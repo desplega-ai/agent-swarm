@@ -1,15 +1,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { RetentionSweep } from "@desplega/storage";
 import type { Attributes, DbRetentionSweepMetric, SpanStatus, SwarmSpan } from "../otel";
 import { recordDbRetentionStatement, recordDbRetentionSweep, startSpan, withSpan } from "../otel";
 import { TERMINAL_SCRIPT_RUN_STATUSES } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
-import {
-  deleteWorkflowRunRetentionBatch,
-  workflowRunRetentionStatements,
-} from "./db/workflow-run-retention";
+import { deleteWorkflowRunRetentionBatch } from "./db/workflow-run-retention";
+import { WORKFLOW_RUN_TREE_MAX_DEPTH } from "./db/workflow-runs";
 import { DbTransactionDeadlineError } from "./db-client";
+import { getStorage } from "./storage";
+import { type RetentionSweepStatements, retentionSweepStatements } from "./storage-root";
 import { DB_RETENTION_TUNING_BOUNDS, MAX_DB_RETENTION_DAYS } from "./swarm-config-guard";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -364,60 +364,58 @@ function maxBatchSize(table: RetentionTable): number {
   return "maxBatchSize" in table ? table.maxBatchSize : MAX_BATCH_SIZE;
 }
 
-/** The backlog COUNT and the batched DELETE for one table under its policy. */
-type SweepStatements = {
-  backlogSql: string;
-  /** Takes `params` followed by the batch LIMIT. */
-  deleteSql: string;
-  params: Array<string | number>;
-};
+/** `YYYY-MM-DD HH:MM:SS`, the format `datetime('now')` writes. */
+function sqliteDatetimeCutoff(iso: string): string {
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}`;
+}
 
-export function sweepStatements(table: RetentionTable, value: number, now: Date): SweepStatements {
+/** One table under its policy, with the cutoff (or kept count) computed for `now`. */
+function retentionSweep(table: RetentionTable, value: number, now: Date): RetentionSweep {
   if (table.policy === "workflowRuns") {
     const iso = new Date(now.getTime() - value * DAY_MS).toISOString();
-    return workflowRunRetentionStatements(`${iso.slice(0, 10)} ${iso.slice(11, 19)}`);
+    return {
+      policy: "workflowRuns",
+      table: table.table,
+      cutoff: sqliteDatetimeCutoff(iso),
+      maxDepth: WORKFLOW_RUN_TREE_MAX_DEPTH,
+    };
   }
   if (table.policy === "keepLatest") {
-    // ROW_NUMBER over the (partition, rank DESC) index: rank 1 is the newest
-    // row of its group. The DELETE removes the deepest history first, so an
-    // interrupted sweep leaves each group's surviving versions contiguous.
-    const ranked = `SELECT rowid AS rid, ROW_NUMBER() OVER (PARTITION BY ${table.partitionBy} ORDER BY ${table.rankBy} DESC) AS rn FROM ${table.table}`;
     return {
-      backlogSql: `SELECT COUNT(*) AS n FROM (${ranked}) WHERE rn > ?`,
-      deleteSql: `DELETE FROM ${table.table} WHERE rowid IN (
-         SELECT rid FROM (${ranked}) WHERE rn > ? ORDER BY rn DESC LIMIT ?
-       )`,
-      params: [value],
+      policy: "keepLatest",
+      table: table.table,
+      partitionBy: table.partitionBy,
+      rankBy: table.rankBy,
+      keep: value,
     };
   }
   const iso = new Date(now.getTime() - value * DAY_MS).toISOString();
   // Text comparison of the two formats: ' ' sorts before 'T', so against a
   // space-separated cutoff an ISO row on the cutoff's own date is kept, never
   // deleted early. It is swept on the next day's ticks instead.
-  const cutoff = "cutoffFormat" in table ? `${iso.slice(0, 10)} ${iso.slice(11, 19)}` : iso;
-  const conditions: string[] = [];
-  const params: Array<string | number> = [];
-  if ("terminalStatuses" in table) {
-    conditions.push(
-      `${table.statusColumn} IN (${table.terminalStatuses.map(() => "?").join(", ")})`,
-    );
-    params.push(...table.terminalStatuses);
-  }
-  conditions.push(`${table.timeColumn} < ?`);
-  params.push(cutoff);
-  if ("keepWhenSet" in table) {
-    conditions.push(
-      `rowid NOT IN (SELECT rowid FROM ${table.table} WHERE ${table.keepWhenSet} IS NOT NULL)`,
-    );
-  }
-  const where = conditions.join(" AND ");
+  const cutoff = "cutoffFormat" in table ? sqliteDatetimeCutoff(iso) : iso;
   return {
-    backlogSql: `SELECT COUNT(*) AS n FROM ${table.table} WHERE ${where}`,
-    deleteSql: `DELETE FROM ${table.table} WHERE rowid IN (
-         SELECT rowid FROM ${table.table} WHERE ${where} ORDER BY ${table.timeColumn} LIMIT ?
-       )`,
-    params,
+    policy: "age",
+    table: table.table,
+    timeColumn: table.timeColumn,
+    cutoff,
+    ...("terminalStatuses" in table
+      ? { statusColumn: table.statusColumn, terminalStatuses: table.terminalStatuses }
+      : {}),
+    ...("keepWhenSet" in table ? { keepWhenSet: table.keepWhenSet } : {}),
   };
+}
+
+/**
+ * The backlog COUNT and the batched DELETE the retention repository runs for
+ * one table under its policy (the text lives in the SQLite storage package).
+ */
+export function sweepStatements(
+  table: RetentionTable,
+  value: number,
+  now: Date,
+): RetentionSweepStatements {
+  return retentionSweepStatements(retentionSweep(table, value, now));
 }
 
 function dryRunEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -426,23 +424,20 @@ function dryRunEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return isEnvFlagEnabled("DB_RETENTION_DRY_RUN", true, env);
 }
 
-async function indexedBacklogCount(statements: SweepStatements): Promise<number> {
-  const row = await getDbClient().get<{ n: number }>(statements.backlogSql, statements.params);
-  return row?.n ?? 0;
+async function indexedBacklogCount(sweep: RetentionSweep): Promise<number> {
+  return await getStorage().repos.retention.countBacklog(sweep);
 }
 
 async function sweepTable(
   table: RetentionTable,
-  statements: SweepStatements,
+  sweep: RetentionSweep,
   dryRun: boolean,
   deadline: number,
   signal: AbortSignal,
   maxStatementMs: number,
 ): Promise<SweepResult> {
-  const client = getDbClient();
-
   if (dryRun) {
-    const backlogRemaining = await indexedBacklogCount(statements);
+    const backlogRemaining = await indexedBacklogCount(sweep);
     return {
       rowsDeleted: 0,
       batches: 0,
@@ -468,13 +463,9 @@ async function sweepTable(
       let result: { changes: number; executionMs: number };
       try {
         result =
-          table.policy === "workflowRuns"
-            ? await deleteWorkflowRunRetentionBatch(
-                String(statements.params[0]),
-                limitUsed,
-                deadline,
-              )
-            : await client.runTimed(statements.deleteSql, [...statements.params, limitUsed]);
+          sweep.policy === "workflowRuns"
+            ? await deleteWorkflowRunRetentionBatch(sweep.cutoff, limitUsed, deadline)
+            : await getStorage().repos.retention.deleteBatch(sweep, limitUsed);
       } catch (err) {
         if (table.policy !== "workflowRuns" || !(err instanceof DbTransactionDeadlineError))
           throw err;
@@ -519,7 +510,7 @@ async function sweepTable(
     // backlogRemaining > 0 drops the table from `undrained`, leaves catch-up
     // unarmed, and publishes that contradiction on /api/metrics until the next
     // hourly tick.
-    const backlogRemaining = await indexedBacklogCount(statements);
+    const backlogRemaining = await indexedBacklogCount(sweep);
     return {
       rowsDeleted,
       batches,
@@ -609,7 +600,7 @@ export function runDbRetentionTick(options: DbRetentionTickOptions = {}): Promis
           try {
             const result = await sweepTable(
               table,
-              sweepStatements(table, value, cutoffBase),
+              retentionSweep(table, value, cutoffBase),
               dryRun,
               tableDeadline,
               abortController.signal,
@@ -763,7 +754,7 @@ export function runDbRetentionTick(options: DbRetentionTickOptions = {}): Promis
         if (deletedAny && !abortController.signal.aborted) {
           try {
             // Harmless when auto_vacuum is not INCREMENTAL; never run a blocking VACUUM here.
-            await getDbClient().run("PRAGMA incremental_vacuum(2000)");
+            await getStorage().repos.retention.incrementalVacuum(2000);
           } catch (err) {
             console.error("[db-retention] incremental vacuum failed:", normalizeError(err));
           }

@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { callToolErr, registerAgent, toolText, upsertScript, withMcp } from "./script-helpers";
@@ -77,8 +78,7 @@ export const scriptRunsExecutorSetting: Scenario = {
 
       const waiting = await pollUntil(() => {
         const task = ctx.db.get<{ id: string }>(
-          "SELECT id FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-          [`script-run:${runId}:wait`],
+          sql`SELECT id FROM agent_tasks WHERE "contextKey" = ${`script-run:${runId}:wait`} AND "taskType" = 'script-run-step'`,
         );
         taskId = task?.id ?? "";
         return taskId !== "";

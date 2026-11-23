@@ -1,3 +1,4 @@
+import type { ScriptApiRow, ScriptRow, ScriptVersionRow } from "@desplega/storage";
 import { defaultAssetKey } from "../../assets/key";
 import type {
   ScriptApiAuthMode,
@@ -11,18 +12,12 @@ import type {
 } from "../../types";
 import { generateBearerToken, generateShortId } from "../../utils/short-id";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
-import { computeContentHash, getDbClient } from "../db";
+import { computeContentHash } from "../db";
 import { registerStoredSecret, scriptApiSecretName } from "../secret-registry";
+import { getStorage } from "../storage";
 import { embedScript } from "./embeddings";
 
-type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked" | "createdBy" | "updatedBy"> & {
-  isScratch: number;
-  typeChecked: number;
-  created_by: string | null;
-  updated_by: string | null;
-};
-
-type ScriptVersionRow = ScriptVersionRecord;
+const repo = () => getStorage().repos.scripts;
 
 type ScriptIdentity = {
   name: string;
@@ -73,7 +68,7 @@ function rowToScript(row: ScriptRow): ScriptRecord {
     updatedByAgentId: row.updatedByAgentId ?? null,
     createdBy: row.created_by ?? null,
     updatedBy: row.updated_by ?? null,
-  };
+  } as ScriptRecord;
 }
 
 function rowToScriptVersion(row: ScriptVersionRow): ScriptVersionRecord {
@@ -95,26 +90,19 @@ async function insertScriptVersion(args: {
   changedByAgentId?: string | null;
   changeReason?: string | null;
 }): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO script_versions (
-        id, scriptId, version, source, description, intent, signatureJson,
-        contentHash, changedByAgentId, changedAt, changeReason
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      crypto.randomUUID(),
-      args.scriptId,
-      args.version,
-      args.source,
-      args.description,
-      args.intent,
-      args.signatureJson,
-      args.contentHash,
-      args.changedByAgentId ?? null,
-      new Date().toISOString(),
-      args.changeReason ?? null,
-    ],
-  );
+  await repo().insertScriptVersion({
+    id: crypto.randomUUID(),
+    scriptId: args.scriptId,
+    version: args.version,
+    source: args.source,
+    description: args.description,
+    intent: args.intent,
+    signatureJson: args.signatureJson,
+    contentHash: args.contentHash,
+    changedByAgentId: args.changedByAgentId ?? null,
+    changedAt: new Date().toISOString(),
+    changeReason: args.changeReason ?? null,
+  });
 }
 
 export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord> {
@@ -124,42 +112,29 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
   const contentHash = computeContentHash(args.source);
   const fsMode = args.fsMode ?? "none";
   const executor = args.executor ?? null;
-  const isScratch = args.isScratch ? 1 : 0;
-  const typeChecked = args.typeChecked ? 1 : 0;
+  const storage = getStorage();
 
-  return await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<ScriptRow>(
-      `INSERT INTO scripts (
-          id, "key", name, scope, scopeId, source, description, intent, signatureJson,
-          argsJsonSchema, contentHash, isScratch, typeChecked, fsMode, executor, createdByAgentId, createdAt, updatedAt,
-          created_by, updated_by, updatedByAgentId
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        RETURNING *`,
-      [
-        id,
-        defaultAssetKey("script", id),
-        args.name,
-        args.scope,
-        scopeId,
-        args.source,
-        args.description,
-        args.intent,
-        args.signatureJson,
-        args.argsJsonSchema ?? null,
-        contentHash,
-        isScratch,
-        typeChecked,
-        fsMode,
-        executor,
-        args.agentId ?? null,
-        now,
-        now,
-        args.createdBy ?? null,
-        args.createdBy ?? null,
-        args.agentId ?? null,
-      ],
-    );
+  return await storage.transaction(async () => {
+    const row = await storage.repos.scripts.insertScript({
+      id,
+      key: defaultAssetKey("script", id),
+      name: args.name,
+      scope: args.scope,
+      scopeId,
+      source: args.source,
+      description: args.description,
+      intent: args.intent,
+      signatureJson: args.signatureJson,
+      argsJsonSchema: args.argsJsonSchema ?? null,
+      contentHash,
+      isScratch: Boolean(args.isScratch),
+      typeChecked: Boolean(args.typeChecked),
+      fsMode,
+      executor,
+      agentId: args.agentId ?? null,
+      actor: args.createdBy ?? null,
+      now,
+    });
 
     if (!row) throw new Error("Failed to insert script");
 
@@ -226,28 +201,19 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       trackedMetadataChanged ||
       refreshScratchLastUsed
     ) {
-      const row = await getDbClient().get<ScriptRow>(
-        `UPDATE scripts
-        SET description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-          isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?,
-          updatedByAgentId = ?
-        WHERE id = ?
-        RETURNING *`,
-        [
-          args.description,
-          args.intent,
-          args.signatureJson,
-          argsJsonSchema ?? null,
-          isScratch ? 1 : 0,
-          typeChecked ? 1 : 0,
-          fsMode,
-          executor ?? null,
-          new Date().toISOString(),
-          args.createdBy ?? null,
-          args.agentId ?? null,
-          existing.id,
-        ],
-      );
+      const row = await repo().updateScriptMetadata(existing.id, {
+        description: args.description,
+        intent: args.intent,
+        signatureJson: args.signatureJson,
+        argsJsonSchema: argsJsonSchema ?? null,
+        isScratch,
+        typeChecked,
+        fsMode,
+        executor: executor ?? null,
+        now: new Date().toISOString(),
+        actor: args.createdBy ?? null,
+        agentId: args.agentId ?? null,
+      });
 
       if (!row) throw new Error("Failed to update script metadata");
       const script = rowToScript(row);
@@ -277,32 +243,24 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   const argsJsonSchema =
     args.argsJsonSchema !== undefined ? args.argsJsonSchema : existing.argsJsonSchema;
 
-  const script = await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<ScriptRow>(
-      `UPDATE scripts
-        SET source = ?, description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-          contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, executor = ?, updatedAt = ?, updated_by = ?,
-          updatedByAgentId = ?
-        WHERE id = ?
-        RETURNING *`,
-      [
-        args.source,
-        args.description,
-        args.intent,
-        args.signatureJson,
-        argsJsonSchema ?? null,
-        contentHash,
-        newVersion,
-        isScratch ? 1 : 0,
-        typeChecked ? 1 : 0,
-        fsMode,
-        executor ?? null,
-        now,
-        args.createdBy ?? null,
-        args.agentId ?? null,
-        existing.id,
-      ],
-    );
+  const storage = getStorage();
+  const script = await storage.transaction(async () => {
+    const row = await storage.repos.scripts.updateScriptContent(existing.id, {
+      source: args.source,
+      description: args.description,
+      intent: args.intent,
+      signatureJson: args.signatureJson,
+      argsJsonSchema: argsJsonSchema ?? null,
+      contentHash,
+      version: newVersion,
+      isScratch,
+      typeChecked,
+      fsMode,
+      executor: executor ?? null,
+      now,
+      actor: args.createdBy ?? null,
+      agentId: args.agentId ?? null,
+    });
 
     if (!row) throw new Error("Failed to update script");
 
@@ -334,16 +292,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
 
 export async function getScript(args: ScriptIdentity): Promise<ScriptRecord | null> {
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
-  const row =
-    scopeId === null
-      ? await getDbClient().get<ScriptRow>(
-          "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId IS NULL",
-          [args.name, args.scope],
-        )
-      : await getDbClient().get<ScriptRow>(
-          "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId = ?",
-          [args.name, args.scope, scopeId],
-        );
+  const row = await repo().findScriptByName(args.name, args.scope, scopeId);
 
   return row ? rowToScript(row) : null;
 }
@@ -351,16 +300,12 @@ export async function getScript(args: ScriptIdentity): Promise<ScriptRecord | nu
 /** contentHash of each named global script, in one query. Missing names are absent from the map. */
 export async function getGlobalScriptContentHashes(names: string[]): Promise<Map<string, string>> {
   if (names.length === 0) return new Map();
-  const rows = await getDbClient().query<{ name: string; contentHash: string }>(
-    `SELECT name, contentHash FROM scripts
-    WHERE scope = 'global' AND scopeId IS NULL AND name IN (${names.map(() => "?").join(", ")})`,
-    names,
-  );
+  const rows = await repo().listGlobalScriptContentHashes(names);
   return new Map(rows.map((row) => [row.name, row.contentHash]));
 }
 
 export async function getScriptById(id: string): Promise<ScriptRecord | null> {
-  const row = await getDbClient().get<ScriptRow>("SELECT * FROM scripts WHERE id = ?", [id]);
+  const row = await repo().findScriptById(id);
   return row ? rowToScript(row) : null;
 }
 
@@ -375,14 +320,8 @@ export async function getScriptVersion(args: {
 
   const row =
     args.version !== undefined
-      ? await getDbClient().get<ScriptVersionRow>(
-          "SELECT * FROM script_versions WHERE scriptId = ? AND version = ?",
-          [args.scriptId, args.version],
-        )
-      : await getDbClient().get<ScriptVersionRow>(
-          "SELECT * FROM script_versions WHERE scriptId = ? AND contentHash = ? ORDER BY version DESC LIMIT 1",
-          [args.scriptId, args.contentHash as string],
-        );
+      ? await repo().findScriptVersion(args.scriptId, args.version)
+      : await repo().findLatestScriptVersionByHash(args.scriptId, args.contentHash as string);
 
   return row ? rowToScriptVersion(row) : null;
 }
@@ -392,41 +331,29 @@ export async function listScripts(args?: {
   scopeId?: string | null;
   includeScratch?: boolean;
 }): Promise<ScriptRecord[]> {
-  const conditions: string[] = [];
-  const params: (string | number | null)[] = [];
-
+  let scope: string | undefined;
+  let scopeId: string | null | undefined;
   if (args?.scope) {
-    conditions.push("scope = ?");
-    params.push(args.scope);
-
+    scope = args.scope;
     if (args.scope === "global") {
-      conditions.push("scopeId IS NULL");
+      scopeId = null;
     } else if (args.scopeId !== undefined) {
-      conditions.push("scopeId = ?");
-      params.push(normalizeScopeId(args.scope, args.scopeId));
+      scopeId = normalizeScopeId(args.scope, args.scopeId);
     }
   } else if (args?.scopeId !== undefined) {
-    conditions.push("scopeId = ?");
-    params.push(args.scopeId ?? "");
+    scopeId = args.scopeId ?? "";
   }
 
-  if (!args?.includeScratch) {
-    conditions.push("isScratch = 0");
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await getDbClient().query<ScriptRow>(
-    `SELECT * FROM scripts ${whereClause} ORDER BY scope ASC, scopeId ASC, name ASC`,
-    params,
-  );
+  const rows = await repo().listScripts({
+    scope,
+    scopeId,
+    includeScratch: Boolean(args?.includeScratch),
+  });
   return rows.map(rowToScript);
 }
 
 export async function listScriptVersions(scriptId: string): Promise<ScriptVersionRecord[]> {
-  const rows = await getDbClient().query<ScriptVersionRow>(
-    "SELECT * FROM script_versions WHERE scriptId = ? ORDER BY version DESC",
-    [scriptId],
-  );
+  const rows = await repo().listScriptVersions(scriptId);
   return rows.map(rowToScriptVersion);
 }
 
@@ -434,8 +361,7 @@ export async function deleteScript(args: ScriptIdentity): Promise<boolean> {
   const existing = await getScript(args);
   if (!existing) return false;
 
-  const result = await getDbClient().run("DELETE FROM scripts WHERE id = ?", [existing.id]);
-  return result.changes > 0;
+  return (await repo().deleteScript(existing.id)) > 0;
 }
 
 /** Bumps updatedAt and returns the timestamp actually written, or null if the row didn't match. */
@@ -443,12 +369,7 @@ export async function touchScratchScriptLastUsed(
   id: string,
   at: string = new Date().toISOString(),
 ): Promise<string | null> {
-  const result = await getDbClient().run(
-    `UPDATE scripts SET updatedAt = ?
-     WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*'`,
-    [at, id],
-  );
-  return result.changes > 0 ? at : null;
+  return (await repo().touchScratchScript(id, at)) > 0 ? at : null;
 }
 
 /**
@@ -463,30 +384,10 @@ export async function restoreScratchScriptLastUsedIfUnchanged(
   priorUpdatedAt: string,
   expectedUpdatedAt: string,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    `UPDATE scripts SET updatedAt = ?
-     WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*' AND updatedAt = ?`,
-    [priorUpdatedAt, id, expectedUpdatedAt],
-  );
-  return result.changes > 0;
+  return (await repo().restoreScratchScriptUpdatedAt(id, priorUpdatedAt, expectedUpdatedAt)) > 0;
 }
 
 // ─── External script APIs (script_apis) ──────────────────────────────────────
-
-type ScriptApiRow = {
-  id: string;
-  scriptId: string;
-  agentId: string;
-  authMode: ScriptApiAuthMode;
-  bearerTokenEncrypted: string | null;
-  enabled: number;
-  label: string | null;
-  callCount: number;
-  lastUsedAt: string | null;
-  createdAt: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 /** Public-facing endpoint record incl. the encrypted token (server-side only). */
 export type ScriptApiInternal = ScriptApiRecord & { bearerTokenEncrypted: string | null };
@@ -531,24 +432,16 @@ export async function createScriptApi(args: {
   for (let attempt = 0; attempt < 5; attempt++) {
     const id = generateShortId(SCRIPT_API_ID_LEN);
     try {
-      const row = await getDbClient().get<ScriptApiRow>(
-        `INSERT INTO script_apis
-           (id, scriptId, agentId, authMode, bearerTokenEncrypted, enabled, label,
-            callCount, lastUsedAt, createdAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, 1, ?, 0, NULL, ?, ?, ?)
-         RETURNING *`,
-        [
-          id,
-          args.scriptId,
-          args.agentId,
-          args.authMode,
-          encrypted,
-          args.label ?? null,
-          now,
-          createdBy,
-          createdBy,
-        ],
-      );
+      const row = await repo().insertScriptApi({
+        id,
+        scriptId: args.scriptId,
+        agentId: args.agentId,
+        authMode: args.authMode,
+        bearerTokenEncrypted: encrypted,
+        label: args.label ?? null,
+        actor: createdBy,
+        now,
+      });
       if (!row) throw new Error("Failed to create script API endpoint");
       registerStoredSecret(token, scriptApiSecretName(id));
       return { ...rowToScriptApi(row), token };
@@ -568,9 +461,7 @@ export async function listStoredScriptApiSecrets(): Promise<{
   secrets: { id: string; token: string }[];
   failed: number;
 }> {
-  const rows = await getDbClient().query<{ id: string; bearerTokenEncrypted: string }>(
-    "SELECT id, bearerTokenEncrypted FROM script_apis WHERE bearerTokenEncrypted IS NOT NULL",
-  );
+  const rows = await repo().listScriptApiSecrets();
   const secrets: { id: string; token: string }[] = [];
   let failed = 0;
   for (const row of rows) {
@@ -585,16 +476,13 @@ export async function listStoredScriptApiSecrets(): Promise<{
 }
 
 export async function listScriptApisForScript(scriptId: string): Promise<ScriptApiRecord[]> {
-  const rows = await getDbClient().query<ScriptApiRow>(
-    "SELECT * FROM script_apis WHERE scriptId = ? ORDER BY createdAt DESC",
-    [scriptId],
-  );
+  const rows = await repo().listScriptApisForScript(scriptId);
   return rows.map(rowToScriptApi);
 }
 
 /** Look up an endpoint incl. its `enabled` flag and (encrypted) token — for the execution path. */
 export async function getScriptApiById(id: string): Promise<ScriptApiInternal | null> {
-  const row = await getDbClient().get<ScriptApiRow>("SELECT * FROM script_apis WHERE id = ?", [id]);
+  const row = await repo().findScriptApiById(id);
   if (!row) return null;
   return { ...rowToScriptApi(row), bearerTokenEncrypted: row.bearerTokenEncrypted ?? null };
 }
@@ -605,10 +493,7 @@ export async function getScriptApiById(id: string): Promise<ScriptApiInternal | 
  * from any later log/telemetry egress — mirrors the config-reveal path.
  */
 export async function getScriptApiSecret(id: string): Promise<string | null> {
-  const row = await getDbClient().get<{ bearerTokenEncrypted: string | null }>(
-    "SELECT bearerTokenEncrypted FROM script_apis WHERE id = ?",
-    [id],
-  );
+  const row = await repo().findScriptApiById(id);
   if (!row?.bearerTokenEncrypted) return null;
   const token = decryptSecret(row.bearerTokenEncrypted, getEncryptionKey());
   registerStoredSecret(token, scriptApiSecretName(id));
@@ -619,31 +504,11 @@ export async function updateScriptApi(
   id: string,
   args: { enabled?: boolean; label?: string | null; updatedBy?: string | null },
 ): Promise<ScriptApiRecord | null> {
-  const sets: string[] = [];
-  const vals: (string | number | null)[] = [];
-  if (args.enabled !== undefined) {
-    sets.push("enabled = ?");
-    vals.push(args.enabled ? 1 : 0);
-  }
-  if (args.label !== undefined) {
-    sets.push("label = ?");
-    vals.push(args.label);
-  }
-  if (args.updatedBy !== undefined) {
-    sets.push("updated_by = ?");
-    vals.push(args.updatedBy);
-  }
-  if (sets.length === 0) {
-    const row = await getDbClient().get<ScriptApiRow>("SELECT * FROM script_apis WHERE id = ?", [
-      id,
-    ]);
-    return row ? rowToScriptApi(row) : null;
-  }
-  vals.push(id);
-  const row = await getDbClient().get<ScriptApiRow>(
-    `UPDATE script_apis SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    vals,
-  );
+  const row = await repo().updateScriptApi(id, {
+    enabled: args.enabled,
+    label: args.label,
+    updatedBy: args.updatedBy,
+  });
   return row ? rowToScriptApi(row) : null;
 }
 
@@ -656,24 +521,17 @@ export async function rotateScriptApiSecret(
   if (!existing || existing.authMode !== "bearer") return null;
   const token = generateBearerToken();
   const encrypted = encryptSecret(token, getEncryptionKey());
-  const row = await getDbClient().get<ScriptApiRow>(
-    "UPDATE script_apis SET bearerTokenEncrypted = ?, updated_by = ? WHERE id = ? RETURNING *",
-    [encrypted, updatedBy ?? null, id],
-  );
+  const row = await repo().setScriptApiToken(id, encrypted, updatedBy ?? null);
   if (!row) return null;
   registerStoredSecret(token, scriptApiSecretName(id));
   return { ...rowToScriptApi(row), token };
 }
 
 export async function deleteScriptApi(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM script_apis WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await repo().deleteScriptApi(id)) > 0;
 }
 
 /** Bump usage counters after an external invocation. Best-effort observability. */
 export async function recordScriptApiUsage(id: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE script_apis SET callCount = callCount + 1, lastUsedAt = ? WHERE id = ?",
-    [new Date().toISOString(), id],
-  );
+  await repo().recordScriptApiUsage(id, new Date().toISOString());
 }

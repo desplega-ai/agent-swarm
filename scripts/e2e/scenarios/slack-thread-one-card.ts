@@ -1,4 +1,5 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -58,9 +59,13 @@ function carriers(ctx: ScenarioContext, threadTs: string, needle: string): Slack
 }
 
 function outcomeRow(ctx: ScenarioContext, taskId: string) {
-  return ctx.db.get<{ id: string; ts: string; finalized_at: string | null; merged_into_id: string | null }>(
-    "SELECT id, ts, finalized_at, merged_into_id FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-    [taskId],
+  return ctx.db.get<{
+    id: string;
+    ts: string;
+    finalized_at: string | null;
+    merged_into_id: string | null;
+  }>(
+    sql`SELECT id, ts, finalized_at, merged_into_id FROM slack_messages WHERE kind = 'outcome' AND task_id = ${taskId}`,
   );
 }
 
@@ -79,12 +84,14 @@ function contextTexts(message: SlackMessage | undefined): string[] {
 async function sessionPerson(ctx: ScenarioContext): Promise<string> {
   const alice = ctx.slack.user("alice");
   const linked = ctx.db.get<{ userId: string }>(
-    "SELECT userId FROM user_external_ids WHERE kind = 'slack' AND externalId = ?",
-    [alice.id],
+    sql`SELECT "userId" FROM user_external_ids WHERE kind = 'slack' AND "externalId" = ${alice.id}`,
   );
   if (linked) return linked.userId;
   const created = await ctx.api("POST", "/api/users", {
-    body: { name: `Thread Alice ${ctx.nonce}`, identities: [{ kind: "slack", externalId: alice.id }] },
+    body: {
+      name: `Thread Alice ${ctx.nonce}`,
+      identities: [{ kind: "slack", externalId: alice.id }],
+    },
   });
   expectStatus(created, [200], "create the Sessions person");
   return asString(asRecord(asRecord(created.json).user).id, "user id");
@@ -94,9 +101,8 @@ async function sessionPerson(ctx: ScenarioContext): Promise<string> {
 async function unlinkSessionPerson(ctx: ScenarioContext): Promise<void> {
   const alice = ctx.slack.user("alice");
   const row = ctx.db.get<{ userId: string }>(
-    `SELECT e.userId FROM user_external_ids e JOIN users u ON u.id = e.userId
-      WHERE e.kind = 'slack' AND e.externalId = ? AND u.name LIKE 'Thread Alice %'`,
-    [alice.id],
+    sql`SELECT e."userId" FROM user_external_ids e JOIN users u ON u.id = e."userId"
+      WHERE e.kind = 'slack' AND e."externalId" = ${alice.id} AND u.name LIKE 'Thread Alice %'`,
   );
   if (!row) return;
   expectStatus(
@@ -118,7 +124,7 @@ async function playThread(ctx: ScenarioContext, label: string): Promise<ThreadRu
   // scenarios' asks away from the leads they registered.
   const liveLeads =
     ctx.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM agents WHERE isLead = 1 AND status != 'offline'",
+      sql`SELECT COUNT(*) AS n FROM agents WHERE "isLead" = ${true} AND status != 'offline'`,
     )?.n ?? 0;
   if (liveLeads === 0) await registerLead(ctx, `e2e-lead-${label}`);
   const coderName = `coder-${label}`;
@@ -139,7 +145,7 @@ async function playThread(ctx: ScenarioContext, label: string): Promise<ThreadRu
   const askId = String(ask.id);
   const leadId = String(ask.agentId);
   const leadName =
-    ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [leadId])?.name ?? "";
+    ctx.db.get<{ name: string }>(sql`SELECT name FROM agents WHERE id = ${leadId}`)?.name ?? "";
   await claim(ctx, leadId, askId);
   const askOutput = `Production deploys fail on a missing env var. Want me to send a worker? ${ctx.nonce}`;
   await finish(ctx, leadId, askId, { status: "completed", output: askOutput });
@@ -296,8 +302,7 @@ export const slackThreadOneCard: Scenario = {
       const trees = new Set(
         ctx.db
           .query<{ ts: string }>(
-            "SELECT ts FROM slack_messages WHERE kind = 'tree' AND thread_ts = ?",
-            [off.threadTs],
+            sql`SELECT ts FROM slack_messages WHERE kind = 'tree' AND thread_ts = ${off.threadTs}`,
           )
           .map((row) => row.ts),
       );

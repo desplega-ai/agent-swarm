@@ -5,11 +5,11 @@ import {
   deleteUser,
   getAgentById,
   getAllUsers,
-  getDbClient,
   getUserById,
   updateUser,
 } from "@/be/db";
 import { assertMayActOnOperatorGrantedTarget } from "@/be/rbac-roles";
+import { getStorage } from "@/be/storage";
 import {
   getUserIdentities,
   type IdentityActor,
@@ -202,7 +202,7 @@ export const registerManageUserTool = (server: McpServer) => {
             // Create and link in one write transaction: an operator grant on the
             // new user cannot land before its identities.
             const name = input.name;
-            const user = await getDbClient().transaction(async () => {
+            const user = await getStorage().transaction(async () => {
               const created = await createUser({
                 name,
                 email: input.email,
@@ -259,7 +259,7 @@ export const registerManageUserTool = (server: McpServer) => {
               input.identities !== undefined ||
               input.email !== undefined ||
               input.emailAliases !== undefined;
-            const user = await getDbClient().transaction(async () => {
+            const user = await getStorage().transaction(async () => {
               if (bindsIdentity) {
                 await assertMayActOnOperatorGrantedTarget(
                   { kind: "agent", id: callerAgent.id },

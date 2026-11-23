@@ -1,4 +1,4 @@
-import { getDbClient } from "../be/db";
+import { getStorage } from "@/be/storage";
 import {
   type AssetPlan,
   preflightAssets,
@@ -206,7 +206,7 @@ export async function activateVersion(
   if (wasEnabled) await disableExtension(id, opts);
   let activated: Extension | null;
   try {
-    activated = await getDbClient().transaction(async () => {
+    activated = await getStorage().transaction(async () => {
       const agentId = await ensureExtensionAgent(current.name);
       const row = await activateExtensionVersionSnapshot(id, version, opts.by);
       if (!row) return null;
@@ -268,7 +268,7 @@ export async function installExtensionWithAssets(
   args: InstallExtensionArgs,
 ): Promise<InstallWithAssetsResult> {
   const plan = await planAssets(args.manifest, args.files);
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const agentId = await ensureExtensionAgent(args.manifest.name);
     const installed = await installExtension(args);
     const extension = installed.extension;
@@ -287,7 +287,7 @@ export async function installExtensionWithAssets(
 
 /** Uninstall: remove pristine assets, detach edited ones, and delete the extension. */
 export async function uninstallExtension(id: string, ownerOnly?: string): Promise<RemoveResult> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const assets = await removeAssets(id);
     await deleteExtension(id, ownerOnly);
     return assets;

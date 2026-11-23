@@ -1,6 +1,7 @@
 import { collectScriptReferences } from "../../apps/definition";
 import { listAppRecords } from "../../apps/store";
-import { getDbClient, listWorkflows } from "../db";
+import { listWorkflows } from "../db";
+import { getStorage } from "../storage";
 
 const SCRATCH_RETENTION_DAYS = 14;
 const SCRATCH_GC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -39,10 +40,7 @@ async function appReferencedScriptIds(candidateIds: readonly string[]): Promise<
  * would otherwise be silently deleted out from under it.
  */
 async function scriptApiReferencedScriptIds(): Promise<Set<string>> {
-  const rows = await getDbClient().query<{ scriptId: string }>(
-    "SELECT DISTINCT scriptId FROM script_apis",
-  );
-  return new Set(rows.map((row) => row.scriptId));
+  return new Set(await getStorage().repos.scripts.listScriptApiScriptIds());
 }
 
 /**
@@ -100,18 +98,7 @@ export async function purgeExpiredScratchScripts(now = new Date()): Promise<numb
   const cutoff = new Date(
     now.getTime() - SCRATCH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
-  const candidates = await getDbClient().query<{
-    id: string;
-    name: string;
-    scopeId: string | null;
-  }>(
-    `SELECT id, name, scopeId FROM scripts
-     WHERE scope = 'agent'
-       AND isScratch = 1
-       AND name GLOB 'scratch-*'
-       AND updatedAt < ?`,
-    [cutoff],
-  );
+  const candidates = await getStorage().repos.scripts.listExpiredScratchScripts(cutoff);
   if (candidates.length === 0) return 0;
 
   // A scratch script still wired into a durable reference — an app action/model
@@ -133,23 +120,12 @@ export async function purgeExpiredScratchScripts(now = new Date()): Promise<numb
     .map((row) => row.id);
   if (idsToDelete.length === 0) return 0;
 
-  const placeholders = idsToDelete.map(() => "?").join(",");
   // The candidate SELECT above is separated from this DELETE by four awaited
   // reference scans, and a run that starts inside that window touches
   // `updatedAt` before it executes (src/be/scripts/run-saved.ts). Re-checking
   // the staleness predicate here keeps a script that was just used out of the
   // delete set instead of removing it mid-run.
-  // RETURNING counts scripts only; SQLite's change count includes cascaded rows.
-  const deleted = await getDbClient().query<{ id: string }>(
-    `DELETE FROM scripts
-     WHERE id IN (${placeholders})
-       AND scope = 'agent'
-       AND isScratch = 1
-       AND name GLOB 'scratch-*'
-       AND updatedAt < ?
-     RETURNING id`,
-    [...idsToDelete, cutoff],
-  );
+  const deleted = await getStorage().repos.scripts.deleteExpiredScratchScripts(idsToDelete, cutoff);
   return deleted.length;
 }
 

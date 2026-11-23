@@ -73,6 +73,9 @@
         "@desplega.ai/slack-mock": "^0.6.1",
         "@desplega/model-catalog": "workspace:*",
         "@desplega/model-routing": "workspace:*",
+        "@desplega/storage": "workspace:*",
+        "@desplega/storage-postgres": "workspace:*",
+        "@desplega/storage-sqlite": "workspace:*",
         "@faker-js/faker": "^10.6.0",
         "@opencode/plugin": "2.3.2",
         "@opencode/sdk": "2.3.2",
@@ -245,6 +248,36 @@
     "packages/model-routing": {
       "name": "@desplega/model-routing",
       "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/storage": {
+      "name": "@desplega/storage",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/storage-postgres": {
+      "name": "@desplega/storage-postgres",
+      "version": "0.1.0",
+      "dependencies": {
+        "@desplega/storage": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.3",
+      },
+    },
+    "packages/storage-sqlite": {
+      "name": "@desplega/storage-sqlite",
+      "version": "0.1.0",
+      "dependencies": {
+        "@desplega/storage": "workspace:*",
+      },
       "devDependencies": {
         "@types/bun": "^1.2.0",
         "typescript": "^5.9.3",
@@ -493,6 +526,12 @@
     "@desplega/model-catalog": ["@desplega/model-catalog@workspace:packages/model-catalog"],
 
     "@desplega/model-routing": ["@desplega/model-routing@workspace:packages/model-routing"],
+
+    "@desplega/storage": ["@desplega/storage@workspace:packages/storage"],
+
+    "@desplega/storage-postgres": ["@desplega/storage-postgres@workspace:packages/storage-postgres"],
+
+    "@desplega/storage-sqlite": ["@desplega/storage-sqlite@workspace:packages/storage-sqlite"],
 
     "@discordjs/builders": ["@discordjs/builders@1.14.1", "", { "dependencies": { "@discordjs/formatters": "^0.6.2", "@discordjs/util": "^1.2.0", "@sapphire/shapeshift": "^4.0.0", "discord-api-types": "^0.38.40", "fast-deep-equal": "^3.1.3", "ts-mixer": "^6.0.4", "tslib": "^2.6.3" } }, "sha512-gSKkhXLqs96TCzk66VZuHHl8z2bQMJFGwrXC0f33ngK+FLNau4hU1PYny3DNJfNdSH+gVMzE85/d5FQ2BpcNwQ=="],
 

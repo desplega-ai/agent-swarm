@@ -332,6 +332,15 @@ describe("work item state ordering and commit boundary", () => {
     await waitForPatches(1);
     expect(patches).toHaveLength(1);
     expect(patches[0]?.body[0]?.value).toBe("Doing");
+
+    // claimTask emits from its afterCommit hook. On Postgres the completion hook of the
+    // same transaction can emit task.completed before a re-deferred start would run,
+    // so a start emitted outside a transaction is delivered at once.
+    process.env.AZURE_DEVOPS_WORKITEM_STATE_DONE = "Done";
+    emitTaskStarted({ id: taskId } as never);
+    workflowEventBus.emit("task.completed", { taskId });
+    await waitForPatches(3);
+    expect(patches.slice(1).map((patch) => patch.body[0]?.value)).toEqual(["Doing", "Done"]);
   });
 
   test("scrubs secrets from a rejected update response", async () => {

@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../be/crypto";
-import { getDbClient, recordKeyValidation, upsertSwarmConfig } from "../be/db";
+import { recordKeyValidation, upsertSwarmConfig } from "../be/db";
 import { getCodexDeviceFlow, upsertCodexDeviceFlow } from "../be/db/codex-oauth-device-flows";
 import { updateOnboardingAiFromCodexDevice } from "../be/onboarding";
+import { getStorage } from "../be/storage";
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json";
 import {
   codexDeviceVerificationUrl,
@@ -122,7 +123,7 @@ async function claimPoll(
   | { type: "return"; response: PollResponse }
   | { type: "poll"; state: FlowState; leaseId: string }
 > {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const state = await readFlow(flowId);
     if (!state || state.expiresAt <= Date.now()) return { type: "expired" };
     if (state.status !== "pending") {
@@ -159,7 +160,7 @@ function ownsActiveLease(state: FlowState, leaseId: string): boolean {
 }
 
 async function releasePendingLease(flowId: string, leaseId: string): Promise<PollResponse> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const state = await readFlow(flowId);
     if (!state || state.expiresAt <= Date.now()) {
       return { status: "expired" };
@@ -187,16 +188,14 @@ async function completeFlow(
   flowId: string,
   credentials: CodexOAuthCredentials,
 ): Promise<PollResponse> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const state = await readFlow(flowId);
     if (!state || state.expiresAt <= Date.now()) {
       return { status: "expired" };
     }
     if (state.status !== "pending") return responseForState(state);
 
-    const configKeys = await getDbClient().query<{ key: string }>(
-      "SELECT key FROM swarm_config WHERE scope = 'global'",
-    );
+    const configKeys = await getStorage().repos.config.listConfigs({ scope: "global" });
     const slot = firstFreeSlot(new Set(configKeys.map((config) => config.key)));
     if (slot === null) {
       return await failFlow(flowId, "", "No Codex OAuth slots are available", true);
@@ -238,7 +237,7 @@ async function failFlow(
   error: string,
   acceptPending = false,
 ): Promise<PollResponse> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const state = await readFlow(flowId);
     if (!state || state.expiresAt <= Date.now()) {
       return { status: "expired" };

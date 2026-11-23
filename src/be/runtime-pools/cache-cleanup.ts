@@ -2,7 +2,10 @@ import type { ControllerCommands } from "../../runtime-providers/controller";
 import { poolCacheKey, type RuntimeCacheReference } from "../../runtime-providers/types";
 import type { RuntimePool } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { getDbClient, getSwarmConfigs } from "../db";
+import { getSwarmConfigs } from "../db";
+import { getStorage } from "../storage";
+
+const repo = () => getStorage().repos.runtimePools;
 
 /** The stored key is private API metadata; legacy caches retain their original name. */
 export async function getPoolCache(poolId: string): Promise<{
@@ -10,16 +13,14 @@ export async function getPoolCache(poolId: string): Promise<{
   mountPath: string;
   controllerId: string;
 } | null> {
-  const row = await getDbClient().get<{ cache: string | null; controllerId: string }>(
-    "SELECT cache, json_extract(placements, '$[0]') AS controllerId FROM runtime_pools WHERE id = ?",
-    [poolId],
-  );
+  const row = await repo().findPoolCache(poolId);
   if (!row?.cache) return null;
   const cache = JSON.parse(row.cache);
   return {
     key: cache.key ?? poolCacheKey(poolId),
     mountPath: cache.mountPath,
-    controllerId: row.controllerId,
+    // json_extract(placements, '$[0]') before the move: NULL for an empty list.
+    controllerId: JSON.parse(row.placements)[0] ?? null,
   };
 }
 
@@ -33,26 +34,16 @@ export async function queuePoolCacheRelease(
   // No runtime could have created an owned cache before the owner was allocated.
   if (!owner) return;
   const cache = (await getPoolCache(pool.id))!;
-  const runtimes = await getDbClient().query<{ id: string }>(
-    `SELECT id FROM runtime_instances WHERE pool_id = ?
-     AND (controller_id = ? OR controller_id IS NULL) AND status != 'offline'`,
-    [pool.id, pool.placements[0]!],
-  );
-  await getDbClient().run(
-    `INSERT INTO runtime_cache_releases
-      (id, pool_id, controller_id, owner_id, cache_key, runtime_ids, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(controller_id, owner_id, cache_key) DO NOTHING`,
-    [
-      crypto.randomUUID(),
-      pool.id,
-      pool.placements[0]!,
-      owner.value,
-      cache.key,
-      JSON.stringify(runtimes.map((r) => r.id)),
-      actor,
-      actor,
-    ],
-  );
+  const runtimeIds = await repo().listNonOfflinePoolRuntimeIds(pool.id, pool.placements[0]!);
+  await repo().insertCacheRelease({
+    id: crypto.randomUUID(),
+    poolId: pool.id,
+    controllerId: pool.placements[0]!,
+    ownerId: owner.value,
+    cacheKey: cache.key,
+    runtimeIdsJson: JSON.stringify(runtimeIds),
+    actor,
+  });
 }
 
 interface CacheRelease extends RuntimeCacheReference {
@@ -68,41 +59,28 @@ export async function reconcileCacheReleases(
   signal: AbortSignal,
   now?: Date,
 ): Promise<void> {
-  const jobs = await getDbClient().query<CacheRelease>(
-    `SELECT id, pool_id AS poolId, controller_id AS controllerId, owner_id AS ownerId,
-     cache_key AS key FROM runtime_cache_releases ORDER BY created_at`,
-  );
+  const jobs: CacheRelease[] = await repo().listCacheReleases();
   for (const job of jobs) {
     if (signal.aborted) return;
     const claimed = now ?? new Date();
     const claimedAt = claimed.toISOString();
     // Reclaim abandoned work after five minutes; generation keys fence late provider calls.
-    const reserved = await getDbClient().run(
-      `UPDATE runtime_cache_releases SET state = 'deleting', updated_at = ?
-       WHERE id = ? AND (state = 'pending' OR updated_at < ?) AND NOT EXISTS (
-         SELECT 1 FROM runtime_instances WHERE status != 'offline'
-         AND id IN (SELECT value FROM json_each(runtime_cache_releases.runtime_ids))
-       )`,
-      [claimedAt, job.id, new Date(claimed.getTime() - RELEASE_LEASE_MS).toISOString()],
+    const reserved = await repo().claimCacheRelease(
+      job.id,
+      claimedAt,
+      new Date(claimed.getTime() - RELEASE_LEASE_MS).toISOString(),
     );
-    if (!reserved.changes) continue;
+    if (!reserved) continue;
     try {
       signal.throwIfAborted();
       const controller = await commands(job.controllerId);
       if (!controller.releaseCache)
         throw new Error("Controller cannot release caches; upgrade it before cleanup");
       await controller.releaseCache({ key: job.key, poolId: job.poolId, ownerId: job.ownerId });
-      await getDbClient().run(
-        "DELETE FROM runtime_cache_releases WHERE id = ? AND state = 'deleting' AND updated_at = ?",
-        [job.id, claimedAt],
-      );
+      await repo().deleteClaimedCacheRelease(job.id, claimedAt);
     } catch (error) {
       const message = scrubSecrets(String(error));
-      await getDbClient().run(
-        `UPDATE runtime_cache_releases SET state = 'pending', last_error = ?, updated_at = ?
-         WHERE id = ? AND state = 'deleting' AND updated_at = ?`,
-        [message, new Date().toISOString(), job.id, claimedAt],
-      );
+      await repo().releaseCacheReleaseClaim(job.id, claimedAt, message, new Date().toISOString());
       if (!signal.aborted) console.error("[runtime-pools] Cache cleanup deferred:", message);
     }
   }

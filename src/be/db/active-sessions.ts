@@ -1,5 +1,5 @@
 import type { ActiveSession } from "../../types";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * Minimum gap between two activity-driven liveness writes for one session.
@@ -23,13 +23,14 @@ export async function refreshActiveSessionOnActivity(
   minIntervalMs: number = SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS,
 ): Promise<boolean> {
   const nowMs = Date.now();
-  const result = await getDbClient().run(
-    "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ? AND lastHeartbeatAt < ?",
-    [new Date(nowMs).toISOString(), taskId, new Date(nowMs - minIntervalMs).toISOString()],
+  const changes = await getStorage().repos.agents.heartbeatActiveSession(
+    taskId,
+    new Date(nowMs).toISOString(),
+    new Date(nowMs - minIntervalMs).toISOString(),
   );
-  return result.changes > 0;
+  return changes > 0;
 }
 
 export async function getActiveSessionById(id: string): Promise<ActiveSession | null> {
-  return getDbClient().get<ActiveSession>("SELECT * FROM active_sessions WHERE id = ?", [id]);
+  return (await getStorage().repos.agents.findActiveSessionById(id)) as ActiveSession | null;
 }

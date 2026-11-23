@@ -3,6 +3,7 @@ import {
   harnessCatalogSection,
   harnessModelIds,
 } from "@desplega/model-catalog";
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -243,8 +244,7 @@ export const platformbModels: Scenario = {
         `Created profile is ${JSON.stringify(profile)}`,
       );
       const profileRow = ctx.db.get<{ harness: string; model: string; effort: string }>(
-        "SELECT harness, model, effort FROM model_profiles WHERE name = ?",
-        [profileName],
+        sql`SELECT harness, model, effort FROM model_profiles WHERE name = ${profileName}`,
       );
       expect(
         profileRow?.harness === "claude" &&
@@ -350,9 +350,9 @@ export const platformbModels: Scenario = {
         `Updated profile is ${JSON.stringify(updated)}`,
       );
       expect(
-        ctx.db.get<{ model: string }>("SELECT model FROM model_profiles WHERE name = ?", [
-          profileName,
-        ])?.model === "sonnet",
+        ctx.db.get<{ model: string }>(
+          sql`SELECT model FROM model_profiles WHERE name = ${profileName}`,
+        )?.model === "sonnet",
         "Profile update is not in model_profiles",
       );
       response = await ctx.api("PATCH", `/api/model-profiles/${profileName}`, {
@@ -478,7 +478,7 @@ export const platformbModels: Scenario = {
           `delete profile ${name} twice`,
         );
         expect(
-          ctx.db.get("SELECT id FROM model_profiles WHERE name = ?", [name]) === null,
+          ctx.db.get(sql`SELECT id FROM model_profiles WHERE name = ${name}`) === null,
           "Deleted profile is still in model_profiles",
         );
       }
@@ -558,8 +558,7 @@ export const platformbModels: Scenario = {
       );
       expect(
         ctx.db.get<{ reason: string }>(
-          "SELECT reason FROM model_catalog_overlay WHERE provider = ? AND modelId = ?",
-          ["openai", overlayModel],
+          sql`SELECT reason FROM model_catalog_overlay WHERE provider = ${"openai"} AND "modelId" = ${overlayModel}`,
         )?.reason === "e2e overlay",
         "Overlay is not in model_catalog_overlay",
       );
@@ -587,8 +586,7 @@ export const platformbModels: Scenario = {
       expect(
         Number(
           ctx.db.get<{ n: number }>(
-            "SELECT COUNT(*) AS n FROM model_catalog_overlay WHERE provider = ? AND modelId = ?",
-            ["openai", overlayModel],
+            sql`SELECT COUNT(*) AS n FROM model_catalog_overlay WHERE provider = ${"openai"} AND "modelId" = ${overlayModel}`,
           )?.n,
         ) === 1,
         "Overlay upsert created a second row",
@@ -658,8 +656,7 @@ export const platformbModels: Scenario = {
       );
       expect(
         ctx.db.get<{ status: string }>(
-          "SELECT status FROM harness_model_support WHERE cliVersion = ?",
-          [cliVersion],
+          sql`SELECT status FROM harness_model_support WHERE "cliVersion" = ${cliVersion}`,
         )?.status === "unsupported",
         "Support row is not in harness_model_support",
       );
@@ -781,7 +778,8 @@ export const platformbModels: Scenario = {
         "worker model-catalog-overlay-upsert",
       );
       expect(
-        ctx.db.get("SELECT 1 FROM model_catalog_overlay WHERE modelId = ?", [toolModel]) === null,
+        ctx.db.get(sql`SELECT 1 FROM model_catalog_overlay WHERE "modelId" = ${toolModel}`) ===
+          null,
         "A refused overlay upsert still wrote a row",
       );
       const upserted = expectToolOk(
@@ -797,8 +795,7 @@ export const platformbModels: Scenario = {
       );
       expect(
         ctx.db.get<{ reason: string }>(
-          "SELECT reason FROM model_catalog_overlay WHERE modelId = ?",
-          [toolModel],
+          sql`SELECT reason FROM model_catalog_overlay WHERE "modelId" = ${toolModel}`,
         )?.reason === "e2e tool overlay",
         "Tool overlay is not in model_catalog_overlay",
       );
@@ -855,8 +852,7 @@ export const platformbModels: Scenario = {
       );
       expect(
         ctx.db.get<{ price: number }>(
-          "SELECT price_per_million_usd AS price FROM pricing WHERE provider = 'claude' AND model = ? AND token_class = 'input' AND effective_from = ?",
-          [model, past],
+          sql`SELECT price_per_million_usd AS price FROM pricing WHERE provider = 'claude' AND model = ${model} AND token_class = 'input' AND effective_from = ${past}`,
         )?.price === 1.5,
         "The price row is not in the pricing table",
       );
@@ -913,8 +909,7 @@ export const platformbModels: Scenario = {
       );
       // Every insert is audited.
       const audit = ctx.db.query<{ metadata: string }>(
-        "SELECT metadata FROM agent_log WHERE eventType = 'pricing.inserted' AND metadata LIKE ?",
-        [`%${model}%`],
+        sql`SELECT metadata FROM agent_log WHERE "eventType" = 'pricing.inserted' AND metadata LIKE ${`%${model}%`}`,
       );
       expect(
         audit.length === 3 && JSON.parse(audit[0]?.metadata ?? "{}").model === model,
@@ -940,8 +935,7 @@ export const platformbModels: Scenario = {
       expectStatus(await ctx.api("DELETE", `${base}/${past}`), [204], "delete the last price row");
       expectStatus(await ctx.api("GET", `${base}/active`), [404], "no price after the deletes");
       const deletedAudit = ctx.db.query<{ metadata: string }>(
-        "SELECT metadata FROM agent_log WHERE eventType = 'pricing.deleted' AND metadata LIKE ?",
-        [`%${model}%`],
+        sql`SELECT metadata FROM agent_log WHERE "eventType" = 'pricing.deleted' AND metadata LIKE ${`%${model}%`}`,
       );
       expect(deletedAudit.length === 3, `Expected 3 pricing.deleted audit rows`);
       priceRows.length = 0;

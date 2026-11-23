@@ -303,12 +303,12 @@ describe("sql connection registration", () => {
     const created = (await registerSql({ dsn: { secret: DSN } })).json().connection as {
       id: string;
     };
-    expect(getScriptApiConnectionDescriptors({ agentId: workerId })).toContainEqual({
+    expect(await getScriptApiConnectionDescriptors({ agentId: workerId })).toContainEqual({
       slug: "analytics",
       kind: "sql",
       connectionId: created.id,
     });
-    expect(getScriptApiTypes({ agentId: workerId })).toContain("query<T");
+    expect(await getScriptApiTypes({ agentId: workerId })).toContain("query<T");
 
     const typecheck = await typecheckScript(
       `
@@ -525,7 +525,7 @@ describe("ctx.api sql runtime", () => {
       const savedExecutor = process.env.SCRIPT_EXECUTOR;
       process.env.SCRIPT_EXECUTOR = executor;
       try {
-        const apiConnections = getScriptApiConnectionDescriptors({ agentId: workerId });
+        const apiConnections = await getScriptApiConnectionDescriptors({ agentId: workerId });
         const egressSecrets = await buildScriptCredentialBindings({ agentId: workerId });
         expect(JSON.stringify({ apiConnections, egressSecrets })).not.toContain("postgres://");
         const output = await runScript({

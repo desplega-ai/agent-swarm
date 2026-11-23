@@ -190,7 +190,9 @@ function migrationTemplateCacheKey(): string {
     join(import.meta.dir, "../be/seed-prompt-templates.ts"),
   ];
   const migrationsDir = join(import.meta.dir, "../be/migrations");
-  for (const name of readdirSync(migrationsDir).sort()) {
+  for (const name of readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()) {
     inputs.push(join(migrationsDir, name));
   }
   for (const file of inputs) {

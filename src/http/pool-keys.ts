@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { baseUrlEnvVar, providerForKeyVar } from "@desplega/model-catalog";
 import { z } from "zod";
+import { getStorage } from "@/be/storage";
 import {
   deleteSwarmConfigByKey,
-  getDbClient,
   getKeyStatuses,
   getSwarmConfigs,
   recordKeyValidation,
@@ -306,7 +306,7 @@ export async function handlePoolKeys(
       });
       return true;
     }
-    const result = await getDbClient().transaction(async () => {
+    const result = await getStorage().transaction(async () => {
       const current = await readPool(key);
       if (current.source === "env") return { error: ENV_POOL_ERROR, status: 409 };
       const duplicate = duplicateError(current.members, additions);
@@ -341,7 +341,7 @@ export async function handlePoolKeys(
     if (!(await ensureConfigAdmin(req, res, "config.delete.any"))) return true;
     if (!(await ensureSecretRead(req, res))) return true;
     const { key, index, suffix } = parsed.query;
-    const result = await getDbClient().transaction(async () => {
+    const result = await getStorage().transaction(async () => {
       const current = await readPool(key);
       if (current.source === "env") return { error: ENV_POOL_ERROR, status: 409 };
       if (!current.members[index] || current.members[index].slice(-5) !== suffix) {

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -115,8 +116,7 @@ export const slackTaskOutputCitations: Scenario = {
         `${testCase.name} task did not complete`,
       );
       const stored = ctx.db.get<{ count: number }>(
-        "SELECT COUNT(*) AS count FROM task_citations WHERE task_id = ?",
-        [taskId],
+        sql`SELECT COUNT(*) AS count FROM task_citations WHERE task_id = ${taskId}`,
       );
       expect(
         stored?.count === testCase.count,

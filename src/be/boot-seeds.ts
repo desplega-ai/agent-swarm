@@ -9,36 +9,36 @@
  * first caller for a given database handle does the work and later callers
  * return immediately.
  *
- * The guard is keyed on the live `Database` handle rather than a bare boolean:
+ * The guard is keyed on the live engine handle (`currentEngineHandle()`)
+ * rather than a bare boolean:
  * `closeDb()` + `initDb()` (tests, DB swaps) yields a new handle that has not
  * been seeded, so it is seeded again. A failed seed does not mark the handle
  * done, so the next caller retries and still sees the error.
  */
 
-import type { Database } from "bun:sqlite";
-import { getDb } from "./db";
 import { ensureRbacSeedsSynced } from "./rbac-roles";
 import { seedModelGroups } from "./seed-model-groups";
 import { seedModelProfiles } from "./seed-model-profiles";
 import { seedPricingFromModelsDev } from "./seed-pricing";
+import { currentEngineHandle } from "./storage-root";
 
-const pricingSeededDbs = new WeakSet<Database>();
-const rbacSyncedDbs = new WeakSet<Database>();
-const modelProfilesSeededDbs = new WeakSet<Database>();
+const pricingSeededDbs = new WeakSet<object>();
+const rbacSyncedDbs = new WeakSet<object>();
+const modelProfilesSeededDbs = new WeakSet<object>();
 
 /** Seed the pricing table from the vendored models.dev snapshot. */
-export function ensurePricingSeeded(): void {
-  const db = getDb();
+export async function ensurePricingSeeded(): Promise<void> {
+  const db = currentEngineHandle();
   if (pricingSeededDbs.has(db)) return;
-  seedPricingFromModelsDev();
+  await seedPricingFromModelsDev();
   pricingSeededDbs.add(db);
 }
 
 /** Sync the built-in RBAC roles, permissions and default-role trigger. */
-export function ensureRbacSeeded(): void {
-  const db = getDb();
+export async function ensureRbacSeeded(): Promise<void> {
+  const db = currentEngineHandle();
   if (rbacSyncedDbs.has(db)) return;
-  ensureRbacSeedsSynced();
+  await ensureRbacSeedsSynced();
   rbacSyncedDbs.add(db);
 }
 
@@ -47,7 +47,7 @@ export function ensureRbacSeeded(): void {
  * then the four tier groups that list them (src/be/seed-model-groups.ts).
  */
 export async function ensureModelProfilesSeeded(): Promise<void> {
-  const db = getDb();
+  const db = currentEngineHandle();
   if (modelProfilesSeededDbs.has(db)) return;
   const inserted = await seedModelProfiles();
   if (inserted > 0) console.log(`[startup] Seeded ${inserted} model profiles`);

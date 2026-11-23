@@ -10,6 +10,9 @@ COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
 COPY packages/model-routing/package.json ./packages/model-routing/package.json
+COPY packages/storage/package.json ./packages/storage/package.json
+COPY packages/storage-sqlite/package.json ./packages/storage-sqlite/package.json
+COPY packages/storage-postgres/package.json ./packages/storage-postgres/package.json
 RUN bun install --frozen-lockfile
 
 # apps/ui imports shared modules from the root src/.

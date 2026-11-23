@@ -1,3 +1,4 @@
+import { sql, sqlIdent } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -108,8 +109,7 @@ export const platformbExtensions: Scenario = {
       );
       expect(
         ctx.db.get<{ n: number }>(
-          "SELECT COUNT(*) AS n FROM extension_versions WHERE extensionId = ?",
-          [extensionId],
+          sql`SELECT COUNT(*) AS n FROM extension_versions WHERE "extensionId" = ${extensionId}`,
         )?.n === 1,
         "extension_versions does not hold exactly one version",
       );
@@ -170,9 +170,9 @@ export const platformbExtensions: Scenario = {
         `extension-enable returned ${JSON.stringify(outcome.data)}`,
       );
       expect(
-        ctx.db.get<{ enabled: number }>("SELECT enabled FROM extensions WHERE id = ?", [
-          extensionId,
-        ])?.enabled === 1,
+        ctx.db.get<{ enabled: number }>(
+          sql`SELECT enabled FROM extensions WHERE id = ${extensionId}`,
+        )?.enabled === 1,
         "extension-enable did not set extensions.enabled",
       );
       response = await ctx.api("POST", "/api/tasks", {
@@ -258,9 +258,9 @@ export const platformbExtensions: Scenario = {
         const column = table === "extensions" ? "id" : "extensionId";
         expect(
           Number(
-            ctx.db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`, [
-              extensionId,
-            ])?.n,
+            ctx.db.get<{ n: number }>(
+              sql`SELECT COUNT(*) AS n FROM ${sqlIdent(table)} WHERE ${sqlIdent(column)} = ${extensionId}`,
+            )?.n,
           ) === 0,
           `Deleting the extension left rows in ${table}`,
         );

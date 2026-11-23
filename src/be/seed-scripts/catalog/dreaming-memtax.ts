@@ -35,7 +35,8 @@ const NS = "dreaming-v2";
 const CURSOR_KEY = "memtax:cursor";
 // /learnings rows belong to the learnings-triage step (script dreaming-learnings): it classifies each one once, in
 // cursor order, with the same path enum, and hands its rows to lane B. B1 skips them so no learning is classified twice.
-export const NOT_LEARNING = (alias: string) => `coalesce(${alias}key, '') NOT GLOB '/learnings/*'`;
+// Not a /learnings/ row. A prefix test both engines run the same way (SQLite GLOB has no Postgres form).
+export const NOT_LEARNING = (alias: string) => `substr(COALESCE(${alias}key, ''), 1, 11) <> '/learnings/'`;
 
 // Closed path enum, taxonomy §3.2, every long-term path under /longterm/ (2026-10-01). Anything not under
 // /longterm/ is inbox; `/inbox/<id>` is the explicit "fits nowhere" answer. `<slug>` = kebab, `<id>` = memory id.
@@ -162,6 +163,26 @@ const rows = (r: any): any[] => {
   const c: string[] = d?.columns ?? [];
   return d.rows.map((x: any[]) => Object.fromEntries(c.map((k, i) => [k, x[i]])));
 };
+// db_query runs the SQL dialect of the swarm's storage engine, and every response states it (a response without the
+// field comes from SQLite). Most statements here are portable text; one with no portable form carries one text per
+// dialect. The dialect is read from the responses only: when a per-dialect statement comes first, one SELECT 1 asks.
+type Sql = string | { sqlite: string; postgres: string };
+type DialectState = { dialect?: "sqlite" | "postgres" };
+const noteDialect = (st: DialectState, r: any): any => {
+  const d = (r?.data ?? r)?.dialect;
+  if (d === "sqlite" || d === "postgres") st.dialect = d;
+  return r;
+};
+async function dbQuery(ctx: any, st: DialectState, sql: Sql, params: unknown[] = []): Promise<any> {
+  if (typeof sql !== "string" && !st.dialect) {
+    noteDialect(st, await ctx.swarm.db_query({ sql: "SELECT 1 AS one", params: [] }));
+    st.dialect ??= "sqlite";
+  }
+  const text = typeof sql === "string" ? sql : st.dialect === "postgres" ? sql.postgres : sql.sqlite;
+  return noteDialect(st, await ctx.swarm.db_query({ sql: text, params }));
+}
+// "$1, $2, ..." placeholders for a list, numbered from `from` (db_query binds $n in order of first appearance).
+const placeholders = (n: number, from = 1) => Array.from({ length: n }, (_, i) => `$${from + i}`).join(", ");
 
 // Seeded shuffle (mulberry32 over an FNV-1a hash of the seed): the same run renders the same 30 samples.
 export function seededSample<T>(arr: T[], n: number, seed: string): T[] {
@@ -230,9 +251,10 @@ export default async function (args: unknown, ctx: ScriptContext) {
   const dry = a.dryRun === true || a.dryRun === "true" || a.dryRun === undefined || a.dryRun === "";
   const runId = a.runId ?? "";
   const errors: string[] = [];
-  const q = async (label: string, sql: string, params: unknown[] = []): Promise<any[]> => {
+  const st: DialectState = {};
+  const q = async (label: string, sql: Sql, params: unknown[] = []): Promise<any[]> => {
     try {
-      return rows(await ctx.swarm.db_query({ sql, params }));
+      return rows(await dbQuery(ctx, st, sql, params));
     } catch (e: any) {
       errors.push(`${label}: ${String(e?.message ?? e).slice(0, 200)}`);
       return [];
@@ -265,34 +287,36 @@ export default async function (args: unknown, ctx: ScriptContext) {
     const backlogCap = S * backlogBatches;
     const cursorEntry: any = await ctx.swarm.kv_getOrNull({ namespace: NS, key: CURSOR_KEY }).catch(() => null);
     const cursor = parse(cursorEntry?.value) ?? { createdAt: "", id: "" };
+    // No cursor yet = the start of time. Postgres compares createdAt as a timestamp, so '' is no value there.
+    const cursorAt = cursor.createdAt || "1970-01-01T00:00:00.000Z";
     // Aggregates in SQL (no row pulls).
     const counts = (
       await q(
         "counts",
         `SELECT
-           SUM(CASE WHEN source='manual' AND (createdAt >= ?1 OR updatedAt >= ?1) THEN 1 ELSE 0 END) AS today,
-           SUM(CASE WHEN (createdAt > ?2 OR (createdAt = ?2 AND id > ?3)) THEN 1 ELSE 0 END) AS backlogLeft,
+           SUM(CASE WHEN source='manual' AND ("createdAt" >= $1 OR "updatedAt" >= $1) THEN 1 ELSE 0 END) AS today,
+           SUM(CASE WHEN ("createdAt" > $2 OR ("createdAt" = $2 AND id > $3)) THEN 1 ELSE 0 END) AS "backlogLeft",
            COUNT(*) AS curated
-         FROM agent_memory WHERE chunkIndex = 0 AND source IN ('manual','file_index') AND ${NOT_LEARNING("")}`,
-        [since, cursor.createdAt ?? "", cursor.id ?? ""],
+         FROM agent_memory WHERE "chunkIndex" = 0 AND source IN ('manual','file_index') AND ${NOT_LEARNING("")}`,
+        [since, cursorAt, cursor.id ?? ""],
       )
     )[0] ?? {};
     // One doc per row: chunk 0 plus chunk 1 when chunk 0 is short, cut to previewChars; tags, posteriors, inbound links.
     const docSql = (where: string) => `
-      SELECT m.id, m.name, m.scope, m.source, m.agentId, m.key, m.tags, m.accessCount, m.alpha, m.beta, m.totalChunks, m.createdAt,
-        substr(m.content || CASE WHEN length(m.content) < ?P THEN coalesce((SELECT c.content FROM agent_memory c WHERE c.key = m.key AND c.scope = m.scope AND coalesce(c.agentId,'') = coalesce(m.agentId,'') AND c.chunkIndex = 1), '') ELSE '' END, 1, ?P) AS text,
-        (SELECT COUNT(*) FROM memory_link l WHERE l.targetId = m.id) AS inLinks
-      FROM agent_memory m WHERE m.chunkIndex = 0 AND ${where}`;
+      SELECT m.id, m.name, m.scope, m.source, m."agentId", m.key, m.tags, m."accessCount", m.alpha, m.beta, m."totalChunks", m."createdAt",
+        substr(m.content || CASE WHEN length(m.content) < ?P THEN COALESCE((SELECT c.content FROM agent_memory c WHERE c.key = m.key AND c.scope = m.scope AND COALESCE(c."agentId",'') = COALESCE(m."agentId",'') AND c."chunkIndex" = 1), '') ELSE '' END, 1, ?P) AS text,
+        (SELECT COUNT(*) FROM memory_link l WHERE l."targetId" = m.id) AS "inLinks"
+      FROM agent_memory m WHERE m."chunkIndex" = 0 AND ${where}`;
     const P = a.previewChars;
     const today = todayCap
-      ? await q("today", docSql(`m.source = 'manual' AND ${NOT_LEARNING("m.")} AND (m.createdAt >= ? OR m.updatedAt >= ?) ORDER BY m.createdAt, m.id LIMIT ?`).replaceAll("?P", String(P)), [since, since, Math.min(todayCap, 400)])
+      ? await q("today", docSql(`m.source = 'manual' AND ${NOT_LEARNING("m.")} AND (m."createdAt" >= $1 OR m."updatedAt" >= $1) ORDER BY m."createdAt", m.id LIMIT $2`).replaceAll("?P", String(P)), [since, Math.min(todayCap, 400)])
       : [];
     const todayIds = new Set(today.map((r) => r.id));
     const backlogRaw = backlogCap
       ? await q(
           "backlog",
-          docSql(`m.source IN ('manual','file_index') AND ${NOT_LEARNING("m.")} AND (m.createdAt > ? OR (m.createdAt = ? AND m.id > ?)) ORDER BY m.createdAt, m.id LIMIT ?`).replaceAll("?P", String(P)),
-          [cursor.createdAt ?? "", cursor.createdAt ?? "", cursor.id ?? "", Math.min(backlogCap + todayIds.size, 400)],
+          docSql(`m.source IN ('manual','file_index') AND ${NOT_LEARNING("m.")} AND (m."createdAt" > $1 OR (m."createdAt" = $1 AND m.id > $2)) ORDER BY m."createdAt", m.id LIMIT $3`).replaceAll("?P", String(P)),
+          [cursorAt, cursor.id ?? "", Math.min(backlogCap + todayIds.size, 400)],
         )
       : [];
     const backlog = backlogRaw.filter((r) => !todayIds.has(r.id)).slice(0, backlogCap);
@@ -388,13 +412,17 @@ export default async function (args: unknown, ctx: ScriptContext) {
       const c = (
         await q(
           "cost",
-          `SELECT COUNT(DISTINCT taskId) tasks, SUM(totalCostUsd) usd, SUM(inputTokens) inTok, SUM(outputTokens) outTok, SUM(cacheReadTokens) cacheTok, group_concat(DISTINCT model) models FROM session_costs WHERE taskId IN (${taskIds.map(() => "?").join(",")})`,
+          // group_concat is string_agg on Postgres.
+          {
+            sqlite: `SELECT COUNT(DISTINCT "taskId") AS tasks, SUM("totalCostUsd") AS usd, SUM("inputTokens") AS "inTok", SUM("outputTokens") AS "outTok", SUM("cacheReadTokens") AS "cacheTok", group_concat(DISTINCT model) AS models FROM session_costs WHERE "taskId" IN (${placeholders(taskIds.length)})`,
+            postgres: `SELECT COUNT(DISTINCT "taskId") AS tasks, SUM("totalCostUsd") AS usd, SUM("inputTokens") AS "inTok", SUM("outputTokens") AS "outTok", SUM("cacheReadTokens") AS "cacheTok", string_agg(DISTINCT model, ',') AS models FROM session_costs WHERE "taskId" IN (${placeholders(taskIds.length)})`,
+          },
           taskIds,
         )
       )[0];
       if (c && c.usd !== null && c.usd !== undefined) {
         const usd = Number(c.usd);
-        cost = { usd, perBatchUsd: taskIds.length ? usd / taskIds.length : null, tasks: Number(c.tasks ?? 0), inputTokens: Number(c.inTok ?? 0), outputTokens: Number(c.outTok ?? 0), cacheReadTokens: Number(c.cacheTok ?? 0), models: String(c.models ?? "").split(",").filter(Boolean) };
+        cost = { usd, perBatchUsd: taskIds.length ? usd / taskIds.length : null, tasks: Number(c.tasks ?? 0), inputTokens: Number(c.inTok ?? 0), outputTokens: Number(c.outTok ?? 0), cacheReadTokens: Number(c.cacheTok ?? 0), models: String(c.models ?? "").split(",").filter(Boolean).sort() };
       }
     }
     // session_costs lands a few seconds after the task finishes, usually after this node ran. Fall back to the
@@ -404,7 +432,8 @@ export default async function (args: unknown, ctx: ScriptContext) {
       const prior = (
         await q(
           "cost-prior",
-          `SELECT COUNT(*) tasks, AVG(s.usd) usd FROM (SELECT sc.taskId, SUM(sc.totalCostUsd) usd FROM session_costs sc JOIN agent_tasks t ON t.id = sc.taskId WHERE t.tags LIKE '%dreaming-v2-memtax%' AND t.status = 'completed' AND sc.createdAt >= datetime('now','-7 days') GROUP BY sc.taskId) s`,
+          `SELECT COUNT(*) AS tasks, AVG(s.usd) AS usd FROM (SELECT sc."taskId", SUM(sc."totalCostUsd") AS usd FROM session_costs sc JOIN agent_tasks t ON t.id = sc."taskId" WHERE CAST(t.tags AS text) LIKE '%dreaming-v2-memtax%' AND t.status = 'completed' AND sc."createdAt" >= $1 GROUP BY sc."taskId") s`,
+          [new Date(Date.now() - 7 * 86400000).toISOString()],
         )
       )[0];
       if (prior && Number(prior.tasks) > 0 && prior.usd !== null) {
@@ -416,10 +445,10 @@ export default async function (args: unknown, ctx: ScriptContext) {
     // Control: B1 must write no memory. memtax-tagged rows touched since the plan window, and manual rows (memory-store /
     // inject-learning) written by the classify tasks. The runner's own session_summary/task_completion rows are not agent writes.
     const since = String(pl.since ?? new Date(Date.now() - 86400000).toISOString());
-    const mw = (await q("memory-writes", `SELECT COUNT(*) n FROM agent_memory WHERE tags LIKE '%memtax%' AND (updatedAt >= ? OR createdAt >= ?)`, [since, since]))[0];
+    const mw = (await q("memory-writes", `SELECT COUNT(*) AS n FROM agent_memory WHERE CAST(tags AS text) LIKE '%memtax%' AND ("updatedAt" >= $1 OR "createdAt" >= $1)`, [since]))[0];
     const memoryWrites = mw ? Number(mw.n) : null;
     const taskWrites = taskIds.length
-      ? Number((await q("task-writes", `SELECT COUNT(*) n FROM agent_memory WHERE sourceTaskId IN (${taskIds.map(() => "?").join(",")}) AND source = 'manual'`, taskIds))[0]?.n ?? 0)
+      ? Number((await q("task-writes", `SELECT COUNT(*) AS n FROM agent_memory WHERE "sourceTaskId" IN (${placeholders(taskIds.length)}) AND source = 'manual'`, taskIds))[0]?.n ?? 0)
       : 0;
 
     // Live only: KV memtax:class:<id> and the backlog cursor. Bounded so a slow KV can never time the node out.
@@ -446,7 +475,7 @@ export default async function (args: unknown, ctx: ScriptContext) {
       }
       if (to) {
         const cur = pl?.cursor?.to && pl.cursor.to.id === to.id ? pl.cursor.to : null;
-        const createdAt = cur?.createdAt ?? (await q("cursor", `SELECT createdAt FROM agent_memory WHERE id = ?`, [to.id]))[0]?.createdAt;
+        const createdAt = cur?.createdAt ?? (await q("cursor", `SELECT "createdAt" FROM agent_memory WHERE id = $1`, [to.id]))[0]?.createdAt;
         if (createdAt) await ctx.swarm.kv_set({ namespace: NS, key: CURSOR_KEY, value: { createdAt, id: to.id, runId, at: new Date().toISOString() } as any }).catch((e: any) => errors.push(`cursor: ${String(e?.message ?? e).slice(0, 120)}`));
       }
       kv = `${kvWritten} memtax:class keys written${kvWritten < good.size ? ` (${good.size - kvWritten} not written)` : ""}`;

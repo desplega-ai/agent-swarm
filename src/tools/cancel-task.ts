@@ -1,12 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import {
-  cancelTask,
-  getAgentById,
-  getDbClient,
-  getTaskById,
-  updateAgentStatusFromCapacity,
-} from "@/be/db";
+import { cancelTask, getAgentById, getTaskById, updateAgentStatusFromCapacity } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import { can } from "@/rbac";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
@@ -47,7 +42,7 @@ export async function cancelTaskHandler(
 
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
 
-  const result = await getDbClient().transaction(
+  const result = await getStorage().transaction(
     async (): Promise<CancelTaskTxnResult | SwarmToolResult> => {
       if (ctx.kind === "owner") {
         const ownerAgentId = ctx.agentId;

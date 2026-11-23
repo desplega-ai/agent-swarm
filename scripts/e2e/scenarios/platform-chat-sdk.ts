@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import { listedMcpTools } from "../mcp";
 import type { Scenario } from "../run";
@@ -37,8 +38,7 @@ export const platformChatSdk: Scenario = {
     const key = threadId;
     const mappingRow = () =>
       ctx.db.get<{ value: string }>(
-        "SELECT value FROM kv_entries WHERE namespace = ? AND key = ?",
-        ["integrations:chat:channels", key],
+        sql`SELECT value FROM kv_entries WHERE namespace = ${"integrations:chat:channels"} AND key = ${key}`,
       );
     let configId: string | undefined;
     let taskId: string | undefined;

@@ -6,8 +6,8 @@
  * agent, the workflow run, the follow-up task or any notification.
  */
 import * as z from "zod";
-import { getDbClient } from "./db";
 import { upsertSwarmConfigWithPolicyMirror } from "./multi-runtime";
+import { getStorage } from "./storage";
 import {
   internalConfigKeyError,
   isApiOnlyConfigKey,
@@ -120,28 +120,21 @@ async function readConfigRow(
   settings: Pick<ConfigQuestionSettings, "scope" | "scopeId" | "key">,
 ): Promise<ConfigRowMeta | null> {
   const scopeId = settings.scope === "global" ? null : (settings.scopeId ?? null);
-  const row = await getDbClient().get<{
-    isSecret: number;
-    lastUpdatedAt: string;
-    envPath: string | null;
-    description: string | null;
-    plainValue: string | null;
-  }>(
-    `SELECT isSecret, lastUpdatedAt, envPath, description,
-            CASE WHEN isSecret = 1 THEN NULL ELSE value END AS plainValue
-       FROM swarm_config
-      WHERE scope = ? AND ${scopeId === null ? "scopeId IS NULL" : "scopeId = ?"} AND key = ?`,
-    scopeId === null ? [settings.scope, settings.key] : [settings.scope, scopeId, settings.key],
+  const row = await getStorage().repos.config.findConfigByScopeKey(
+    settings.scope,
+    scopeId,
+    settings.key,
   );
   if (!row) return null;
   // API-only keys are never readable over HTTP, so they count as secret here.
   const isSecret = row.isSecret === 1 || isApiOnlyConfigKey(settings.key);
+  const plainValue = row.isSecret === 1 ? null : row.value;
   return {
     isSecret,
     updatedAt: row.lastUpdatedAt,
     envPath: row.envPath,
     description: row.description,
-    ...(isSecret || row.plainValue === null ? {} : { value: row.plainValue }),
+    ...(isSecret || plainValue === null ? {} : { value: plainValue }),
   };
 }
 

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { cancelQuietly, createAssignedTask, registerWorker, UUID } from "./core-helpers";
@@ -7,8 +8,7 @@ type SwarmConfigRow = { value: string };
 function configValue(ctx: ScenarioContext, agentId: string, key: string): string | null {
   return (
     ctx.db.get<SwarmConfigRow>(
-      "SELECT value FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
-      [agentId, key],
+      sql`SELECT value FROM swarm_config WHERE scope = 'agent' AND "scopeId" = ${agentId} AND key = ${key}`,
     )?.value ?? null
   );
 }
@@ -33,7 +33,7 @@ async function identityAndProfile(ctx: ScenarioContext): Promise<string> {
   expectStatus(response, [200], "rename agent");
   expect(asRecord(response.json).name === renamed, "Rename did not trim and apply the new name");
   expect(
-    ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [agentId])?.name ===
+    ctx.db.get<{ name: string }>(sql`SELECT name FROM agents WHERE id = ${agentId}`)?.name ===
       renamed,
     "agents row does not carry the new name",
   );
@@ -94,8 +94,7 @@ async function identityAndProfile(ctx: ScenarioContext): Promise<string> {
   });
   expectStatus(response, [200], "second soul revision");
   const versions = ctx.db.query<{ version: number; changeReason: string | null; content: string }>(
-    "SELECT version, changeReason, content FROM context_versions WHERE agentId = ? AND field = 'soulMd' ORDER BY version",
-    [agentId],
+    sql`SELECT version, "changeReason", content FROM context_versions WHERE "agentId" = ${agentId} AND field = 'soulMd' ORDER BY version`,
   );
   expect(
     versions.length === 2 && versions[0]?.version === 1 && versions[1]?.version === 2,

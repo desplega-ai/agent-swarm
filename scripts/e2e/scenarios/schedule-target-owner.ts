@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // A schedule fires as the agent that created it, so only that agent or a lead may change
 // what it runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs, params), over
 // MCP and HTTP. Other agents keep every other edit; the operator keeps every edit.
@@ -43,8 +44,7 @@ export const scheduleTargetOwner: Scenario = {
 
       const row = () =>
         ctx.db.get<{ targetType: string; taskTemplate: string; cronExpression: string }>(
-          "SELECT targetType, taskTemplate, cronExpression FROM scheduled_tasks WHERE id = ?",
-          [scheduleId as string],
+          sql`SELECT "targetType", "taskTemplate", "cronExpression" FROM scheduled_tasks WHERE id = ${scheduleId as string}`,
         );
 
       // Another agent cannot change what the schedule runs, on any surface.

@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { ensureModelProfilesSeeded, ensurePricingSeeded, ensureRbacSeeded } from "./be/boot-seeds";
-import { initDb } from "./be/db";
+import { initDb, isPostgresEngine, startPostgres } from "./be/db";
 import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
@@ -416,6 +416,13 @@ export async function createServer(
     excludedTools?: readonly string[];
   } = {},
 ) {
+  // Initialize database with WAL mode
+  // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
+  // DATABASE_URL with a postgres:// scheme selects the Postgres engine instead (async start).
+  // Before the config load below: it is the first database read.
+  if (isPostgresEngine()) await startPostgres();
+  else initDb(process.env.DATABASE_PATH);
+
   // Reload env
   await loadGlobalConfigsIntoEnv(true);
 
@@ -438,19 +445,15 @@ export async function createServer(
     toolAllowlist !== undefined ||
     (cap === "chat-sdk" ? isChatSdkEnabled() : getCapabilities().has(cap));
 
-  // Initialize database with WAL mode
-  // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
-  initDb(process.env.DATABASE_PATH);
-
   // Phase 2: project the vendored models.dev snapshot into the pricing table.
   // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0). This runs
-  // once per database handle, not once per MCP session: the seed is a
-  // synchronous 8.6 MB parse plus a write transaction, and createServer() runs
+  // once per database handle, not once per MCP session: the seed is an
+  // 8.6 MB parse plus a write transaction, and createServer() runs
   // on every `POST /mcp` session init. The HTTP boot path seeds first, so
   // sessions normally skip it; standalone callers (stdio, tests) seed here.
   // See src/be/seed-pricing.ts for the projection logic and the
   // manual-override constants for runtime-fee / ACU pricing.
-  ensurePricingSeeded();
+  await ensurePricingSeeded();
   startPricingRefreshLoop();
   try {
     await ensureModelProfilesSeeded();
@@ -459,7 +462,7 @@ export async function createServer(
   }
 
   try {
-    ensureRbacSeeded();
+    await ensureRbacSeeded();
   } catch (err) {
     console.error("[startup] Failed to sync RBAC seed rows:", err);
     // RBAC flag-on must fail closed; flag-off deployments should not be bricked
@@ -479,7 +482,7 @@ export async function createServer(
     },
     {
       ...(opts.preloadedTools?.length
-        ? { instructions: resolveTemplate("system.agent.tool_preload", {}).text }
+        ? { instructions: (await resolveTemplate("system.agent.tool_preload", {})).text }
         : {}),
       capabilities: {
         logging: {},

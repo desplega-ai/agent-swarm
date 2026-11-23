@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // A session whose task already ended keeps store-progress and read-only tools, and loses writes.
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
@@ -42,7 +43,12 @@ export const coreTerminalTaskFence: Scenario = {
       await expectToolError(
         conn,
         "send-task",
-        { agentId: targetId, routingReason: "skill", routingNote: "late fence call", task: lateText },
+        {
+          agentId: targetId,
+          routingReason: "skill",
+          routingNote: "late fence call",
+          task: lateText,
+        },
         "superseded",
       );
       await expectToolError(
@@ -51,9 +57,9 @@ export const coreTerminalTaskFence: Scenario = {
         { taskId, message: `late reply ${ctx.nonce}` },
         "superseded",
       );
-      const leaked = ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_tasks WHERE task = ?", [
-        lateText,
-      ]);
+      const leaked = ctx.db.get<{ n: number }>(
+        sql`SELECT COUNT(*) AS n FROM agent_tasks WHERE task = ${lateText}`,
+      );
       expect(leaked?.n === 0, "The refused send-task still created a task");
 
       await expectToolOk(conn, "store-progress", { taskId, progress: `late note ${ctx.nonce}` });

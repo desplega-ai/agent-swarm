@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { SlackMock } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { ScenarioContext } from "../run";
 import {
@@ -125,8 +126,7 @@ export type ChatTaskRow = { id: string; source: string; status: string; agentId:
 
 export function chatTasksForThread(ctx: ScenarioContext, threadTs: string): ChatTaskRow[] {
   return ctx.db.query<ChatTaskRow>(
-    'SELECT id, source, status, agentId FROM agent_tasks WHERE "key" = ? ORDER BY createdAt',
-    [chatSlackTaskKey(threadTs)],
+    sql`SELECT id, source, status, "agentId" FROM agent_tasks WHERE "key" = ${chatSlackTaskKey(threadTs)} ORDER BY "createdAt"`,
   );
 }
 
@@ -349,7 +349,6 @@ export function slackTasksForMessage(
   ts: string,
 ): { id: string; status: string }[] {
   return ctx.db.query<{ id: string; status: string }>(
-    "SELECT id, status FROM agent_tasks WHERE source = 'slack' AND (slackTriggerMessageTs = ? OR slackThreadTs = ?)",
-    [ts, ts],
+    sql`SELECT id, status FROM agent_tasks WHERE source = 'slack' AND ("slackTriggerMessageTs" = ${ts} OR "slackThreadTs" = ${ts})`,
   );
 }

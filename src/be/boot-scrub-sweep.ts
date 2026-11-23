@@ -51,12 +51,12 @@ import {
   SCRUBBER_RULES_VERSION,
   scrubberRulesFingerprint,
 } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
-import type { DbExecutor, DbParam } from "./db-client";
+import type { DbParam } from "./db-client";
 import { getMemoryStore } from "./memory";
 import type { MemoryScrubFields } from "./memory/types";
 import { breaksJsonValidity, foldHexCopies } from "./scrub-json";
 import { sealJson } from "./sealed-json";
+import { getStorage } from "./storage";
 
 const DEFAULT_BATCH_SIZE = 100;
 
@@ -118,8 +118,8 @@ type SweepTarget = {
   replay?: Record<string, string>;
   /** Unique TEXT row key within `where`. Default `id`. */
   idColumn?: string;
-  /** Static SQL filter limiting the sweep to some rows of the table. */
-  where?: string;
+  /** Limits the sweep to the rows where this column equals this value. */
+  whereEquals?: { column: string; value: string };
   /**
    * Undo an encoding the scrubber cannot see through, before scrubbing. The
    * decoded form is written only when the scrub then redacts something.
@@ -155,7 +155,7 @@ export const BOOT_SCRUB_TARGETS: readonly SweepTarget[] = [
     table: "kv_entries",
     columns: ["value"],
     idColumn: "key",
-    where: "namespace = 'dreaming-v2'",
+    whereEquals: { column: "namespace", value: "dreaming-v2" },
     decode: foldHexCopies,
   },
 ];
@@ -221,11 +221,8 @@ export async function runBootScrubSweep(
 ): Promise<BootScrubTableStats[] | null> {
   const version = opts.version ?? SCRUBBER_RULES_VERSION;
   const doneKey = bootScrubDoneKey(version);
-  const done = await getDbClient().get<{ key: string }>(
-    "SELECT key FROM seed_state WHERE kind = 'maintenance' AND key = ?",
-    [doneKey],
-  );
-  if (done) return null;
+  const maintenance = getStorage().repos.maintenance;
+  if ((await maintenance.getState(doneKey)) !== null) return null;
 
   const tag = `boot-scrub-v${version}`;
   if (bootScrubMode() === "forward-only") {
@@ -256,22 +253,12 @@ export async function runBootScrubSweep(
     return stats;
   }
 
-  await getDbClient().transaction(async (tx) => {
-    await tx.run(
-      `INSERT INTO seed_state (kind, key, seededHash, seededAt)
-       VALUES ('maintenance', ?, 'done', datetime('now'))
-       ON CONFLICT (kind, key) DO UPDATE SET seededHash = 'done', seededAt = datetime('now')`,
-      [doneKey],
-    );
-    await tx.run("DELETE FROM seed_state WHERE kind = 'maintenance' AND key LIKE ? ESCAPE '!'", [
-      `${doneKey.replace(/[!%_]/g, "!$&")}:%:cursor`,
-    ]);
+  await getStorage().transaction(async () => {
+    await maintenance.setState(doneKey, "done");
+    await maintenance.deleteStatesLike(`${doneKey.replace(/[!%_]/g, "!$&")}:%:cursor`);
     // This sweep ran every current rule over every row, so it covers each version a
     // forward-only install skipped up to here.
-    await tx.run(
-      "DELETE FROM seed_state WHERE kind = 'maintenance' AND key GLOB 'boot-scrub-skipped-v*' AND CAST(substr(key, 21) AS INTEGER) <= ?",
-      [version],
-    );
+    await maintenance.deleteSkippedBootScrubVersions(version);
   });
   console.log(`[${tag}] complete`);
 
@@ -287,11 +274,9 @@ export async function runBootScrubSweep(
 
 /** Remember a rules version the sweep did not run for, with the rule set it skipped. */
 async function recordSkippedVersion(version: number): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO seed_state (kind, key, seededHash, seededAt)
-     VALUES ('maintenance', ?, ?, datetime('now'))
-     ON CONFLICT (kind, key) DO UPDATE SET seededHash = excluded.seededHash, seededAt = datetime('now')`,
-    [bootScrubSkippedKey(version), scrubberRulesFingerprint()],
+  await getStorage().repos.maintenance.setState(
+    bootScrubSkippedKey(version),
+    scrubberRulesFingerprint(),
   );
 }
 
@@ -300,7 +285,8 @@ async function sweepTarget(
   version: number,
   opts: BootScrubSweepOptions,
 ): Promise<{ stats: BootScrubTableStats; halted: boolean }> {
-  const client = getDbClient();
+  const storage = getStorage();
+  const maintenance = storage.repos.maintenance;
   const pacer = createPacer();
   // A scrubber is valid until the event loop turns: a secret registered meanwhile needs a new one.
   const freshScrub = () => opts.scrub ?? createSweepScrubber();
@@ -314,18 +300,10 @@ async function sweepTarget(
     skippedInvalidJson: 0,
   };
 
-  let cursor =
-    (
-      await client.get<{ seededHash: string }>(
-        "SELECT seededHash FROM seed_state WHERE kind = 'maintenance' AND key = ?",
-        [cursorKey],
-      )
-    )?.seededHash ?? "";
+  let cursor = (await maintenance.getState(cursorKey)) ?? "";
 
-  const idCol = target.idColumn ?? "id";
-  const filter = target.where ? `${target.where} AND ` : "";
+  const table = keyedTable(target);
   const selectCols = [
-    idCol === "id" ? "id" : `${idCol} AS id`,
     ...target.columns,
     ...(target.hash && !target.columns.includes(target.hash.column) ? [target.hash.column] : []),
     ...Object.values(target.replay ?? {}),
@@ -337,11 +315,7 @@ async function sweepTarget(
       halted = true;
       break;
     }
-    const rows = await client.query<Record<string, string | null>>(
-      `SELECT ${selectCols.join(", ")} FROM ${target.table}
-       WHERE ${filter}${idCol} > ? ORDER BY ${idCol} ASC LIMIT ?`,
-      [cursor, batchSize],
-    );
+    const rows = await maintenance.scanKeyedBatch(table, selectCols, cursor, batchSize);
     if (rows.length === 0) break;
     await pacer.yieldIfDue();
     scrub = freshScrub();
@@ -389,19 +363,16 @@ async function sweepTarget(
     }
 
     const batchLastId = rows[rows.length - 1]!.id as string;
-    await client.transaction(async (tx) => {
+    stats.changed += await storage.transaction(async () => {
+      let changed = 0;
       for (const { id, before, after } of pending) {
         const wrote = target.memory
           ? await rewriteMemoryRow(id, before, after)
-          : await rewriteRow(tx, target, id, before, after);
-        if (wrote) stats.changed++;
+          : await rewriteRow(target, id, before, after);
+        if (wrote) changed++;
       }
-      await tx.run(
-        `INSERT INTO seed_state (kind, key, seededHash, seededAt)
-         VALUES ('maintenance', ?, ?, datetime('now'))
-         ON CONFLICT (kind, key) DO UPDATE SET seededHash = excluded.seededHash, seededAt = datetime('now')`,
-        [cursorKey, batchLastId],
-      );
+      await maintenance.setState(cursorKey, batchLastId);
+      return changed;
     });
 
     stats.scanned += rows.length;
@@ -413,8 +384,15 @@ async function sweepTarget(
   return { stats, halted };
 }
 
+function keyedTable(target: SweepTarget) {
+  return {
+    table: target.table,
+    idColumn: target.idColumn ?? "id",
+    whereEquals: target.whereEquals,
+  };
+}
+
 async function rewriteRow(
-  tx: DbExecutor,
   target: SweepTarget,
   id: string,
   before: Record<string, string | null>,
@@ -423,21 +401,21 @@ async function rewriteRow(
   const changedCols = target.columns.filter((c) => after[c] !== before[c]);
   // Replay columns the sweep fills: only while still NULL (guarded below).
   const sealedCols = Object.values(target.replay ?? {}).filter((c) => after[c] !== undefined);
-  const sets = [...changedCols, ...sealedCols].map((c) => `${c} = ?`);
-  const params: DbParam[] = [...changedCols, ...sealedCols].map((c) => after[c] ?? null);
+  const set: Record<string, DbParam> = {};
+  for (const c of [...changedCols, ...sealedCols]) set[c] = after[c] ?? null;
   if (target.hash && changedCols.includes(target.hash.of)) {
-    sets.push(`${target.hash.column} = ?`);
-    params.push(contentSha256(after[target.hash.of] ?? ""));
+    set[target.hash.column] = contentSha256(after[target.hash.of] ?? "");
   }
   // Compare-and-set on every changed column.
-  const guards = [...changedCols.map((c) => `${c} IS ?`), ...sealedCols.map((c) => `${c} IS NULL`)];
-  params.push(id, ...changedCols.map((c) => before[c] ?? null));
-  const filter = target.where ? `${target.where} AND ` : "";
-  const result = await tx.run(
-    `UPDATE ${target.table} SET ${sets.join(", ")} WHERE ${filter}${target.idColumn ?? "id"} = ? AND ${guards.join(" AND ")}`,
-    params,
+  const expect: Record<string, DbParam> = {};
+  for (const c of changedCols) expect[c] = before[c] ?? null;
+  return getStorage().repos.maintenance.compareAndSetRow(
+    keyedTable(target),
+    id,
+    set,
+    expect,
+    sealedCols,
   );
-  return result.changes > 0;
 }
 
 async function rewriteMemoryRow(

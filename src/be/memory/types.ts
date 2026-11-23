@@ -86,7 +86,7 @@ export interface MemoryStore {
     after: MemoryScrubFields,
   ): Promise<boolean>;
   getStats(agentId: string): Promise<MemoryStats>;
-  getHealth(): MemoryHealth;
+  getHealth(): Promise<MemoryHealth>;
 }
 
 // ============================================================================

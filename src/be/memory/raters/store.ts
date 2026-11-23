@@ -1,4 +1,4 @@
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import { ensure } from "../../../utils/business-use";
 import { type RatingEvent, REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "./types";
 
@@ -93,52 +93,38 @@ export async function applyRating(
 
   // One transaction for the whole batch. SQLite WAL handles concurrent
   // writers — Beta updates are commutative, so racing applies converge.
-  const UPDATE_MEMORY_SQL =
-    "UPDATE agent_memory SET alpha = alpha + ?, beta = beta + ? WHERE id = ?";
-  const CHECK_EXISTS_SQL = "SELECT id FROM agent_memory WHERE id = ?";
-  const INSERT_RATING_SQL = `INSERT INTO memory_rating
-       (id, memoryId, taskId, source, signal, weight, reasoning, createdAt, contextKey, model)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  // Step-6 §3 — UPSERT the edge with the SAME deltas as the memory row.
-  // The `- 1.0` corrections in DO UPDATE undo the default-prior offset that
-  // the INSERT arm baked into excluded.alpha/excluded.beta. Net effect: on
-  // insert, alpha/beta start at `1 + delta`; on update, the existing
-  // (alpha, beta) simply gain (delta_alpha, delta_beta).
-  const UPSERT_EDGE_SQL = `INSERT INTO agent_memory_edge (from_id, to_id, type, alpha, beta, createdAt)
-     VALUES (?, ?, 'references-source', ?, ?, ?)
-     ON CONFLICT(from_id, to_id, type) DO UPDATE SET
-       alpha = alpha + excluded.alpha - 1.0,
-       beta  = beta  + excluded.beta  - 1.0`;
-
+  // Step-6 §3 — the edge UPSERT carries the SAME deltas as the memory row.
   type AppliedEntry = { event: RatingEvent; sanitizedReferencesSource: string | null };
 
-  const { applied, lateRejects, appliedEvents } = await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  const repo = storage.repos.memory;
+  const { applied, lateRejects, appliedEvents } = await storage.transaction(async () => {
     let applied = 0;
     const lateRejects: ApplyRatingResult["rejected"] = [];
     const appliedEvents: AppliedEntry[] = [];
     for (const { event, sanitizedReferencesSource } of accepted) {
-      const exists = await tx.get<{ id: string }>(CHECK_EXISTS_SQL, [event.memoryId]);
+      const exists = await repo.memoryExists(event.memoryId);
       if (!exists) {
         lateRejects.push({ event, reason: "memoryId not found in agent_memory" });
         continue;
       }
       const alphaDelta = Math.max(0, event.signal) * event.weight;
       const betaDelta = Math.max(0, -event.signal) * event.weight;
-      await tx.run(UPDATE_MEMORY_SQL, [alphaDelta, betaDelta, event.memoryId]);
+      await repo.addPosterior(event.memoryId, alphaDelta, betaDelta);
       try {
-        await tx.run(INSERT_RATING_SQL, [
-          crypto.randomUUID(),
-          event.memoryId,
-          ctx.taskId ?? null,
-          event.source,
-          event.signal,
-          event.weight,
-          event.reasoning ?? null,
-          new Date().toISOString(),
-          ctx.contextKey ?? null,
+        await repo.insertRating({
+          id: crypto.randomUUID(),
+          memoryId: event.memoryId,
+          taskId: ctx.taskId ?? null,
+          source: event.source,
+          signal: event.signal,
+          weight: event.weight,
+          reasoning: event.reasoning ?? null,
+          createdAt: new Date().toISOString(),
+          contextKey: ctx.contextKey ?? null,
           // Provenance is only meaningful for a model-judged rating.
-          event.source === "llm" ? (event.model ?? null) : null,
-        ]);
+          model: event.source === "llm" ? (event.model ?? null) : null,
+        });
       } catch (err) {
         // Partial unique index on (taskId, memoryId) WHERE source='explicit-self'
         // is the only constraint that can fire here.
@@ -151,13 +137,13 @@ export async function applyRating(
         throw err;
       }
       if (sanitizedReferencesSource !== null) {
-        await tx.run(UPSERT_EDGE_SQL, [
+        await repo.upsertReferenceEdge(
           event.memoryId,
           sanitizedReferencesSource,
-          1.0 + alphaDelta,
-          1.0 + betaDelta,
+          alphaDelta,
+          betaDelta,
           new Date().toISOString(),
-        ]);
+        );
       }
       appliedEvents.push({ event, sanitizedReferencesSource });
       applied += 1;

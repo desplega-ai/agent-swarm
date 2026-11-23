@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -72,8 +73,9 @@ export const platformChatSdkRocketchat: Scenario = {
       });
     const chatTasks = (text: string) =>
       ctx.db.get<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM agent_tasks WHERE contextKey GLOB ? AND task LIKE ?",
-        [`task:chat-sdk:rocketchat:*`, `%${text}%`],
+        // A case-sensitive prefix test on both engines (GLOB is SQLite only):
+        // 25 = "task:chat-sdk:rocketchat:".length.
+        sql`SELECT COUNT(*) AS n FROM agent_tasks WHERE substr("contextKey", 1, 25) = ${"task:chat-sdk:rocketchat:"} AND task LIKE ${`%${text}%`}`,
       )?.n ?? 0;
     try {
       for (const key of ["baseUrl", "apiUrl", "apiBaseUrl"]) {

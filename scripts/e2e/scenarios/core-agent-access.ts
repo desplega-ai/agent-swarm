@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -178,9 +179,9 @@ async function workerTokens(ctx: ScenarioContext): Promise<void> {
   const firstTokenId = String(minted.tokenId);
   const firstToken = String(minted.plaintext);
   expect(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM session_tokens WHERE id = ?", [
-      firstTokenId,
-    ])?.n === 1,
+    ctx.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM session_tokens WHERE id = ${firstTokenId}`,
+    )?.n === 1,
     "Minted token has no session_tokens row",
   );
 
@@ -202,7 +203,7 @@ async function workerTokens(ctx: ScenarioContext): Promise<void> {
   expect(minted.agentCreated === true, "agentCreated is false for a new agent");
   const createdId = `core-created-${ctx.nonce}`;
   expect(
-    ctx.db.get<{ status: string }>("SELECT status FROM agents WHERE id = ?", [createdId])
+    ctx.db.get<{ status: string }>(sql`SELECT status FROM agents WHERE id = ${createdId}`)
       ?.status === "offline",
     "Agent created by the token route is not offline",
   );

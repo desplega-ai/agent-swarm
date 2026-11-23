@@ -1,10 +1,5 @@
-import {
-  createLogEntry,
-  getDbClient,
-  getScheduledTaskById,
-  getUserById,
-  updateScheduledTask,
-} from "@/be/db";
+import { createLogEntry, getScheduledTaskById, getUserById, updateScheduledTask } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import {
   type ConfirmResult,
   describeEventWait,
@@ -20,6 +15,10 @@ import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
 import { type AgentTask, type ScheduledTask, SUPERSEDED_WORKFLOW_TASK_REASON } from "@/types";
 import { type PrefixHandler, workflowEventBus } from "@/workflows/event-bus";
 import { createStandaloneScheduleTask, prepareStandaloneScheduleTask } from "./schedule-task";
+
+function tasksRepo() {
+  return getStorage().repos.tasks;
+}
 
 export type TaskWakeEvent = "task.completed" | "task.failed" | "settled";
 
@@ -42,16 +41,6 @@ type WakeReason =
 
 type WaitTable = "deferred_task_waits" | "deferred_event_waits";
 
-/** An external-event wait: the sibling of a task wait, keyed by the same one-time schedule. */
-type EventWait = {
-  scheduleId: string;
-  source: string;
-  event: string;
-  matchKey: string;
-  matchJson: string;
-  status: "pending" | "fired";
-};
-
 /** The wake reason for an external event; it is also what the wait row records as `firedBy`. */
 export function externalWakeReason(source: string, event: string): WakeReason {
   return `external:${source}:${event}`;
@@ -60,17 +49,15 @@ export function externalWakeReason(source: string, event: string): WakeReason {
 /** Pending external waits one agent may hold, so a runaway agent cannot flood the webhook fan-out. */
 export const MAX_PENDING_EVENT_WAITS_PER_AGENT = 20;
 
-/**
+/*
  * A member's status as waits see it. A workflow step cut by a supersede is
  * `failed` first and moves to `superseded` once its retry is queued. It has no
  * resume child (the retry is a fresh task the wait never named), so it keeps
  * reading as the failure it settled as. Reading it from the row, not the
  * event, keeps restart reconciliation and either commit order of the retry
- * move and the wait's reconcile on the same answer.
+ * move and the wait's reconcile on the same answer. The tasks repository's
+ * wait-member status does this.
  */
-const WAIT_MEMBER_STATUS_SQL = `CASE
-  WHEN t.status = 'superseded' AND t.failureReason = '${SUPERSEDED_WORKFLOW_TASK_REASON}' THEN 'failed'
-  ELSE t.status END`;
 
 /**
  * Read the wait row and its member set and decide whether the wait is ready.
@@ -89,16 +76,10 @@ async function resolveWaitCause(
 ): Promise<
   { table: WaitTable; mode?: "all" | "any"; cause: string; matchedTaskIds: string[] } | undefined
 > {
-  const client = getDbClient();
-  const wait = await client.get<TaskWait>(
-    "SELECT * FROM deferred_task_waits WHERE scheduleId = ?",
-    [scheduleId],
-  );
+  const repo = tasksRepo();
+  const wait = (await repo.findDeferredTaskWait(scheduleId)) as TaskWait | null;
   if (!wait) {
-    const eventWait = await client.get<EventWait>(
-      "SELECT * FROM deferred_event_waits WHERE scheduleId = ?",
-      [scheduleId],
-    );
+    const eventWait = await repo.findDeferredEventWait(scheduleId);
     if (!eventWait || eventWait.status !== "pending") return undefined;
     if (reason === "ceiling")
       return { table: "deferred_event_waits", cause: "ceiling expired", matchedTaskIds: [] };
@@ -123,14 +104,9 @@ async function resolveWaitCause(
       cause: "ceiling expired",
       matchedTaskIds: [],
     };
-  const members = await client.query<WaitMember>(
-    `SELECT m.taskId, ${WAIT_MEMBER_STATUS_SQL} AS taskStatus, EXISTS (
-       SELECT 1 FROM scheduled_tasks d
-       WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
-     ) AS deferred
-     FROM deferred_task_wait_members m LEFT JOIN agent_tasks t ON t.id = m.taskId
-     WHERE m.scheduleId = ?`,
-    [scheduleId],
+  const members: WaitMember[] = await repo.listDeferredWaitMembers(
+    scheduleId,
+    SUPERSEDED_WORKFLOW_TASK_REASON,
   );
   const matched = members.filter(
     (member) =>
@@ -193,16 +169,8 @@ export async function prepareDeferredTaskWait(
   extraTags: string[] = [],
   causeDetail?: string,
 ): Promise<{ task?: PreparedTaskCreate } | undefined> {
-  const client = getDbClient();
   // Keep ordinary schedule dispatch off the write-lock path.
-  if (
-    !(await client.get(
-      `SELECT 1 AS found FROM deferred_task_waits WHERE scheduleId = ?
-       UNION ALL SELECT 1 FROM deferred_event_waits WHERE scheduleId = ?`,
-      [scheduleId, scheduleId],
-    ))
-  )
-    return undefined;
+  if (!(await tasksRepo().hasDeferredWait(scheduleId))) return undefined;
   // Extension pre-hooks must run outside the transaction, so build the wake-up task
   // first; the transaction below re-reads the wait and its member set before claiming.
   // The prepared description carries the cause seen here; for an `any` wait a member
@@ -224,18 +192,15 @@ export async function dispatchDeferredTaskWait(
   if (!preparation) return undefined;
   const preparedForWait = preparation.task;
   if (!preparedForWait) return {};
-  const client = getDbClient();
-  return client.transaction(async () => {
+  const repo = tasksRepo();
+  return getStorage().transaction(async () => {
     const resolved = await resolveWaitCause(scheduleId, reason, causeDetail);
     if (!resolved) return {};
     let schedule = await getScheduledTaskById(scheduleId);
     if (!schedule?.enabled) return {};
     const now = new Date().toISOString();
-    const claimed = await client.run(
-      `UPDATE ${resolved.table} SET status = 'fired', firedBy = ?, resolvedAt = ?, updated_at = ? WHERE scheduleId = ? AND status = 'pending'`,
-      [reason, now, now, scheduleId],
-    );
-    if (!claimed.changes) return {};
+    const claimed = await repo.claimDeferredWait(resolved.table, scheduleId, reason, now);
+    if (!claimed) return {};
     if (schedule.createdBy && !(await getUserById(schedule.createdBy))) {
       schedule = { ...schedule, createdBy: undefined };
     }
@@ -245,10 +210,7 @@ export async function dispatchDeferredTaskWait(
       extraTags,
       preparedForWait,
     );
-    await client.run(`UPDATE ${resolved.table} SET childTaskId = ? WHERE scheduleId = ?`, [
-      task.id,
-      scheduleId,
-    ]);
+    await repo.setDeferredWaitChild(resolved.table, scheduleId, task.id);
     // Attribute the wake to the settlement that triggered this claim, in the
     // claim's own transaction. Only the trigger is attributed: an `all` sibling
     // that settled earlier already got its follow-up, and a member that settles
@@ -285,31 +247,18 @@ export async function dispatchDeferredTaskWait(
  * With `taskId`, the wakes it fires are attributed to that task's settlement.
  */
 export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void> {
-  const client = getDbClient();
-  const replacements = await client.query<{ taskId: string; resumeTaskId: string }>(
-    `SELECT DISTINCT m.taskId, (
-       SELECT r.id FROM agent_tasks r
-       WHERE r.parentTaskId = t.id AND r.taskType = 'resume'
-       ORDER BY r.createdAt, r.id LIMIT 1
-     ) AS resumeTaskId
-     FROM deferred_task_wait_members m
-     JOIN deferred_task_waits w ON w.scheduleId = m.scheduleId
-     JOIN agent_tasks t ON t.id = m.taskId
-     WHERE w.status = 'pending' AND t.status = 'superseded'
-       AND resumeTaskId IS NOT NULL`,
-  );
+  const repo = tasksRepo();
+  const replacements = await repo.listSupersededWaitMembers();
   if (replacements.length) {
-    await client.transaction(async () => {
+    await getStorage().transaction(async () => {
       for (const replacement of replacements) {
         // Collapse members that now watch the same child. Fired waits and their
         // original ceilings stay untouched. No resume child (including skipped
         // recovery) means hold to the ceiling, never wake on supersession.
-        await client.run(
-          `UPDATE OR REPLACE deferred_task_wait_members SET taskId = ?, updated_at = ?
-           WHERE taskId = ? AND scheduleId IN (
-             SELECT scheduleId FROM deferred_task_waits WHERE status = 'pending'
-           )`,
-          [replacement.resumeTaskId, new Date().toISOString(), replacement.taskId],
+        await repo.repointWaitMembers(
+          replacement.taskId,
+          replacement.resumeTaskId,
+          new Date().toISOString(),
         );
       }
     });
@@ -317,23 +266,10 @@ export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void>
     // even when the triggering event named their superseded parent.
     return reconcileDeferredTaskWaits();
   }
-  const rows = await client.query<
-    TaskWait & { taskStatus: "completed" | "failed" | "cancelled" | "skipped" }
-  >(
-    `SELECT DISTINCT w.*, ${WAIT_MEMBER_STATUS_SQL} AS taskStatus FROM deferred_task_waits w
-     JOIN deferred_task_wait_members m ON m.scheduleId = w.scheduleId
-     JOIN agent_tasks t ON t.id = m.taskId
-     JOIN scheduled_tasks s ON s.id = w.scheduleId
-     WHERE w.status = 'pending' AND s.enabled = 1
-       AND ${WAIT_MEMBER_STATUS_SQL} IN ('completed', 'failed', 'cancelled', 'skipped')
-       AND NOT EXISTS (
-         SELECT 1 FROM scheduled_tasks d
-         WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
-       )
-       AND (w.eventName = 'settled' OR w.eventName = 'task.' || ${WAIT_MEMBER_STATUS_SQL})
-       ${taskId ? "AND m.taskId = ?" : ""}`,
-    taskId ? [taskId] : [],
-  );
+  const rows = (await repo.listReadyDeferredTaskWaits(
+    SUPERSEDED_WORKFLOW_TASK_REASON,
+    taskId,
+  )) as (TaskWait & { taskStatus: "completed" | "failed" | "cancelled" | "skipped" })[];
   for (const row of rows) {
     try {
       await dispatchDeferredTaskWait(row.scheduleId, `task.${row.taskStatus}`, [], taskId);
@@ -359,21 +295,7 @@ export const SPENT_DEFERRED_SCHEDULE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
  */
 export async function reapSpentDeferredSchedules(now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - SPENT_DEFERRED_SCHEDULE_RETENTION_MS).toISOString();
-  const result = await getDbClient().run(
-    `DELETE FROM scheduled_tasks
-     WHERE taskType = 'deferred' AND scheduleType = 'one_time' AND enabled = 0
-       AND lastRunAt IS NOT NULL AND lastRunAt < ?
-       AND NOT EXISTS (
-         SELECT 1 FROM deferred_task_waits w
-         WHERE w.scheduleId = scheduled_tasks.id AND w.status = 'pending'
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM deferred_event_waits e
-         WHERE e.scheduleId = scheduled_tasks.id AND e.status = 'pending'
-       )`,
-    [cutoff],
-  );
-  return result.changes;
+  return await getStorage().repos.schedules.deleteSpentDeferredSchedules(cutoff);
 }
 
 /**
@@ -414,10 +336,7 @@ function noop(): void {}
 
 /** True when some agent holds a pending wait for `event`, so its webhook deliveries are worth verifying. */
 export async function hasPendingEventWait(source: string, event: string): Promise<boolean> {
-  return !!(await getDbClient().get(
-    "SELECT 1 AS found FROM deferred_event_waits WHERE status = 'pending' AND source = ? AND event = ? LIMIT 1",
-    [source, event],
-  ));
+  return tasksRepo().hasPendingEventWait(source, event);
 }
 
 /**
@@ -432,15 +351,7 @@ export async function reconcileDeferredEventWaits(
   only?: { source: string; event: string; matchKey: string },
   trustEvent = false,
 ): Promise<void> {
-  const waits = await getDbClient().query<
-    Pick<EventWait, "scheduleId" | "source" | "event" | "matchKey" | "matchJson">
-  >(
-    `SELECT w.scheduleId, w.source, w.event, w.matchKey, w.matchJson FROM deferred_event_waits w
-     JOIN scheduled_tasks s ON s.id = w.scheduleId
-     WHERE w.status = 'pending' AND s.enabled = 1
-       ${only ? "AND w.source = ? AND w.event = ? AND w.matchKey = ?" : ""}`,
-    only ? [only.source, only.event, only.matchKey] : [],
-  );
+  const waits = await tasksRepo().listPendingEventWaits(only);
   const satisfied = new Map<string, ConfirmResult>();
   for (const wait of waits) {
     const adapter = getExternalEventAdapter(wait.source);

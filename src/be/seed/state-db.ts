@@ -4,21 +4,14 @@
  * entity from one a user has modified. See migration 070_seed_state.sql.
  */
 
-import { getDbClient } from "../db";
+import type { SeedStateRow } from "@desplega/storage";
+import { getStorage } from "../storage";
 
-export type SeedStateRow = {
-  kind: string;
-  key: string;
-  seededHash: string;
-  seededAt: string;
-};
+export type { SeedStateRow };
 
 /** The last hash this framework seeded for `(kind, key)`, or null if never seeded. */
 export async function getSeedState(kind: string, key: string): Promise<SeedStateRow | null> {
-  return getDbClient().get<SeedStateRow>(
-    "SELECT kind, key, seededHash, seededAt FROM seed_state WHERE kind = ? AND key = ?",
-    [kind, key],
-  );
+  return getStorage().repos.config.getSeedState(kind, key);
 }
 
 /** Record (or refresh) the hash this framework just seeded for `(kind, key)`. */
@@ -27,17 +20,15 @@ export async function recordSeedState(
   key: string,
   seededHash: string,
 ): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO seed_state (kind, key, seededHash, seededAt)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(kind, key) DO UPDATE SET
-       seededHash = excluded.seededHash,
-       seededAt = excluded.seededAt`,
-    [kind, key, seededHash, new Date().toISOString()],
-  );
+  await getStorage().repos.config.upsertSeedState({
+    kind,
+    key,
+    seededHash,
+    seededAt: new Date().toISOString(),
+  });
 }
 
 /** Forget `(kind, key)`, e.g. after the seeder retires the entity it seeded. */
 export async function deleteSeedState(kind: string, key: string): Promise<void> {
-  await getDbClient().run("DELETE FROM seed_state WHERE kind = ? AND key = ?", [kind, key]);
+  await getStorage().repos.config.deleteSeedState(kind, key);
 }
