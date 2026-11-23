@@ -3,8 +3,18 @@
  * database (decision D11). The runbook (`runbooks/postgres.md`) gives the
  * production procedure around it.
  */
-import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  lstatSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { EMBEDDING_DIMENSIONS } from "./memory/constants";
 import { copySqliteFileToPostgres, postgresUrlFromEnv } from "./storage-root";
@@ -97,6 +107,13 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
       scrubSecrets(`[db-copy] ATTENTION ${item.table} ${item.row}, ${item.column}: ${item.reason}`),
     );
   }
+  for (const item of report.unchecked ?? []) {
+    console.error(
+      scrubSecrets(
+        `[db-copy] NOT CHECKED ${item.table} ${item.row}, ${item.column}: ${item.reason}`,
+      ),
+    );
+  }
   for (const table of report.tables.filter((t) => !t.equal)) {
     console.error(
       `[db-copy] MISMATCH ${table.table}: rows ${table.sourceRows} -> ${table.targetRows}, checksum ${table.sourceChecksum.slice(0, 12)} -> ${table.targetChecksum.slice(0, 12)}`,
@@ -105,7 +122,7 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
   const rows = report.tables.reduce((sum, t) => sum + t.targetRows, 0);
   if (parsed.json) {
     try {
-      await Bun.write(parsed.json, `${JSON.stringify(report, null, 2)}\n`);
+      await writeReportAtomically(parsed.json, `${JSON.stringify(report, null, 2)}\n`);
     } catch (error) {
       const outcome = report.ok
         ? "The database copy COMMITTED: the target holds the copied data. Only the report is missing."
@@ -116,6 +133,14 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
       // 3: committed, report missing. Distinct from 1 (copy failed).
       return report.ok ? 3 : 1;
     }
+  }
+  const unchecked = report.unchecked?.length ?? 0;
+  if (report.ok && unchecked > 0) {
+    console.error(
+      `[db-copy] COMMITTED with unchecked dashboards: ${report.tables.length} tables, ${rows} rows, every count and checksum equal, but ${unchecked} saved ${unchecked === 1 ? "query was" : "queries were"} not checked on Postgres (NOT CHECKED lines above). Run each one before cutover.`,
+    );
+    // 4: committed, a dashboard check is incomplete. Distinct from 0, 1 and 3.
+    return 4;
   }
   if (report.ok) {
     console.log(
@@ -185,4 +210,46 @@ export function reportPathProblem(reportPath: string): string | null {
     return `cannot be created in ${parent}`;
   }
   return null;
+}
+
+/**
+ * The file a report path names. A symlink is followed even when its target does
+ * not exist yet (a dangling link): `existsSync` is false for one, and renaming
+ * over the link would replace it with a regular file.
+ */
+function reportTarget(path: string): string {
+  if (existsSync(path)) return realpathSync(path);
+  let target = resolve(path);
+  for (let hops = 0; hops < 40; hops++) {
+    let link: boolean;
+    try {
+      link = lstatSync(target).isSymbolicLink();
+    } catch {
+      return target;
+    }
+    if (!link) return target;
+    target = resolve(dirname(target), readlinkSync(target));
+  }
+  return target;
+}
+
+/**
+ * Write the report to a temporary sibling, then rename it over the path, so a
+ * failed write (a full disk, a file-size limit) leaves the previous report
+ * whole. An existing symlink keeps pointing at the file it names.
+ */
+export async function writeReportAtomically(path: string, text: string): Promise<void> {
+  const target = reportTarget(path);
+  const temp = join(dirname(target), `.${basename(target)}.${process.pid}.tmp`);
+  try {
+    await Bun.write(temp, text);
+    renameSync(temp, target);
+  } catch (error) {
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Nothing was created.
+    }
+    throw error;
+  }
 }

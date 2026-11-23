@@ -108,6 +108,10 @@ function cosineSimilarityF32(a: Float32Array, b: Float32Array): number {
 }
 
 export class PostgresMemoryRepository extends BaseMemoryRepository {
+  protected insertionOrder(): SqlQuery {
+    return new SqlQuery(['"_rowid"'], []);
+  }
+
   protected notReviewTaskCompletion(alias: string, rule: ReviewTaskRule): SqlQuery {
     const p = this.prefix(alias);
     // Only string elements of an array count as tags, as SQLite's json_each

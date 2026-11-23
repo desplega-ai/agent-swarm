@@ -189,6 +189,19 @@ export function memoryContract(engine: ContractEngine): void {
       expect((await repo.listContentAfter("", 1)).map((r) => r.id)).toEqual(["a"]);
     });
 
+    test("list pages rows with one createdAt in insertion order, with no skip or repeat", async () => {
+      const ids = Array.from({ length: 48 }, (_, i) => `tie-${String(47 - i).padStart(2, "0")}`);
+      for (const id of ids) await repo.insertMemory(memory({ id, now: T1 }));
+      const base = { agentId: AGENT, scope: "all", isLead: false };
+      const full = (await repo.list(base, 100, 0)).map((r) => r.id);
+      expect(full).toEqual(ids);
+      const paged: string[] = [];
+      for (let offset = 0; offset < ids.length; offset++) {
+        paged.push(...(await repo.list(base, 1, offset)).map((r) => r.id));
+      }
+      expect(paged).toEqual(full);
+    });
+
     test("list orders by createdAt descending and filters by visibility, owner, source and path", async () => {
       await repo.insertMemory(memory({ id: "old", now: T0, sourcePath: "/Work/Notes.md" }));
       await repo.insertMemory(memory({ id: "new", now: T2, source: "file_index" }));

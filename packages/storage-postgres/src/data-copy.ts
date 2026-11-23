@@ -19,7 +19,7 @@ import { loadPostgresMigrations, runPostgresMigrations } from "./migrations";
  * fails at COMMIT, or any other error leaves the target as it was.
  *
  * Steps (D11 numbering): the source is opened read-only by the caller (1); a
- * target with rows is refused (2); user triggers are off during the copy (3);
+ * target with any table is refused (2); user triggers are off during the copy (3);
  * each value is converted to the type of its target column (4); a value the
  * target cannot store is reported, never dropped (5); the vector table is built
  * from the copied embeddings, full text needs no rebuild because it is an
@@ -83,89 +83,71 @@ function chainSeededTables(migrationsDir: string): Set<string> {
 }
 
 /**
- * Rows the chain itself seeds per table: one per top-level `INSERT INTO`
- * statement (the baseline writes one row per statement). An INSERT inside a
- * trigger or function body is indented, so it does not count: those tables
- * start empty.
- */
-function chainSeedRowCounts(migrationsDir: string): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const migration of loadPostgresMigrations(migrationsDir)) {
-    for (const match of migration.sql.matchAll(/^INSERT\s+INTO\s+"?([A-Za-z0-9_]+)"?/gim)) {
-      if (match[1]) counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
-    }
-  }
-  return counts;
-}
-
-/**
- * What the target holds before and after the chain runs. A table the chain does
- * not seed must be empty. A table it seeds may hold only rows that a chain
- * migration wrote and nobody changed since: each such row carries the `xmin` of
- * its migration's `_migrations` row (one transaction per migration). An edited
- * seed row (a renamed channel, a retitled starter widget) has another `xmin`.
+ * What the target holds. The copy writes only into a database with no tables:
+ * it runs the chain itself, so every seed row in the target is one the chain
+ * just wrote. A database an API (or a restore) already migrated may hold edited
+ * seed rows (a renamed channel, a retitled starter widget), and no check on the
+ * migrated target can tell every edit apart from what the chain wrote: a later
+ * migration that rewrites an edited row hides the edit. Such a target is refused
+ * before anything is written. After the chain runs, the same function reads the
+ * head (`requireEmpty: false`).
  */
 async function inspectTarget(
   conn: Conn,
-  migrationsDir: string,
+  chainHead: number | null,
+  requireEmpty: boolean,
 ): Promise<{ head: number | null; error?: string }> {
   const tables = (
     await conn.unsafe(`
-      SELECT c.relname AS name,
-             EXISTS (SELECT 1 FROM pg_attribute a
-                      WHERE a.attrelid = c.oid AND a.attname = ${quoteLiteral(TABLE_ORDER_KEY)}
-                        AND NOT a.attisdropped) AS "hasRowid"
+      SELECT c.relname AS name
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')
        ORDER BY c.relname`)
-  ).map((r) => ({ name: String(r.name), hasRowid: r.hasRowid === true }));
+  ).map((r) => String(r.name));
   if (tables.length === 0) return { head: null };
-  if (!tables.some((t) => t.name === "_migrations")) {
+  const named = tables.slice(0, 10).join(", ");
+  if (!tables.includes("_migrations")) {
     return {
       head: null,
-      error: `the target database holds tables but no _migrations history (${tables
-        .slice(0, 10)
-        .map((t) => t.name)
-        .join(", ")}). Copy into an empty database only.`,
+      error: `the target database holds tables but no _migrations history (${named}). Copy into an empty database only.`,
+    };
+  }
+  // Another tool's `_migrations` (for example `id`, `name`) is not this chain's history.
+  const required = ["version", "name", "applied_at", "checksum"];
+  const present = new Set(
+    (
+      await conn.unsafe(
+        `SELECT attname FROM pg_attribute
+          WHERE attrelid = to_regclass('_migrations') AND attnum > 0 AND NOT attisdropped`,
+      )
+    ).map((r) => String(r.attname)),
+  );
+  const absent = required.filter((column) => !present.has(column));
+  if (absent.length > 0) {
+    return {
+      head: null,
+      error: `the target's _migrations table is not this build's migration history (no column ${absent.join(", ")}). Copy into an empty database only.`,
     };
   }
   const headRow = await conn.unsafe("SELECT MAX(version)::bigint AS v FROM _migrations");
   const head = headRow[0]?.v === null || headRow[0]?.v === undefined ? null : Number(headRow[0].v);
-  const chain = loadPostgresMigrations(migrationsDir);
-  const chainStart = chain[0]?.version ?? 0;
-  const seeded = chainSeededTables(migrationsDir);
-  const seedCounts = chainSeedRowCounts(migrationsDir);
-  const occupied: string[] = [];
-  for (const table of tables) {
-    if (table.name === "_migrations") continue;
-    if (!seeded.has(table.name)) {
-      const rows = await conn.unsafe(
-        `SELECT EXISTS(SELECT 1 FROM ${quote(table.name)}) AS present`,
-      );
-      if (rows[0]?.present === true) occupied.push(table.name);
-      continue;
-    }
-    const expected = seedCounts.get(table.name) ?? 0;
-    const rows = await conn.unsafe(
-      `SELECT COUNT(*)::bigint AS n,
-              ${table.hasRowid ? `COALESCE(MAX(${quote(TABLE_ORDER_KEY)}), 0)::bigint` : "0::bigint"} AS top,
-              COUNT(*) FILTER (WHERE xmin::text NOT IN (
-                SELECT xmin::text FROM _migrations WHERE version >= ${chainStart}))::bigint AS changed
-         FROM ${quote(table.name)}`,
-    );
-    const count = Number(rows[0]?.n ?? 0);
-    const top = Number(rows[0]?.top ?? 0);
-    const changed = Number(rows[0]?.changed ?? 0);
-    if (count > expected || top > expected || changed > 0) occupied.push(table.name);
-  }
-  if (occupied.length > 0) {
+  if (!requireEmpty) return { head };
+  if (head !== chainHead) {
     return {
       head,
-      error: `the target database holds rows (tables: ${occupied.slice(0, 10).join(", ")}). Copy into an empty database only: the copy would replace them, so nothing was changed.`,
+      error:
+        `the target database is at migration ${head}, this build at ${chainHead}. ` +
+        "The copy runs the migrations itself: copy into a new, empty database. Nothing was written.",
     };
   }
-  return { head };
+  return {
+    head,
+    error:
+      `the target database already holds tables (${named}). The copy runs the migrations itself ` +
+      "and needs a database with no tables: a migrated database may hold edited seed rows the copy " +
+      "would replace. Copy into a new, empty database, and do not start an API on it first. Nothing was written.",
+  };
 }
 
 /** The reserved copy session as the pool the migration runner reserves from. */
@@ -261,8 +243,14 @@ function timestampText(text: string): string | null {
     number,
     number,
   ];
-  if (month < 1 || month > 12 || day < 1) return null;
-  if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
+  // Postgres has no year 0 (1 BC), and Date.UTC maps years 0-99 to 1900-1999.
+  if (year < 1 || month < 1 || month > 12 || day < 1) return null;
+  const monthEnd = new Date(Date.UTC(2000, month, 0));
+  monthEnd.setUTCFullYear(year, month, 0);
+  if (day > monthEnd.getUTCDate()) return null;
+  // Postgres takes a UTC offset up to 15:59; JavaScript takes up to 23:59.
+  const offset = /^[+-](\d{2}):?(\d{2})?$/.exec(zone);
+  if (offset && (Number(offset[1]) > 15 || Number(offset[2] ?? 0) > 59)) return null;
   return Number.isFinite(Date.parse(iso)) ? iso : null;
 }
 
@@ -718,7 +706,7 @@ export async function copyIntoPostgres(
         "Start the API of this build on the SQLite file once (it applies the chain), stop it, then copy.";
       // Inspect the target before the chain touches it: a refusal must leave its
       // schema and rows as they were.
-      const before = await inspectTarget(conn, options.migrationsDir);
+      const before = await inspectTarget(conn, chainHead, true);
       if (before.error) {
         report.error = before.error;
         return report;
@@ -727,54 +715,56 @@ export async function copyIntoPostgres(
         report.error = headError(before.head);
         return report;
       }
-      // A database with no table, or one that holds only the chain's own rows,
-      // gets the rest of the chain.
-      await runPostgresMigrations(onConnection(conn), {
-        migrationsDir: options.migrationsDir,
-        log: (line) => log(line),
-      });
-      const after = await inspectTarget(conn, options.migrationsDir);
-      if (after.error) {
-        report.error = after.error;
-        return report;
-      }
-      if (after.head !== chainHead) {
-        report.error = headError(after.head);
-        return report;
-      }
-      const targets = await readTargetTables(conn);
-      const seeded = chainSeededTables(options.migrationsDir);
-
-      const sourceTables = source.tables();
-      const sourceNames = new Set(sourceTables.map((t) => t.name));
-      const rebuiltTables = new Set(["memory_vec"]);
-      const missing = sourceTables.filter((t) => !targets.has(t.name)).map((t) => t.name);
-      const extra = [...targets.keys()].filter(
-        (name) => name !== "_migrations" && !sourceNames.has(name) && !rebuiltTables.has(name),
-      );
-      if (missing.length > 0 || extra.length > 0) {
-        report.error = `the schemas differ: only in SQLite [${missing.join(", ")}], only in Postgres [${extra.join(", ")}]`;
-        return report;
-      }
-
-      // The width SQLite searches with today decides the rebuilt index, not the
-      // widths of every stored embedding (an old model can leave other widths).
-      const sourceIndex = source.vectorIndex?.() ?? null;
-      if (
-        targets.has("memory_vec") &&
-        sourceIndex?.dimensions &&
-        sourceIndex.dimensions !== options.embeddingDimensions
-      ) {
-        report.error =
-          `the SQLite vector index has ${sourceIndex.dimensions} dimensions, ` +
-          `but this copy indexes ${options.embeddingDimensions}. ` +
-          `Set EMBEDDING_DIMENSIONS=${sourceIndex.dimensions} (the value the API uses), then copy again. Nothing was written.`;
-        return report;
-      }
+      // The chain runs inside the copy transaction: a refusal at any later step
+      // rolls the schema back too, so the target stays empty for a re-run.
       const toPlan: PendingPlan[] = [];
       await conn.unsafe("BEGIN");
       let committed = false;
       try {
+        // The target has no table: the chain writes the schema and its seed rows.
+        await runPostgresMigrations(onConnection(conn), {
+          migrationsDir: options.migrationsDir,
+          log: (line) => log(line),
+          inCallerTransaction: true,
+        });
+        const after = await inspectTarget(conn, chainHead, false);
+        if (after.error) {
+          report.error = after.error;
+          return report;
+        }
+        if (after.head !== chainHead) {
+          report.error = headError(after.head);
+          return report;
+        }
+        const targets = await readTargetTables(conn);
+        const seeded = chainSeededTables(options.migrationsDir);
+
+        const sourceTables = source.tables();
+        const sourceNames = new Set(sourceTables.map((t) => t.name));
+        const rebuiltTables = new Set(["memory_vec"]);
+        const missing = sourceTables.filter((t) => !targets.has(t.name)).map((t) => t.name);
+        const extra = [...targets.keys()].filter(
+          (name) => name !== "_migrations" && !sourceNames.has(name) && !rebuiltTables.has(name),
+        );
+        if (missing.length > 0 || extra.length > 0) {
+          report.error = `the schemas differ: only in SQLite [${missing.join(", ")}], only in Postgres [${extra.join(", ")}]`;
+          return report;
+        }
+
+        // The width SQLite searches with today decides the rebuilt index, not the
+        // widths of every stored embedding (an old model can leave other widths).
+        const sourceIndex = source.vectorIndex?.() ?? null;
+        if (
+          targets.has("memory_vec") &&
+          sourceIndex?.dimensions &&
+          sourceIndex.dimensions !== options.embeddingDimensions
+        ) {
+          report.error =
+            `the SQLite vector index has ${sourceIndex.dimensions} dimensions, ` +
+            `but this copy indexes ${options.embeddingDimensions}. ` +
+            `Set EMBEDDING_DIMENSIONS=${sourceIndex.dimensions} (the value the API uses), then copy again. Nothing was written.`;
+          return report;
+        }
         await conn.unsafe("SET CONSTRAINTS ALL DEFERRED");
         for (const table of targets.values()) {
           if (table.hasUserTriggers)
@@ -849,16 +839,30 @@ export async function copyIntoPostgres(
             const counter = column === keyColumn ? BigInt(counters[table.name] ?? 0) : 0n;
             // ALTER SEQUENCE ... RESTART is transactional, unlike setval: a late
             // ROLLBACK of the copy leaves the target's sequence where it was.
+            // numeric: MAX + 1 at the bigint maximum would overflow.
             const next = await conn.unsafe(
               `SELECT pg_get_serial_sequence(${quoteLiteral(quote(table.name))}, ${quoteLiteral(column.name)}) AS seq,
-                      (GREATEST(COALESCE(MAX(${quote(column.name)}), 0), ${counter}::bigint) + 1)::text AS next
+                      (GREATEST(COALESCE(MAX(${quote(column.name)}), 0), ${counter}::bigint)::numeric + 1)::text AS next
                  FROM ${quote(table.name)}`,
             );
             const seq = next[0]?.seq as string | null;
-            if (seq)
-              await conn.unsafe(
-                `ALTER SEQUENCE ${seq} RESTART WITH ${BigInt(String(next[0]?.next))}`,
+            if (seq) {
+              const [limit] = await conn.unsafe(
+                "SELECT seqmax::text AS max FROM pg_sequence WHERE seqrelid = $1::regclass",
+                [seq],
               );
+              const max = BigInt(String(limit?.max));
+              const wanted = BigInt(String(next[0]?.next));
+              if (wanted <= max) {
+                await conn.unsafe(`ALTER SEQUENCE ${seq} RESTART WITH ${wanted}`);
+              } else {
+                // Exhausted, as in SQLite: hand out the last value inside the copy
+                // transaction, so the next insert fails with "reached maximum value".
+                // RESTART gives the sequence new storage, so a ROLLBACK undoes both.
+                await conn.unsafe(`ALTER SEQUENCE ${seq} RESTART WITH ${max}`);
+                await conn.unsafe("SELECT nextval($1::regclass)", [seq]);
+              }
+            }
           }
           if (table.hasUserTriggers)
             await conn.unsafe(`ALTER TABLE ${quote(table.name)} ENABLE TRIGGER USER`);
@@ -936,7 +940,20 @@ export async function copyIntoPostgres(
         // After COMMIT: the copy's table locks are gone, and a saved query runs
         // only on a read-only session that does not own the database.
         for (const pending of toPlan) {
-          const planned = await planReadOnly(options.url, pending.query);
+          let planned: string | null;
+          try {
+            planned = await planReadOnly(options.url, pending.query);
+          } catch (error) {
+            // The data is committed: report this query as unverified, not the copy as failed.
+            report.unchecked ??= [];
+            report.unchecked.push({
+              table: "metrics",
+              column: pending.where,
+              row: pending.row,
+              reason: `could not be checked on Postgres: ${(error as Error).message}`,
+            });
+            continue;
+          }
           if (planned) {
             report.attention ??= [];
             report.attention.push({
@@ -952,7 +969,15 @@ export async function copyIntoPostgres(
         if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
         report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${(error as Error).message}`;
         return report;
+      } finally {
+        // An early refusal returns without COMMIT: undo the chain and every write.
+        if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
       }
+    } catch (error) {
+      // A failure before the copy transaction (target inspection):
+      // it still goes into the report, so --json is written.
+      report.error = `the copy did not start, no row was copied: ${(error as Error).message}`;
+      return report;
     } finally {
       await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});
       conn.release();

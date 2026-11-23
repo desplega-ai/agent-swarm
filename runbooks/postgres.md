@@ -62,6 +62,8 @@ At start, a probe checks that the role cannot read the 7 denied tables (directly
 
 The API holds a session advisory lock on its database for its whole life. A second API process on the same database waits 10 seconds, then stops with `another API process holds this Postgres database`. `db-copy` takes the same lock, so it refuses a database an API runs on. If the lock session ends while the API runs (a database restart, a dropped connection), the API logs `lost the one-process lock` and exits within about a second; the supervisor restarts it, and the new process waits for the lock again. Writes are fenced in that window: each write transaction first checks that the process still holds the lock, and a new holder waits for the old holder's open write transactions before it writes (`packages/storage-postgres/src/owner-fence.ts`). A write after a takeover fails with `no longer holds the one-process lock`.
 
+Connection budget per API process: 1 session for the one-process lock, up to 10 for the application pool, and up to 4 for the optional db-query reader (15 in total). Set the role's or the server's connection limit to at least that. With a connection pooler (PgBouncer, a cloud proxy) between the API and Postgres, use session pooling for the API's `DATABASE_URL`. The lock is a session advisory lock, so the lock connection needs session affinity: in transaction pooling the lock lands on a server connection that other clients share, and the write fence cannot see the owner session. Connect directly when the pooler offers only transaction pooling.
+
 More than one API replica is not supported on either engine. The parts that a second replica would break are listed, with file and line, in `thoughts/taras/research/2026-11-20-replica-blockers.md`: the in-memory realtime bus (`src/realtime/bus.ts`), the workflow event bus (`src/workflows/event-bus.ts`), in-memory locks (`src/oauth/ensure-mcp-token.ts`), per-process caches, and timers with no leader election.
 
 ## Backups
@@ -87,13 +89,13 @@ In the window:
    agent-swarm db-copy --from /app/data/agent-swarm-db.sqlite \
      --to "postgres://swarm:<password>@<host>:5432/swarm" --json /app/data/db-copy-report.json
    ```
-   Expect `[db-copy] done: <n> tables, <m> rows, every count and checksum equal` and exit 0. The report lists each table's row counts and checksums, the skipped SQLite-only tables (FTS5 and sqlite-vec indexes, migration bookkeeping) and the rebuilt vector rows.
+   Expect `[db-copy] done: <n> tables, <m> rows, every count and checksum equal` and exit 0. The report lists each table's row counts and checksums, the skipped SQLite-only tables (FTS5 and sqlite-vec indexes, migration bookkeeping) and the rebuilt vector rows. Exit 3 means the copy committed but the report could not be written. Exit 4 means the copy committed but the dashboard check after COMMIT could not run (for example no connection was free): each `NOT CHECKED` line names an unverified saved query. Run each one on Postgres before you start the API.
 4. Set `DATABASE_URL` (and `DATABASE_QUERY_URL` if the reader role exists). Keep the same encryption key: secrets copy as ciphertext.
 5. Start the API. Check `[db] Postgres engine ready`, `/health`, the dashboard task list, a secret config value, and one memory search.
 
 Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the untouched SQLite file. Writes made on Postgres after the cutover are not copied back.
 
-What the copy does, step by step: opens the SQLite file read-only; refuses a target that holds rows (rows the Postgres chain seeds are replaced); disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table.
+What the copy does, step by step: opens the SQLite file read-only; refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table.
 
 ## Known differences
 
@@ -121,7 +123,8 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 | `db-query is off: DATABASE_QUERY_URL is not set` / `failed its probe` | Create the reader role (above). The log names the failed probe rule. |
 | `type "vector" does not exist` at the first start | Create the pgvector extension as a superuser, then start again. |
 | `db-copy: migration heads differ` | Start this build once on the SQLite file, stop it, copy again. |
-| `db-copy: the target database holds rows` | Copy into a new, empty database. A table the migrations seed (channels, roles, pricing, ...) may hold only those seed rows. |
+| `db-copy: the target database already holds tables` | Copy into a new, empty database. The copy runs the migrations itself. A migrated database (an API started on it, a restored dump) may hold edited seed rows (a renamed channel, a retitled widget) that the copy would replace, so it is refused. |
+| `db-copy: the target database is at migration N, this build at M` | Same cause: the target already holds tables. Copy into a new, empty database. |
 | `db-copy: the source embeddings have N dimensions` | Set `EMBEDDING_DIMENSIONS=N` (the API's value) and copy again. Nothing was written. |
 | `db-copy: --json ... is the SQLite source` | Write the report to another path. |
 | `[db-copy] ATTENTION metrics ...` | Edit that dashboard query into Postgres SQL (`$n` placeholders, quoted camelCase columns) after the cutover. |

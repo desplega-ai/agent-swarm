@@ -237,7 +237,6 @@ import { auditAssetKeys, auditAssetKeysAsync } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import {
-  type AgentRow,
   configureAgentDependencies,
   ExtensionAgentAssignmentError,
   getActiveTaskCount,
@@ -3166,7 +3165,7 @@ export async function updateAgentProfile(
       // A local copy: a replayed attempt (decision D6) must start from the request.
       let updates = requested;
       // Get current agent state for version comparison
-      const current = (await agents.findAgentById(id)) as AgentRow | null;
+      const current = await agents.findAgentById(id);
       if (!current) return null;
 
       const roleViolation = reservedRoleViolation(current.role, updates.role, {
@@ -3301,7 +3300,7 @@ export async function updateAgentProfile(
       const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
 
       const now = new Date().toISOString();
-      const row = (await agents.updateAgentProfile(id, {
+      const row = await agents.updateAgentProfile(id, {
         name: updates.name ?? null,
         description: updates.description ?? null,
         role: updates.role ?? null,
@@ -3315,7 +3314,7 @@ export async function updateAgentProfile(
         avatar: { set: avatarProvided, value: avatarJson },
         slackIcon: { set: slackIconProvided, value: slackIconJson },
         now,
-      })) as AgentRow | null;
+      });
 
       return row ? rowToAgent(row) : null;
     })();
@@ -5840,7 +5839,7 @@ export async function failPendingResumeIfUnclaimed(
  * Used by the heartbeat for auto-assignment of pool tasks.
  */
 export async function getIdleWorkersWithCapacity(): Promise<Agent[]> {
-  const rows = (await getStorage().repos.agents.listIdleWorkers()) as AgentRow[];
+  const rows = await getStorage().repos.agents.listIdleWorkers();
   const agents = rows.map((row) => rowToAgent(row));
 
   const withCapacity = await Promise.all(

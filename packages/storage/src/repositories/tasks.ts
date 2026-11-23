@@ -243,6 +243,74 @@ export type TaskListFilters = {
 /** Which columns a task list returns. */
 export type TaskListFields = "full" | "slim" | "timeline";
 
+/** Every list row carries the summed session cost of its task. */
+type TaskListCost = { totalCostUsd: number | null };
+/** The slim and timeline `task`: the UTF-8 byte prefix the list projection cuts. */
+type TaskListPreview = Omit<TaskRow, "task" | "totalCostUsd"> & { task: Uint8Array };
+
+/** The slim list projection (`LIST_COLUMNS.slim` of each engine). */
+export type TaskSlimListRow = Pick<
+  TaskListPreview,
+  | "id"
+  | "key"
+  | "agentId"
+  | "creatorAgentId"
+  | "task"
+  | "title"
+  | "status"
+  | "source"
+  | "taskType"
+  | "tags"
+  | "priority"
+  | "dependsOn"
+  | "offeredTo"
+  | "acceptedAt"
+  | "parentTaskId"
+  | "scheduleId"
+  | "model"
+  | "modelTier"
+  | "resolvedModel"
+  | "modelSource"
+  | "modelAlias"
+  | "effort"
+  | "resolvedEffort"
+  | "profile"
+  | "resolvedProfile"
+  | "modelGroup"
+  | "provider"
+  | "requestedByUserId"
+  | "progress"
+  | "createdAt"
+  | "lastUpdatedAt"
+  | "finishedAt"
+  | "statusKind"
+  | "peakContextPercent"
+> &
+  TaskListCost;
+
+/** The timeline list projection (`LIST_COLUMNS.timeline` of each engine). */
+export type TaskTimelineListRow = Pick<
+  TaskListPreview,
+  | "id"
+  | "agentId"
+  | "parentTaskId"
+  | "task"
+  | "title"
+  | "status"
+  | "createdAt"
+  | "lastUpdatedAt"
+  | "finishedAt"
+  | "peakContextTokens"
+> &
+  TaskListCost;
+
+/** The row `listTasks` returns for a projection: only the selected columns. */
+export type TaskListRow<F extends TaskListFields> = F extends "slim"
+  ? TaskSlimListRow
+  : F extends "timeline"
+    ? TaskTimelineListRow
+    : Omit<TaskRow, "totalCostUsd"> & TaskListCost;
+
 /** A task list page. */
 export type TaskListPage = {
   orderBy?: "lastUpdatedAt" | "createdAt";
@@ -761,11 +829,11 @@ export interface TasksRepository {
    * sibling block. Order: `lastUpdatedAt` desc, priority desc (or `createdAt`
    * desc), then insertion order desc.
    */
-  listTasks(
+  listTasks<F extends TaskListFields>(
     filters: TaskListFilters,
     page: TaskListPage,
-    fields: TaskListFields,
-  ): Promise<Record<string, unknown>[]>;
+    fields: F,
+  ): Promise<TaskListRow<F>[]>;
   /** Count of the tasks matching `filters`. */
   countTasks(filters: TaskListFilters): Promise<number>;
   /**
@@ -1961,11 +2029,11 @@ export abstract class BaseTasksRepository implements TasksRepository {
   // ---- agent_tasks: lists, counts, lineage ----
 
   /** Pages through the insertion-order column and builds list projections (SQLite `rowid`, BLOB cuts). */
-  abstract listTasks(
+  abstract listTasks<F extends TaskListFields>(
     filters: TaskListFilters,
     page: TaskListPage,
-    fields: TaskListFields,
-  ): Promise<Record<string, unknown>[]>;
+    fields: F,
+  ): Promise<TaskListRow<F>[]>;
 
   /**
    * The WHERE term of a free-text task search (SQLite FTS5 MATCH). `purpose`

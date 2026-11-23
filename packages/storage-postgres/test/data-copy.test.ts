@@ -142,6 +142,15 @@ afterAll(async () => {
   for (const s of scratch) await s.drop();
 });
 
+/** Tables in the target schema: a refused copy rolls the chain back, so 0. */
+const tableCount = async () =>
+  (
+    await sql.unsafe(
+      `SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')`,
+    )
+  )[0].n;
+
 const run = (src: CopySource) =>
   copyIntoPostgres(src, { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} });
 
@@ -220,6 +229,18 @@ describe("copyIntoPostgres", () => {
       // Date.parse accepts both and rolls them into March; Postgres refuses them.
       item(8, [text("feb30"), int(1), NULL, text("2026-02-30 10:00:00"), NULL, NULL, NULL, NULL]),
       item(9, [text("feb31"), int(1), NULL, text("2026-02-31T10:00:00Z"), NULL, NULL, NULL, NULL]),
+      // Date.parse accepts both; Postgres refuses an offset past 15:59 and year 0.
+      item(10, [
+        text("off16"),
+        int(1),
+        NULL,
+        text("2026-01-01T10:00:00+16:00"),
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+      ]),
+      item(11, [text("year0"), int(1), NULL, text("0000-01-01 00:00:00"), NULL, NULL, NULL, NULL]),
     ];
     const report = await run(fullSource(bad));
     expect(report.ok).toBe(false);
@@ -233,16 +254,45 @@ describe("copyIntoPostgres", () => {
       ["rowid 7", "flag", "NULL in a NOT NULL column"],
       ["rowid 8", "at", "invalid timestamp"],
       ["rowid 9", "at", "invalid timestamp"],
+      ["rowid 10", "at", "invalid timestamp"],
+      ["rowid 11", "at", "invalid timestamp"],
     ]);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
-    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+    expect(await tableCount()).toBe(0);
+  });
+
+  test("copies the timestamp edges Postgres accepts", async () => {
+    const edges = [
+      item(20, [
+        text("off15"),
+        int(1),
+        NULL,
+        text("2026-01-01T10:00:00+15:59"),
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+      ]),
+      item(21, [text("year1"), int(1), NULL, text("0001-01-01 00:00:00"), NULL, NULL, NULL, NULL]),
+      item(22, [text("leap4"), int(1), NULL, text("0004-02-29 00:00:00"), NULL, NULL, NULL, NULL]),
+    ];
+    const report = await run(fullSource([...goodItems(), ...edges]));
+    expect(report.problems).toEqual([]);
+    expect(report.ok).toBe(true);
+    const rows = await sql.unsafe(
+      "SELECT id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS at FROM items WHERE id IN ('off15', 'year1', 'leap4') ORDER BY id",
+    );
+    expect(rows.map((r: { id: string; at: string }) => [r.id, r.at])).toEqual([
+      ["leap4", "0004-02-29 00:00"],
+      ["off15", "2025-12-31 18:01"],
+      ["year1", "0001-01-01 00:00"],
+    ]);
   });
 
   test("a foreign key that fails at the end rolls the copy back", async () => {
     const report = await run(fullSource(goodItems(), [item(1, [text("c1"), text("missing")])]));
     expect(report.ok).toBe(false);
     expect(report.error).toMatch(/nothing was written.*foreign key/);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
+    expect(await tableCount()).toBe(0);
   });
 
   test("a checksum difference rolls the copy back, so a re-run is not refused", async () => {
@@ -256,8 +306,7 @@ describe("copyIntoPostgres", () => {
     expect(report.ok).toBe(false);
     expect(report.error).toMatch(/checksum differs.*nothing was written/);
     expect(report.tables.find((t) => t.table === "items")?.equal).toBe(false);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
-    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+    expect(await tableCount()).toBe(0);
     const again = await run(fullSource());
     expect(again.error).toMatch(/checksum differs/);
   });
@@ -266,7 +315,7 @@ describe("copyIntoPostgres", () => {
     expect((await run(fullSource())).ok).toBe(true);
     const again = await run(fullSource());
     expect(again.ok).toBe(false);
-    expect(again.error).toMatch(/holds rows \(tables: [^)]*\bitems\b/);
+    expect(again.error).toMatch(/already holds tables \([^)]*\bitems\b/);
 
     const other = await createScratchDatabase("copyhead");
     scratch.push(other);
@@ -278,15 +327,17 @@ describe("copyIntoPostgres", () => {
     expect(behind.error).toMatch(/migration heads differ: source 0, target null/);
   });
 
-  test("refuses an operator row in a seeded table and keeps it", async () => {
+  test("refuses a target an API already migrated, even with only the chain's seed rows", async () => {
     const pool = new Bun.SQL({ url: db.url, max: 1 });
     try {
       await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
     } finally {
       await pool.close();
     }
-    // The chain's own seed row alone is no reason to refuse.
-    expect((await run(fullSource())).ok).toBe(true);
+    const refused = await run(fullSource());
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/already holds tables \([^)]*\bseeded\b/);
+    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
 
     const other = await createScratchDatabase("copyseed");
     scratch.push(other);
@@ -294,14 +345,14 @@ describe("copyIntoPostgres", () => {
     try {
       await runPostgresMigrations(otherSql as never, { migrationsDir: dir, log: () => {} });
       await otherSql.unsafe("INSERT INTO seeded (name) VALUES ('operator row')");
-      const refused = await copyIntoPostgres(fullSource(), {
+      const withRow = await copyIntoPostgres(fullSource(), {
         url: other.url,
         migrationsDir: dir,
         embeddingDimensions: 4,
         log: () => {},
       });
-      expect(refused.ok).toBe(false);
-      expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+      expect(withRow.ok).toBe(false);
+      expect(withRow.error).toMatch(/already holds tables/);
       expect(
         (await otherSql.unsafe("SELECT name FROM seeded ORDER BY id")).map(
           (r: { name: string }) => r.name,
@@ -310,6 +361,52 @@ describe("copyIntoPostgres", () => {
     } finally {
       await otherSql.close();
     }
+  });
+
+  test("refuses an edited seed row that a later migration rewrote, and keeps the edit", async () => {
+    // The API's own runner migrates the target: 001 seeds the row, the operator
+    // edits it, 002 rewrites another column of that row. The UPDATE gives the
+    // edited row the xmin of a chain migration, so only an empty target is safe.
+    const migrate = async () => {
+      const pool = new Bun.SQL({ url: db.url, max: 1 });
+      try {
+        await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
+      } finally {
+        await pool.close();
+      }
+    };
+    await migrate();
+    await sql.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
+    writeFileSync(
+      join(dir, "002_next.sql"),
+      "ALTER TABLE seeded ADD COLUMN note text;\nUPDATE seeded SET note = 'set by 002';",
+    );
+    await migrate();
+    // The source carries 002's column, so a copy that passed the guard would
+    // overwrite the edit rather than fail on a schema difference.
+    const withNote: CopyTable = {
+      ...SEEDED,
+      columns: [...SEEDED.columns, { name: "note", declaredType: "TEXT" }],
+    };
+    const refused = await copyIntoPostgres(
+      source(
+        {
+          items: { table: ITEMS, rows: goodItems() },
+          seeded: {
+            table: withNote,
+            rows: [item(5, [int(5), text("from the source"), text("set by 002")])],
+          },
+          children: { table: CHILDREN, rows: [] },
+        },
+        2,
+      ),
+      { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/already holds tables/);
+    expect(await sql.unsafe("SELECT name, note FROM seeded")).toEqual([
+      { name: "operator edit", note: "set by 002" },
+    ]);
   });
 
   test("refuses an edited seed row and keeps the edit", async () => {
@@ -323,12 +420,34 @@ describe("copyIntoPostgres", () => {
     await sql.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
     const refused = await run(fullSource());
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect(refused.error).toMatch(/already holds tables/);
     expect(
       (await sql.unsafe("SELECT name FROM seeded ORDER BY id")).map(
         (r: { name: string }) => r.name,
       ),
     ).toEqual(["operator edit"]);
+  });
+
+  test("refuses seed rows whose history was restored in one transaction", async () => {
+    // Two migrations in one transaction, as pg_restore --single-transaction leaves
+    // them: every row shares one xmin, so an edited seed row looks chain-written.
+    writeFileSync(join(dir, "002_next.sql"), "SELECT 1;");
+    await sql.begin(async (tx) => {
+      await tx.unsafe(CHAIN);
+      await tx.unsafe(`CREATE TABLE _migrations (
+        version integer PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL, checksum text)`);
+      await tx.unsafe(
+        "INSERT INTO _migrations VALUES (1, '001_chain', now(), NULL), (2, '002_next', now(), NULL)",
+      );
+      await tx.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
+    });
+    const refused = await copyIntoPostgres(
+      { ...fullSource(), migrationHead: () => 2 },
+      { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/already holds tables/);
+    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("operator edit");
   });
 
   test("refuses an occupied target at an older head before applying the chain", async () => {
@@ -346,18 +465,40 @@ describe("copyIntoPostgres", () => {
       { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
     );
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect(refused.error).toMatch(/target database is at migration 1, this build at 2/);
     expect((await sql.unsafe("SELECT MAX(version)::int AS v FROM _migrations"))[0].v).toBe(1);
     expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("operator edit");
   });
 
-  test("a late rollback leaves the target sequence where it was", async () => {
+  test("refuses an untouched target at an older head and leaves it at that head", async () => {
     const pool = new Bun.SQL({ url: db.url, max: 1 });
     try {
       await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
     } finally {
       await pool.close();
     }
+    writeFileSync(join(dir, "002_next.sql"), "UPDATE seeded SET name = 'rewritten by 002';");
+    const refused = await copyIntoPostgres(
+      { ...fullSource(), migrationHead: () => 2 },
+      { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/target database is at migration 1, this build at 2/);
+    expect((await sql.unsafe("SELECT MAX(version)::int AS v FROM _migrations"))[0].v).toBe(1);
+    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+  });
+
+  test("refuses another tool's _migrations table through the report", async () => {
+    await sql.unsafe("CREATE TABLE _migrations (id serial PRIMARY KEY, name text NOT NULL)");
+    const report = await run(fullSource());
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/not this build's migration history \(no column version/);
+    expect(
+      (await sql.unsafe("SELECT count(*)::int AS n FROM pg_class WHERE relname = 'items'"))[0].n,
+    ).toBe(0);
+  });
+
+  test("a late rollback undoes the chain too, so a re-run copies", async () => {
     // A duplicate history row fails the copy after the sequences restarted.
     const src = {
       ...fullSource(),
@@ -370,10 +511,12 @@ describe("copyIntoPostgres", () => {
     const report = await run(src);
     expect(report.ok).toBe(false);
     expect(report.error).toMatch(/nothing was written/);
+    expect(await tableCount()).toBe(0);
+    expect((await run(fullSource())).ok).toBe(true);
     const next = await sql.unsafe(
       "INSERT INTO seeded (name) VALUES ('next') RETURNING id::int AS id",
     );
-    expect(next[0].id).toBe(2);
+    expect(next[0].id).toBe(6);
   });
 
   test("carries an AUTOINCREMENT counter above 2^53 exactly", async () => {
@@ -387,6 +530,32 @@ describe("copyIntoPostgres", () => {
       "INSERT INTO seeded (name) VALUES ('next') RETURNING id::text AS id",
     );
     expect(next[0].id).toBe("9007199254740994");
+  });
+
+  test("keeps an exhausted AUTOINCREMENT counter at the bigint maximum", async () => {
+    const MAX = 9_223_372_036_854_775_807n;
+    // A drained queue: the counter is at the maximum, the row is gone.
+    const report = await run({ ...fullSource(), autoincrementCounters: () => ({ seeded: MAX }) });
+    expect(report.error).toBeUndefined();
+    expect(report.ok).toBe(true);
+    await expect(sql.unsafe("INSERT INTO seeded (name) VALUES ('next')")).rejects.toThrow(
+      /reached maximum value/,
+    );
+  });
+
+  test("an exhausted counter on a refused copy leaves nothing behind", async () => {
+    const report = await run({
+      ...fullSource(),
+      autoincrementCounters: () => ({ seeded: 9_223_372_036_854_775_807n }),
+      migrationHistory: () => [HISTORY[0] as CopyMigration, ...HISTORY],
+    });
+    expect(report.ok).toBe(false);
+    expect(await tableCount()).toBe(0);
+    expect((await run(fullSource())).ok).toBe(true);
+    const next = await sql.unsafe(
+      "INSERT INTO seeded (name) VALUES ('next') RETURNING id::int AS id",
+    );
+    expect(next[0].id).toBe(6);
   });
 
   test("refuses while another session holds the one-process lock", async () => {
@@ -481,7 +650,7 @@ CREATE TABLE memory_vec (memory_id text PRIMARY KEY, embedding vector);
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/have 8 dimensions, but this copy indexes 4/);
     expect(refused.error).toMatch(/EMBEDDING_DIMENSIONS=8/);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM agent_memory"))[0].n).toBe(0);
+    expect(await tableCount()).toBe(0);
 
     const copied = await copyIntoPostgres(memorySource(), {
       url: db.url,
@@ -540,7 +709,7 @@ CREATE TABLE memory_vec (memory_id text PRIMARY KEY, embedding vector);
     const byWidth = await run(mixed({ dimensions: 8, ids: ["new1", "new2"] }));
     expect(byWidth.ok).toBe(false);
     expect(byWidth.error).toMatch(/SQLite vector index has 8 dimensions.*EMBEDDING_DIMENSIONS=8/);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM memory_vec"))[0].n).toBe(0);
+    expect(await tableCount()).toBe(0);
 
     // Width unknown, IDs known: a searchable memory the rebuild drops is refused.
     const byIds = await run(mixed({ dimensions: null, ids: ["new1", "new2"] }));
@@ -666,5 +835,65 @@ CREATE TABLE metrics (
     expect(report.attention?.[2]?.reason).toMatch(/more than one statement/);
     // No saved query ran: every copied item is still there.
     expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(2);
+  });
+
+  test("a dashboard check that cannot connect after COMMIT is reported as unchecked", async () => {
+    writeFileSync(
+      join(dir, "001_chain.sql"),
+      `${CHAIN}
+CREATE TABLE metrics (
+  id text PRIMARY KEY,
+  "agentId" text,
+  slug text NOT NULL,
+  definition jsonb NOT NULL,
+  "_rowid" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL UNIQUE
+);
+`,
+    );
+    // An owner role with one connection: the copy session takes it, so the
+    // read-only planning session after COMMIT cannot connect.
+    const role = `copy_owner_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    await sql.unsafe(`CREATE ROLE ${role} LOGIN PASSWORD '${role}' CONNECTION LIMIT 1`);
+    try {
+      await sql.unsafe(`ALTER DATABASE ${db.name} OWNER TO ${role}`);
+      const url = new URL(db.url);
+      url.username = role;
+      url.password = role;
+      const METRICS: CopyTable = {
+        name: "metrics",
+        hasRowid: true,
+        columns: ["id", "agentId", "slug", "definition"].map((name) => ({
+          name,
+          declaredType: "",
+        })),
+      };
+      const definition = { widgets: [{ id: "custom", query: { sql: "SELECT 1 AS one" } }] };
+      const report = await copyIntoPostgres(
+        source({
+          items: { table: ITEMS, rows: goodItems() },
+          seeded: { table: SEEDED, rows: [] },
+          children: { table: CHILDREN, rows: [] },
+          metrics: {
+            table: METRICS,
+            rows: [
+              item(1, [text("m1"), text("system"), text("dash"), text(JSON.stringify(definition))]),
+            ],
+          },
+        }),
+        { url: url.toString(), migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+      );
+      expect(report.ok).toBe(true);
+      expect(report.error).toBeUndefined();
+      expect(report.unchecked?.map((u) => [u.table, u.row, u.column])).toEqual([
+        ["metrics", "dash (agent system)", "widget custom"],
+      ]);
+      expect(report.unchecked?.[0]?.reason).toMatch(/could not be checked on Postgres/);
+      expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(2);
+    } finally {
+      await sql.unsafe(`ALTER DATABASE ${db.name} OWNER TO CURRENT_USER`);
+      await sql.unsafe(`REASSIGN OWNED BY ${role} TO CURRENT_USER`);
+      await sql.unsafe(`DROP OWNED BY ${role}`);
+      await sql.unsafe(`DROP ROLE ${role}`);
+    }
   });
 });

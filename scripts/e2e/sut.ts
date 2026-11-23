@@ -282,7 +282,6 @@ export async function startSut(
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
   const databaseUrl = engine === "postgres" ? await createPostgresDatabase(stamp) : undefined;
-  const databaseQueryUrl = databaseUrl ? await preparePostgresQueryReader(databaseUrl) : undefined;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
   const fsDir = `/tmp/e2e-fs-${stamp}`;
   const secretsDir = `/tmp/e2e-secrets-${stamp}`;
@@ -301,7 +300,6 @@ export async function startSut(
     AGENT_SWARM_API_KEY: apiKey,
     DATABASE_PATH: dbPath,
     ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
-    ...(databaseQueryUrl ? { DATABASE_QUERY_URL: databaseQueryUrl } : {}),
     // test, not development: the Slack socket-mode guard refuses to connect
     // under development, and every run drives Slack through the mock.
     NODE_ENV: "test",
@@ -364,6 +362,12 @@ export async function startSut(
     drains: Promise.resolve(),
   };
   await prepare?.(sut);
+  // After prepare: db-copy needs a database with no tables, and the reader role
+  // needs the tables (it applies the chain when nothing else did).
+  if (databaseUrl) {
+    const databaseQueryUrl = await preparePostgresQueryReader(databaseUrl);
+    sut.env = { ...sut.env, DATABASE_QUERY_URL: databaseQueryUrl };
+  }
   await launch(sut, keep);
   return sut;
 }

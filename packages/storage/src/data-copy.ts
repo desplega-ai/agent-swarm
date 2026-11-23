@@ -91,6 +91,12 @@ export type CopyReport = {
    * succeeds; an operator edits each one before or right after cutover.
    */
   attention?: CopyProblem[];
+  /**
+   * Saved queries the copy could not check after COMMIT (for example the
+   * planning session could not connect). The data is copied; each of these
+   * queries is unverified, so an operator runs it once on Postgres.
+   */
+  unchecked?: CopyProblem[];
   /** A failure that stopped the copy (refused target, constraint at commit). */
   error?: string;
   tables: CopyTableReport[];

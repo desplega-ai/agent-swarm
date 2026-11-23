@@ -18,6 +18,7 @@ import {
   type TaskListFields,
   type TaskListFilters,
   type TaskListPage,
+  type TaskListRow,
   type TaskRow,
 } from "@desplega/storage";
 
@@ -236,11 +237,11 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     ) WHEN 0 THEN 1 WHEN 1 THEN 0 ELSE ${set} END)`;
   }
 
-  async listTasks(
+  async listTasks<F extends TaskListFields>(
     filters: TaskListFilters,
     page: TaskListPage,
-    fields: TaskListFields,
-  ): Promise<Record<string, unknown>[]> {
+    fields: F,
+  ): Promise<TaskListRow<F>[]> {
     const conditions = await this.taskFilterConditions(filters, "page");
     // Without selective filters, tiny LIMITs can make SQLite choose a full
     // scan and sort when ANALYZE statistics are absent. Keep filtered pages
@@ -267,7 +268,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     const outerOrder = [...new Set([...orderColumns, "rowid DESC"])]
       .map((column) => `agent_tasks.${column}`)
       .join(", ");
-    return this.db.query<Record<string, unknown>>(sql`WITH page AS (
+    return this.db.query<TaskListRow<F>>(sql`WITH page AS (
       SELECT rowid AS rid FROM agent_tasks${pageIndex}${sqlWhere(conditions)}
       ORDER BY ${raw(orderColumns.join(", "))} LIMIT ${raw(String(page.limit))} OFFSET ${raw(String(page.offset))}
     )

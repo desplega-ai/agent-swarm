@@ -67,7 +67,10 @@ describe("acquireProcessLock", () => {
     const admin = new Bun.SQL({ url: scratch.url, max: 1 });
     await admin.unsafe("CREATE TABLE fenced (v text)");
     const first = await acquireProcessLock(scratch.url, { waitMs: 0 });
-    const old = createPostgresClient(scratch.url, { max: 2, fence: { ownerPid: first.pid } });
+    const old = createPostgresClient(scratch.url, {
+      max: 2,
+      fence: { ownerPid: first.pid, ownerBackendStart: first.backendStart },
+    });
     let second: Awaited<ReturnType<typeof acquireProcessLock>> | undefined;
     try {
       await old.run("INSERT INTO fenced (v) VALUES ('before')");
@@ -102,11 +105,43 @@ describe("acquireProcessLock", () => {
     }
   });
 
+  test("the fence refuses a lock session with the same pid but another start time", async () => {
+    // A reused pid: the session that holds the lock is not the one this process opened.
+    const admin = new Bun.SQL({ url: scratch.url, max: 1 });
+    await admin.unsafe("CREATE TABLE reused (v text)");
+    const first = await acquireProcessLock(scratch.url, { waitMs: 0 });
+    const stale = createPostgresClient(scratch.url, {
+      max: 1,
+      fence: { ownerPid: first.pid, ownerBackendStart: "2000-01-01 00:00:00+00" },
+    });
+    const owner = createPostgresClient(scratch.url, {
+      max: 1,
+      fence: { ownerPid: first.pid, ownerBackendStart: first.backendStart },
+    });
+    try {
+      await expect(stale.run("INSERT INTO reused (v) VALUES ('stale')")).rejects.toThrow(
+        /no longer holds the one-process lock/,
+      );
+      await owner.run("INSERT INTO reused (v) VALUES ('owner')");
+      const rows = await admin.unsafe("SELECT v FROM reused");
+      expect(rows.map((r: { v: string }) => r.v)).toEqual(["owner"]);
+    } finally {
+      await stale.close();
+      await owner.close();
+      await first.release();
+      await admin.unsafe("DROP TABLE reused");
+      await admin.close();
+    }
+  });
+
   test("a takeover waits for the old holder's open write transaction to end", async () => {
     const admin = new Bun.SQL({ url: scratch.url, max: 1 });
     await admin.unsafe("CREATE TABLE drained (v text)");
     const first = await acquireProcessLock(scratch.url, { waitMs: 0 });
-    const old = createPostgresClient(scratch.url, { max: 2, fence: { ownerPid: first.pid } });
+    const old = createPostgresClient(scratch.url, {
+      max: 2,
+      fence: { ownerPid: first.pid, ownerBackendStart: first.backendStart },
+    });
     let second: Awaited<ReturnType<typeof acquireProcessLock>> | undefined;
     try {
       let finish = () => {};
