@@ -1,7 +1,7 @@
-import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { makeSqliteSecretLegacy } from "../db";
 import { asRecords, createApiClient, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { restartSut, startSut, stopSut, stopSutProcess } from "../sut";
@@ -27,16 +27,7 @@ export const secretsBackupDataDir: Scenario = {
       // Turn the row into a pre-encryption legacy secret, then boot with no key setting:
       // the API generates a key in the data directory and writes the plaintext backup.
       await stopSutProcess(sut);
-      const db = new Database(sut.dbPath);
-      try {
-        db.run("DELETE FROM swarm_config WHERE encrypted = 1 AND key <> ?", [key]);
-        db.run("UPDATE swarm_config SET value = ?, encrypted = 0 WHERE key = ?", [
-          "legacy plaintext value",
-          key,
-        ]);
-      } finally {
-        db.close();
-      }
+      makeSqliteSecretLegacy(sut.dbPath, key, "legacy plaintext value");
 
       await restartSut(sut, { SECRETS_ENCRYPTION_KEY_FILE: "", SWARM_DATA_DIR: dataDir });
 

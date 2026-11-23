@@ -286,3 +286,17 @@ export async function loadDbFixture(name: string): Promise<DbFixture> {
 export async function restoreSqliteFixture(path: string, fixture: DbFixture): Promise<void> {
   await Bun.write(path, fixture.file);
 }
+
+/**
+ * Turn one stored secret into a pre-encryption legacy row on a stopped SQLite SUT,
+ * and drop every other encrypted row. The legacy-secret scenario boots on this state.
+ */
+export function makeSqliteSecretLegacy(path: string, key: string, plaintext: string): void {
+  const db = new Database(path);
+  try {
+    db.run("DELETE FROM swarm_config WHERE encrypted = 1 AND key <> ?", [key]);
+    db.run("UPDATE swarm_config SET value = ?, encrypted = 0 WHERE key = ?", [plaintext, key]);
+  } finally {
+    db.close();
+  }
+}
