@@ -124,7 +124,7 @@ let server: McpServer;
 
 beforeAll(async () => {
   initDb(":memory:");
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   const admin = await createUser({ name: "Default admin" });
   adminAuth = { kind: "user", userId: admin.id, user: admin as never };
   await createAgent({ id: LEAD_ID, name: "Lead", isLead: true, status: "idle" });

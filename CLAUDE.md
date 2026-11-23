@@ -6,7 +6,7 @@ Setup: [CONTRIBUTING.md](./CONTRIBUTING.md). Server: `bun run start:http`.
 
 ## Architecture invariants
 
-- The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the sole owner of the SQLite database. Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) NEVER imports `src/be/db` or `bun:sqlite`: it calls the API over HTTP with the swarm API key and the `X-Agent-ID` header. CI: `scripts/check-db-boundary.sh`.
+- The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the sole owner of the database (SQLite, or Postgres when `DATABASE_URL` is set; [runbooks/postgres.md](./runbooks/postgres.md)). Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) NEVER imports `src/be/db` or `bun:sqlite`: it calls the API over HTTP with the swarm API key and the `X-Agent-ID` header. CI: `scripts/check-db-boundary.sh`.
 - Read the swarm API key with `getApiKey()` from `src/utils/api-key.ts` (precedence `AGENT_SWARM_API_KEY` > `API_KEY`), NEVER from `process.env`. CI: `scripts/check-api-key-boundary.sh`.
 - System prompt and task prompt text goes through the prompt-template registry in `src/prompts/`. To add a prompt section, add or update a registered template and resolve it from the call site, instead of concatenating strings in runners, hooks or providers.
 - Use Bun, not Node, npm, pnpm or vite: `Bun.serve()` for HTTP/WebSocket, `bun:sqlite` for SQLite (API server only), `Bun.file()` for file I/O, `Bun.$` for shell. Bun loads `.env` by itself.
@@ -47,7 +47,7 @@ Everyday commands. Every other script (Docker images, generators, the Playwright
 
 <important if="you are writing or modifying API-server code that reads or writes the database (src/be, src/http, src/tools, src/apps, src/workflows, src/heartbeat, src/scheduler)">
 
-All runtime DB access goes through the async seam: `getDbClient()` from `src/be/db.ts`. Use `await client.query<Row>(sql, params)` / `get<Row>` / `run`, and `await client.transaction(async (tx) => ...)`. Raw sync access (`getDb()`, `.prepare(`, `bun:sqlite`) is only for the boot-path files in `scripts/check-async-db-seam.sh` (CI).
+SQL lives only in `packages/storage*` and must pass on both engines (rules: runbooks/postgres.md). All runtime DB access goes through the async seam: `getDbClient()` from `src/be/db.ts`. Use `await client.query<Row>(sql, params)` / `get<Row>` / `run`, and `await client.transaction(async (tx) => ...)`. Raw sync access (`getDb()`, `.prepare(`, `bun:sqlite`) is only for the boot-path files in `scripts/check-async-db-seam.sh` (CI).
 
 - Client calls inside a transaction callback join it. Nested `transaction` calls become SAVEPOINTs.
 - `transaction` opens with `BEGIN IMMEDIATE`. Pass `{ readOnly: true }` only for SELECT-only callbacks. Boot-path code that still uses raw `db.transaction(fn)` invokes it as `.immediate(...)`: a deferred BEGIN that reads before it writes fails with `SQLITE_BUSY_SNAPSHOT` when a second process shares the file.
@@ -143,7 +143,7 @@ Full contract, the per-harness matrix and the validation gate: [runbooks/mcp-too
 
 <important if="you are adding or modifying database schema or migrations">
 
-File-based, forward-only SQL in `src/be/migrations/NNN_descriptive_name.sql`, applied on startup. NEVER modify an applied migration: create a new one. There are no `down` migrations.
+File-based, forward-only SQL in `src/be/migrations/NNN_descriptive_name.sql` plus a Postgres file of the same ordinal in `src/be/migrations/postgres/` (`check:schema-parity`), applied on startup. NEVER modify an applied migration: create a new one. There are no `down` migrations.
 
 - Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) and an existing one. Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with the SQL CHECK constraints.
 - Before you add one, check its ordinal against `main`'s tail and every open PR that adds a migration. `scripts/check-migration-conflicts.sh` (CI) requires a unique ordinal that sorts above the base branch's tail. The runner silently skips a duplicate ordinal.

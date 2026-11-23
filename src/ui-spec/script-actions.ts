@@ -1,6 +1,7 @@
-import { createLogEntry, getDbClient, getSwarmConfigs } from "../be/db";
+import { createLogEntry, getSwarmConfigs } from "../be/db";
 import { getGlobalScriptContentHashes, getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
+import { getStorage } from "../be/storage";
 import {
   acquireTaskUiScriptActionRun,
   finishTaskUiScriptActionRun,
@@ -310,7 +311,7 @@ export async function runTaskUiScriptAction({
     // Re-check the new card's pins in the write itself, so a pin removed while
     // the script ran never lands as an armed button.
     const okOutcome = outcome;
-    const pinIssue = await getDbClient().transaction(async () => {
+    const pinIssue = await getStorage().transaction(async () => {
       const [issue] = await scriptActionPinIssues(okOutcome.uiSpec.actions);
       if (!issue) await upsertTaskUiSpec(task.id, okOutcome.uiSpec, actorUserId);
       return issue;
@@ -332,7 +333,7 @@ export async function runTaskUiScriptAction({
   }
 
   await finishTaskUiScriptActionRun(task.id, actionId, null);
-  getDbClient().afterCommit(() =>
+  getStorage().afterCommit(() =>
     workflowEventBus.emit(TASK_UI_SPEC_UPDATED_EVENT, { taskId: task.id }),
   );
   // The stored row is the scrubbed one: return that, not the raw script output.

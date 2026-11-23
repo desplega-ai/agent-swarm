@@ -1,0 +1,48 @@
+# check:schema-parity allowlist (scripts/storage-checks/check-schema-parity.ts).
+# One difference per line: <key> -- <reason>. An entry that matches no difference fails the check.
+#
+# Full-text search on Postgres is milestone M4 (decision D15: tsvector). The FTS5 virtual tables,
+# their shadow tables and the triggers that write them have no Postgres counterpart until then.
+table:agent_tasks_fts -- FTS5 virtual table; Postgres full-text search (tsvector) is milestone M4
+table:skills_fts -- FTS5 virtual table; Postgres full-text search (tsvector) is milestone M4
+table:skills_meta_fts -- FTS5 virtual table; Postgres full-text search (tsvector) is milestone M4
+table:agent_tasks_fts_config -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:agent_tasks_fts_data -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:agent_tasks_fts_docsize -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:agent_tasks_fts_idx -- FTS5 shadow table (SQLite internal storage of agent_tasks_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_config -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_content -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_data -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_docsize -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_fts_idx -- FTS5 shadow table (SQLite internal storage of skills_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_config -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_content -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_data -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_docsize -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+table:skills_meta_fts_idx -- FTS5 shadow table (SQLite internal storage of skills_meta_fts); no Postgres counterpart, M4 replaces the index
+trigger:agent_tasks_fts_delete -- writes the FTS5 table agent_tasks_fts (rowid-keyed); ported with full-text search in M4
+trigger:agent_tasks_fts_insert -- writes the FTS5 table agent_tasks_fts (rowid-keyed); ported with full-text search in M4
+trigger:agent_tasks_fts_update -- writes the FTS5 table agent_tasks_fts (rowid-keyed); ported with full-text search in M4
+trigger:skills_fts_delete -- writes the FTS5 table skills_fts; ported with full-text search in M4
+trigger:skills_fts_insert -- writes the FTS5 table skills_fts; ported with full-text search in M4
+trigger:skills_fts_update -- writes the FTS5 table skills_fts; ported with full-text search in M4
+trigger:skills_meta_fts_delete -- writes the FTS5 table skills_meta_fts; ported with full-text search in M4
+trigger:skills_meta_fts_insert -- writes the FTS5 table skills_meta_fts; ported with full-text search in M4
+trigger:skills_meta_fts_update -- writes the FTS5 table skills_meta_fts; ported with full-text search in M4
+#
+# Migration 368 (M4, decision D15): Postgres full-text search runs on tsvector expression GIN indexes
+# over the base tables, the counterparts of the FTS5 tables above (no shadow table, no trigger: D9).
+index:skills_fts_search -- tsvector GIN expression index (name A, description B, content C), the Postgres counterpart of the FTS5 tables skills_fts and skills_meta_fts (migration 368)
+index:agent_tasks_fts_task -- tsvector GIN expression index on agent_tasks.task, with agent_tasks_fts_title the Postgres counterpart of the FTS5 table agent_tasks_fts (migration 368)
+index:agent_tasks_fts_title -- tsvector GIN expression index on agent_tasks.title, with agent_tasks_fts_task the Postgres counterpart of the FTS5 table agent_tasks_fts (migration 368)
+# Memory search (migration 369, M4). On SQLite memory_fts (FTS5) and memory_vec (sqlite-vec) are
+# run-time tables that src/be/memory/providers/sqlite-store.ts creates outside the migration chain.
+table:memory_vec -- Postgres form of the run-time sqlite-vec table memory_vec (pgvector, no fixed dimension); SQLite creates its memory_vec at run time outside the chain, sized from EMBEDDING_DIMENSIONS (migration 369)
+index:idx_agent_memory_fts -- Postgres form of the run-time FTS5 table memory_fts: an expression GIN index on agent_memory, no shadow table or sync trigger (D9); SQLite creates memory_fts at run time outside the chain (migration 369)
+#
+# rowid: every rowid table without an INTEGER PRIMARY KEY alias (all but kv_entries, WITHOUT ROWID,
+# and the FTS tables) gets "_rowid" bigint GENERATED BY DEFAULT AS IDENTITY NOT NULL with a unique
+# index <table>__rowid_key. The check reports each correct one under this one key; a wrong or
+# missing one is rowid-surrogate-shape:<table>, which is not allowlisted.
+rowid-surrogate -- Postgres has no rowid: session_logs exposes rowid AS seq in the API, human_free_reclassify_queue stores rowids, and about 140 repository ORDER BYs tie-break on rowid; the data copy copies rowid into _rowid so API values stay equal across engines (lead decision, M3)
+rows:metrics -- the seeded starter dashboard holds engine-native SQL: Postgres migration 370 rewrites its widget and options queries in Postgres SQL, the SQLite chain keeps the SQLite queries of migration 092 (review of PR #141)

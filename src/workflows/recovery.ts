@@ -1,7 +1,6 @@
 import {
   getApprovalRequestById,
   getCompletedStepNodeIds,
-  getDbClient,
   getRunWorkflow,
   getStuckApprovalRuns,
   getStuckWaitRuns,
@@ -17,6 +16,7 @@ import {
   getRunningSubWorkflowSteps,
   getSettledChildRunParentSteps,
 } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
 import { adoptStoredContext } from "./checkpoint";
@@ -165,7 +165,7 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
 
 /** Fail a run that is still `running`; a cancel or finish that committed first wins. */
 async function failRunningRun(runId: string, error: string): Promise<void> {
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (run?.status !== "running") return;
     await updateWorkflowRun(runId, {
@@ -230,7 +230,7 @@ function retryPendingNodeIds(steps: WorkflowRunStep[]): Set<string> {
  * a user retry leaves before inserting its new step, does not park the run.
  */
 async function completeIfSettled(runId: string, ctx: Record<string, unknown>): Promise<boolean> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (run?.status !== "running") return false;
     if (await getRunLineageBlock(runId)) return false;
@@ -390,7 +390,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
       // The timeout write, the status re-read, and the step claim share 1
       // transaction. A request cancelled or answered after the sweep snapshot
       // routes on its current status, or not at all.
-      const routing = await getDbClient().transaction(async () => {
+      const routing = await getStorage().transaction(async () => {
         // If still pending but expired, mark as timeout
         if (stuck.approvalStatus === "pending" && stuck.expiresAt) {
           await resolveApprovalRequest(stuck.approvalId, {
@@ -508,20 +508,7 @@ async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
  * step id.
  */
 async function recoverForeachFanouts(registry: ExecutorRegistry): Promise<number> {
-  const rows = await getDbClient().query<{
-    runId: string;
-    workflowId: string;
-    stepId: string;
-    nodeId: string;
-    status: string;
-  }>(
-    `SELECT s.runId AS runId, r.workflowId AS workflowId, s.id AS stepId, s.nodeId AS nodeId, s.status AS status
-       FROM workflow_run_steps s
-       JOIN workflow_runs r ON r.id = s.runId
-      WHERE r.status IN ('running', 'waiting')
-        AND s.status IN ('pending', 'running')
-        AND instr(s.nodeId, '#') > 1`,
-  );
+  const rows = await getStorage().repos.workflows.listForeachFanoutCandidates();
   const fanouts = new Map<string, { runId: string; workflowId: string; parentNodeId: string }>();
   for (const row of rows) {
     if (row.status === "running" && isForeachChildOwned(row.stepId)) continue;
@@ -558,9 +545,5 @@ async function recoverForeachFanouts(registry: ExecutorRegistry): Promise<number
  * Get run IDs by status. Simple query since there's no dedicated function for this.
  */
 async function getRunIdsByStatus(status: string): Promise<string[]> {
-  const rows = await getDbClient().query<{ id: string }>(
-    "SELECT id FROM workflow_runs WHERE status = ?",
-    [status],
-  );
-  return rows.map((r) => r.id);
+  return getStorage().repos.workflows.listRunIdsByStatus(status);
 }

@@ -1010,7 +1010,7 @@ describe("POST /api/comb/review-batches", () => {
   test("answers 503 with the skipped list while a review template is disabled", async () => {
     const good = fake.add({ body: "@swarm a" }).id;
     const resolved = fake.add({ body: "@swarm b", resolved: true }).id;
-    upsertPromptTemplate({
+    await upsertPromptTemplate({
       eventType: "comb.review.batch",
       scope: "global",
       state: "skip_event",

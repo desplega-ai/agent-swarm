@@ -1,7 +1,8 @@
 import { FilesError } from "@/fs/provider";
 import { buildAgentFsFileLink } from "@/utils/constants";
 import { agentFsClientFor } from "../agent-fs-identity";
-import { getDbClient, getSwarmConfigs } from "../db";
+import { getSwarmConfigs } from "../db";
+import { getStorage } from "../storage";
 import { parseScene } from "./boards/elements";
 import {
   ObjectsError,
@@ -52,7 +53,7 @@ async function sharedDrive(): Promise<{ orgId: string; driveId: string } | null>
 
 /** Look up the object, check its drive, and open an agent-fs client as its owner agent. */
 async function open(id: string) {
-  const row = await getDbClient().get<Row>("SELECT * FROM primitive_objects WHERE id = ?", [id]);
+  const row: Row | null = await getStorage().repos.pages.findObjectById(id);
   if (!row) throw new ObjectEmbedError(404, `no object with id '${id}'`);
   const shared = await sharedDrive();
   if (!shared || shared.orgId !== row.orgId || shared.driveId !== row.driveId) {
@@ -77,16 +78,13 @@ const withLink = (row: Row): PrimitiveObject => ({ ...row, link: buildAgentFsFil
 
 /** agent-fs keeps this drive's rows fresh through `file.changed` (object-webhooks.ts). */
 async function driveWatched(orgId: string, driveId: string): Promise<boolean> {
-  const hook = await getDbClient().get<{ status: string }>(
-    "SELECT status FROM agent_fs_object_webhooks WHERE orgId = ? AND driveId = ?",
-    [orgId, driveId],
-  );
+  const hook = await getStorage().repos.agentFsWebhooks.findByDrive(orgId, driveId);
   return hook?.status === "active";
 }
 
 /** The row records the person behind the last save; a save with no person clears it. */
 async function recordEditor(id: string, userId: string | null): Promise<void> {
-  await getDbClient().run("UPDATE primitive_objects SET updated_by = ? WHERE id = ?", [userId, id]);
+  await getStorage().repos.pages.setObjectEditor(id, userId);
 }
 
 /** Service refusals become 400, except the CAS give-up, which is a 409 the caller retries. */

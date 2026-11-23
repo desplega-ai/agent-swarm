@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -125,8 +126,7 @@ export const knowledgeRooms: Scenario = {
         () =>
           dbCount(
             ctx,
-            "SELECT count(*) AS n FROM kv_entries WHERE namespace = ? AND key = '_room/alpha'",
-            [namespace],
+            sql`SELECT count(*) AS n FROM kv_entries WHERE namespace = ${namespace} AND key = '_room/alpha'`,
           ) === 1,
         8_000,
         200,

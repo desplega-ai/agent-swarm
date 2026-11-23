@@ -977,7 +977,7 @@ export async function handlePages(
     }
 
     const note = parsed.body.note;
-    const taskPrompt = resolveTemplate("task.page.feedback", {
+    const taskPrompt = await resolveTemplate("task.page.feedback", {
       page_id: page.id,
       page_title: page.title,
       page_slug: page.slug,

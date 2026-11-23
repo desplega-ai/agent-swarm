@@ -5,8 +5,9 @@
  * `checkProfileForAgent` there. Send-task, claim, the pool filters and the
  * fallback hop all read the group through this module.
  */
-import { getAgentById, getDbClient } from "./db";
+import { getAgentById } from "./db";
 import { checkProfileForAgent, type ProfileCheckOptions } from "./model-profile-check";
+import { getStorage } from "./storage";
 
 /** A member passed over, and why ("harness: runs on codex", "harness-credentials: ..."). */
 export type GroupMemberSkip = { profile: string; reason: string };
@@ -32,15 +33,7 @@ export type GroupResolution =
 export async function modelGroupMemberHarnesses(
   group: string,
 ): Promise<{ profile: string; harness: string }[] | null> {
-  const rows = await getDbClient().query<{ profile: string | null; harness: string | null }>(
-    `SELECT m.profileName AS profile, p.harness AS harness
-       FROM model_groups g
-       LEFT JOIN model_group_members m ON m.groupId = g.id
-       LEFT JOIN model_profiles p ON p.name = m.profileName
-      WHERE g.name = ?
-      ORDER BY m.position`,
-    [group.trim()],
-  );
+  const rows = await getStorage().repos.models.listGroupMemberHarnesses(group.trim());
   if (rows.length === 0) return null;
   return rows.flatMap((row) =>
     row.profile && row.harness ? [{ profile: row.profile, harness: row.harness }] : [],

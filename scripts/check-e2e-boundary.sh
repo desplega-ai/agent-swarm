@@ -11,6 +11,9 @@ if [ -d "$E2E_PATH" ]; then
   MATCHES=$(grep -rn --include='*.ts' -E \
     '(from|import[[:space:]]*\()[[:space:]]*["\x27](\.\./)+(src|apps|packages)(/|["\x27])|from[[:space:]]+["\x27]@swarm/|import[[:space:]]*["\x27]@swarm/' \
     "$E2E_PATH" 2>/dev/null || true)
+  # db.ts may also import the storage engine packages: on Postgres it applies
+  # the migration chain and creates the db-query reader role an operator would.
+  MATCHES=$(printf '%s\n' "$MATCHES" | grep -vE "^${DB_FILE}:[0-9]+:.*[\"\x27](\.\./)+packages/storage(-sqlite|-postgres)?/" || true)
   if [ -n "$MATCHES" ]; then
     VIOLATIONS="${VIOLATIONS}${MATCHES}\n"
   fi

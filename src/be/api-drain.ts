@@ -13,7 +13,7 @@
 
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
+import { getStorage } from "./storage";
 
 /**
  * Default cap on the wait for worker handoffs: `0`, the drain is off. It is
@@ -65,25 +65,13 @@ export function resolveApiDrainMaxMs(
 /** `in_progress` tasks held by an agent that pinged recently, i.e. one that can still hand off. */
 export async function listLiveInFlightTaskIds(now: number = Date.now()): Promise<string[]> {
   const cutoff = new Date(now - LIVE_WORKER_WINDOW_MS).toISOString();
-  const rows = await getDbClient().query<{ id: string }>(
-    `SELECT t.id AS id
-       FROM agent_tasks t
-       JOIN agents a ON a.id = t.agentId
-      WHERE t.status = 'in_progress' AND a.status != 'offline' AND a.lastUpdatedAt >= ?`,
-    [cutoff],
-  );
-  return rows.map((row) => row.id);
+  return getStorage().repos.tasks.listLiveInProgressTaskIds(cutoff);
 }
 
 /** How many of `taskIds` are still `in_progress`. */
 export async function countStillInProgress(taskIds: string[]): Promise<number> {
   if (taskIds.length === 0) return 0;
-  const row = await getDbClient().get<{ n: number }>(
-    `SELECT count(*) AS n FROM agent_tasks
-      WHERE status = 'in_progress' AND id IN (SELECT value FROM json_each(?))`,
-    [JSON.stringify(taskIds)],
-  );
-  return row?.n ?? 0;
+  return getStorage().repos.tasks.countInProgressAmong(taskIds);
 }
 
 export interface ApiDrainDeps {

@@ -69,7 +69,9 @@ const EXPECTED_INVENTORY: InventoryEntry[] = [
     file: "src/be/db.ts",
     owner: "createTaskExtended",
     syntax: "PropertyAssignment",
-    count: 1,
+    // The consumer, plus the insert-row field the tasks repository writes (the
+    // INSERT moved into the repository in the Postgres storage work).
+    count: 2,
     kind: "consumer",
   },
   {

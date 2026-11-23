@@ -1,4 +1,5 @@
-import { getDbClient, getWorkflow, updateWorkflow } from "../be/db";
+import { getWorkflow, updateWorkflow } from "../be/db";
+import { getStorage } from "../be/storage";
 import type { Workflow, WorkflowDefinition, WorkflowPatch } from "../types";
 import { applyDefinitionPatch, definitionNodeIds, validateDefinition } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -46,7 +47,7 @@ export async function patchWorkflowDefinition(options: {
   serverRefInputAllowed?: boolean;
 }): Promise<PatchWorkflowDefinitionResult> {
   const { id, patch, registry, snapshotAgentId, snapshotOptional, updates } = options;
-  return await getDbClient().transaction(async (): Promise<PatchWorkflowDefinitionResult> => {
+  return await getStorage().transaction(async (): Promise<PatchWorkflowDefinitionResult> => {
     const existing = await getWorkflow(id);
     if (!existing) return { ok: false, reason: "not_found" };
 

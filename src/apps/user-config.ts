@@ -1,4 +1,4 @@
-import { getDbClient } from "../be/db";
+import { getStorage } from "../be/storage";
 import { isIso8601Date, type UserConfigField } from "./definition";
 
 export type UserConfigValue = string | number | boolean | null;
@@ -29,10 +29,6 @@ function acceptedReservedEntries(stored: Record<string, unknown>): UserConfigVal
     if (typeof value === "string" && pattern.test(value)) entries[key] = value;
   }
   return entries;
-}
-
-interface AppUserConfigRow {
-  storedValues: string;
 }
 
 function accepts(field: UserConfigField, value: unknown): value is Exclude<UserConfigValue, null> {
@@ -106,13 +102,10 @@ export function userConfigValueIssues(
 }
 
 export async function getAppUserConfigValues(appId: string, scope: string): Promise<unknown> {
-  const row = await getDbClient().get<AppUserConfigRow>(
-    'SELECT "values" AS storedValues FROM app_user_config WHERE appId = ? AND scope = ?',
-    [appId, scope],
-  );
-  if (!row) return {};
+  const storedValues = await getStorage().repos.users.getAppUserConfigValues(appId, scope);
+  if (storedValues === null) return {};
   try {
-    return JSON.parse(row.storedValues);
+    return JSON.parse(storedValues);
   } catch {
     return {};
   }
@@ -124,10 +117,11 @@ export async function upsertAppUserConfigValues(
   values: Record<string, unknown>,
 ): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO app_user_config (id, appId, scope, "values", createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(appId, scope) DO UPDATE SET "values" = excluded."values", updatedAt = excluded.updatedAt`,
-    [crypto.randomUUID(), appId, scope, JSON.stringify(values), now, now],
-  );
+  await getStorage().repos.users.upsertAppUserConfigValues({
+    id: crypto.randomUUID(),
+    appId,
+    scope,
+    values: JSON.stringify(values),
+    now,
+  });
 }

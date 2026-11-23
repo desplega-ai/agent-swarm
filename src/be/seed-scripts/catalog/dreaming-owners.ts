@@ -45,7 +45,7 @@ let LEAD = "";
 async function resolveLead(ctx: ScriptContext, id: unknown, errors: string[]): Promise<string> {
   if (typeof id === "string" && id.trim()) return id.trim();
   try {
-    const r = rows(await ctx.swarm.db_query({ sql: `SELECT id FROM agents WHERE isLead = 1 ORDER BY createdAt ASC LIMIT 1` }));
+    const r = rows(await ctx.swarm.db_query({ sql: `SELECT id FROM agents WHERE "isLead" = true ORDER BY "createdAt" ASC, id ASC LIMIT 1` }));
     return String(r[0]?.id ?? "");
   } catch (e: any) {
     errors.push(`lead lookup: ${String(e?.message ?? e).slice(0, 200)}`);

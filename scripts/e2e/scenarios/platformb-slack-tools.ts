@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
@@ -701,8 +702,7 @@ export const platformbSlackTools: Scenario = {
       );
       const leftKey = `${slackChannel}:${slackThread}`;
       const leftRow = ctx.db.get<{ value: string }>(
-        "SELECT value FROM kv_entries WHERE namespace = 'slack-left-thread' AND key = ?",
-        [leftKey],
+        sql`SELECT value FROM kv_entries WHERE namespace = 'slack-left-thread' AND key = ${leftKey}`,
       );
       expect(leftRow, "slack-leave-thread stored no left-thread entry");
       expect(
@@ -717,9 +717,9 @@ export const platformbSlackTools: Scenario = {
         "slack-leave-thread by channel and thread",
       );
       expect(
-        ctx.db.get("SELECT 1 FROM kv_entries WHERE namespace = 'slack-left-thread' AND key = ?", [
-          `${channelId}:${threadTs}`,
-        ]) !== null,
+        ctx.db.get(
+          sql`SELECT 1 FROM kv_entries WHERE namespace = 'slack-left-thread' AND key = ${`${channelId}:${threadTs}`}`,
+        ) !== null,
         "slack-leave-thread by channel stored no entry for the p-form ts",
       );
       for (const [args, conn, needle, label] of [

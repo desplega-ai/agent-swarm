@@ -9,8 +9,8 @@
  * (MCP) need to read them without importing each other.
  */
 
-import { Database } from "bun:sqlite";
-import { getDb, resolveSqliteVecExtensionPath } from "../be/db";
+import { DB_QUERY_DENIED_TABLES, QueryReaderDeniedError } from "@desplega/storage";
+import { sqliteDbQuery } from "../be/storage-root";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 
 export interface DbQueryResult {
@@ -65,15 +65,7 @@ export function assertSingleStatement(sql: string): void {
  * subquery, join or covering index). `swarm_config` stays readable: its
  * secret values are ciphertext and agents query its non-secret keys.
  */
-export const DB_QUERY_DENIED_TABLES: ReadonlySet<string> = new Set([
-  "oauth_authorizations",
-  "oauth_apps",
-  "oauth_pending",
-  "user_tokens",
-  "session_tokens",
-  "script_apis",
-  "codex_oauth_device_flows",
-]);
+export { DB_QUERY_DENIED_TABLES };
 
 /** Thrown when a query would read a table in {@link DB_QUERY_DENIED_TABLES}. */
 export class DbQueryDeniedTableError extends Error {
@@ -86,89 +78,35 @@ export class DbQueryDeniedTableError extends Error {
   }
 }
 
-/** Bytecode opcodes whose p2 is the root page of the b-tree they open. */
-const CURSOR_OPEN_OPCODES = new Set(["OpenRead", "ReopenIdx", "OpenWrite"]);
-
-/**
- * Open a read-only connection to the swarm database. User SQL is never
- * prepared on the writable application connection. In-memory databases have
- * no file to reopen, so they get a read-only snapshot instead.
- */
-function openReadOnlyReader(): Database {
-  const database = getDb();
-  const reader =
-    !database.filename || database.filename === ":memory:"
-      ? Database.deserialize(database.serialize(), { readonly: true })
-      : new Database(database.filename, { readonly: true });
-  const vecExtensionPath = resolveSqliteVecExtensionPath();
-  if (vecExtensionPath) {
-    try {
-      reader.loadExtension(vecExtensionPath);
-    } catch {
-      // Match the bounded path: only vec queries require the extension.
-    }
-  }
-  return reader;
-}
-
-/**
- * Reject `sql` if it reads a denied table. Works on the compiled program, not
- * the SQL text: `EXPLAIN` lists every b-tree the statement opens by root page,
- * and `sqlite_master` maps root pages (tables and their indexes) back to a
- * table name. Views, CTEs and subqueries are already expanded in the program,
- * so no SQL parsing is needed. A user `EXPLAIN ...` returns bytecode, never
- * row data, so it is allowed as is.
- */
-export function assertNoDeniedTables(sql: string, reader?: Database): void {
-  const statement = stripTrailingSemicolon(sql);
-  if (/^explain\b/i.test(stripLeadingComments(statement))) return;
-
-  const db = reader ?? openReadOnlyReader();
+/** The SQLite reader's denial, as the error db-query callers know. */
+function withDeniedTableError<T>(run: () => T): T {
   try {
-    const rootPages = new Map<number, string>();
-    for (const row of db
-      .query("SELECT rootpage, tbl_name FROM main.sqlite_master WHERE rootpage > 0")
-      .all() as Array<{ rootpage: number; tbl_name: string }>) {
-      rootPages.set(row.rootpage, row.tbl_name.toLowerCase());
-    }
-
-    using program = db.prepare(`EXPLAIN ${statement}`);
-    const denied = new Set<string>();
-    for (const op of program.all() as Array<{ opcode: string; p2: number; p3: number }>) {
-      // p3 is the schema index: 0 = main. Credential tables only live there.
-      if (!CURSOR_OPEN_OPCODES.has(op.opcode) || op.p3 !== 0) continue;
-      const table = rootPages.get(op.p2);
-      if (table && DB_QUERY_DENIED_TABLES.has(table)) denied.add(table);
-    }
-    if (denied.size > 0) throw new DbQueryDeniedTableError([...denied].sort());
-  } finally {
-    if (!reader) db.close();
+    return run();
+  } catch (err) {
+    if (err instanceof QueryReaderDeniedError) throw new DbQueryDeniedTableError(err.tables);
+    throw err;
   }
 }
 
-function stripLeadingComments(sql: string): string {
-  let rest = sql.trimStart();
-  for (;;) {
-    if (rest.startsWith("--")) {
-      const end = rest.indexOf("\n");
-      rest = end === -1 ? "" : rest.slice(end + 1).trimStart();
-    } else if (rest.startsWith("/*")) {
-      const end = rest.indexOf("*/");
-      rest = end === -1 ? "" : rest.slice(end + 2).trimStart();
-    } else {
-      return rest;
-    }
-  }
+/**
+ * Reject `sql` if it reads a denied table. The SQLite reader works on the
+ * compiled program, not the SQL text (packages/storage-sqlite/src/db-query.ts),
+ * so views, CTEs, subqueries and covering indexes are covered. A user
+ * `EXPLAIN ...` returns bytecode, never row data, so it is allowed as is.
+ */
+export function assertNoDeniedTables(sql: string): void {
+  withDeniedTableError(() => sqliteDbQuery.assertNoDeniedTables(sql));
 }
 
 /**
  * Execute a read-only SQL query against the swarm database, synchronously,
- * on the caller's own thread.
+ * on the caller's own thread, on a read-only handle (never the writable
+ * application connection).
  *
  * Lives here (not db-query.ts) so db-query-bounded.ts can fall back to it
  * without a circular import — db-query.ts already imports the bounded
  * executor. Two callers rely on this fallback path: the
- * `DB_QUERY_BOUNDED_ENABLED=false` kill switch, and runBoundedQueryChild when
+ * `DB_QUERY_BOUNDED_ENABLED=false` kill switch, and the bounded path when
  * no `bun` executable can be spawned (see warnDbQuerySpawnUnavailableOnce).
  */
 export function executeReadOnlyQuery(
@@ -177,38 +115,7 @@ export function executeReadOnlyQuery(
   maxRows?: number,
 ): DbQueryResult {
   assertSingleStatement(sql);
-  const reader = openReadOnlyReader();
-  try {
-    assertNoDeniedTables(sql, reader);
-    using stmt = reader.prepare(sql);
-
-    // Require a result set; SQLite readonly mode is the write barrier.
-    // RETURNING statements have columns too, so columnNames alone is not a guard.
-    if (stmt.columnNames.length === 0) {
-      throw new Error("Only read-only queries are allowed");
-    }
-
-    const columns = stmt.columnNames as string[];
-    const start = performance.now();
-    // Iterate rather than `stmt.all()` + slice: a query against a huge table
-    // with a small maxRows would otherwise hold every matched row's object in
-    // memory at once just to throw most of them away. Iterating still visits
-    // every row (so `total` keeps meaning "rows SQLite matched"), but only the
-    // first `maxRows` are converted and retained.
-    const rowArrays: unknown[][] = [];
-    let total = 0;
-    for (const row of stmt.iterate(...(params as [string]))) {
-      total++;
-      if (maxRows === undefined || rowArrays.length < maxRows) {
-        rowArrays.push(columns.map((col) => (row as Record<string, unknown>)[col]));
-      }
-    }
-    const elapsed = Math.round(performance.now() - start);
-
-    return { columns, rows: rowArrays, elapsed, total };
-  } finally {
-    reader.close();
-  }
+  return withDeniedTableError(() => sqliteDbQuery.executeInProcess(sql, params, maxRows));
 }
 
 /** Hardcoded pre-flag defaults — kept equal to the values PR #87 shipped with, so adding the flag changes no behaviour out of the box. */

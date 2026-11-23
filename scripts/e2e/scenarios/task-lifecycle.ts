@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -67,16 +68,16 @@ export const taskLifecycle: Scenario = {
     expect(finished.status === "completed", "Task did not reach completed status");
     expect(String(finished.output).includes(ctx.nonce), "Task output does not contain the nonce");
 
-    const taskRow = ctx.db.get<{ status: string }>("SELECT status FROM agent_tasks WHERE id = ?", [
-      String(taskId),
-    ]);
+    const taskRow = ctx.db.get<{ status: string }>(
+      sql`SELECT status FROM agent_tasks WHERE id = ${String(taskId)}`,
+    );
     expect(
       taskRow?.status === "completed",
       `agent_tasks row for ${String(taskId)} has status ${taskRow?.status ?? "<missing row>"}`,
     );
-    const agentRow = ctx.db.get<{ id: string }>("SELECT id FROM agents WHERE id = ?", [
-      String(agentId),
-    ]);
+    const agentRow = ctx.db.get<{ id: string }>(
+      sql`SELECT id FROM agents WHERE id = ${String(agentId)}`,
+    );
     expect(agentRow?.id === agentId, `No agents row for the registered worker ${String(agentId)}`);
 
     response = await ctx.api("GET", "/api/tasks?status=completed");

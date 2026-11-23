@@ -13,6 +13,7 @@
  * run on their own, get/set enabled). Scripts have no enabled state: they run only
  * when called.
  */
+import type { ExtensionAssetRow as StoredExtensionAssetRow } from "@desplega/storage";
 import { parseWorkflowText, skillDirs } from "../../extensions/manifest-format";
 import { calculateNextRun } from "../../scheduler/scheduler";
 import { extractScriptSignature } from "../../scripts-runtime/extract-signature";
@@ -36,7 +37,6 @@ import {
   deleteSkill,
   deleteSkillFile,
   deleteWorkflow,
-  getDbClient,
   getScheduledTaskById,
   getScheduledTaskByName,
   getSkillById,
@@ -52,6 +52,7 @@ import { embedScript } from "../scripts/embeddings";
 import { extractArgsJsonSchema } from "../scripts/extract-schema";
 import { typecheckScript } from "../scripts/typecheck";
 import { type ParsedSkill, parseSkillContent } from "../skill-parser";
+import { getStorage } from "../storage";
 
 export type ExtensionAssetKind = "script" | "schedule" | "workflow" | "skill";
 
@@ -155,15 +156,7 @@ export type ReconcileResult = {
 
 export type RemoveResult = { deleted: AssetRef[]; detached: AssetRef[] };
 
-type ExtensionAssetRow = {
-  id: string;
-  extensionId: string;
-  kind: ExtensionAssetKind;
-  assetId: string;
-  name: string;
-  seededHash: string;
-  enabledBefore: number | null;
-};
+type ExtensionAssetRow = StoredExtensionAssetRow;
 
 /** Raised inside the install transaction; rolls back every write. */
 export class ExtensionAssetConflictError extends Error {
@@ -513,7 +506,7 @@ async function writeScript(plan: ScriptPlan, agentId: string, actor: Actor) {
   });
   // Embedding calls out to a provider; never inside the write lock.
   const script = result.script;
-  getDbClient().afterCommit(async () => {
+  getStorage().afterCommit(async () => {
     await embedScript(script);
   });
   return script.id;
@@ -582,10 +575,8 @@ const scheduleAdapter: Adapter<SchedulePlan> = {
 };
 
 async function findWorkflowByName(name: string): Promise<Workflow | null> {
-  const row = await getDbClient().get<{ id: string }>("SELECT id FROM workflows WHERE name = ?", [
-    name,
-  ]);
-  return row ? await getWorkflow(row.id) : null;
+  const id = await getStorage().repos.workflows.findWorkflowIdByName(name);
+  return id ? await getWorkflow(id) : null;
 }
 
 const workflowAdapter: Adapter<WorkflowPlan> = {
@@ -635,11 +626,8 @@ const workflowAdapter: Adapter<WorkflowPlan> = {
 
 async function findSkillByName(name: string) {
   // Any scope: an extension skill must not shadow a same-named skill anywhere.
-  const row = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM skills WHERE name = ? ORDER BY createdAt LIMIT 1",
-    [name],
-  );
-  return row ? await getSkillById(row.id) : null;
+  const id = await getStorage().repos.skills.findOldestSkillIdByName(name);
+  return id ? await getSkillById(id) : null;
 }
 
 const skillAdapter: Adapter<SkillPlan> = {
@@ -713,10 +701,7 @@ const KIND_ORDER: ExtensionAssetKind[] = ["script", "schedule", "workflow", "ski
 // ─── Provenance ─────────────────────────────────────────────────────────────
 
 async function listAssetRows(extensionId: string): Promise<ExtensionAssetRow[]> {
-  return await getDbClient().query<ExtensionAssetRow>(
-    "SELECT * FROM extension_assets WHERE extensionId = ? ORDER BY kind, name",
-    [extensionId],
-  );
+  return await getStorage().repos.extensions.listAssets(extensionId);
 }
 
 async function upsertAssetRow(args: {
@@ -728,41 +713,30 @@ async function upsertAssetRow(args: {
   enabledBefore: number | null;
   actor: Actor;
 }): Promise<void> {
-  const now = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO extension_assets (
-      id, extensionId, kind, assetId, name, seededHash, enabledBefore,
-      created_by, updated_by, createdAt, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(extensionId, kind, name) DO UPDATE SET
-      assetId = excluded.assetId, seededHash = excluded.seededHash,
-      enabledBefore = excluded.enabledBefore, updated_by = excluded.updated_by,
-      updatedAt = excluded.updatedAt`,
-    [
-      crypto.randomUUID(),
-      args.extensionId,
-      args.kind,
-      args.assetId,
-      args.name,
-      args.seededHash,
-      args.enabledBefore,
-      args.actor,
-      args.actor,
-      now,
-      now,
-    ],
-  );
+  await getStorage().repos.extensions.upsertAsset({
+    id: crypto.randomUUID(),
+    extensionId: args.extensionId,
+    kind: args.kind,
+    assetId: args.assetId,
+    name: args.name,
+    seededHash: args.seededHash,
+    enabledBefore: args.enabledBefore,
+    actor: args.actor,
+    now: new Date().toISOString(),
+  });
 }
 
 async function setEnabledBefore(row: ExtensionAssetRow, value: number | null, actor: Actor) {
-  await getDbClient().run(
-    "UPDATE extension_assets SET enabledBefore = ?, updated_by = ?, updatedAt = ? WHERE id = ?",
-    [value, actor, new Date().toISOString(), row.id],
+  await getStorage().repos.extensions.setAssetEnabledBefore(
+    row.id,
+    value,
+    actor,
+    new Date().toISOString(),
   );
 }
 
 async function deleteAssetRow(id: string): Promise<void> {
-  await getDbClient().run("DELETE FROM extension_assets WHERE id = ?", [id]);
+  await getStorage().repos.extensions.deleteAsset(id);
 }
 
 // ─── Reconcile (inside the caller's transaction) ────────────────────────────
@@ -888,7 +862,7 @@ export async function setAssetsEnabled(
   actor?: string | null,
 ): Promise<void> {
   const by = actor ?? null;
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     for (const row of await listAssetRows(extensionId)) {
       const toggle = adapterFor(row.kind).enabled;
       if (!toggle) continue;

@@ -1,4 +1,4 @@
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
 
 /**
  * Outcome card groups: one Slack message (the host card) that shows the
@@ -36,12 +36,7 @@ type HostRow = {
 };
 
 async function mergedTaskIds(hostId: string): Promise<string[]> {
-  const rows = await getDbClient().query<{ task_id: string }>(
-    `SELECT task_id FROM slack_messages
-       WHERE merged_into_id = ? AND kind = 'outcome' AND task_id IS NOT NULL
-       ORDER BY created_at ASC, id ASC`,
-    [hostId],
-  );
+  const rows = await getStorage().repos.slack.listMergedOutcomeTasks(hostId);
   return rows.map((row) => row.task_id);
 }
 
@@ -57,22 +52,14 @@ async function toHost(row: HostRow): Promise<SlackOutcomeGroupHost> {
   };
 }
 
-const HOST_COLUMNS = `id, ts, task_id, context_key, permalink, conclusion_kind`;
-const DELIVERED_HOST_SQL = `kind = 'outcome' AND task_id IS NOT NULL AND merged_into_id IS NULL
-  AND finalized_at IS NOT NULL AND delivery_abandoned_at IS NULL
-  AND ts NOT LIKE 'pending:%' AND ts NOT LIKE '${MERGED_SLACK_MESSAGE_TS_PREFIX}%'`;
-
 /** The newest delivered, unmerged outcome card in the thread, or null. */
 export async function getLatestSlackOutcomeGroupHost(
   channelId: string,
   threadTs: string,
 ): Promise<SlackOutcomeGroupHost | null> {
-  const row = await getDbClient().get<HostRow>(
-    `SELECT ${HOST_COLUMNS} FROM slack_messages
-       WHERE channel_id = ? AND thread_ts = ? AND ${DELIVERED_HOST_SQL}
-       ORDER BY finalized_at DESC, created_at DESC
-       LIMIT 1`,
-    [channelId, threadTs],
+  const row: HostRow | null = await getStorage().repos.slack.findLatestOutcomeHost(
+    channelId,
+    threadTs,
   );
   return row ? await toHost(row) : null;
 }
@@ -85,16 +72,10 @@ export async function getLatestSlackOutcomeGroupHost(
 export async function getSlackOutcomeGroupOf(
   messageId: string,
 ): Promise<SlackOutcomeGroupHost | null> {
-  const own = await getDbClient().get<{ merged_into_id: string | null }>(
-    `SELECT merged_into_id FROM slack_messages WHERE id = ?`,
-    [messageId],
-  );
+  const own = await getStorage().repos.slack.findMergedIntoId(messageId);
   if (!own) return null;
   const hostId = own.merged_into_id ?? messageId;
-  const row = await getDbClient().get<HostRow>(
-    `SELECT ${HOST_COLUMNS} FROM slack_messages WHERE id = ? AND ${DELIVERED_HOST_SQL}`,
-    [hostId],
-  );
+  const row: HostRow | null = await getStorage().repos.slack.findOutcomeHost(hostId);
   if (!row) return null;
   const host = await toHost(row);
   return host.mergedTaskIds.length > 0 ? host : null;
@@ -114,28 +95,16 @@ export async function recordMergedSlackOutcome(input: {
 }): Promise<boolean> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const row = await getDbClient().get<{ id: string }>(
-    `INSERT INTO slack_messages (
-         id, context_key, channel_id, thread_ts, ts, kind, task_id, permalink,
-         finalized_at, merged_into_id, created_at, updated_at, created_by, updated_by
-       ) VALUES (?, ?, ?, ?, ?, 'outcome', ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT DO NOTHING
-       RETURNING id`,
-    [
-      id,
-      input.host.contextKey,
-      input.channelId,
-      input.threadTs,
-      `${MERGED_SLACK_MESSAGE_TS_PREFIX}${id}`,
-      input.taskId,
-      input.host.permalink,
-      now,
-      input.host.id,
-      now,
-      now,
-      input.actorId ?? null,
-      input.actorId ?? null,
-    ],
-  );
-  return !!row;
+  return getStorage().repos.slack.insertMergedOutcome({
+    id,
+    contextKey: input.host.contextKey,
+    channelId: input.channelId,
+    threadTs: input.threadTs,
+    ts: `${MERGED_SLACK_MESSAGE_TS_PREFIX}${id}`,
+    taskId: input.taskId,
+    permalink: input.host.permalink,
+    hostId: input.host.id,
+    actorId: input.actorId ?? null,
+    now,
+  });
 }
