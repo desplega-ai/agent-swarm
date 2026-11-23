@@ -6,18 +6,18 @@ declare module "swarm-extension" {
     creatorAgentId?: string | undefined;
     source?:
       | "chat"
-      | "workflow"
-      | "schedule"
-      | "api"
       | "mcp"
-      | "system"
       | "slack"
-      | "agentmail"
+      | "api"
       | "ui"
       | "github"
       | "gitlab"
       | "azure-devops"
       | "bitbucket"
+      | "agentmail"
+      | "system"
+      | "schedule"
+      | "workflow"
       | "linear"
       | "jira"
       | "comb"
@@ -36,7 +36,7 @@ declare module "swarm-extension" {
     priority?: number | undefined;
     dependsOn?: string[] | undefined;
     offeredTo?: string | undefined;
-    status?: "unassigned" | "draft" | "backlog" | undefined;
+    status?: "draft" | "backlog" | "unassigned" | undefined;
     slackChannelId?: string | undefined;
     slackThreadTs?: string | undefined;
     slackTriggerMessageTs?: string | undefined;
@@ -145,31 +145,31 @@ declare module "swarm-extension" {
     status:
       | "pending"
       | "failed"
-      | "completed"
-      | "cancelled"
-      | "skipped"
-      | "superseded"
+      | "draft"
+      | "backlog"
       | "unassigned"
       | "offered"
       | "reviewing"
       | "in_progress"
       | "paused"
-      | "draft"
-      | "backlog";
+      | "completed"
+      | "cancelled"
+      | "superseded"
+      | "skipped";
     source:
       | "chat"
-      | "workflow"
-      | "schedule"
-      | "api"
       | "mcp"
-      | "system"
       | "slack"
-      | "agentmail"
+      | "api"
       | "ui"
       | "github"
       | "gitlab"
       | "azure-devops"
       | "bitbucket"
+      | "agentmail"
+      | "system"
+      | "schedule"
+      | "workflow"
       | "linear"
       | "jira"
       | "comb";
@@ -202,13 +202,13 @@ declare module "swarm-extension" {
     statusKind?:
       | "error"
       | "agent"
+      | "system"
       | "workflow"
       | "user"
       | "external"
       | "runner"
       | "deferred"
       | "cascade"
-      | "system"
       | "graceful_shutdown"
       | "context_limits"
       | "manual_supersede"
@@ -364,7 +364,7 @@ declare module "swarm-extension" {
 
   export type SteerMode = "steer" | "queue";
 
-  export type SteeringSource = "chat" | "script" | "api" | "mcp" | "slack" | "ui" | "app-page";
+  export type SteeringSource = "chat" | "mcp" | "slack" | "api" | "ui" | "script" | "app-page";
 
   export type RequestInfo = {
     sessionId: string | undefined;
@@ -373,7 +373,7 @@ declare module "swarm-extension" {
     sourceTaskId: string | undefined;
     auditSourceTaskId: string | undefined;
     contextKey: string | undefined;
-    callOrigin: "native" | "extension" | "mcp" | "script-sdk";
+    callOrigin: "native" | "mcp" | "extension" | "script-sdk";
     harness?: string | undefined;
   };
 
