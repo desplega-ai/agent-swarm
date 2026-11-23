@@ -1624,6 +1624,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_WORKFLOW_BOT_IDS",
+        label: "Bots that start Slack workflows",
+        description:
+          "Comma-separated `CHANNEL_ID:BOT_ID` pairs. A post from a listed bot in its listed channel starts `slack.message` workflows, and never creates an agent task. Unset drops every bot message. The swarm's own bot is always ignored.",
+        kind: "string",
+        placeholder: "e.g. C0123ABCD:B0123ABCD",
+        docsUrl: `${DOCS}integrations/slack#bot-messages-and-workflows`,
+      },
+      {
         key: "LINEAR_ALLOWED_STATES",
         label: "Linear pickup states",
         description:

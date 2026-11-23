@@ -2,6 +2,7 @@ import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
 import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemetry-ranking";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
+import { SLACK_WORKFLOW_BOT_IDS_KEY, validateSlackWorkflowBotIds } from "../slack/workflow-bots";
 import { ProviderNameSchema } from "../types";
 import {
   UI_SPEC_SCRIPT_ACTIONS_KEY,
@@ -781,6 +782,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
   ...enumValidator("SLACK_SESSION_MIRROR", ["off", "reply", "both"]),
+  [SLACK_WORKFLOW_BOT_IDS_KEY]: validateSlackWorkflowBotIds,
   ...shortcodeValidators([
     "SLACK_REACTION_ACCEPTED",
     "SLACK_REACTION_BUFFERED",
