@@ -27,16 +27,18 @@ trap 'rm -f "$S"/tmp/*."$$" "$S"/tmp/*."$$".*' EXIT
 # call METHOD PATH AGENT_ID|- [JSON_BODY] [IDEMPOTENCY_KEY]
 # Sets CODE (000 when there was no complete answer) and writes the body to $RESP.
 # The harness gives up on a command after 10 s of guest time. A step makes at most two
-# requests (a poll, then a create), so each request stops at 4 s.
+# requests (a poll, then a create), so each request stops at 4 s (CALL_MAX_S).
 call() {
   local method=$1 path=$2 agent=$3 body=${4-} idem=${5-}
-  local args=(-sS -m 4 --connect-timeout 2 -o "$RESP" -w '%{http_code}' -X "$method"
+  local max=${CALL_MAX_S:-4}
+  local args=(-sS -m "$max" --connect-timeout 2 -o "$RESP" -w '%{http_code}' -X "$method"
     -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json')
   [ "$agent" != - ] && args+=(-H "X-Agent-ID: $agent")
   [ -n "$idem" ] && args+=(-H "Idempotency-Key: $idem")
   [ -n "$body" ] && args+=(-d "$body")
   : >"$RESP"
-  CODE=$(curl "${args[@]}" "$API$path" 2>/dev/null) || CODE=000
+  # `timeout` as well: curl's own limit does not stop a name lookup that hangs.
+  CODE=$(timeout -k 1 "$((${max%.*} + 1))" curl "${args[@]}" "$API$path" 2>/dev/null) || CODE=000
   [ -n "$CODE" ] || CODE=000
 }
 

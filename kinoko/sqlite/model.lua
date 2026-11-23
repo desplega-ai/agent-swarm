@@ -18,11 +18,13 @@ for n = 1, 19 do
 end
 setup("the API answers", "client", "/k/wait-api 25 1")
 setup("four workers register", "client", "/k/act init")
+-- Every line of the search starts here: four tasks wait, agents 1 and 2 hold one each.
+setup("six tasks, two of them claimed", "client", "/k/act seed")
 
 -- The audit line, `name=number ...` (the fields: kinoko/images/swarm/k/audit).
 -- One anchored match per field keeps the pattern cost small.
 local FIELDS = {
-  "api", "tasks", "lost", "double", "redispatch", "idem", "regress", "flip", "stuck",
+  "api", "away", "hung", "tasks", "lost", "double", "redispatch", "idem", "regress", "flip", "stuck",
   "overcap", "orphan", "dupchild", "pool", "pending", "inprog", "done", "failed", "superseded", "cancelled",
 }
 resource("audit", {
@@ -57,19 +59,16 @@ action("work", { bash = "client" }, function(draw, r)
 end)
 
 -- The operator: a new pool task (the request sent once or twice at the same time,
--- under one Idempotency-Key), an old create sent again, a cancel, and a heartbeat
--- sweep at a moment of the search's choosing.
-action("create", { bash = "client" }, function(draw, r)
-  return { command = "/k/act create " .. draw.int(1, 2) }
-end)
-action("replay", { bash = "client" }, function(draw, r)
-  return { command = "/k/act replay " .. draw.int(1, 64) }
-end)
-action("cancel", { bash = "client" }, function(draw, r)
-  return { command = "/k/act cancel " .. draw.int(1, 64) }
-end)
-action("sweep", { bash = "client" }, function(draw, r)
-  return { command = "/k/act sweep" }
+-- under one Idempotency-Key), an old create sent again, a cancel, or a heartbeat
+-- sweep at a moment of the search's choosing. One action, so that half of the
+-- actions of a line are worker steps.
+action("ops", { bash = "client" }, function(draw, r)
+  local kind = draw.pick({ "create 1", "create 2", "replay", "cancel", "sweep" })
+  local n = draw.int(1, 64)
+  if kind == "replay" or kind == "cancel" then
+    return { command = "/k/act " .. kind .. " " .. n }
+  end
+  return { command = "/k/act " .. kind }
 end)
 
 -- 1. At most one agent holds a claimed task.
@@ -81,16 +80,22 @@ always("a running task has an agent", function(r) return r.audit.orphan == 0 end
 -- 2. A task the API acknowledged is readable.
 always("an acknowledged task is readable", function(r) return r.audit.lost == 0 end)
 always("an Idempotency-Key names one task", function(r) return r.audit.idem == 0 end)
-eventually("the API answers after things settle", function(r) return r.audit.api == 1 end)
+-- The API comes back. Kinoko judges an `eventually` check a few seconds after the
+-- faults stop, before a killed API has started again, so this is a bound in guest
+-- time instead: the task list is never unreadable for 40 s.
+always("the API comes back after a fault", function(r) return r.audit.away <= 40 end)
+-- An API that answers /health also serves requests. A fault lasts 5 s at most, so
+-- 20 s of "healthy, but the task list does not read" is an API that hangs.
+always("an API that answers /health serves the task list", function(r) return r.audit.hung <= 20 end)
 
 -- 3. A terminal task stays terminal.
 always("a terminal task stays terminal", function(r) return r.audit.regress == 0 end)
 always("a terminal status does not change", function(r) return r.audit.flip == 0 end)
 
--- 4. Crash recovery: no task stays in_progress with nobody working on it.
-eventually("no task stays in_progress without a live agent", function(r)
-  return r.audit.api == 1 and r.audit.stuck == 0
-end)
+-- 4. Crash recovery: no task stays in_progress with nobody working on it. The bound
+-- is 20 s without an update while the API reads (a sweep every 2 s takes a task with
+-- no session after 6 s).
+always("no task stays in_progress without a live agent", function(r) return r.audit.stuck == 0 end)
 
 -- Crash recovery replaces a task it takes (a resume, or a retry after a reboot) once.
 always("crash recovery makes one follow-up per task", function(r) return r.audit.dupchild == 0 end)
@@ -107,9 +112,7 @@ local function no_violation(asked, answer)
   return string.find(answer.result.stdout, "viol=", 1, true) == nil
 end
 reply("work", "work: the answers fit the contract", no_violation)
-reply("create", "create: the answer fits the contract", no_violation)
-reply("replay", "replay: the answer fits the contract", no_violation)
-reply("cancel", "cancel: the answer fits the contract", no_violation)
+reply("ops", "ops: the answer fits the contract", no_violation)
 
 -- Variant: SQLite. What may go wrong for a while, then stops.
 -- The API killed and started again (crash recovery of the WAL file):
@@ -124,7 +127,4 @@ local function no_server_error(asked, answer)
   return string.find(answer.result.stdout, "http=5", 1, true) == nil
 end
 reply("work", "work: no server error on SQLite", no_server_error)
-reply("create", "create: no server error on SQLite", no_server_error)
-reply("replay", "replay: no server error on SQLite", no_server_error)
-reply("cancel", "cancel: no server error on SQLite", no_server_error)
-reply("sweep", "sweep: no server error on SQLite", no_server_error)
+reply("ops", "ops: no server error on SQLite", no_server_error)

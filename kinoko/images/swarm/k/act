@@ -3,6 +3,8 @@
 #
 # Usage: /k/act <verb> [args]
 #   init             register the simulated workers (setup)
+#   seed             six pool tasks, two of them claimed by agents 1 and 2 (setup), so
+#                    every line of the search starts with waiting and running tasks
 #   work N MODE      agents 1..N take one step each, at the same time. An agent that
 #                    holds a task does MODE on it: finish | fail | progress | abandon
 #                    (abandon: the worker died, it never finishes the task). An agent
@@ -197,6 +199,12 @@ case $verb in
     done
     : >>"$J"
     echo "init agents=$n"
+    ;;
+
+  seed)
+    for n in 1 2 3 4 5 6; do create_task 1 seed; done
+    step 1 finish
+    step 2 finish
     ;;
 
   work)

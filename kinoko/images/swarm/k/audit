@@ -4,6 +4,8 @@
 #
 # Prints one line of `name=number` fields:
 #   api         1 when the task list was read, else 0 (the fields below marked * are then 0)
+#   away        seconds since the task list was last read (0 when api=1)
+#   hung        seconds for which /health answered 200 while the task list did not read
 #   tasks       tasks in the list *
 #   lost        acknowledged task ids that are not in the list *
 #   double      tasks that two different agents were handed
@@ -34,20 +36,39 @@ cp "$J" "$snap" 2>/dev/null || : >"$snap"
 : >"$tsv"
 : >"$newterm"
 
+# The harness drops a reading that takes a few seconds (one of 4 s never arrived), so
+# both requests stop at 1.2 s and run at the same time.
+health="$S/tmp/health.$$"
+(timeout -k 1 2 curl -s -m 1.2 --connect-timeout 1 -o /dev/null -w '%{http_code}' "$API/health" >"$health" 2>/dev/null) &
 RESP=$list
-call GET '/api/tasks?limit=5000' -
+CALL_MAX_S=1.2 call GET '/api/tasks?limit=5000' -
+wait
 api=0
 if [ "$CODE" = 200 ] && jq -r '.tasks[] | [.id, .status, (.agentId // "-"), (.lastUpdatedAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601), (.parentTaskId // "-")] | @tsv' "$list" >"$tsv" 2>/dev/null; then
   api=1
+  away=0
+  echo "$now" >"$S/api_last_ok"
   [ -s "$S/api_up_since" ] || echo "$now" >"$S/api_up_since"
   up=$(cat "$S/api_up_since")
 else
   : >"$tsv"
   rm -f "$S/api_up_since"
   up=$now
+  [ -s "$S/api_last_ok" ] || echo "$now" >"$S/api_last_ok"
+  away=$((now - $(cat "$S/api_last_ok")))
+fi
+# Up by its own health route, but the route that needs the database does not answer.
+if [ "$api" = 0 ] && [ "$(cat "$health" 2>/dev/null)" = 200 ]; then
+  [ -s "$S/hung_since" ] || echo "$now" >"$S/hung_since"
+  hung=$((now - $(cat "$S/hung_since")))
+  state=2
+else
+  rm -f "$S/hung_since"
+  hung=0
+  state=$api
 fi
 
-awk -v api="$api" -v now="$now" -v up="$up" -v stuck_after="${STUCK_AFTER_S:-45}" \
+awk -v api="$api" -v away="$away" -v hung="$hung" -v state="$state" -v now="$now" -v up="$up" -v stuck_after="${STUCK_AFTER_S:-20}" \
   -v journal="$snap" -v newterm="$newterm" -v shape="$S/shape" '
 BEGIN {
   n = split("completed failed cancelled superseded skipped", names, " ")
@@ -91,15 +112,16 @@ END {
   if (api) for (k in known) if (!(k in seen)) lost++
   for (a in per) if (a != "-" && per[a] > 1) overcap++
   for (p in kids) if (kids[p] > 1) dupchild++
-  printf "api=%d tasks=%d lost=%d double=%d redispatch=%d idem=%d regress=%d flip=%d stuck=%d overcap=%d orphan=%d dupchild=%d", \
-    api, tasks, lost, double, redispatch, idem, regress, flip, stuck, overcap, orphan, dupchild
+  printf "api=%d away=%d hung=%d tasks=%d lost=%d double=%d redispatch=%d idem=%d regress=%d flip=%d stuck=%d overcap=%d orphan=%d dupchild=%d", \
+    api, away, hung, tasks, lost, double, redispatch, idem, regress, flip, stuck, overcap, orphan, dupchild
   printf " pool=%d pending=%d inprog=%d done=%d failed=%d superseded=%d cancelled=%d\n", \
     by["unassigned"], by["pending"], by["in_progress"], by["completed"], by["failed"], by["superseded"], by["cancelled"]
   # What the search steers by: a few small numbers, not the whole state.
   running = by["in_progress"] > 4 ? 4 : by["in_progress"]
   recovered = by["superseded"] + by["failed"]; if (recovered > 3) recovered = 3
   queued = by["unassigned"] + by["pending"]; if (queued > 2) queued = 2
-  printf "a%di%dr%dq%d\n", api, running, recovered, queued > shape
+  # a: 1 the list reads, 0 the API is away, 2 it answers /health only.
+  printf "a%di%dr%dq%d\n", state, running, recovered, queued > shape
 }' "$snap" "$tsv"
 
 # Remember each terminal status the list showed, for `regress` and `flip` later.

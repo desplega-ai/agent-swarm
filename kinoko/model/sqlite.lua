@@ -11,7 +11,4 @@ local function no_server_error(asked, answer)
   return string.find(answer.result.stdout, "http=5", 1, true) == nil
 end
 reply("work", "work: no server error on SQLite", no_server_error)
-reply("create", "create: no server error on SQLite", no_server_error)
-reply("replay", "replay: no server error on SQLite", no_server_error)
-reply("cancel", "cancel: no server error on SQLite", no_server_error)
-reply("sweep", "sweep: no server error on SQLite", no_server_error)
+reply("ops", "ops: no server error on SQLite", no_server_error)
