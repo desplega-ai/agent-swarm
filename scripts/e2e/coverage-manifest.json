@@ -225,9 +225,10 @@
   ],
   "flows": {
     "storage-engine-parity": {
-      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
+      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
       "scenarios": [
         "upgrade-base-db",
+        "tasks-historical-values",
         "storage-recovery",
         "data-copy",
         "divergence-fulltext-search",
