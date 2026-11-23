@@ -1,0 +1,249 @@
+#!/bin/bash
+# The simulated clients of the agent-swarm API. One call is one client step.
+#
+# Usage: /k/act <verb> [args]
+#   init             register the simulated workers (setup)
+#   work N MODE      agents 1..N take one step each, at the same time. An agent that
+#                    holds a task does MODE on it: finish | fail | progress | abandon
+#                    (abandon: the worker died, it never finishes the task). An agent
+#                    that holds none polls; when the poll hands it nothing and few
+#                    tasks wait, it creates a pool task, so a line of `work` alone
+#                    never runs dry.
+#   create COPIES    create one pool task; the request is sent COPIES times at once
+#                    under one Idempotency-Key. A create that got no answer before is
+#                    sent again first, with its old key (a client that retries).
+#   replay N         send the create of the N-th key again (same key, same body)
+#   cancel N         an operator cancels the N-th created task
+#   sweep            an operator runs one heartbeat sweep
+#
+# Prints one line per request: `<verb> key=value ...`. A line with `viol=<name>` is an
+# answer that breaks the API contract; the reply checks of model.lua fail on it.
+set -u
+. /k/lib.sh
+
+verb=${1-}
+shift || true
+
+# The first task that agent N holds, in name order. Empty when it holds none.
+first_held() { ls "$S/held/$1" 2>/dev/null | head -n 1; }
+
+# send_create KEY LABEL: one create request under KEY.
+send_create() {
+  local key=$1 label=$2 id prev status
+  call POST /api/tasks - "{\"task\":\"kinoko task $key\"}" "$key"
+  case $CODE in
+    200 | 201)
+      id=$(jq -r '.id // empty' "$RESP" 2>/dev/null)
+      status=$(jq -r '.status // empty' "$RESP" 2>/dev/null)
+      if [ -z "$id" ]; then
+        echo "$label key=$key http=$CODE viol=create-without-id"
+        return
+      fi
+      prev=$(awk -v k="$key" '$1 == "created" && $2 == k { print $3; exit }' "$J" 2>/dev/null)
+      jline "created $key $id"
+      is_terminal "$status" && jline "term $id $status"
+      if [ -n "$prev" ] && [ "$prev" != "$id" ]; then
+        echo "$label key=$key http=$CODE task=$id first=$prev viol=idempotency-key-made-two-tasks"
+      else
+        echo "$label key=$key http=$CODE task=$id status=$status"
+      fi
+      ;;
+    4??)
+      # Same key, same body, valid task: the API has no reason to refuse it.
+      jline "refused $key $CODE"
+      echo "$label key=$key http=$CODE viol=create-refused: $(head -c 160 "$RESP" | tr '\n' ' ')"
+      ;;
+    *) echo "$label key=$key http=$CODE" ;; # no answer or 5xx: sent again later
+  esac
+}
+
+# create_task COPIES LABEL: retry the oldest create without an answer, else a new key.
+create_task() {
+  local copies=$1 label=$2 key n
+  key=$(awk '$1 == "intent" { order[c++] = $2 } $1 == "created" || $1 == "refused" { done[$2] = 1 }
+    END { for (i = 0; i < c; i++) if (!(order[i] in done)) { print order[i]; exit } }' "$J" 2>/dev/null)
+  if [ -z "$key" ]; then
+    # The guest's clock is counted, so this key is the same when a run goes again.
+    key="k$(date +%s%N)p$BASHPID"
+    jline "intent $key"
+  fi
+  if [ "$copies" -le 1 ]; then
+    send_create "$key" "$label"
+    return
+  fi
+  for n in $(seq 1 "$copies"); do
+    (RESP="$RESP.c$n" && send_create "$key" "$label") &
+  done
+  wait
+}
+
+# Created tasks that no agent claimed and no answer showed as terminal.
+backlog() {
+  awk '$1 == "created" { made[$3] = 1 } $1 == "claim" || $1 == "term" { gone[$2] = 1 }
+    END { for (id in made) if (!(id in gone)) n++; print n + 0 }' "$J" 2>/dev/null
+}
+
+step_poll() {
+  local i=$1 a=$2 type tid st ag other again out
+  call GET /api/poll "$a"
+  if [ "$CODE" != 200 ]; then
+    echo "poll agent=$i http=$CODE"
+    return
+  fi
+  IFS=$'\t' read -r type tid st ag < <(jq -r '[.trigger.type // "none", .trigger.taskId // "-", .trigger.task.status // "-", .trigger.task.agentId // "-"] | @tsv' "$RESP" 2>/dev/null)
+  case ${type-} in
+    task_assigned | task_offered)
+      other=$(awk -v t="$tid" -v i="$i" '$1 == "claim" && $2 == t && $3 != i { print $3; exit }' "$J")
+      again=$(awk -v t="$tid" -v i="$i" '$1 == "claim" && $2 == t && $3 == i { print 1; exit }' "$J")
+      jline "claim $tid $i"
+      : >"$S/held/$i/$tid"
+      out="poll agent=$i http=200 trigger=$type task=$tid status=$st"
+      if [ -n "$other" ]; then
+        out="$out other=$other viol=task-claimed-by-two-agents"
+      elif [ -n "$again" ]; then
+        out="$out viol=task-dispatched-twice"
+      elif [ "$type" = task_assigned ] && { [ "$st" != in_progress ] || [ "$ag" != "$a" ]; }; then
+        out="$out owner=$ag viol=claim-answer-is-not-a-running-task-of-the-caller"
+      fi
+      echo "$out"
+      ;;
+    '') echo "poll agent=$i http=200 viol=poll-answer-is-not-json" ;;
+    *)
+      echo "poll agent=$i http=200 trigger=$type"
+      # Nothing to do: add a task, unless enough created tasks still wait for a claim.
+      if [ "$type" = none ] && [ "$(backlog)" -lt 4 ]; then create_task 1 "create-by-$i"; fi
+      ;;
+  esac
+}
+
+step_progress() {
+  local i=$1 a=$2 tid=$3
+  call POST "/api/tasks/$tid/progress" "$a" '{"progress":"kinoko: working"}'
+  case $CODE in
+    403) echo "progress agent=$i task=$tid http=403 viol=held-task-belongs-to-another-agent" ;;
+    404) echo "progress agent=$i task=$tid http=404 viol=held-task-does-not-exist" ;;
+    *) echo "progress agent=$i task=$tid http=$CODE" ;;
+  esac
+}
+
+step_finish() {
+  local i=$1 a=$2 tid=$3 mode=$4 body st
+  if [ "$mode" = fail ]; then
+    body='{"status":"failed","failureReason":"kinoko: simulated failure"}'
+  else
+    body='{"status":"completed","output":"kinoko: done"}'
+  fi
+  call POST "/api/tasks/$tid/finish" "$a" "$body"
+  case $CODE in
+    200 | 409)
+      # 409: the task was already terminal (superseded, failed or cancelled by the API).
+      st=$(jq -r '.task.status // empty' "$RESP" 2>/dev/null)
+      rm -f "$S/held/$i/$tid"
+      if is_terminal "$st"; then
+        jline "term $tid $st"
+        echo "$mode agent=$i task=$tid http=$CODE status=$st"
+      else
+        # The agent held an acknowledged claim, so the task was in_progress or terminal.
+        echo "$mode agent=$i task=$tid http=$CODE status=$st viol=claimed-task-is-neither-running-nor-terminal"
+      fi
+      ;;
+    403)
+      rm -f "$S/held/$i/$tid"
+      echo "$mode agent=$i task=$tid http=403 viol=held-task-belongs-to-another-agent"
+      ;;
+    404)
+      rm -f "$S/held/$i/$tid"
+      echo "$mode agent=$i task=$tid http=404 viol=held-task-does-not-exist"
+      ;;
+    *) echo "$mode agent=$i task=$tid http=$CODE" ;; # no answer or 5xx: try again later
+  esac
+}
+
+# One step of agent N in MODE.
+step() {
+  local i=$1 mode=$2 a tid
+  a=$(agent_id "$i")
+  [ -n "$a" ] || return 0
+  tid=$(first_held "$i")
+  if [ -z "$tid" ]; then
+    step_poll "$i" "$a"
+    return
+  fi
+  case $mode in
+    progress) step_progress "$i" "$a" "$tid" ;;
+    abandon)
+      rm -f "$S/held/$i/$tid"
+      jline "abandon $tid $i"
+      echo "abandon agent=$i task=$tid"
+      ;;
+    *) step_finish "$i" "$a" "$tid" "$mode" ;;
+  esac
+}
+
+case $verb in
+  init)
+    n=0
+    for a in "${AGENTS[@]}"; do
+      n=$((n + 1))
+      mkdir -p "$S/held/$n"
+      call POST /api/agents "$a" "{\"name\":\"kinoko-worker-$n\",\"role\":\"worker\",\"maxTasks\":1}"
+      case $CODE in
+        200 | 201) ;;
+        *)
+          echo "init agent=$n http=$CODE: $(head -c 300 "$RESP")"
+          exit 1
+          ;;
+      esac
+    done
+    : >>"$J"
+    echo "init agents=$n"
+    ;;
+
+  work)
+    count=${1:-1}
+    mode=${2:-finish}
+    for i in $(seq 1 "$count"); do
+      (RESP="$RESP.a$i" && step "$i" "$mode") &
+    done
+    wait
+    ;;
+
+  create)
+    create_task "${1:-1}" create
+    ;;
+
+  replay)
+    key=$(awk -v n="${1:-1}" '$1 == "intent" { k[c++] = $2 } END { if (c) print k[(n - 1) % c] }' "$J" 2>/dev/null)
+    if [ -z "$key" ]; then
+      echo "replay noop=1"
+      exit 0
+    fi
+    send_create "$key" replay
+    ;;
+
+  cancel)
+    tid=$(awk -v n="${1:-1}" '$1 == "created" && !($3 in seen) { seen[$3] = 1; id[c++] = $3 } END { if (c) print id[(n - 1) % c] }' "$J" 2>/dev/null)
+    if [ -z "$tid" ]; then
+      echo "cancel noop=1"
+      exit 0
+    fi
+    call POST "/api/tasks/$tid/cancel" - '{}'
+    st=$(jq -r '.task.status // empty' "$RESP" 2>/dev/null)
+    if [ "$CODE" = 200 ] && is_terminal "$st"; then jline "term $tid $st"; fi
+    if [ "$CODE" = 404 ]; then
+      echo "cancel task=$tid http=404 viol=created-task-does-not-exist"
+    else
+      echo "cancel task=$tid http=$CODE status=$st"
+    fi
+    ;;
+
+  sweep)
+    call POST /api/heartbeat/sweep - '{}'
+    echo "sweep http=$CODE"
+    ;;
+
+  *)
+    echo "act: unknown verb '$verb'" >&2
+    exit 2
+    ;;
+esac

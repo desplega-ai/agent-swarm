@@ -1,0 +1,107 @@
+#!/bin/bash
+# The reading behind the checks of model.lua. One call compares what the API
+# acknowledged (the journal) with what it says now (GET /api/tasks).
+#
+# Prints one line of `name=number` fields:
+#   api         1 when the task list was read, else 0 (the fields below marked * are then 0)
+#   tasks       tasks in the list *
+#   lost        acknowledged task ids that are not in the list *
+#   double      tasks that two different agents were handed
+#   redispatch  tasks that one agent was handed more than once
+#   idem        Idempotency-Keys that answered with more than one task id
+#   regress     tasks seen terminal before that are not terminal now *
+#   flip        tasks seen terminal before that hold another terminal status now *
+#   stuck       in_progress tasks with no update for STUCK_AFTER_S seconds, counted
+#               from the later of the task's last update and the moment the list
+#               became readable again (a sweep cannot run while the API is away) *
+#   overcap     agents with more in_progress tasks than their maxTasks (1) *
+#   orphan      in_progress tasks without an agent *
+#   dupchild    tasks with more than one child task. The model gives no task a parent,
+#               so a child is a follow-up of crash recovery (a resume or a reboot retry) *
+#   pool pending inprog done failed superseded cancelled   tasks by status *
+set -u
+. /k/lib.sh
+
+now=$(date +%s)
+snap="$S/tmp/journal.$$"
+list="$S/tmp/list.$$"
+tsv="$S/tmp/tsv.$$"
+newterm="$S/tmp/newterm.$$"
+
+# The journal first, the list second: every id in this snapshot was acknowledged
+# before the list was asked for.
+cp "$J" "$snap" 2>/dev/null || : >"$snap"
+: >"$tsv"
+: >"$newterm"
+
+RESP=$list
+call GET '/api/tasks?limit=5000' -
+api=0
+if [ "$CODE" = 200 ] && jq -r '.tasks[] | [.id, .status, (.agentId // "-"), (.lastUpdatedAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601), (.parentTaskId // "-")] | @tsv' "$list" >"$tsv" 2>/dev/null; then
+  api=1
+  [ -s "$S/api_up_since" ] || echo "$now" >"$S/api_up_since"
+  up=$(cat "$S/api_up_since")
+else
+  : >"$tsv"
+  rm -f "$S/api_up_since"
+  up=$now
+fi
+
+awk -v api="$api" -v now="$now" -v up="$up" -v stuck_after="${STUCK_AFTER_S:-45}" \
+  -v journal="$snap" -v newterm="$newterm" -v shape="$S/shape" '
+BEGIN {
+  n = split("completed failed cancelled superseded skipped", names, " ")
+  for (k = 1; k <= n; k++) terminal[names[k]] = 1
+}
+FILENAME == journal {
+  if ($1 == "created") {
+    known[$3] = 1
+    if (!(($2, $3) in keyid)) { keyid[$2, $3] = 1; nkey[$2]++ }
+  } else if ($1 == "claim") {
+    known[$2] = 1
+    nclaim[$2]++
+    if (!(($2, $3) in claimed)) { claimed[$2, $3] = 1; nagent[$2]++ }
+  } else if ($1 == "term") {
+    if (!($2 in term)) term[$2] = $3
+  }
+  next
+}
+{
+  seen[$1] = 1
+  tasks++
+  by[$2]++
+  if ($2 == "in_progress") {
+    per[$3]++
+    if ($3 == "-") orphan++
+    base = ($4 > up) ? $4 : up
+    if (now - base > stuck_after) stuck++
+  }
+  if ($5 != "-") kids[$5]++
+  if ($1 in term) {
+    if (!($2 in terminal)) regress++
+    else if ($2 != term[$1]) flip++
+  } else if ($2 in terminal) {
+    print "term", $1, $2 > newterm
+  }
+}
+END {
+  for (k in nkey) if (nkey[k] > 1) idem++
+  for (k in nagent) if (nagent[k] > 1) double++
+  for (k in nclaim) if (nclaim[k] > nagent[k]) redispatch++
+  if (api) for (k in known) if (!(k in seen)) lost++
+  for (a in per) if (a != "-" && per[a] > 1) overcap++
+  for (p in kids) if (kids[p] > 1) dupchild++
+  printf "api=%d tasks=%d lost=%d double=%d redispatch=%d idem=%d regress=%d flip=%d stuck=%d overcap=%d orphan=%d dupchild=%d", \
+    api, tasks, lost, double, redispatch, idem, regress, flip, stuck, overcap, orphan, dupchild
+  printf " pool=%d pending=%d inprog=%d done=%d failed=%d superseded=%d cancelled=%d\n", \
+    by["unassigned"], by["pending"], by["in_progress"], by["completed"], by["failed"], by["superseded"], by["cancelled"]
+  # What the search steers by: a few small numbers, not the whole state.
+  running = by["in_progress"] > 4 ? 4 : by["in_progress"]
+  recovered = by["superseded"] + by["failed"]; if (recovered > 3) recovered = 3
+  queued = by["unassigned"] + by["pending"]; if (queued > 2) queued = 2
+  printf "a%di%dr%dq%d\n", api, running, recovered, queued > shape
+}' "$snap" "$tsv"
+
+# Remember each terminal status the list showed, for `regress` and `flip` later.
+[ -s "$newterm" ] && cat "$newterm" >>"$J"
+exit 0
