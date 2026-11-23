@@ -212,6 +212,38 @@ describe("postgres client", () => {
     expect(rows.map((row) => row.id)).toEqual(["swallow-2"]);
   });
 
+  test("a serialization failure caught around a savepoint retries the whole callback", async () => {
+    let attempts = 0;
+    const hooks: number[] = [];
+    const value = await client.transaction(async () => {
+      attempts += 1;
+      const attempt = attempts;
+      if (attempt === 1) {
+        try {
+          await client.transaction(async () => {
+            await client.run(
+              `DO $$ BEGIN RAISE EXCEPTION 'conflict' USING ERRCODE = '40001'; END $$`,
+            );
+          });
+        } catch {
+          // The savepoint rolled back; the outer transaction stays usable.
+        }
+      }
+      await client.run(`INSERT INTO t VALUES ($1, $2, $3)`, [`sp-swallow-${attempt}`, "S", 1]);
+      client.afterCommit(() => {
+        hooks.push(attempt);
+      });
+      return attempt;
+    });
+    await tick();
+    expect(value).toBe(2);
+    expect(hooks).toEqual([2]);
+    const rows = await client.query<{ id: string }>(
+      `SELECT id FROM t WHERE id LIKE 'sp-swallow-%' ORDER BY id`,
+    );
+    expect(rows.map((row) => row.id)).toEqual(["sp-swallow-2"]);
+  });
+
   test("a statement outside a transaction that loses a serialization race runs again", async () => {
     await client.run(`INSERT INTO t VALUES ('solo', 'x', 0)`);
     const before = client.retriedAttempts;

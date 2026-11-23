@@ -116,6 +116,19 @@ type TxContext = {
 const txContext = new AsyncLocalStorage<TxContext>();
 
 /** Thrown inside `sql.begin` to roll back a replayed first attempt. */
+/**
+ * A retryable failure (40001, 40P01) that a statement hit and the callback
+ * caught, for example around a savepoint. The callback returned, but the
+ * transaction must not commit: it rolls back and the whole callback runs again.
+ */
+class SwallowedRetryableFailure extends Error {
+  constructor(readonly errno: string) {
+    super(
+      `[pg-client] the transaction caught a retryable failure (SQLSTATE ${errno}) and cannot commit`,
+    );
+  }
+}
+
 class ReplayRollback extends Error {
   constructor(readonly value: unknown) {
     super("tx-replay: first attempt rolled back");
@@ -264,6 +277,12 @@ export class PostgresClient implements DbClient {
             };
             const active = ctx;
             const result = await txContext.run(active, () => fn(this.boundExecutor(active)));
+            // A serialization failure inside a savepoint that the callback caught
+            // leaves the outer transaction usable, but its reads are no longer
+            // serializable: roll back and run the whole callback again.
+            if (active.failure.retryable !== null) {
+              throw new SwallowedRetryableFailure(active.failure.retryable);
+            }
             if (replaying) throw new ReplayRollback(result);
             if (opts.deadlineAt !== undefined && Date.now() > opts.deadlineAt) {
               throw new DbTransactionDeadlineError();
