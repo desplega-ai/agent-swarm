@@ -349,6 +349,38 @@ export const workflowGithubJiraEventTriggers: Scenario = {
         jiraMisses.map(([delivery]) => delivery),
         "Jira",
       );
+
+      // Only the authenticated webhooks emit trigger names: a signal that replays a genuine
+      // delivery's payload under a new delivery id is refused on both signal routes and
+      // starts no run.
+      const listed = await ctx.api("GET", `/api/workflows/${jiraId}/runs?limit=100`);
+      expectStatus(listed, [200], "list Jira runs");
+      const jiraRunId = String(asRecords(listed.json, "runs")[0]?.id);
+      const forgeries: Array<[string, string, string]> = [
+        ["jira.issue.assigned", jiraId, d("jira-assigned")],
+        ["jira.issue.transitioned", jiraId, d("jira-transitioned")],
+        ["jira.issue.commented", jiraId, d("jira-commented")],
+        ["github.issue.opened", githubId, d("issue-opened")],
+      ];
+      for (const [name, workflowId, delivery] of forgeries) {
+        const genuine = (await runsByDelivery(ctx, workflowId)).get(delivery)?.[0];
+        expect(!!genuine, `no genuine ${name} run to replay`);
+        for (const path of ["/api/workflow-events", `/api/workflow-runs/${jiraRunId}/events`]) {
+          const forged = await ctx.api("POST", path, {
+            body: { name, payload: { ...genuine, delivery_id: `forged-${delivery}` } },
+          });
+          expectStatus(forged, [403], `forged ${name} via ${path}`);
+        }
+      }
+      await pollUntil(async () => false, 1_000);
+      for (const [workflowId, want, label] of [
+        [githubId, githubHits.length, "GitHub"],
+        [jiraId, jiraHits.length, "Jira"],
+      ] as const) {
+        const runs = await runsByDelivery(ctx, workflowId);
+        const total = [...runs.values()].reduce((sum, list) => sum + list.length, 0);
+        expect(total === want, `${label}: ${total} runs after forged signals, want ${want}`);
+      }
     } finally {
       await cleanup.run();
     }
