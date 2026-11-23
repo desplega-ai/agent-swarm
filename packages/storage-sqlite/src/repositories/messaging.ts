@@ -19,6 +19,11 @@ function chatRelayEligible(now: string): SqlQuery {
             ELSE 3000 * (1 << obligation.attempt_count) END)`;
 }
 
+/**
+ * The relay polls use CROSS JOIN because SQLite keeps its left table as the
+ * outer loop: the plan reads the few pending obligations, then each task by id.
+ * A plain JOIN without `sqlite_stat1` scans every finished task per tick (#3580).
+ */
 export class SqliteMessagingRepository extends BaseMessagingRepository {
   protected insertionOrder(alias?: string): SqlQuery {
     return new SqlQuery([alias ? `${alias}.rowid` : "rowid"], []);
@@ -27,8 +32,9 @@ export class SqliteMessagingRepository extends BaseMessagingRepository {
   listPendingSlackRelayTasks(): Promise<TaskRow[]> {
     return this.db.query<TaskRow>(sql`
       SELECT task.* FROM slack_relay_obligations obligation
-      JOIN agent_tasks task ON task.id = obligation.task_id
-      WHERE obligation.delivered_at IS NULL
+      CROSS JOIN agent_tasks task
+      WHERE task.id = obligation.task_id
+        AND obligation.delivered_at IS NULL
         AND task.status IN ('completed', 'failed', 'cancelled')
       ORDER BY obligation.last_attempt_at IS NOT NULL,
                obligation.last_attempt_at ASC,
@@ -55,8 +61,9 @@ export class SqliteMessagingRepository extends BaseMessagingRepository {
              obligation.created_at AS relay_created_at,
              obligation.last_error AS relay_last_error
       FROM chat_relay_obligations obligation
-      JOIN agent_tasks task ON task.id = obligation.task_id
-      WHERE obligation.delivered_at IS NULL
+      CROSS JOIN agent_tasks task
+      WHERE task.id = obligation.task_id
+        AND obligation.delivered_at IS NULL
         AND obligation.given_up_at IS NULL
         AND task.status IN ('completed', 'failed', 'cancelled')
         AND (${adapterFilter})
