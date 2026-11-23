@@ -2,7 +2,8 @@ import { asRecord, createApiClient, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { startSut, stopSut } from "../sut";
 
-const LOCKED = 6;
+// More than the old five-round cap reached (5 + 10 + ... = 25 tried IDs).
+const LOCKED = 30;
 
 // On Postgres a pool claim skips a row another transaction holds (FOR UPDATE SKIP LOCKED),
 // and the held task stays at the top of the priority order. The poll reads the pool again

@@ -775,16 +775,20 @@ export async function handlePoll(
             const tried = new Set<string>();
             const candidates = async function* () {
               let batch = unassignedIds;
-              for (let round = 0; batch.length > 0 && round < 5; round++) {
+              // No round cap: keep reading while a read returns an untried ID.
+              // Every round tries at least one new ID, so the loop ends at the
+              // pool size (and the eligibility scan cap). A fixed cap moved the
+              // cutoff: a free task below 25 held ones was never reached.
+              while (batch.length > 0) {
                 for (const id of batch) {
                   tried.add(id);
                   yield id;
                 }
                 // Read past the tried IDs: a candidate a concurrent writer
-                // still holds stays at the top of the priority order, and a
-                // fixed limit of 5 would never reach the free task below it.
+                // still holds stays at the top of the priority order. The read
+                // doubles each round, so a long held prefix costs few rounds.
                 batch = (
-                  await getUnassignedTaskIdsForAgent(myAgentId, tried.size + 5, runsHere)
+                  await getUnassignedTaskIdsForAgent(myAgentId, tried.size * 2 + 5, runsHere)
                 ).filter((id) => !tried.has(id));
               }
             };
