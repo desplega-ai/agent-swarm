@@ -42,39 +42,6 @@ export const TASK_STATUSES = [
 ] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-const TASK_STATUS_SET: ReadonlySet<string> = new Set(TASK_STATUSES);
-
-/** True when `value` is one of the `TASK_STATUSES`. */
-export function isTaskStatus(value: unknown): value is TaskStatus {
-  return typeof value === "string" && TASK_STATUS_SET.has(value);
-}
-
-/**
- * A stored `agent_tasks.status` outside `TASK_STATUSES`. Typed writes cannot
- * produce one, so it marks a row written by an older build, an import, or a
- * hand edit; the read fails instead of handing the value on as a `TaskStatus`.
- */
-export class InvalidTaskStatusError extends Error {
-  constructor(
-    readonly taskId: string,
-    readonly status: unknown,
-  ) {
-    super(`Task ${taskId} has status ${JSON.stringify(status)}, which is not a TaskStatus`);
-    this.name = "InvalidTaskStatusError";
-  }
-}
-
-/**
- * Returns a task row read from the database once its `status` (when the row
- * carries one) is a `TaskStatus`. Throws `InvalidTaskStatusError` otherwise.
- */
-export function narrowTaskStatus<T extends { id?: string; status?: TaskStatus }>(row: T): T {
-  if ("status" in row && !isTaskStatus(row.status)) {
-    throw new InvalidTaskStatusError(String(row.id), row.status);
-  }
-  return row;
-}
-
 /**
  * The `agent_tasks.source` values. Migration 056 dropped the column's CHECK so
  * a new source needs no table rebuild; the typed writes below are the only
@@ -1653,17 +1620,6 @@ export type TaskCitationTargetKind = "task" | "memory" | "page" | "script-run";
 export abstract class BaseTasksRepository implements TasksRepository {
   constructor(protected readonly db: SqlExecutor) {}
 
-  /** One `agent_tasks` row, its status narrowed to `TaskStatus`. */
-  protected async taskRow(query: SqlQuery): Promise<TaskRow | null> {
-    const row = await this.db.get<TaskRow>(query);
-    return row && narrowTaskStatus(row);
-  }
-
-  /** `agent_tasks` rows, each status narrowed to `TaskStatus`. */
-  protected async taskRows(query: SqlQuery): Promise<TaskRow[]> {
-    return (await this.db.query<TaskRow>(query)).map(narrowTaskStatus);
-  }
-
   // ---- agent_tasks: drafts and Slack folds ----
 
   async appendDraftTaskText(taskId: string, suffix: string, now: string): Promise<number> {
@@ -1719,11 +1675,11 @@ export abstract class BaseTasksRepository implements TasksRepository {
   // ---- agent_tasks: reads ----
 
   findTaskById(id: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`SELECT * FROM agent_tasks WHERE id = ${id}`);
+    return this.db.get<TaskRow>(sql`SELECT * FROM agent_tasks WHERE id = ${id}`);
   }
 
   listChildTasks(parentTaskId: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE "parentTaskId" = ${parentTaskId}
       ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
   }
@@ -1743,7 +1699,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     finishedAfter: string,
     workflowReason: string,
   ): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks t
         WHERE t.status = 'superseded'
           AND t."workflowRunStepId" IS NULL
@@ -1767,7 +1723,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     const readable = readableBy
       ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_tasks.id`)}`
       : EMPTY;
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE "agentId" = ${agentId}${readable} ORDER BY "createdAt" DESC`);
   }
 
@@ -1775,13 +1731,13 @@ export abstract class BaseTasksRepository implements TasksRepository {
   abstract listTasksDispatchedFrom(taskIds: readonly string[]): Promise<TaskRow[]>;
 
   findAgentCurrentTask(agentId: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE "agentId" = ${agentId} AND status = 'in_progress'
       ORDER BY "lastUpdatedAt" DESC LIMIT 1`);
   }
 
   listTasksByStatus(status: string): Promise<TaskRow[]> {
-    return this.taskRows(
+    return this.db.query<TaskRow>(
       sql`SELECT * FROM agent_tasks WHERE status = ${status} ORDER BY "createdAt" DESC`,
     );
   }
@@ -1795,13 +1751,13 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findActiveTaskByVcs(scope: TaskVcsScope): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE ${this.vcsScope(scope)}
       ORDER BY "createdAt" DESC LIMIT 1`);
   }
 
   listActiveTasksByVcs(scope: TaskVcsScope): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE ${this.vcsScope(scope)}
       ORDER BY "createdAt" DESC`);
   }
@@ -1823,7 +1779,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listFinishedSlackTasks(): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "slackChannelId" IS NOT NULL
         AND status IN ('completed', 'failed')
@@ -1832,7 +1788,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listUnnotifiedFinishedWorkerTasks(): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT t.* FROM agent_tasks t
         LEFT JOIN agents a ON t."agentId" = a.id
         WHERE t.status IN ('completed', 'failed')
@@ -1859,7 +1815,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listInProgressSlackTasks(): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "slackChannelId" IS NOT NULL
         AND status = 'in_progress'
@@ -1869,7 +1825,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
 
   listTasksByContextKey(contextKey: string, statuses: readonly string[]): Promise<TaskRow[]> {
     if (statuses.length === 0) return Promise.resolve([]);
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "contextKey" = ${contextKey}
         AND status IN (${sqlList(statuses)})
@@ -1890,7 +1846,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
           AND "vcsRepo" IS NOT NULL
           AND "vcsNumber" IS NOT NULL
           AND "vcsUrl" IS NOT NULL`;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       WITH RECURSIVE
         ancestors(id, "parentTaskId") AS (
           SELECT id, "parentTaskId" FROM agent_tasks
@@ -1927,7 +1883,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       opts.notRequestedByUserId !== undefined
         ? sql` AND "requestedByUserId" IS DISTINCT FROM ${opts.notRequestedByUserId}`
         : EMPTY;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "contextKey" = ${contextKey}${mine}${others}
         ORDER BY "createdAt" DESC
@@ -1935,7 +1891,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findLatestScriptRunStepTask(contextKey: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "contextKey" = ${contextKey}
         AND "taskType" = 'script-run-step'
@@ -1944,7 +1900,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findLatestSlackIngressTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE source = 'slack'
         AND "slackChannelId" = ${channelId}
@@ -1954,7 +1910,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findLatestActiveSlackTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE source = 'slack'
         AND "slackChannelId" = ${channelId}
@@ -1965,7 +1921,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findLatestLeadSlackTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT t.*
         FROM agent_tasks t
         JOIN agents a ON a.id = t."agentId"
@@ -2007,7 +1963,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       opts.requestedByUserId !== undefined
         ? sql` AND "requestedByUserId" = ${opts.requestedByUserId}`
         : EMPTY;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "contextKey" >= ${lower} AND "contextKey" < ${upper}
         AND ${this.contextKeySource(opts.source)}${active}${mine}
@@ -2024,7 +1980,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       requestedByUserId !== undefined
         ? sql` AND "requestedByUserId" = ${requestedByUserId}`
         : EMPTY;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "contextKey" = ${contextKey}
         AND ${this.contextKeySource(source)}
@@ -2037,7 +1993,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     contextKey: string,
     source: string | null,
   ): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT t.*
         FROM agent_tasks t
         JOIN agents a ON a.id = t."agentId"
@@ -2049,7 +2005,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findFirstTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "slackChannelId" = ${channelId}
         AND "slackThreadTs" = ${threadTs}
@@ -2058,7 +2014,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findMostRecentTaskInThread(channelId: string, threadTs: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "slackChannelId" = ${channelId}
         AND "slackThreadTs" = ${threadTs}
@@ -2076,7 +2032,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     const cursor = before
       ? sql` AND ("lastUpdatedAt" < ${before.lastUpdatedAt} OR ("lastUpdatedAt" = ${before.lastUpdatedAt} AND id < ${before.id}))`
       : EMPTY;
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "slackChannelId" = ${channelId}
         AND "slackThreadTs" = ${threadTs}
@@ -2092,7 +2048,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     threadTs: string,
     since: string,
   ): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "slackChannelId" = ${channelId}
         AND "slackThreadTs" = ${threadTs}
@@ -2108,7 +2064,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     since: string,
   ): Promise<TaskRow | null> {
     const reason = sql`"failureReason"`;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "slackChannelId" = ${channelId}
         AND "slackThreadTs" = ${threadTs}
@@ -2253,7 +2209,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   // ---- agent_tasks: lifecycle writes ----
 
   insertSimpleTask(t: NewSimpleTask): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       INSERT INTO agent_tasks (id, "key", "agentId", task, status, source, "slackChannelId", "slackThreadTs",
         "slackUserId", "swarmVersion", "isHumanFree", "createdAt", "lastUpdatedAt")
       VALUES (${t.id}, ${t.key}, ${t.agentId}, ${t.task}, ${t.status}, ${t.source}, ${t.slackChannelId},
@@ -2262,7 +2218,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listPendingTasksForAgent(agentId: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE "agentId" = ${agentId} AND status = 'pending'
       ORDER BY priority DESC, "createdAt" ASC`);
   }
@@ -2285,14 +2241,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
       ? sql` AND EXISTS (SELECT 1 FROM runtime_pools WHERE id = ${pool.id} AND updated_at = ${pool.updatedAt}
         AND enabled = ${true} AND (circuit_open_until IS NULL OR circuit_open_until <= ${pool.at}))`
       : EMPTY;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET "agentId" = ${args.agentId}, status = 'pending', "lastUpdatedAt" = ${args.now},
         pool_wake_at = ${args.poolWakeAt}
       WHERE id = ${args.taskId} AND status = 'unassigned'${snapshotGuard}${poolGuard} RETURNING *`);
   }
 
   startTask(taskId: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET status = 'in_progress', "lastUpdatedAt" = ${nowIso}
       WHERE id = ${taskId} AND status NOT IN ${TERMINAL} RETURNING *`);
   }
@@ -2308,7 +2264,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       const bound = TASK_JSON_SESSION_COLUMNS.has(column) ? sql`${jsonText(value)}` : sql`${value}`;
       sets.push(sql`${sqlIdent(column)} = ${bound}`);
     }
-    return this.taskRow(
+    return this.db.get<TaskRow>(
       sql`UPDATE agent_tasks SET ${sqlJoin(sets, sql`, `)} WHERE id = ${taskId} RETURNING *`,
     );
   }
@@ -2320,13 +2276,13 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   setTaskTitle(taskId: string, title: string | null): Promise<TaskRow | null> {
-    return this.taskRow(
+    return this.db.get<TaskRow>(
       sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} RETURNING *`,
     );
   }
 
   setTaskTitleIfUnset(taskId: string, title: string): Promise<TaskRow | null> {
-    return this.taskRow(
+    return this.db.get<TaskRow>(
       sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} AND title IS NULL RETURNING *`,
     );
   }
@@ -2339,7 +2295,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
 
   setTaskTags(taskId: string, tagsJson: string, touch: boolean): Promise<TaskRow | null> {
     const touched = touch ? sql`, "lastUpdatedAt" = ${nowIso}` : EMPTY;
-    return this.taskRow(
+    return this.db.get<TaskRow>(
       sql`UPDATE agent_tasks SET tags = ${jsonText(tagsJson)}${touched} WHERE id = ${taskId} RETURNING *`,
     );
   }
@@ -2351,14 +2307,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
       f.expectedLastUpdatedAt === undefined
         ? EMPTY
         : sql` AND "lastUpdatedAt" = ${f.expectedLastUpdatedAt}`;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET status = ${f.status}, "statusKind" = ${f.statusKind}${reason},
         "finishedAt" = ${f.finishedAt}, "lastUpdatedAt" = ${nowIso}
       WHERE id = ${id} AND status NOT IN ${TERMINAL}${cas} RETURNING *`);
   }
 
   setTaskOutput(id: string, output: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET output = ${output}, "lastUpdatedAt" = ${nowIso} WHERE id = ${id} RETURNING *`);
   }
 
@@ -2367,7 +2323,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     deferredAt: string,
     deferredUntil: string | null,
   ): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET "deferredAt" = ${deferredAt}, "deferredUntil" = ${deferredUntil},
         "lastUpdatedAt" = ${nowIso}
       WHERE id = ${id} RETURNING *`);
@@ -2378,14 +2334,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
     output: string | null,
     failureReason: string | null,
   ): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET output = ${output}, "failureReason" = ${failureReason}
       WHERE id = ${id} AND status IN ${TERMINAL}
       RETURNING *`);
   }
 
   markWorkflowStepTaskSuperseded(id: string, reason: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
         SET status = 'superseded',
             "statusKind" = 'workflow_retry',
@@ -2402,7 +2358,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   ): Promise<{ id: string; agentId: string | null }[]>;
 
   pauseTask(id: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
         SET status = 'paused',
             was_paused = ${true},
@@ -2412,7 +2368,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   resumePausedTask(id: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
         SET status = 'in_progress',
             was_paused = ${true},
@@ -2428,7 +2384,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     const readable = readableBy
       ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_tasks.id`)}`
       : EMPTY;
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "agentId" = ${agentId} AND status = 'paused'${readable}
         ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
@@ -2444,7 +2400,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listOrphanedInProgressTasks(agentId: string, cutoff: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT t.* FROM agent_tasks t
         LEFT JOIN active_sessions s ON s."taskId" = t.id
         WHERE ${this.orphanedInProgress(agentId, cutoff)}
@@ -2452,7 +2408,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   resetOrphanedInProgressTasks(agentId: string, cutoff: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       UPDATE agent_tasks
         SET status = 'pending',
             "lastUpdatedAt" = ${nowIso}
@@ -2472,7 +2428,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     const readable = readableBy
       ? sql` AND ${readableSessionSql(readableBy.userId, sql`agent_tasks.id`)}`
       : EMPTY;
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
         WHERE "agentId" = ${agentId}
         AND status = 'cancelled'
@@ -2492,7 +2448,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   updateTaskProgress(id: string, progress: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET progress = ${progress},
         status = CASE WHEN status IN ${TERMINAL} THEN status ELSE 'in_progress' END,
         "lastUpdatedAt" = ${nowIso}
@@ -2775,7 +2731,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   // ---- agent_tasks: runtime pool routing ----
 
   listPoolPendingTasks(): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE status = 'pending'
         AND (pool_wake_at IS NOT NULL OR "agentId" IN (
           SELECT id FROM agents WHERE runtime_pool_id IS NOT NULL
@@ -2995,7 +2951,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   // ---- agent_tasks: Slack and VCS tracking ----
 
   listTasksInSlackThread(channelId: string, threadTs: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
       WHERE "slackChannelId" = ${channelId} AND "slackThreadTs" = ${threadTs}
       ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
@@ -3025,7 +2981,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     vcs: { vcsProvider: string; vcsRepo: string; vcsNumber: number; vcsUrl: string },
     now: string,
   ): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
       SET "vcsProvider" = ${vcs.vcsProvider}, "vcsRepo" = ${vcs.vcsRepo}, "vcsNumber" = ${vcs.vcsNumber},
         "vcsUrl" = ${vcs.vcsUrl}, "lastUpdatedAt" = ${now}
@@ -3210,7 +3166,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     const conditions = [sql`"createdAt" > ${f.since}`, sql`status NOT IN ${TERMINAL}`];
     if (f.creatorAgentId) conditions.push(sql`"creatorAgentId" = ${f.creatorAgentId}`);
     if (f.agentId) conditions.push(sql`"agentId" = ${f.agentId}`);
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks${sqlWhere(conditions)}
       ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC LIMIT ${f.limit}`);
   }
@@ -3247,7 +3203,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   insertTask(r: NewTaskRow): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       INSERT INTO agent_tasks (
         id, "key", "agentId", "creatorAgentId", task, status, source, routing_reason, routing_source,
         routing_note, "taskType", tags, priority, "dependsOn", "offeredTo", "offeredAt",
@@ -3289,7 +3245,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   claimUnassignedTask(taskId: string, agentId: string, now: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET "agentId" = ${agentId}, status = 'in_progress', "lastUpdatedAt" = ${now}
       WHERE id = (
         SELECT id FROM agent_tasks WHERE id = ${taskId} AND status = 'unassigned'${forUpdateSkipLocked}
@@ -3297,7 +3253,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   lockTask(taskId: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`SELECT * FROM agent_tasks WHERE id = ${taskId}${forUpdate}`);
+    return this.db.get<TaskRow>(sql`SELECT * FROM agent_tasks WHERE id = ${taskId}${forUpdate}`);
   }
 
   releaseTaskToPool(
@@ -3309,7 +3265,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
       ? sql` AND status = 'pending' AND "agentId" = ${wake.agentId} AND pool_wake_at = ${wake.poolWakeAt}
           AND COALESCE(routing_reason, '') != 'human_pinned'`
       : EMPTY;
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
       SET "agentId" = NULL, status = 'unassigned', "lastUpdatedAt" = ${now}, pool_wake_at = NULL
       WHERE id = ${taskId} AND status IN ('pending', 'in_progress')${wakeGuard}
@@ -3317,14 +3273,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   acceptOfferedTask(taskId: string, agentId: string, now: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
       SET "agentId" = ${agentId}, status = 'pending', "acceptedAt" = ${now}, "lastUpdatedAt" = ${now}
       WHERE id = ${taskId} AND status IN ('offered', 'reviewing') RETURNING *`);
   }
 
   rejectOfferedTask(taskId: string, reason: string | null, now: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
       SET status = 'unassigned', "offeredTo" = NULL, "offeredAt" = NULL,
         "rejectionReason" = ${reason}, "lastUpdatedAt" = ${now}, pool_wake_at = NULL
@@ -3337,7 +3293,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     to: TaskStatus,
     now: string,
   ): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET status = ${to}, "lastUpdatedAt" = ${now}
       WHERE id = ${taskId} AND status = ${from} RETURNING *`);
   }
@@ -3349,7 +3305,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     END`;
 
   promoteDraftTask(taskId: string, now: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET status = ${this.draftTarget}, "lastUpdatedAt" = ${now}
       WHERE id = ${taskId} AND status = 'draft'
       RETURNING *`);
@@ -3388,7 +3344,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listOfferedTasksForAgent(agentId: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE "offeredTo" = ${agentId} AND status = 'offered'
       ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
   }
@@ -3408,7 +3364,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listUnassignedTasks(limit: number, offset: number): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE status = 'unassigned'
       ORDER BY priority DESC, "createdAt" ASC, ${this.insertionOrder()} ASC
       LIMIT ${limit} OFFSET ${offset}`);
@@ -3460,7 +3416,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findLatestTaskByAgentMailThread(threadId: string): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE "agentmailThreadId" = ${threadId}
       ORDER BY "createdAt" DESC, ${this.insertionOrder()} DESC LIMIT 1`);
   }
@@ -3470,7 +3426,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   listStalePinnedResumes(cutoff: string): Promise<TaskRow[]> {
     // CAST: `tags` is jsonb on Postgres; on SQLite it is TEXT, so the cast changes nothing.
     const tagged = (tag: string) => likeAsciiCi(sql`CAST(tags AS text)`, sql`${`%"${tag}"%`}`);
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
       WHERE status = 'pending'
         AND (
@@ -3485,7 +3441,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
     taskId: string,
     f: { status: TaskStatus; statusKind: string; failureReason: string; now: string },
   ): Promise<TaskRow | null> {
-    return this.taskRow(sql`
+    return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks
       SET status = ${f.status}, "statusKind" = ${f.statusKind}, "failureReason" = ${f.failureReason},
         "finishedAt" = ${f.now}, "lastUpdatedAt" = ${f.now}
@@ -3493,14 +3449,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   listStaleUnassignedAffinityTasks(cutoff: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks
       WHERE status = 'unassigned' AND "routingAffinity" IS NOT NULL AND "createdAt" < ${cutoff}
       ORDER BY "createdAt" ASC, ${this.insertionOrder()} ASC`);
   }
 
   listRecentFailedTasks(since: string, limit: number): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE status = 'failed' AND "finishedAt" > ${since}
       ORDER BY "finishedAt" DESC, ${this.insertionOrder()} DESC LIMIT ${limit}`);
   }
@@ -3542,7 +3498,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   findTaskByWorkflowRunStepId(stepId: string): Promise<TaskRow | null> {
-    return this.taskRow(
+    return this.db.get<TaskRow>(
       sql`SELECT * FROM agent_tasks WHERE "workflowRunStepId" = ${stepId} LIMIT 1`,
     );
   }
