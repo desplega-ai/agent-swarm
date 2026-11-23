@@ -666,7 +666,8 @@
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
-        "slack-delegation-band-entry"
+        "slack-delegation-band-entry",
+        "slack-quiet-lead-threads"
       ]
     },
     "slack-http-native": {
