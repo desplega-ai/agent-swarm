@@ -109,6 +109,7 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 
 - A new migration has one file for each engine with the same ordinal: `src/be/migrations/NNN_name.sql` and `src/be/migrations/postgres/NNN_name.sql`. A file may be a no-op for one engine, with a comment that says why. `bun run check:schema-parity` must pass. Never edit an applied migration.
 - No new triggers (`bun run check:no-new-triggers`). Put new rules in repository code.
+- A Postgres migration that changes rows must stay correct under `db-copy` (`bun run check:copy-migrations`): the copy writes the SQLite rows over the migrated target and records every migration as applied. A plain seed passes. For a rewrite of stored rows, list the migration in `after-copy.json`, port the rows in the copy, or write the reason in `scripts/storage-checks/copy-migrations-allowlist.txt`. A new column type needs a conversion in `packages/storage-postgres/src/data-copy.ts` and a sample in `packages/storage-postgres/test/data-copy-chain.test.ts`.
 - SQL lives in the storage packages (`packages/storage*`) only (`bun run check:storage-boundary`). Write portable SQL with the dialect helpers; SQLite-only syntax stays in `packages/storage-sqlite` (`bun run check:sql-portability`). Quote each identifier that has an uppercase letter.
 - Code tests a capability (`fullTextSearch`, `vectorSearch`, `dbQuery`), never the engine name.
 - A transaction callback may run twice on Postgres. Side effects go in `afterCommit` (`bun run check:tx-callbacks`; prove it with `bun run e2e --tx-replay`).
