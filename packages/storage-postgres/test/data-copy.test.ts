@@ -404,6 +404,19 @@ describe("copyIntoPostgres", () => {
     }
   });
 
+  test("refuses a migration directory whose copy metadata comes from another build", async () => {
+    // Same SQL chain, older metadata: it would ask for rewrites this build does not do.
+    writeFileSync(join(dir, "after-copy.json"), JSON.stringify({ reapply: ["001_chain"] }));
+    const refused = await run(fullSource());
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/copy metadata format null, this build reads 2/);
+    expect(
+      (await sql.unsafe("SELECT count(*)::int AS n FROM pg_class WHERE relname = 'items'"))[0].n,
+    ).toBe(0);
+    writeFileSync(join(dir, "after-copy.json"), JSON.stringify({ format: 2, reapply: [] }));
+    expect((await run(fullSource())).ok).toBe(true);
+  });
+
   test("keeps a leading U+FEFF in a text value", async () => {
     const bom = new Uint8Array([0xef, 0xbb, 0xbf, 0x78]);
     const rows = [
@@ -581,7 +594,10 @@ CREATE TABLE metrics (
         params: ["{{rangeModifier:since}}"],
       },
     };
-    writeFileSync(join(dir, "metric-query-ports.json"), JSON.stringify({ ports: [stock, ranged] }));
+    writeFileSync(
+      join(dir, "metric-query-ports.json"),
+      JSON.stringify({ format: 2, ports: [stock, ranged] }),
+    );
     const METRICS: CopyTable = {
       name: "metrics",
       hasRowid: true,

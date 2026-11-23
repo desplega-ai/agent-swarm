@@ -437,6 +437,35 @@ class TableChecksum {
  * 370) is overwritten by the SQLite rows; the API on the copy then skips it,
  * because `_migrations` records it. Each listed file must be safe to run twice.
  */
+/**
+ * The format of the copy metadata (`after-copy.json`, `metric-query-ports.json`)
+ * this code reads. A migration directory from another build can hold the same SQL
+ * with older metadata, which asks for other rewrites (an older `after-copy.json`
+ * reapplied the whole starter dashboard over operator edits). Such a directory is
+ * refused before the target is touched.
+ */
+const COPY_METADATA_FORMAT = 2;
+
+function copyMetadataProblem(migrationsDir: string): string | null {
+  for (const name of ["after-copy.json", "metric-query-ports.json"]) {
+    const file = join(migrationsDir, name);
+    if (!existsSync(file)) continue;
+    let format: unknown;
+    try {
+      format = (JSON.parse(readFileSync(file, "utf8")) as { format?: unknown }).format;
+    } catch (error) {
+      return `${file} is not valid JSON: ${(error as Error).message}`;
+    }
+    if (format !== COPY_METADATA_FORMAT) {
+      return (
+        `${file} has copy metadata format ${JSON.stringify(format ?? null)}, this build reads ${COPY_METADATA_FORMAT}: ` +
+        "the migration directory comes from another build. Use the chain bundled with this CLI (unset MIGRATIONS_DIR / POSTGRES_MIGRATIONS_DIR), then copy again. Nothing was written."
+      );
+    }
+  }
+  return null;
+}
+
 function reapplyAfterCopy(
   chain: ReturnType<typeof loadPostgresMigrations>,
   migrationsDir: string,
@@ -674,6 +703,11 @@ export async function copyIntoPostgres(
       if (got[0]?.locked !== true) {
         report.error =
           "an API process holds the target database: another session holds the one-process lock";
+        return report;
+      }
+      const metadataProblem = copyMetadataProblem(options.migrationsDir);
+      if (metadataProblem) {
+        report.error = metadataProblem;
         return report;
       }
       const chain = loadPostgresMigrations(options.migrationsDir);

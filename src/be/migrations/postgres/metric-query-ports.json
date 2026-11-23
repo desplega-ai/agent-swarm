@@ -1,5 +1,6 @@
 {
   "$comment": "SQLite metric queries that db-copy rewrites to their Postgres form, matched on the exact SQL and params of a widget query or a variable options query: the starter dashboard (migration 092, Postgres form in 370) and the new-dashboard template of the UI before it became portable. Any other title, layout or query stays as the operator saved it.",
+  "format": 2,
   "ports": [
     {
       "source": "starter dashboard widget tasks-created-per-day",
