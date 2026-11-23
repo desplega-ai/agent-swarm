@@ -33,6 +33,38 @@ import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 const usersRepo = () => getStorage().repos.users;
 const sessionsRepo = () => getStorage().repos.sessions;
 
+/**
+ * A token's `lastUsedAt` is written at most once per this interval. Every
+ * authenticated request used to update its token row. Parallel requests with
+ * one token (a script that makes SDK calls at the same time) then all wrote the
+ * same row, and on Postgres (SERIALIZABLE) most of those writes failed with
+ * 40001 and ran again. `lastUsedAt` is the time of a use at most this long
+ * before the last use. Token validation (revocation, expiry) still reads the
+ * row on every request.
+ */
+const TOKEN_TOUCH_INTERVAL_MS = 60_000;
+const TOKEN_TOUCH_MAX_ENTRIES = 10_000;
+/** Token key (`<table>:<id>`) to the time this process last wrote its `lastUsedAt`. */
+const tokenTouchedAt = new Map<string, number>();
+
+/**
+ * Whether this request must write the token's `lastUsedAt`. The API is the one
+ * process that writes the database, so this in-memory record sees every use.
+ * It marks the token at once, so concurrent requests of one token write once.
+ */
+function tokenTouchDue(key: string, nowMs: number): boolean {
+  const last = tokenTouchedAt.get(key);
+  if (last !== undefined && nowMs - last < TOKEN_TOUCH_INTERVAL_MS) return false;
+  if (tokenTouchedAt.size >= TOKEN_TOUCH_MAX_ENTRIES) {
+    for (const [k, at] of tokenTouchedAt) {
+      if (nowMs - at >= TOKEN_TOUCH_INTERVAL_MS) tokenTouchedAt.delete(k);
+    }
+    if (tokenTouchedAt.size >= TOKEN_TOUCH_MAX_ENTRIES) tokenTouchedAt.clear();
+  }
+  tokenTouchedAt.set(key, nowMs);
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -522,8 +554,8 @@ export async function revokeAllUserCredentials(
 
 /**
  * Resolve a plaintext token to its owning user. Returns null if the token
- * is unknown or revoked. On a successful hit, updates `lastUsedAt` so the
- * People page can surface "last seen".
+ * is unknown or revoked. On a successful hit, updates `lastUsedAt` (at most
+ * once per minute) so the People page can surface "last seen".
  */
 export async function resolveUserByToken(plaintext: string): Promise<User | null> {
   return (await resolveUserToken(plaintext))?.user ?? null;
@@ -539,12 +571,16 @@ export async function resolveUserToken(
   if (!row || row.revokedAt !== null) return null;
   if (row.expiresAt !== null && Date.parse(row.expiresAt) <= Date.now()) return null;
 
-  // Best-effort lastUsedAt update — never let a failure here leak to the
-  // caller and block a successful token resolution.
-  try {
-    await usersRepo().touchUserToken(row.id, new Date().toISOString());
-  } catch {
-    // Never let a `lastUsedAt` update failure leak to the caller.
+  // Best-effort lastUsedAt update, at most once per TOKEN_TOUCH_INTERVAL_MS.
+  // Never let a failure here leak to the caller and block a successful token
+  // resolution.
+  const nowMs = Date.now();
+  if (tokenTouchDue(`user:${row.id}`, nowMs)) {
+    try {
+      await usersRepo().touchUserToken(row.id, new Date(nowMs).toISOString());
+    } catch {
+      // Never let a `lastUsedAt` update failure leak to the caller.
+    }
   }
 
   return { user: await findUserById(row.userId), tokenId: row.id };
@@ -880,7 +916,7 @@ export async function revokeAllAgentSessionTokens(agentId: string): Promise<numb
 /**
  * Resolve a plaintext `aseph_` token to its principal. Returns null when the
  * token is unknown, revoked, or past its expiry. On a hit, touches `lastUsedAt`
- * best-effort unless `touch` is false.
+ * best-effort (at most once per minute) unless `touch` is false.
  */
 export async function resolveBySessionToken(
   plaintext: string,
@@ -932,9 +968,10 @@ export async function resolveSessionToken(
       : null;
   }
 
-  if (options.touch !== false) {
+  const nowMs = Date.now();
+  if (options.touch !== false && tokenTouchDue(`session:${row.id}`, nowMs)) {
     try {
-      await sessionsRepo().touchSessionToken(row.id, new Date().toISOString());
+      await sessionsRepo().touchSessionToken(row.id, new Date(nowMs).toISOString());
     } catch {
       // best-effort
     }
