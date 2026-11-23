@@ -1263,10 +1263,10 @@ async function classifyLeadFollowUp(
 }
 
 /**
- * Settles a Lead follow-up's card as abandoned without posting anything, so
+ * Settles a task's card as abandoned without posting anything, so
  * slackThreadHasOutcomeWork stops counting it and the thread can close.
  */
-async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): Promise<void> {
+async function settleOutcomeWithoutCard(task: AgentTask, reason: string): Promise<void> {
   if (!task.slackChannelId || !task.slackThreadTs) return;
   // A bound card is a stream Slack already holds; it keeps its own bounded
   // recovery. A pending one has no bound message, so it is settled here.
@@ -1305,7 +1305,7 @@ async function mayPostLeadFollowUpCard(
   if ((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent) {
     // A reservation left by a failed delivery would keep the thread open.
     if (await getSlackOutcomeMessage(task.id)) {
-      await settleLeadFollowUpWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
+      await settleOutcomeWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
     }
     return false;
   }
@@ -1328,7 +1328,7 @@ async function mayPostLeadFollowUpCard(
     // reply. A reply under the ask or a sibling's task does not count: in a
     // fan-out, every sibling follow-up shares those. The reconcile SQL counts
     // this task as outcome work until its card is settled, so always settle it.
-    await settleLeadFollowUpWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
+    await settleOutcomeWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
     return false;
   }
   const askId = ownerAskId.get(task.id);
@@ -1346,10 +1346,24 @@ async function mayPostLeadFollowUpCard(
   const blockReason = await getChannelBlockReason(app.client, task.slackChannelId);
   if (blockReason === "external") {
     // "unverified" is not settled: it retries on the next tick.
-    await settleLeadFollowUpWithoutCard(task, "external_channel: Lead follow-up not posted");
+    await settleOutcomeWithoutCard(task, "external_channel: Lead follow-up not posted");
     return false;
   }
   return blockReason === null;
+}
+
+/**
+ * True when the task's card would only say "<agent> completed": the agent
+ * already answered with `slack-reply`, the task did not defer, and the card
+ * has no ui-spec card, sources or links to add. That card notifies the
+ * person and tells them nothing, so it is not posted, as for a Lead follow-up.
+ */
+async function cardOnlyRepeatsSlackReply(task: AgentTask): Promise<boolean> {
+  if (task.status !== "completed" || isDeferredTask(task)) return false;
+  if (!((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent)) return false;
+  if (await outcomeUiSpec(task)) return false;
+  const content = await outcomeContent(task, true);
+  return (await outcomeCaptionBlocks(task, content)).length === 0;
 }
 
 /**
@@ -2491,7 +2505,7 @@ async function processSlackThread(
       !endedBefore(task, outcomeWindow.finishedAfter)
     ) {
       // The reconcile SQL cannot walk the parent chain, so it counts this one.
-      await settleLeadFollowUpWithoutCard(task, "no_slack_ask: Lead follow-up not posted");
+      await settleOutcomeWithoutCard(task, "no_slack_ask: Lead follow-up not posted");
       continue;
     }
     if (!(await taskNeedsDirectOutcome(task, activatedAt, leadFollowUp))) continue;
@@ -2522,6 +2536,11 @@ async function processSlackThread(
       }
       // An in-flight card keeps its bounded retries; only a new card is refused.
       if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
+      if ((!card || isPendingSlackMessage(card)) && (await cardOnlyRepeatsSlackReply(task))) {
+        await settleOutcomeWithoutCard(task, "slack_reply_sent: completed card not posted");
+        await finalizeTerminalSlackReactions([task]);
+        continue;
+      }
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
         if (!card && (await mergeLeadFollowUpCard(task, tasks, statusTick.budget))) {

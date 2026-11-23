@@ -24,10 +24,40 @@ type ConversationProps = {
   requestText?: (task: AgentTask) => string | null;
   value?: string;
   onValueChange?: (next: string) => void;
-  onFollowUp?: (text: string, parentTaskId: string | undefined) => Promise<void>;
+  onFollowUp?: (text: string, parentTaskId: string | undefined, files: File[]) => Promise<void>;
+  followUpAttachments?: unknown;
+  requestFiles?: (task: AgentTask) => React.ReactNode;
   placeholder?: string;
 };
 let conversation: ConversationProps | undefined;
+
+// The new-session dock's last props, so a test can add files the way a pick does.
+type DockProps = {
+  attachments?: File[];
+  onAttachmentsChange?: (files: File[]) => void;
+  attachmentLimits?: unknown;
+};
+let dock: DockProps | undefined;
+
+// The viewer's agent-fs upload (`useFormFileUploader`): null while not connected.
+let uploads: Array<{ path: string; name: string }> = [];
+let failUpload: string | null = null;
+let uploader: ((path: string, file: File) => Promise<string>) | null = null;
+const connectedUploader = async (path: string, file: File) => {
+  if (file.name === failUpload) throw new Error("403 no write access");
+  uploads.push({ path, name: file.name });
+  return path;
+};
+mock.module("./form-file", () => ({ useFormFileUploader: () => uploader }));
+mock.module("./session-thread-files", () => ({
+  ThreadMessageFiles: ({ files }: { files: { name: string }[] }) => (
+    <ul data-testid="thread-files">
+      {files.map((file) => (
+        <li key={file.name}>{file.name}</li>
+      ))}
+    </ul>
+  ),
+}));
 
 mock.module("@/api/hooks/use-feature-gate", () => ({
   useFeatureGate: () => ({ supported: true, requiredVersion: "1.76.0", currentVersion: "9.9.9" }),
@@ -52,27 +82,33 @@ mock.module("@/components/sessions/session-conversation", () => ({
   },
 }));
 mock.module("@/components/sessions/composer-dock", () => ({
-  ComposerDock: (props: {
-    value: string;
-    onChange: (next: string) => void;
-    onSubmit: () => void;
-    isPending: boolean;
-    isError?: boolean;
-    errorMessage?: string;
-    disabled?: boolean;
-    sendLabel?: string;
-  }) => (
-    <form>
-      <textarea value={props.value} onChange={(event) => props.onChange(event.target.value)} />
-      <button
-        type="button"
-        aria-label={props.sendLabel}
-        disabled={props.disabled || props.isPending}
-        onClick={props.onSubmit}
-      />
-      {props.isError ? <p data-testid="dock-error">{props.errorMessage}</p> : null}
-    </form>
-  ),
+  DEFAULT_ATTACHMENT_LIMITS: { accept: [".png", ".pdf", ".md"], maxBytes: 50 },
+  ComposerDock: (
+    props: DockProps & {
+      value: string;
+      onChange: (next: string) => void;
+      onSubmit: () => void;
+      isPending: boolean;
+      isError?: boolean;
+      errorMessage?: string;
+      disabled?: boolean;
+      sendLabel?: string;
+    },
+  ) => {
+    dock = props;
+    return (
+      <form>
+        <textarea value={props.value} onChange={(event) => props.onChange(event.target.value)} />
+        <button
+          type="button"
+          aria-label={props.sendLabel}
+          disabled={props.disabled || props.isPending}
+          onClick={props.onSubmit}
+        />
+        {props.isError ? <p data-testid="dock-error">{props.errorMessage}</p> : null}
+      </form>
+    );
+  },
 }));
 mock.module("@/components/ui/button", () => ({
   Button: ({ children, ...rest }: Record<string, unknown> & { children?: React.ReactNode }) => (
@@ -110,6 +146,10 @@ beforeEach(() => {
   currentUserId = "u1";
   lookups.length = 0;
   conversation = undefined;
+  dock = undefined;
+  uploads = [];
+  failUpload = null;
+  uploader = connectedUploader;
 });
 
 afterAll(async () => {
@@ -396,4 +436,138 @@ test("the thread has a fixed height, or fills a fill-aware parent", async () => 
   // A phone stacks the fill parent: the thread keeps a usable height there.
   expect(fillBox?.className).toContain("max-md:min-h-[420px]");
   await filled.unmount();
+});
+
+const ATTACHMENTS = {
+  dir: "/projects/p1/attachments",
+  accept: [".png", ".pdf"],
+  maxFiles: 3,
+  maxBytes: 1000,
+};
+const png = () => new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+const pdf = () => new File(["%PDF"], "flow.pdf", { type: "application/pdf" });
+const UPLOADED = /^\/projects\/p1\/attachments\/\d{8}T\d{9}Z-[0-9a-f]{8}-\d-/;
+
+test("without the attachments prop no box takes files and $form is { message }", async () => {
+  const { host, calls, unmount } = await mount({}, () => ({ status: "running", taskId: "new" }));
+  expect(dock?.onAttachmentsChange).toBeUndefined();
+  expect(dock?.attachments).toBeUndefined();
+  expect(dock?.attachmentLimits).toBeUndefined();
+  await typeMessage(host, "hello");
+  await act(async () => startButton(host).click());
+  expect((calls[0]?.params as Call).input).toEqual({ message: "hello" });
+  await unmount();
+  roots = [task({ id: "root", contextKey: KEY })];
+  chains = { root: roots };
+  const session = await mount({}, () => ({}));
+  expect(conversation?.followUpAttachments).toBeUndefined();
+  expect(conversation?.requestFiles).toBeUndefined();
+  await session.unmount();
+});
+
+test("a first message with files uploads them, then dispatches them in $form", async () => {
+  const { host, calls, unmount } = await mount({ attachments: ATTACHMENTS }, () => ({
+    status: "running",
+    taskId: "new",
+  }));
+  expect(dock?.attachmentLimits).toEqual({
+    accept: [".png", ".pdf"],
+    maxBytes: 1000,
+    maxFiles: 3,
+  });
+  const files = [png(), pdf()];
+  await act(async () => dock?.onAttachmentsChange?.(files));
+  await typeMessage(host, "use these");
+  await act(async () => startButton(host).click());
+  expect(uploads.map((upload) => upload.name)).toEqual(["shot.png", "flow.pdf"]);
+  for (const upload of uploads) expect(upload.path).toMatch(UPLOADED);
+  expect(calls).toEqual([
+    {
+      action: "app.action",
+      params: {
+        name: "ask",
+        input: {
+          message: "use these",
+          attachments: [
+            { path: uploads[0]?.path, name: "shot.png", mimeType: "image/png", size: 3 },
+            { path: uploads[1]?.path, name: "flow.pdf", mimeType: "application/pdf", size: 4 },
+          ],
+        },
+        session: SESSION,
+        followUp: false,
+      },
+    },
+  ]);
+  expect(textarea(host).value).toBe("");
+  expect(dock?.attachments).toEqual([]);
+  await unmount();
+});
+
+test("a failed upload sends nothing and keeps the text and the files", async () => {
+  failUpload = "flow.pdf";
+  const { host, calls, unmount } = await mount({ attachments: ATTACHMENTS }, () => ({
+    status: "running",
+    taskId: "new",
+  }));
+  const files = [png(), pdf()];
+  await act(async () => dock?.onAttachmentsChange?.(files));
+  await typeMessage(host, "use these");
+  await act(async () => startButton(host).click());
+  expect(calls).toEqual([]);
+  expect(textarea(host).value).toBe("use these");
+  expect(dock?.attachments).toEqual(files);
+  expect(host.querySelector('[data-testid="dock-error"]')?.textContent).toBe(
+    "flow.pdf failed to upload (403 no write access), so nothing was sent. Send again to retry.",
+  );
+  await unmount();
+});
+
+test("files without an agent-fs connection send nothing and say so", async () => {
+  uploader = null;
+  const { host, calls, unmount } = await mount({ attachments: ATTACHMENTS }, () => ({}));
+  await act(async () => dock?.onAttachmentsChange?.([png()]));
+  await typeMessage(host, "hello");
+  await act(async () => startButton(host).click());
+  expect(calls).toEqual([]);
+  expect(host.querySelector('[data-testid="dock-error"]')?.textContent).toContain(
+    "Connect agent-fs to send files",
+  );
+  await unmount();
+});
+
+test("a follow-up with files uploads them and chains under the leaf; bubbles show the files", async () => {
+  roots = [task({ id: "root", contextKey: KEY })];
+  chains = { root: [task({ id: "root" }), task({ id: "leaf" })] };
+  const { calls, unmount } = await mount({ attachments: ATTACHMENTS }, () => ({
+    status: "running",
+    taskId: "next",
+  }));
+  expect(conversation?.followUpAttachments).toEqual({
+    accept: [".png", ".pdf"],
+    maxBytes: 1000,
+    maxFiles: 3,
+  });
+  await act(async () => {
+    void conversation?.onFollowUp?.("and this", "leaf", [pdf()]);
+  });
+  expect(uploads.map((upload) => upload.name)).toEqual(["flow.pdf"]);
+  expect(calls[0]?.params).toMatchObject({
+    input: {
+      message: "and this",
+      attachments: [{ path: uploads[0]?.path, name: "flow.pdf", mimeType: "application/pdf" }],
+    },
+    parentTaskId: "leaf",
+  });
+  const input = {
+    message: "see",
+    attachments: [{ path: "/a/b.png", name: "b.png", mimeType: "image/png", size: 1 }],
+  };
+  const sent = task({ task: `[App action] app=a action=ask input=${JSON.stringify(input)}` });
+  const files = document.createElement("div");
+  const filesRoot = createRoot(files);
+  await act(async () => filesRoot.render(conversation?.requestFiles?.(sent)));
+  expect(files.textContent).toBe("b.png");
+  expect(conversation?.requestFiles?.(task({ task: "plain" }))).toBeNull();
+  await act(async () => filesRoot.unmount());
+  await unmount();
 });

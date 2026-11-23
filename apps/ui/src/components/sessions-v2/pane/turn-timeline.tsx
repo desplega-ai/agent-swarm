@@ -1,6 +1,15 @@
 import { ChevronUp, MessageSquarePlus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { AgentTask, SessionApproval } from "@/api/types";
 import { TaskCard } from "@/components/sessions/task-card";
@@ -170,6 +179,7 @@ export function TurnTimeline({
   typing,
   onLayoutChange,
   requestText = fileReviewRequest,
+  requestFiles,
 }: {
   rootTaskId: string;
   chain: AgentTask[];
@@ -187,6 +197,8 @@ export function TurnTimeline({
    * By default, file reviews link to the follow-up that holds the full request.
    */
   requestText?: (task: AgentTask) => string | null;
+  /** The files the person sent with such a task, shown above its bubble. */
+  requestFiles?: (task: AgentTask) => ReactNode;
 }) {
   const { turns, rest } = useMemo(
     () => buildTurns(chain, { personText: requestText }),
@@ -278,6 +290,7 @@ export function TurnTimeline({
               task={turn.person}
               rootSource={rootSource}
               text={requestText?.(turn.person) ?? undefined}
+              files={requestFiles?.(turn.person)}
             />
           ) : null}
           {/* Waits in a row fold into one line; a part with a card, an approval, or handoffs on screen stays whole. */}
