@@ -31,6 +31,10 @@ Complete reference for all environment variables used by Agent Swarm.
 | `STEERING_ENABLED` | `true` | [Task steering](/docs/guides/task-steering) is enabled by default. Set `false` or `0` (API server and worker containers) to opt out: steering routes reject writes, `steer-task`/`accept-steer` are not registered, and workers skip steering delivery polls. |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
+| `DATABASE_URL` | — | A `postgres://` URL runs the API on Postgres 16 with pgvector instead of SQLite. Deployment env only. See [Postgres](/docs/guides/postgres). |
+| `DATABASE_PASSWORD` | — | Postgres only: raw password that the API URL-encodes into `DATABASE_URL`. Deployment env only. |
+| `DATABASE_QUERY_URL` | — | Postgres only: URL of the restricted read-only role the `db-query` tool uses. Unset turns `db-query` off on Postgres. |
+| `SWARM_DATA_DIR` | directory of `DATABASE_PATH` | Directory of the encryption key file and the page-session secret, on either engine. |
 | `SESSION_LOG_RETENTION_DAYS` | `30` on a new install; disabled on an existing one | Permanently delete `session_logs` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep; on a new install, delete the stored value in Settings → Configuration, or set `0` here before the first boot. Start with `DB_RETENTION_DRY_RUN=true`; deleted session transcripts cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `AGENT_LOG_RETENTION_DAYS` | `90` on a new install; disabled on an existing one | Permanently delete `agent_log` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep; on a new install, delete the stored value in Settings → Configuration, or set `0` here before the first boot. Deleted task and agent history cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `EVENTS_RETENTION_DAYS` | `90` on a new install; disabled on an existing one | Permanently delete `events` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep; on a new install, delete the stored value in Settings → Configuration, or set `0` here before the first boot. Event aggregates become retention-window totals, and deleted telemetry cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
@@ -402,6 +406,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITLAB_URL` | GitLab instance URL (default: `https://gitlab.com`) |
 | `GITLAB_WEBHOOK_SECRET` | Shared secret for webhook verification |
 | `GITLAB_BOT_NAME` | Bot username for @mention detection (default: `agent-swarm-bot`) |
+| `GITLAB_ALLOWED_SENDERS` | Comma-separated GitLab usernames allowed to trigger mention tasks without a linked swarm user |
 | `GITLAB_EMAIL` | Git commit email for GitLab repos (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` is set) |
 | `GITLAB_NAME` | Git commit name for GitLab repos (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` is set) |
 | `GITLAB_DISABLE` | Set to `true` to disable GitLab integration |
@@ -414,7 +419,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
-| `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger Azure Boards work item tasks without a linked swarm user |
+| `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger pull request and Azure Boards work item tasks without a linked swarm user |
 | `AZURE_DEVOPS_WORKITEM_STATE_STARTED` | Work item state to set when its swarm task starts (process-specific, e.g. `Doing`); unset = no change |
 | `AZURE_DEVOPS_WORKITEM_STATE_DONE` | Work item state to set when its swarm task completes (e.g. `Done`); unset = no change |
 | `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
@@ -432,6 +437,7 @@ Bitbucket Cloud only. See [Bitbucket Integration](/docs/integrations/bitbucket).
 | `BITBUCKET_TOKEN` | Atlassian API token of the bot service account (recommended) or a workspace access token. API server: REST calls and the bot identity lookup (`GET /2.0/user`). Workers: git clone and push (username `x-token-auth`) and REST calls for PR linking |
 | `BITBUCKET_BOT_ACCOUNT_ID` | Atlassian `account_id` of the bot (e.g. `557058:<uuid>`) for `@{<account_id>}` mentions (default: resolved from `BITBUCKET_TOKEN` via `GET /2.0/user`; set it with a workspace access token) |
 | `BITBUCKET_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
+| `BITBUCKET_ALLOWED_SENDERS` | Comma-separated Atlassian `account_id` values allowed to trigger mention and reviewer tasks without a linked swarm user |
 | `BITBUCKET_EMAIL` | Git commit email for Bitbucket commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN`, `GITLAB_TOKEN` or `AZURE_DEVOPS_TOKEN` is set) |
 | `BITBUCKET_NAME` | Git commit name for Bitbucket commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN`, `GITLAB_TOKEN` or `AZURE_DEVOPS_TOKEN` is set) |
 | `BITBUCKET_DISABLE` | Set to `true` to disable the Bitbucket integration |
@@ -489,6 +495,8 @@ A `slack` adapter requires `SLACK_DISABLE=true`. See [Chat SDK](/docs/integratio
 | `LINEAR_CLIENT_SECRET` | OAuth app client secret (shown once on creation) |
 | `LINEAR_REDIRECT_URI` | OAuth callback URL (e.g., `http://localhost:3013/api/trackers/linear/callback`) |
 | `LINEAR_SIGNING_SECRET` | Webhook signing secret from Linear app settings |
+| `LINEAR_URL` | Linear web base override (default `https://linear.app`), used by the E2E emulator. Deployment env only |
+| `LINEAR_API_URL` | Linear API base override (default `https://api.linear.app`), used by the E2E emulator. The API base receives the client secret and tokens. Deployment env only |
 | `LINEAR_ALLOWED_STATES` | CSV of `WorkflowState.type` values that trigger task creation. Default: `unstarted,started,completed,canceled` (i.e. skip Backlog & Triage). Set to empty to lock down everything but the label override. See [Linear integration → State gate](/docs/integrations/linear#state-gate). |
 | `LINEAR_SWARM_READY_LABEL` | Label name (case-insensitive) that bypasses the state gate. Default: `swarm-ready`. |
 

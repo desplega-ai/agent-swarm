@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, pollUntil } from "../http";
 import type { McpConnection } from "../mcp";
 import type { Scenario, ScenarioContext } from "../run";
@@ -18,15 +19,13 @@ type ChannelRow = { id: string; type: string; createdBy: string; participants: s
 
 function channelRow(ctx: ScenarioContext, name: string): ChannelRow | null {
   return ctx.db.get<ChannelRow>(
-    "SELECT id, type, createdBy, participants FROM channels WHERE name = ?",
-    [name],
+    sql`SELECT id, type, "createdBy", participants FROM channels WHERE name = ${name}`,
   );
 }
 
 function messageCount(ctx: ScenarioContext, channelId: string): number {
   return ctx.db.get<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM channel_messages WHERE channelId = ?",
-    [channelId],
+    sql`SELECT COUNT(*) AS n FROM channel_messages WHERE "channelId" = ${channelId}`,
   )?.n as number;
 }
 
@@ -196,8 +195,7 @@ async function reading(
   expect(asRecords(outcome.data, "messages").length === 0, "Reading did not mark the channel read");
   expect(
     ctx.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-      [readerId, channelId],
+      sql`SELECT COUNT(*) AS n FROM channel_read_state WHERE "agentId" = ${readerId} AND "channelId" = ${channelId}`,
     )?.n === 1,
     "channel_read_state lacks the reader",
   );

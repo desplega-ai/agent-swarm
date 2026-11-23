@@ -2,11 +2,11 @@ import { cancelApprovalRequestAndRun } from "../workflows/approval-cancel";
 import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
 import {
   type ApprovalRequest,
-  getDbClient,
   getExpiredPendingApprovals,
   getStaleApprovalRequests,
   resolveApprovalRequest,
 } from "./db";
+import { getStorage } from "./storage";
 
 export const DEFAULT_APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS = 7;
 
@@ -86,7 +86,7 @@ export async function timeoutExpiredApprovalRequests(
     // The status change and the follow-up task commit together: a crash
     // between them cannot leave a timeout with no follow-up task.
     try {
-      const updated = await getDbClient().transaction(async () => {
+      const updated = await getStorage().transaction(async () => {
         const request = await resolveApprovalRequest(row.id, {
           status: "timeout",
           resolutionReason: `Timed out by the approval sweep: no answer before ${row.expiresAt}`,

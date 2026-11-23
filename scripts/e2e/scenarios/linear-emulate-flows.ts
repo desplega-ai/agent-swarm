@@ -14,6 +14,7 @@
 //   - status sync: moving a tracked issue to Canceled sends `Issue.update`; the task is
 //     cancelled.
 import { createEmulator } from "emulate";
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { claimTask, expectToolOk, registerLead, retireAgent, withMcp } from "./core-helpers";
@@ -34,8 +35,7 @@ type Session = { id: string; issue: { id: string } | null; activities: { nodes: 
 
 function syncedTask(ctx: ScenarioContext, issueId: string) {
   return ctx.db.get<{ swarmId: string; lastSyncedAt: string }>(
-    "SELECT swarmId, lastSyncedAt FROM tracker_sync WHERE provider = 'linear' AND entityType = 'task' AND externalId = ?",
-    [issueId],
+    sql`SELECT "swarmId", "lastSyncedAt" FROM tracker_sync WHERE provider = 'linear' AND "entityType" = 'task' AND "externalId" = ${issueId}`,
   );
 }
 
@@ -236,8 +236,7 @@ export const linearEmulateFlows: Scenario = {
       const taskId = syncedTask(ctx, issueIds.todo)!.swarmId;
       taskIds.push(taskId);
       const task = ctx.db.get<{ source: string; agentId: string | null }>(
-        "SELECT source, agentId FROM agent_tasks WHERE id = ?",
-        [taskId],
+        sql`SELECT source, "agentId" FROM agent_tasks WHERE id = ${taskId}`,
       );
       expect(
         task?.source === "linear" && task.agentId === leadId,
@@ -305,9 +304,9 @@ export const linearEmulateFlows: Scenario = {
       );
       const cancelled = await pollUntil(
         () =>
-          ctx.db.get<{ status: string }>("SELECT status FROM agent_tasks WHERE id = ?", [
-            cancelTaskId,
-          ])?.status === "cancelled",
+          ctx.db.get<{ status: string }>(
+            sql`SELECT status FROM agent_tasks WHERE id = ${cancelTaskId}`,
+          )?.status === "cancelled",
         10_000,
       );
       expect(cancelled, "moving the issue to Canceled never cancelled its task");

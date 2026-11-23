@@ -87,6 +87,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Preparing contractor credential expiry checks for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/contractor-license-expiry-review). Reference.
 - [Coordinating a departing employee's access review across HR and IT with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/employee-offboarding-access-review). Reference.
 - [Coordinating a new hire's first-day readiness across HR, managers and operations with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/employee-onboarding-readiness-review). Reference.
+- [Coordinating an interview loop across recruiters and engineering managers with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/interview-scheduling-handoff). Reference.
 - [Preparing workforce training completion evidence for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-training-completion-evidence-review). Reference.
 - [Briefing sales and leadership on competitor changes with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/competitor-change-brief). Reference.
 - [Preparing a business continuity tabletop exercise with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/business-continuity-tabletop-preparation). Reference.
@@ -97,6 +98,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Investigating a payroll discrepancy for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-payroll-discrepancy-review). Reference.
 - [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-service-capacity-planning). Reference.
 - [Preparing a property maintenance request for human triage with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/maintenance-work-order-triage). Reference.
+- [Preparing an unusual facility energy reading for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/facility-energy-anomaly-review). Reference.
 - [Reviewing customer help content for conflicts with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/support-knowledge-conflict-review). Reference.
 - [Hot Patterns](https://docs.agent-swarm.dev/docs/playbooks/patterns). Reference.
 - [Pattern: Litmus Tests (LLM-as-Judge Quality Gates)](https://docs.agent-swarm.dev/docs/playbooks/patterns/litmus-tests). When: Someone wants one agent to check another agent's output against a rubric before it ships.
@@ -110,6 +112,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Deployment Guide](https://docs.agent-swarm.dev/docs/guides/deployment). When: Someone wants to run Agent Swarm on their own server with Docker Compose.
 - [One-click deploy](https://docs.agent-swarm.dev/docs/guides/one-click-deploy). When: Someone has no server yet and wants Agent Swarm running in the cloud with HTTPS.
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes). When: Someone wants to install Agent Swarm on Kubernetes.
+- [Postgres Storage Engine](https://docs.agent-swarm.dev/docs/guides/postgres). When: Someone asks how to run the swarm on Postgres, or how to move from SQLite to Postgres.
 - [Worker Recovery: What Happens to Running Work When a Worker Stops](https://docs.agent-swarm.dev/docs/guides/worker-recovery-decision). Reference.
 - [Deleting and Restoring Agents](https://docs.agent-swarm.dev/docs/guides/agent-deletion). Reference.
 - [Rootless Podman](https://docs.agent-swarm.dev/docs/guides/podman-rootless). When: Someone wants to run Agent Swarm under rootless Podman.

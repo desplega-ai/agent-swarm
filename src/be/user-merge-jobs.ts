@@ -51,11 +51,11 @@
  * replaces the source with the target.
  */
 
+import type { UserMergeJobRow } from "@desplega/storage";
 import { invalidateTelemetryUserRole, scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { UserMergeJob, UserMergeJobStatus } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { nextRestRatio } from "./boot-scrub-sweep";
-import { getDbClient } from "./db";
 import {
   discoverUserReferenceColumns,
   rewriteUserReferenceColumn,
@@ -63,7 +63,9 @@ import {
   selectWorkflowRunsRequestedBy,
   type UserReferenceColumn,
 } from "./db/users/references";
-import type { DbExecutor } from "./db-client";
+import { getStorage } from "./storage";
+
+const usersRepo = () => getStorage().repos.users;
 
 /** Rows per transaction. On the incident tables this keeps a batch well under 100 ms. */
 export const USER_MERGE_BATCH_SIZE = 5000;
@@ -76,21 +78,6 @@ export const DELETE_USER_PHASE = "delete-user";
 
 /** An error no retry can fix: the job is marked failed without a backoff. */
 export class TerminalUserMergeError extends Error {}
-
-type UserMergeJobRow = {
-  id: string;
-  sourceUserId: string;
-  targetUserId: string;
-  status: UserMergeJobStatus;
-  phase: string | null;
-  progress: string;
-  error: string | null;
-  attempts: number;
-  nextAttemptAt: string | null;
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-};
 
 function rowToJob(row: UserMergeJobRow): UserMergeJob {
   let progress: Record<string, number> = {};
@@ -137,29 +124,19 @@ export async function createUserMergeJob(input: {
   }
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const row = await getDbClient().get<UserMergeJobRow>(
-    `INSERT INTO user_merge_jobs
-       (id, sourceUserId, targetUserId, status, progress, createdAt, created_by, updated_by)
-     VALUES (?, ?, ?, 'pending', '{}', ?, ?, ?)
-     RETURNING *`,
-    [
-      id,
-      input.sourceUserId,
-      input.targetUserId,
-      now,
-      input.createdBy ?? null,
-      input.createdBy ?? null,
-    ],
-  );
+  const row = await usersRepo().insertMergeJob({
+    id,
+    sourceUserId: input.sourceUserId,
+    targetUserId: input.targetUserId,
+    createdAt: now,
+    createdBy: input.createdBy ?? null,
+  });
   if (!row) throw new Error("Failed to create user merge job");
   return rowToJob(row);
 }
 
 export async function getUserMergeJob(id: string): Promise<UserMergeJob | null> {
-  const row = await getDbClient().get<UserMergeJobRow>(
-    "SELECT * FROM user_merge_jobs WHERE id = ?",
-    [id],
-  );
+  const row = await usersRepo().findMergeJob(id);
   return row ? rowToJob(row) : null;
 }
 
@@ -168,26 +145,13 @@ export async function listUserMergeJobs(opts?: {
   limit?: number;
 }): Promise<UserMergeJob[]> {
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
-  const rows = opts?.status
-    ? await getDbClient().query<UserMergeJobRow>(
-        "SELECT * FROM user_merge_jobs WHERE status = ? ORDER BY createdAt DESC LIMIT ?",
-        [opts.status, limit],
-      )
-    : await getDbClient().query<UserMergeJobRow>(
-        "SELECT * FROM user_merge_jobs ORDER BY createdAt DESC LIMIT ?",
-        [limit],
-      );
+  const rows = await usersRepo().listMergeJobs({ status: opts?.status || null, limit });
   return rows.map(rowToJob);
 }
 
 /** The pending or running job that names `userId` as source or target, if any. */
 export async function findActiveUserMergeJob(userId: string): Promise<UserMergeJob | null> {
-  const row = await getDbClient().get<UserMergeJobRow>(
-    `SELECT * FROM user_merge_jobs
-     WHERE status IN ('pending', 'running') AND (sourceUserId = ? OR targetUserId = ?)
-     ORDER BY createdAt LIMIT 1`,
-    [userId, userId],
-  );
+  const row = await usersRepo().findActiveMergeJob(userId);
   return row ? rowToJob(row) : null;
 }
 
@@ -196,12 +160,7 @@ export async function findFailedUserMergeJob(
   sourceUserId: string,
   targetUserId: string,
 ): Promise<UserMergeJob | null> {
-  const row = await getDbClient().get<UserMergeJobRow>(
-    `SELECT * FROM user_merge_jobs
-     WHERE status = 'failed' AND sourceUserId = ? AND targetUserId = ?
-     ORDER BY createdAt DESC LIMIT 1`,
-    [sourceUserId, targetUserId],
-  );
+  const row = await usersRepo().findFailedMergeJob(sourceUserId, targetUserId);
   return row ? rowToJob(row) : null;
 }
 
@@ -210,13 +169,7 @@ export async function findFailedUserMergeJob(
  * kicks runUserMergeJobs (after its transaction commits, when it has one).
  */
 export async function requeueUserMergeJob(jobId: string): Promise<UserMergeJob | null> {
-  const row = await getDbClient().get<UserMergeJobRow>(
-    `UPDATE user_merge_jobs
-     SET status = 'pending', error = NULL, attempts = 0, nextAttemptAt = NULL, finishedAt = NULL
-     WHERE id = ? AND status = 'failed'
-     RETURNING *`,
-    [jobId],
-  );
+  const row = await usersRepo().requeueFailedMergeJob(jobId);
   return row ? rowToJob(row) : null;
 }
 
@@ -267,41 +220,21 @@ function createPacer() {
 }
 
 async function saveProgress(
-  tx: DbExecutor,
   jobId: string,
   phase: string,
   progress: Record<string, number>,
 ): Promise<void> {
-  await tx.run("UPDATE user_merge_jobs SET phase = ?, progress = ? WHERE id = ?", [
-    phase,
-    JSON.stringify(progress),
-    jobId,
-  ]);
+  await usersRepo().saveMergeJobProgress(jobId, phase, JSON.stringify(progress));
 }
 
-async function userExists(executor: DbExecutor, id: string): Promise<boolean> {
-  const row = await executor.get<{ present: number }>(
-    "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
-    [id],
-  );
-  return row?.present === 1;
+async function userExists(id: string): Promise<boolean> {
+  return usersRepo().userExists(id);
 }
 
 /** Claim the oldest pending job whose backoff has passed, counting the attempt. */
 async function claimNextJob(): Promise<UserMergeJob | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<UserMergeJobRow>(
-    `UPDATE user_merge_jobs
-     SET status = 'running', startedAt = COALESCE(startedAt, ?), attempts = attempts + 1,
-         nextAttemptAt = NULL, finishedAt = NULL
-     WHERE id = (
-       SELECT id FROM user_merge_jobs
-       WHERE status = 'pending' AND (nextAttemptAt IS NULL OR nextAttemptAt <= ?)
-       ORDER BY createdAt LIMIT 1
-     )
-     RETURNING *`,
-    [now, now],
-  );
+  const row = await usersRepo().claimNextMergeJob(now);
   return row ? rowToJob(row) : null;
 }
 
@@ -312,17 +245,15 @@ function errorMessage(error: unknown): string {
 }
 
 async function markFailed(jobId: string, error: unknown): Promise<void> {
-  await getDbClient().run(
-    "UPDATE user_merge_jobs SET status = 'failed', error = ?, finishedAt = ? WHERE id = ?",
-    [errorMessage(error), new Date().toISOString(), jobId],
-  );
+  await usersRepo().markMergeJobFailed(jobId, errorMessage(error), new Date().toISOString());
 }
 
 /** Back to pending, with the error kept for the UI and a backoff before the next claim. */
 async function scheduleRetry(jobId: string, error: unknown, delayMs: number): Promise<void> {
-  await getDbClient().run(
-    "UPDATE user_merge_jobs SET status = 'pending', error = ?, nextAttemptAt = ? WHERE id = ?",
-    [errorMessage(error), new Date(Date.now() + delayMs).toISOString(), jobId],
+  await usersRepo().scheduleMergeJobRetry(
+    jobId,
+    errorMessage(error),
+    new Date(Date.now() + delayMs).toISOString(),
   );
 }
 
@@ -336,19 +267,21 @@ async function finishJob(
   progress: Record<string, number>,
   references: UserReferenceColumn[],
 ): Promise<void> {
-  const client = getDbClient();
+  const storage = getStorage();
   // Outside the transaction, so a failed delete still reports its phase.
-  await saveProgress(client, job.id, DELETE_USER_PHASE, progress);
-  await client.transaction(async (tx) => {
+  await saveProgress(job.id, DELETE_USER_PHASE, progress);
+  // A copy per attempt: a replayed attempt (decision D6) must not count twice.
+  const done = await storage.transaction(async () => {
+    const next = { ...progress };
     if (references.length > 0) {
-      const runIds = await selectWorkflowRunsRequestedBy(job.sourceUserId, tx);
+      const runIds = await selectWorkflowRunsRequestedBy(job.sourceUserId);
       const contexts = await rewriteWorkflowRunRequester(
         runIds,
         job.sourceUserId,
         job.targetUserId,
       );
       if (contexts > 0) {
-        progress[WORKFLOW_CONTEXT_PHASE] = (progress[WORKFLOW_CONTEXT_PHASE] ?? 0) + contexts;
+        next[WORKFLOW_CONTEXT_PHASE] = (next[WORKFLOW_CONTEXT_PHASE] ?? 0) + contexts;
       }
       for (const reference of references) {
         const changes = await rewriteUserReferenceColumn(
@@ -358,28 +291,30 @@ async function finishJob(
         );
         if (changes > 0) {
           const phase = `${reference.tableName}.${reference.columnName}`;
-          progress[phase] = (progress[phase] ?? 0) + changes;
+          next[phase] = (next[phase] ?? 0) + changes;
         }
       }
     }
-    const result = await tx.run("DELETE FROM users WHERE id = ?", [job.sourceUserId]);
-    progress[DELETE_USER_PHASE] = (progress[DELETE_USER_PHASE] ?? 0) + result.changes;
-    await tx.run(
-      `UPDATE user_merge_jobs
-       SET status = 'done', phase = ?, progress = ?, error = NULL, finishedAt = ?
-       WHERE id = ?`,
-      [DELETE_USER_PHASE, JSON.stringify(progress), new Date().toISOString(), job.id],
+    const deleted = await usersRepo().deleteUser(job.sourceUserId);
+    next[DELETE_USER_PHASE] = (next[DELETE_USER_PHASE] ?? 0) + deleted;
+    await usersRepo().markMergeJobDone(
+      job.id,
+      DELETE_USER_PHASE,
+      JSON.stringify(next),
+      new Date().toISOString(),
     );
-    client.afterCommit(() => {
+    storage.afterCommit(() => {
       invalidateTelemetryUserRole(job.sourceUserId);
       invalidateTelemetryUserRole(job.targetUserId);
       scheduleOrgDomainRecompute();
     });
+    return next;
   });
+  Object.assign(progress, done);
 }
 
 async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promise<void> {
-  const client = getDbClient();
+  const storage = getStorage();
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? USER_MERGE_BATCH_SIZE));
   const pacer = options.pace === false ? null : createPacer();
   const progress: Record<string, number> = { ...job.progress };
@@ -392,13 +327,13 @@ async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promi
     else await new Promise<void>((resolve) => setTimeout(resolve, 0));
   };
 
-  if (!(await userExists(client, job.sourceUserId))) {
+  if (!(await userExists(job.sourceUserId))) {
     // Deleted by another path (the manage-user tool) or by this job's own
     // delete before the done mark was written: nothing left to move.
     await finishJob(job, progress, []);
     return;
   }
-  if (!(await userExists(client, job.targetUserId))) {
+  if (!(await userExists(job.targetUserId))) {
     throw new TerminalUserMergeError("Target user not found");
   }
 
@@ -407,20 +342,22 @@ async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promi
   // forward) and rewrites them in one transaction.
   while (true) {
     const started = performance.now();
-    const changes = await client.transaction(async (tx) => {
-      const runIds = await selectWorkflowRunsRequestedBy(job.sourceUserId, tx, batchSize);
-      if (runIds.length === 0) return 0;
+    const { changes, next } = await storage.transaction(async () => {
+      const next = { ...progress };
+      const runIds = await selectWorkflowRunsRequestedBy(job.sourceUserId, undefined, batchSize);
+      if (runIds.length === 0) return { changes: 0, next };
       const rewritten = await rewriteWorkflowRunRequester(
         runIds,
         job.sourceUserId,
         job.targetUserId,
       );
       if (rewritten > 0) {
-        progress[WORKFLOW_CONTEXT_PHASE] = (progress[WORKFLOW_CONTEXT_PHASE] ?? 0) + rewritten;
+        next[WORKFLOW_CONTEXT_PHASE] = (next[WORKFLOW_CONTEXT_PHASE] ?? 0) + rewritten;
       }
-      await saveProgress(tx, job.id, WORKFLOW_CONTEXT_PHASE, progress);
-      return rewritten;
+      await saveProgress(job.id, WORKFLOW_CONTEXT_PHASE, next);
+      return { changes: rewritten, next };
     });
+    Object.assign(progress, next);
     await afterBatch(WORKFLOW_CONTEXT_PHASE, changes, performance.now() - started);
     // A short batch means no run names the source any more. A selected run
     // always changes (its requester is the source), so this also ends the
@@ -434,17 +371,19 @@ async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promi
     const phase = `${reference.tableName}.${reference.columnName}`;
     while (true) {
       const started = performance.now();
-      const changes = await client.transaction(async (tx) => {
+      const { changes, next } = await storage.transaction(async () => {
+        const next = { ...progress };
         const rewritten = await rewriteUserReferenceColumn(
           reference,
           job.sourceUserId,
           job.targetUserId,
           batchSize,
         );
-        if (rewritten > 0) progress[phase] = (progress[phase] ?? 0) + rewritten;
-        await saveProgress(tx, job.id, phase, progress);
-        return rewritten;
+        if (rewritten > 0) next[phase] = (next[phase] ?? 0) + rewritten;
+        await saveProgress(job.id, phase, next);
+        return { changes: rewritten, next };
       });
+      Object.assign(progress, next);
       await afterBatch(phase, changes, performance.now() - started);
       // A short batch means the column holds no more rows for the source.
       if (changes < batchSize) break;
@@ -549,16 +488,9 @@ export function runUserMergeJobs(options: UserMergeRunnerOptions = {}): Promise<
  * attempts or hit a terminal error, and a repeat POST re-queues them.
  */
 export async function resumeUserMergeJobs(options: UserMergeRunnerOptions = {}): Promise<void> {
-  const requeued = await getDbClient().run(
-    `UPDATE user_merge_jobs SET status = 'pending', nextAttemptAt = NULL, finishedAt = NULL
-     WHERE status = 'running' OR (status = 'pending' AND nextAttemptAt IS NOT NULL)`,
-  );
-  const pending = await getDbClient().get<{ n: number }>(
-    "SELECT COUNT(*) AS n FROM user_merge_jobs WHERE status = 'pending'",
-  );
-  if (!pending || pending.n === 0) return;
-  console.log(
-    `[user-merge] resuming ${pending.n} job(s) (${requeued.changes} re-queued after restart)`,
-  );
+  const requeued = await usersRepo().resetInterruptedMergeJobs();
+  const pending = await usersRepo().countPendingMergeJobs();
+  if (pending === 0) return;
+  console.log(`[user-merge] resuming ${pending} job(s) (${requeued} re-queued after restart)`);
   await runUserMergeJobs(options);
 }

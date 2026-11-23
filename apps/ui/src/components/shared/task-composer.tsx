@@ -59,7 +59,9 @@
  *
  * A json-render app page (`SessionThread`) passes `onFollowUp`: its follow-up
  * runs the page's action chain instead of `POST /api/tasks`, so the box drops
- * attachments and the mic. Its steers carry `steerSource: "app-page"`.
+ * the mic, and drops attachments unless the page passes
+ * `followUpAttachments`: then the files go to `onFollowUp`, which uploads
+ * them itself. Its steers carry `steerSource: "app-page"`.
  */
 
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
@@ -73,7 +75,11 @@ import {
   type ComposeAttachmentUploadResult,
   uploadComposeAttachments,
 } from "@/components/sessions/compose-attachment-upload";
-import { ComposerDock, partitionAttachmentFiles } from "@/components/sessions/composer-dock";
+import {
+  type AttachmentLimits,
+  ComposerDock,
+  partitionAttachmentFiles,
+} from "@/components/sessions/composer-dock";
 import { useSendFollowUp } from "@/components/sessions/pending-follow-ups";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -143,12 +149,17 @@ export interface TaskComposerProps {
   /**
    * Hands the follow-up to the caller instead of creating the task here (a
    * json-render app page runs its own action chain). Called with the typed
-   * text and the parent (`targetTask`, else `rootTaskId`). The draft clears
-   * when it resolves; a rejection keeps the draft and shows its message. The
-   * caller's send carries text only, so the box offers no attachments and no
-   * mic, and `renderActions` is not rendered.
+   * text, the parent (`targetTask`, else `rootTaskId`) and the attached
+   * files. The draft and the files clear when it resolves; a rejection keeps
+   * both and shows its message. The box offers no mic, and `renderActions`
+   * is not rendered.
    */
-  onFollowUp?: (text: string, parentTaskId: string | undefined) => Promise<void>;
+  onFollowUp?: (text: string, parentTaskId: string | undefined, files: File[]) => Promise<void>;
+  /**
+   * With `onFollowUp`: the box takes files within these limits and hands
+   * them to `onFollowUp`. Omitted: the caller's send is text only.
+   */
+  followUpAttachments?: AttachmentLimits;
   className?: string;
 }
 
@@ -298,6 +309,7 @@ export function TaskComposer({
   bar,
   steerSource,
   onFollowUp,
+  followUpAttachments,
   className,
 }: TaskComposerProps) {
   const queryClient = useQueryClient();
@@ -448,14 +460,21 @@ export function TaskComposer({
     },
   });
 
-  // The caller's follow-up (`onFollowUp`): text only, no task created here.
+  // The caller's follow-up (`onFollowUp`): no task created here.
   const callerFollowUp = useMutation({
-    mutationFn: (input: { text: string; parentTaskId: string | undefined }) => {
+    mutationFn: (input: { text: string; parentTaskId: string | undefined; files: File[] }) => {
       if (!onFollowUp) throw new Error("No follow-up handler");
-      return onFollowUp(input.text, input.parentTaskId);
+      return onFollowUp(input.text, input.parentTaskId, input.files);
     },
-    onSuccess: () => setDraft(""),
+    onSuccess: (_, input) => {
+      setDraft("");
+      if (input.files.length > 0) {
+        setAttachments((current) => current.filter((file) => !input.files.includes(file)));
+      }
+    },
   });
+  // Files go out on the follow-up path, ours or the caller's when it takes them.
+  const takesFiles = !onFollowUp || !!followUpAttachments;
   const sending = onFollowUp ? callerFollowUp : createTask;
   const optimisticFollowUp = useSendFollowUp(rootTaskId ?? "");
 
@@ -482,7 +501,11 @@ export function TaskComposer({
     const message = messageWithCitations(draft, citations);
     if (!message || sending.isPending || holdingFiles) return;
     if (onFollowUp) {
-      callerFollowUp.mutate({ text: message, parentTaskId: targetTask?.id ?? rootTaskId });
+      callerFollowUp.mutate({
+        text: message,
+        parentTaskId: targetTask?.id ?? rootTaskId,
+        files: takesFiles ? attachments : [],
+      });
       return;
     }
     if (rootTaskId && attachments.length === 0) {
@@ -608,15 +631,16 @@ export function TaskComposer({
         routeLabel={routeLabel}
         routeDetail={routeDetail}
         sendLabel={sendLabel}
-        attachments={onFollowUp ? undefined : attachments}
+        attachments={takesFiles ? attachments : undefined}
         onAttachmentsChange={
-          onFollowUp
-            ? undefined
-            : (files) => {
+          takesFiles
+            ? (files) => {
                 setAttachments(files);
                 setAttachmentError(null);
               }
+            : undefined
         }
+        attachmentLimits={onFollowUp ? followUpAttachments : undefined}
         attachmentErrorMessage={onFollowUp ? null : attachmentError}
         extraActions={extraActions}
         fullWidth={fullWidth}

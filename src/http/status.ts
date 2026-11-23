@@ -17,6 +17,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getStorage } from "@/be/storage";
 import {
   type AutomationSetupStates,
   automationIntegrationFixUrl,
@@ -26,13 +27,11 @@ import {
 } from "../be/automation-preflight";
 import {
   getAgentHarnessProviders,
-  getDbClient,
   getInstanceActivity,
   getLiveAgentCounts,
   getReadyAgentCounts,
   hasFirstCompletedTask,
   listAgentsWithCredStatusByProvider,
-  NOT_EXTENSION_AGENT_SQL,
 } from "../be/db";
 import { getInstanceFeedbackSignals } from "../be/db/instance-signals";
 import { getEmbeddingProvider } from "../be/memory";
@@ -638,10 +637,7 @@ function agentfsMilestone(state: AutomationSetupStates["agentfs"]): SetupMilesto
 async function workersMilestone(): Promise<SetupMilestone> {
   // `configured` if ≥1 row in agents; `verified` if both lead+worker alive
   // within the last 5 minutes.
-  const totalRow = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL}`,
-  );
-  const totalAgents = totalRow?.count ?? 0;
+  const totalAgents = await getStorage().repos.agents.countNonExtensionAgents();
 
   const { leads_alive, workers_alive } = await getLiveAgentCounts(5);
   if (leads_alive > 0 && workers_alive > 0) {

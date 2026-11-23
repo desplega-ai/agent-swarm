@@ -9,7 +9,6 @@ import {
   schedulePreflightInput,
 } from "@/be/automation-preflight";
 import {
-  getDbClient,
   getDueScheduledTasks,
   getLeadAgent,
   getScheduledTaskById,
@@ -28,6 +27,7 @@ import { buildScriptCredentialBindingsWithFailures } from "@/be/script-credentia
 import { getScript } from "@/be/scripts/db";
 import { runScriptWithRunCredential } from "@/be/scripts/run-credential";
 import { seededWorkflowState } from "@/be/seed/workflows-seeder";
+import { getStorage } from "@/be/storage";
 import { SCHEDULER_INTERVAL_MS_BOUNDS } from "@/be/swarm-config-guard";
 import { telemetry } from "@/telemetry";
 import type { AgentTask, ScheduledTask, Workflow } from "@/types";
@@ -118,8 +118,8 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
         egressSecrets: credentials.egressSecrets,
         userConfig: credentials.userConfig,
         agentFs: credentials.agentFs,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
+        apiConnections: await getScriptApiConnectionDescriptors({ agentId }),
+        mcpConnections: await getScriptMcpConnectionDescriptors({ agentId }),
         timeoutMs: 60_000,
       },
       { sourceScriptRunId: record.id },
@@ -294,7 +294,7 @@ export async function dispatchScheduleTarget(
       if (!triggeredWorkflows) {
         // Extension hooks must run before the transaction opens (see schedule-task.ts).
         const prepared = await prepareStandaloneScheduleTask(schedule, extraTags);
-        const task = await getDbClient().transaction(async () =>
+        const task = await getStorage().transaction(async () =>
           createStandaloneScheduleTask(schedule, extraTags, prepared),
         );
         return { triggeredWorkflows, task };
@@ -359,7 +359,7 @@ async function claimScheduleOccurrence(
   // guard below still prevents a moved ceiling from consuming this preparation.
   const preparedWait = await prepareDeferredTaskWait(snapshot.id, "ceiling", extraTags);
   if (signal?.aborted) return null;
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const current = await getScheduledTaskById(snapshot.id);
     if (
       signal?.aborted ||
@@ -404,7 +404,7 @@ async function claimScheduleOccurrence(
 
 /** A slow target must not overwrite a newer occurrence or a schedule edit. */
 async function updateClaimedSchedule(claimed: ScheduledTask, updates: UpdateScheduledTaskData) {
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const current = await getScheduledTaskById(claimed.id);
     if (
       current?.nextRunAt !== claimed.nextRunAt ||

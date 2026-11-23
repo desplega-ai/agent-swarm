@@ -1,6 +1,6 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "@/server";
-import { closeDb } from "./be/db";
+import { closeDatabase } from "./be/db";
 import { setDeploymentEnvReader } from "./be/memory";
 import {
   enqueueAuditRow,
@@ -36,9 +36,9 @@ async function main() {
 }
 
 // NOTE: main() resolves right after the transport starts (the process stays
-// alive on stdin), so `.finally` below runs post-boot — NOT at shutdown.
-// getDb() lazily re-opens on the next query, which is why the existing
-// closeDb() here is harmless. Audit teardown therefore hangs off shutdown:
+// alive on stdin), so teardown cannot hang off main(): the database stays open
+// for the transport lifetime (a Postgres engine does not reopen lazily) and
+// closes after the audit drain. Audit and database teardown hang off shutdown:
 // the final flush is asynchronous, so it runs from `beforeExit` (stdin closed,
 // event loop drained) and from explicit SIGINT/SIGTERM handlers — both of
 // which can await it, unlike the `exit` event. Supervisors stop stdio workers
@@ -51,6 +51,7 @@ async function drainAudit(): Promise<void> {
   stopAuditWriter();
   await flushAuditBuffer();
   clearAuditSink();
+  await closeDatabase();
 }
 process.on("beforeExit", async () => {
   await drainAudit();
@@ -64,8 +65,4 @@ process.on("SIGTERM", async () => {
   process.exit(143);
 });
 
-main()
-  .catch(console.error)
-  .finally(() => {
-    closeDb();
-  });
+main().catch(console.error);

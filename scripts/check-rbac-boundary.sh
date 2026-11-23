@@ -56,7 +56,7 @@ ALLOWED_PATTERNS=(
   'src/tools/get-swarm.ts|a\.isLead \? ", lead" : ""'
   'src/tools/join-swarm.ts|agents\.find\(\(agent\) => agent\.isLead\)'
   'src/tools/join-swarm.ts|agent\.isLead \? "Lead" : "Worker"'
-  'src/tools/send-task.ts|if \(taskOptions\.routingAffinity\?\.leadOnly && !agent\.isLead\) \{'
+  'src/tools/send-task.ts|if \(options\.routingAffinity\?\.leadOnly && !agent\.isLead\) \{'
   'src/tools/send-task.ts|if \(ctx\.kind === "user" && \(!agent\.isLead \|\| !\(await isAgentReachable\(agent\)\)\)\) \{'
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
   'src/http/poll.ts|^import \{ isLeadChannelMonitoringEnabled \} from "\.\./utils/lead-monitor-channels";$'

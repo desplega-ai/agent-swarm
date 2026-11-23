@@ -63,7 +63,11 @@ async function agentsAreRefused(ctx: ScenarioContext): Promise<void> {
       ["POST", `/api/agents/${target}/restore`, { reason: "not allowed" }],
       ["GET", "/api/agent-history", undefined],
     ] as const) {
-      expectStatus(await ctx.api(method, path, { agentId: caller, body }), [403], `agent ${method} ${path}`);
+      expectStatus(
+        await ctx.api(method, path, { agentId: caller, body }),
+        [403],
+        `agent ${method} ${path}`,
+      );
     }
   }
   await retireAgent(ctx, leadId);

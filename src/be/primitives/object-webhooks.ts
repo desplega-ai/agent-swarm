@@ -5,12 +5,12 @@ import { getPublicMcpBaseUrl } from "@/utils/constants";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { getEncryptionKey } from "../crypto/key-bootstrap";
 import { decryptSecret, encryptSecret } from "../crypto/secrets-cipher";
-import { getDbClient } from "../db";
 import {
   AgentFsRequestError,
   agentFsRequest,
   resolveAgentFsServiceCredentials,
 } from "../seed/agent-fs-provision";
+import { getStorage } from "../storage";
 import { applyFileChange, type FileChangeResult } from "./objects";
 
 /**
@@ -91,10 +91,7 @@ export async function ensureObjectWebhook(orgId: string, driveId: string): Promi
 /** Boot pass over every drive that already holds objects. Never throws. */
 export async function ensureObjectWebhooksForKnownDrives(): Promise<EnsureResult[]> {
   try {
-    const drives = await getDbClient().query<{ orgId: string; driveId: string }>(
-      "SELECT DISTINCT orgId, driveId FROM primitive_objects ORDER BY orgId, driveId LIMIT ?",
-      [MAX_BOOT_DRIVES],
-    );
+    const drives = await getStorage().repos.pages.listObjectDrives(MAX_BOOT_DRIVES);
     const results: EnsureResult[] = [];
     for (const { orgId, driveId } of drives) {
       results.push(await ensureObjectWebhook(orgId, driveId));
@@ -123,18 +120,11 @@ async function ensure(orgId: string, driveId: string): Promise<EnsureResult> {
     return skipped(driveId, "the drive is outside the swarm's agent-fs org");
   }
 
-  const db = getDbClient();
+  const hooks = getStorage().repos.agentFsWebhooks;
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
-  await db.run(
-    `INSERT INTO agent_fs_object_webhooks (id, orgId, driveId, status, createdAt, updatedAt)
-     VALUES (?, ?, ?, 'pending', ?, ?) ON CONFLICT(orgId, driveId) DO NOTHING`,
-    [randomUUID(), orgId, driveId, nowIso, nowIso],
-  );
-  const row = await db.get<HookRow>(
-    "SELECT * FROM agent_fs_object_webhooks WHERE orgId = ? AND driveId = ?",
-    [orgId, driveId],
-  );
+  await hooks.insertPendingIfAbsent(randomUUID(), orgId, driveId, nowIso);
+  const row: HookRow | null = await hooks.findByDrive(orgId, driveId);
   if (!row) throw new Error("webhook row vanished after insert");
   const url = `${base}${OBJECT_WEBHOOK_PATH}${row.id}`;
   if (row.status === "active" && row.url === url && row.secretCiphertext) {
@@ -142,18 +132,13 @@ async function ensure(orgId: string, driveId: string): Promise<EnsureResult> {
   }
 
   // One replica registers. A lapsed lease or an old failure frees the claim.
-  const { changes } = await db.run(
-    `UPDATE agent_fs_object_webhooks SET claimedAt = ?
-     WHERE id = ? AND (claimedAt IS NULL OR claimedAt < ?)
-       AND NOT (status = 'failed' AND attemptedAt > ?)`,
-    [
-      nowIso,
-      row.id,
-      new Date(now - LEASE_MS).toISOString(),
-      new Date(now - RETRY_AFTER_MS).toISOString(),
-    ],
+  const claimed = await hooks.claim(
+    row.id,
+    nowIso,
+    new Date(now - LEASE_MS).toISOString(),
+    new Date(now - RETRY_AFTER_MS).toISOString(),
   );
-  if (changes === 0) {
+  if (!claimed) {
     return {
       status: "busy",
       reason:
@@ -167,24 +152,18 @@ async function ensure(orgId: string, driveId: string): Promise<EnsureResult> {
   try {
     const { subscriptionId, secret } = await register(service, row, base, url);
     registerVolatileSecret(secret, SECRET_NAME);
-    await db.run(
-      `UPDATE agent_fs_object_webhooks
-       SET subscriptionId = ?, url = ?, secretCiphertext = ?, status = 'active',
-           lastError = NULL, claimedAt = NULL, attemptedAt = ?, updatedAt = ?
-       WHERE id = ?`,
-      [subscriptionId, url, encryptSecret(secret, getEncryptionKey()), doneIso, doneIso, row.id],
-    );
+    await hooks.markActive(row.id, {
+      subscriptionId,
+      url,
+      secretCiphertext: encryptSecret(secret, getEncryptionKey()),
+      now: doneIso,
+    });
     console.log(`[objects] agent-fs webhook registered for drive ${driveId}`);
     return { status: "registered" };
   } catch (error) {
     const reason = errorText(error);
     // The stored secret stays: deliveries to the old URL still verify.
-    await db.run(
-      `UPDATE agent_fs_object_webhooks
-       SET status = 'failed', lastError = ?, claimedAt = NULL, attemptedAt = ?, updatedAt = ?
-       WHERE id = ?`,
-      [reason, doneIso, doneIso, row.id],
-    );
+    await hooks.markFailed(row.id, reason, doneIso);
     warnOnce(driveId, reason);
     return { status: "failed", reason };
   }
@@ -272,10 +251,7 @@ function readSecret(ciphertext: string): string | null {
 export async function objectWebhookSecret(
   hookId: string,
 ): Promise<{ secret: string; orgId: string; driveId: string } | null> {
-  const row = await getDbClient().get<HookRow>(
-    "SELECT * FROM agent_fs_object_webhooks WHERE id = ?",
-    [hookId],
-  );
+  const row: HookRow | null = await getStorage().repos.agentFsWebhooks.findById(hookId);
   if (!row?.secretCiphertext) return null;
   const secret = readSecret(row.secretCiphertext);
   return secret ? { secret, orgId: row.orgId, driveId: row.driveId } : null;

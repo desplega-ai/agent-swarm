@@ -1,9 +1,12 @@
 import { createHmac } from "node:crypto";
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
   cleanupStack,
+  createUser,
   deleteConfig,
+  expectWebhookBodyTooLarge,
   hmacSignature,
   putConfig,
   reloadConfig,
@@ -36,11 +39,12 @@ const NOT_CONFIGURED: Record<(typeof WEBHOOKS)[number], string> = {
 
 /**
  * A GitLab sender with no linked identity is linked by its payload email only when that value
- * is an address. Values GitLab sends for senders without a public email (a redaction marker)
- * are shared by many senders, so they link nobody.
+ * is an address an existing user owns: a linked sender may open tasks with a mention, so no
+ * user is created for an unknown address. Values GitLab sends for senders without a public
+ * email (a redaction marker) are shared by many senders, so they link nobody.
  */
 async function checkGitLabSenders(ctx: ScenarioContext, token: string): Promise<void> {
-  const note = (id: number, username: string, email: string) =>
+  const note = (id: number, username: string, email: string, text = "a comment with no mention") =>
     ctx.api("POST", "/api/gitlab/webhook", {
       apiKey: null,
       headers: { "X-Gitlab-Token": token },
@@ -57,27 +61,68 @@ async function checkGitLabSenders(ctx: ScenarioContext, token: string): Promise<
         },
         object_attributes: {
           id: id * 10,
-          note: "a comment with no mention",
+          note: text,
           noteable_type: "MergeRequest",
           noteable_id: 1,
           url: `https://gitlab.example.test/acme/app/-/merge_requests/1#note_${id * 10}`,
           author_id: id,
           type: null,
         },
+        merge_request: {
+          id: 1,
+          iid: id,
+          title: "MR",
+          description: "",
+          state: "opened",
+          action: "open",
+          source_branch: "feature",
+          target_branch: "main",
+          url: `https://gitlab.example.test/acme/app/-/merge_requests/${id}`,
+          last_commit: null,
+          author_id: id,
+        },
       }),
     });
   const linkedEmail = (username: string) =>
     ctx.db.get<{ email: string | null }>(
-      `SELECT u.email AS email FROM user_external_ids x JOIN users u ON u.id = x.userId
-       WHERE x.kind = 'gitlab' AND x.externalId = ?`,
-      [username],
+      sql`SELECT u.email AS email FROM user_external_ids x JOIN users u ON u.id = x."userId"
+       WHERE x.kind = 'gitlab' AND x."externalId" = ${username}`,
     );
 
   const real = `gl-real-${ctx.nonce}`;
+  await createUser(ctx, "gitlab sender", { email: `${real}@example.test` });
   expectStatus(await note(1, real, `${real}@example.test`), [200], "gitlab note, real email");
   expect(
     linkedEmail(real)?.email === `${real}@example.test`,
-    "a sender with an email address is linked by it",
+    "a sender whose email an existing user owns is linked by it",
+  );
+
+  const stranger = `gl-stranger-${ctx.nonce}`;
+  expectStatus(
+    await note(4, stranger, `${stranger}@example.test`),
+    [200],
+    "gitlab note, unknown email",
+  );
+  expect(
+    linkedEmail(stranger) === null &&
+      ctx.db.get(sql`SELECT 1 AS one FROM users WHERE email = ${`${stranger}@example.test`}`) ===
+        null,
+    "no user is created for an email no user owns",
+  );
+
+  // A mention opens a task only for a linked (or allowed) sender. The SUT keeps the default bot name.
+  const mention = "@agent-swarm-bot please look";
+  const strangerMention = await note(5, stranger, `${stranger}@example.test`, mention);
+  expectStatus(strangerMention, [200], "gitlab mention, unknown sender");
+  expect(
+    asRecord(strangerMention.json).created === false,
+    "a mention from an unknown sender creates no task",
+  );
+  const linkedMention = await note(6, real, `${real}@example.test`, mention);
+  expectStatus(linkedMention, [200], "gitlab mention, linked sender");
+  expect(
+    asRecord(linkedMention.json).created === true,
+    "a mention from a linked sender creates a task",
   );
 
   const first = `gl-redacted-a-${ctx.nonce}`;
@@ -89,7 +134,7 @@ async function checkGitLabSenders(ctx: ScenarioContext, token: string): Promise<
     "senders with a redacted email stay unlinked",
   );
   expect(
-    ctx.db.get("SELECT 1 AS one FROM users WHERE email = ?", ["[REDACTED]"]) === null,
+    ctx.db.get(sql`SELECT 1 AS one FROM users WHERE email = ${"[REDACTED]"}`) === null,
     "no user is created for a redacted email",
   );
 }
@@ -143,8 +188,7 @@ async function checkAgentMailSenders(
     };
     const taskFor = (subject: string) =>
       ctx.db.get<{ requestedByUserId: string | null; task: string }>(
-        "SELECT requestedByUserId, task FROM agent_tasks WHERE task LIKE ?",
-        [`%Subject: ${subject}%`],
+        sql`SELECT "requestedByUserId", task FROM agent_tasks WHERE task LIKE ${`%Subject: ${subject}%`}`,
       );
     const waitForTask = async (subject: string) => {
       expect(
@@ -154,10 +198,9 @@ async function checkAgentMailSenders(
       return taskFor(subject);
     };
     const merges = () =>
-      ctx.db.query("SELECT 1 FROM user_identity_events WHERE userId = ? AND eventType = ?", [
-        bossId,
-        "auto_merge",
-      ]).length;
+      ctx.db.query(
+        sql`SELECT 1 FROM user_identity_events WHERE "userId" = ${bossId} AND "eventType" = ${"auto_merge"}`,
+      ).length;
 
     // The mailbox is the trailing <...>; an address inside the display name is ignored.
     const quoted = `quoted-${ctx.nonce}`;
@@ -321,7 +364,10 @@ export const platformWebhooks: Scenario = {
             author_association: association,
           },
           issue: { number: 1, title: "e2e", html_url: "https://github.com/e2e/repo/issues/1" },
-          repository: { full_name: `e2e/repo-${ctx.nonce}`, html_url: "https://github.com/e2e/repo" },
+          repository: {
+            full_name: `e2e/repo-${ctx.nonce}`,
+            html_url: "https://github.com/e2e/repo",
+          },
           sender: { login },
         });
         const response = await github(body, {
@@ -351,14 +397,16 @@ export const platformWebhooks: Scenario = {
         "dismiss a github login",
       );
       cleanup.add("undo the github dismissal", async () => {
-        await ctx.api("DELETE", `/api/kv/_/integration:unmapped-dismissed:github/${dismissedLogin}`);
+        await ctx.api(
+          "DELETE",
+          `/api/kv/_/integration:unmapped-dismissed:github/${dismissedLogin}`,
+        );
       });
       expect(!(await mention(dismissedLogin, "NONE")), "a dismissed login opens no task");
       expect(!(await trackedMeta(dismissedLogin)), "the tracker skips a dismissed login");
       expect(
         ctx.db.get(
-          "SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND externalId = ?",
-          [dismissedLogin],
+          sql`SELECT 1 AS one FROM user_external_ids WHERE kind = 'github' AND "externalId" = ${dismissedLogin}`,
         ) === null,
         "a dismissed login is linked to no user",
       );
@@ -375,7 +423,8 @@ export const platformWebhooks: Scenario = {
           "unmapped",
         ).map((row) => row.externalId);
       expect(
-        !(await githubQueue("")).includes(botLogin) && (await githubQueue("")).includes(strangerLogin),
+        !(await githubQueue("")).includes(botLogin) &&
+          (await githubQueue("")).includes(strangerLogin),
         "the queue hides a [bot] login by default",
       );
       expect(
@@ -604,11 +653,17 @@ export const platformWebhooks: Scenario = {
       );
       expect(
         ctx.db.get(
-          "SELECT 1 AS one FROM agent_tasks WHERE taskType = 'kapso-inbound' AND task LIKE ?",
-          [`%${ctx.nonce}%`],
+          sql`SELECT 1 AS one FROM agent_tasks WHERE "taskType" = 'kapso-inbound' AND task LIKE ${`%${ctx.nonce}%`}`,
         ) === null,
         "an unrouted message creates no task",
       );
+
+      // ── body limit: the body is read before the signature check ────────────
+      await expectWebhookBodyTooLarge(ctx, "/api/github/webhook", {
+        "X-GitHub-Event": "pull_request",
+      });
+      await expectWebhookBodyTooLarge(ctx, "/api/agentmail/webhook");
+      await expectWebhookBodyTooLarge(ctx, "/api/integrations/kapso/webhook");
 
       // ── back to the disabled contract ──────────────────────────────────────
       for (const id of rows.splice(0)) await deleteConfig(ctx, id);

@@ -741,7 +741,9 @@ export function buildClaudeCodeRuntimeEnv(
   return {
     ENABLE_TOOL_SEARCH: "true",
     CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING: "1",
-    CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
+    // No CLAUDE_CODE_SKIP_PROMPT_HISTORY: it stops the session transcript the
+    // runner reads observedModel/observedReasoningEffort from. The runner
+    // deletes that transcript when the session ends.
     CLAUDE_CODE_DISABLE_ATTACHMENTS: "1",
     DISABLE_TELEMETRY: "1",
     DO_NOT_TRACK: "1",

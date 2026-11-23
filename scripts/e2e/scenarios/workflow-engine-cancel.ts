@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // Cancelling workflow runs: a waiting run, a run with an open agent task, a run parked
 // on an approval, a fan-out, and a whole sub-workflow tree. Cancel finishes every piece
 // of open work and a late signal or answer cannot revive the run.
@@ -118,8 +119,7 @@ export const workflowEngineCancel: Scenario = {
       const taskRun = await triggerWorkflow(ctx, taskId, {}, { agentId: workerId });
       const taskStep = await waitForStep(ctx, taskRun.runId, "t", "waiting");
       const openTask = ctx.db.get<{ id: string; status: string }>(
-        "SELECT id, status FROM agent_tasks WHERE workflowRunStepId = ?",
-        [String(taskStep.id)],
+        sql`SELECT id, status FROM agent_tasks WHERE "workflowRunStepId" = ${String(taskStep.id)}`,
       );
       expect(openTask && openTask.status !== "completed", "the pinned task is open");
       const toolCancel = await callToolOk(connection, "cancel-workflow-run", {
@@ -134,8 +134,7 @@ export const workflowEngineCancel: Scenario = {
         "cancel tool cancels the run with its reason",
       );
       const closedTask = ctx.db.get<{ status: string }>(
-        "SELECT status FROM agent_tasks WHERE id = ?",
-        [openTask?.id ?? ""],
+        sql`SELECT status FROM agent_tasks WHERE id = ${openTask?.id ?? ""}`,
       );
       expect(
         closedTask?.status === "cancelled",
@@ -252,8 +251,7 @@ export const workflowEngineCancel: Scenario = {
         `fan-out children are cancelled: ${JSON.stringify(childStatuses)}`,
       );
       const openFanTasks = ctx.db.query<{ status: string }>(
-        "SELECT status FROM agent_tasks WHERE workflowRunId = ?",
-        [fanRun.runId],
+        sql`SELECT status FROM agent_tasks WHERE "workflowRunId" = ${fanRun.runId}`,
       );
       expect(
         openFanTasks.length >= 2 && openFanTasks.every((task) => task.status === "cancelled"),

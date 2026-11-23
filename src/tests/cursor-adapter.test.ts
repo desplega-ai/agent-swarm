@@ -334,7 +334,7 @@ describe("translateCursorMessage", () => {
   });
 
   test("composeFirstMessage renders the registered template", async () => {
-    configureDbResolver((eventType) =>
+    configureDbResolver(async (eventType) =>
       eventType === "system.agent.cursor.first_message"
         ? { template: { id: "custom", scope: "global", body: "[{{systemPrompt}}] {{prompt}}" } }
         : null,
@@ -344,9 +344,9 @@ describe("translateCursorMessage", () => {
 
   test("composeFirstMessage keeps the system prompt on skipped, blank, and failing templates", async () => {
     for (const resolver of [
-      () => ({ skip: true as const }),
-      () => ({ template: { id: "blank", scope: "global", body: "  " } }),
-      () => {
+      async () => ({ skip: true as const }),
+      async () => ({ template: { id: "blank", scope: "global", body: "  " } }),
+      async () => {
         throw new Error("db down");
       },
     ]) {

@@ -1,8 +1,9 @@
 import { can } from "@/rbac";
 import type { SwarmRepo } from "@/types";
 import type { HttpRequestAuth } from "@/utils/request-auth-context";
-import { getAgentById, getDbClient, getSwarmRepoById, updateSwarmRepo } from "./db";
+import { getAgentById, getSwarmRepoById, updateSwarmRepo } from "./db";
 import { changesMergePolicy } from "./repo-merge-policy";
+import { getStorage } from "./storage";
 
 export type CheckedRepoUpdate<Refusal> =
   | { kind: "updated"; repo: SwarmRepo }
@@ -69,7 +70,7 @@ export async function updateSwarmRepoChecked<Refusal>(
   authorize: (existing: SwarmRepo) => Promise<Refusal | null> | Refusal | null,
   authorizeExecConfig: (existing: SwarmRepo) => Promise<Refusal | null> | Refusal | null,
 ): Promise<CheckedRepoUpdate<Refusal>> {
-  return await getDbClient().transaction(async (): Promise<CheckedRepoUpdate<Refusal>> => {
+  return await getStorage().transaction(async (): Promise<CheckedRepoUpdate<Refusal>> => {
     const touchesExecConfig =
       updates.url !== undefined || updates.clonePath !== undefined || updates.hooks !== undefined;
     if (updates.guidelines !== undefined || touchesExecConfig) {

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { McpConnection } from "../mcp";
 import type { Scenario, ScenarioContext } from "../run";
@@ -317,8 +318,7 @@ async function learningTool(
   const memoryId = String(outcome.data.memoryId);
   expect(outcome.message.includes("best-practice"), `inject-learning: ${outcome.message}`);
   const row = ctx.db.get<{ agentId: string; scope: string; content: string }>(
-    "SELECT agentId, scope, content FROM agent_memory WHERE id = ?",
-    [memoryId],
+    sql`SELECT "agentId", scope, content FROM agent_memory WHERE id = ${memoryId}`,
   );
   expect(
     row?.agentId === workerId && row.scope === "swarm" && row.content.includes(learning),

@@ -2466,6 +2466,11 @@ export interface paths {
                             total: number;
                             truncated: boolean;
                             rowLimit: number | null;
+                            /**
+                             * @description SQL dialect of the storage engine that ran the query
+                             * @enum {string}
+                             */
+                            dialect: "sqlite" | "postgres";
                         };
                     };
                 };
@@ -18372,7 +18377,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Launch a page session (issues HttpOnly cookie) */
+        /**
+         * Launch a page session (issues HttpOnly cookie)
+         * @description The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -27455,6 +27463,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Jira webhook handler not configured */
                 503: {
                     headers: {
@@ -27938,6 +27955,15 @@ export interface paths {
                 };
                 /** @description Invalid signature */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 5 MiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30367,6 +30393,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description GitHub integration not configured */
                 503: {
                     headers: {
@@ -30622,6 +30657,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description AgentMail integration not configured or inbound archive unavailable */
                 503: {
                     headers: {
@@ -30674,6 +30718,15 @@ export interface paths {
                 };
                 /** @description Invalid signature */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 5 MiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -32218,6 +32271,15 @@ export interface paths {
                 };
                 /** @description Workflow not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 5 MiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };

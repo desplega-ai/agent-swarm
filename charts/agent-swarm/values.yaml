@@ -326,7 +326,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.18.36
+    tag: 0.18.37
   port: 7433
   # -- Blob storage backend for agent-fs. `s3` (default) stores objects in
   # the bucket configured below. `local` stores objects on the agent-fs PVC
@@ -404,7 +404,23 @@ sharedVolume:
   # per-pod emptyDir (default — no cross-pod sharing).
   existingClaim: ""
 
-# Litestream — optional continuous SQLite WAL replication to S3.
+# Storage engine. Empty `url` and `existingSecret` keep SQLite on the API volume
+# (the default). A postgres:// URL selects Postgres 16 with pgvector; see
+# runbooks/postgres.md for the database, the db-query role and the cutover.
+# Litestream is off on Postgres. api.replicas stays 1 on both engines.
+database:
+  # -- Postgres URL, for example postgres://swarm:pass@db:5432/swarm. Stored in
+  # the chart's database Secret as DATABASE_URL.
+  url: ""
+  # -- Optional URL of the restricted read-only db-query role (DATABASE_QUERY_URL).
+  # Empty turns the db-query tool off on Postgres.
+  queryUrl: ""
+  # -- Pre-existing Secret with key DATABASE_URL (and optional DATABASE_QUERY_URL).
+  # When set, the inline values above are ignored.
+  existingSecret: ""
+
+# Litestream — optional continuous SQLite WAL replication to S3 (SQLite only:
+# the sidecar does not render when database.url or database.existingSecret is set).
 #
 # When enabled, runs a litestream sidecar in the API pod that streams the
 # WAL to an S3-compatible bucket. Restoration is documented in

@@ -229,28 +229,35 @@ async function recordUnmappedIdentity(
  * identity (or owning its sign-in email), or a sign-in name listed in
  * AZURE_DEVOPS_ALLOWED_ACTORS (comma-separated). Unlike
  * `resolveAzureDevOpsSender` this never creates users for strangers. Returns
- * the `users.id`, or null after recording the actor for operator triage.
+ * the actor's `users.id` (undefined for an allowlisted actor with no linked
+ * user), or null after recording a refused actor for operator triage.
  */
 export async function authorizeAzureDevOpsActor(
   identity: AzureDevOpsIdentityRef,
   sampleEventType: string,
   sampleContext: string,
-): Promise<string | null> {
+): Promise<{ userId: string | undefined } | null> {
   const externalId = externalIdOf(identity);
   const known =
     (await findUserByExternalId("azure-devops", externalId)) ??
     (externalId.includes("@") ? await findUserByEmail(externalId) : null);
-  if (known) return known.id;
+  if (known) return { userId: known.id };
 
   const allowed = (process.env.AZURE_DEVOPS_ALLOWED_ACTORS ?? "")
     .split(",")
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean);
   if (allowed.includes(externalId.toLowerCase())) {
-    return (await resolveAzureDevOpsSender(identity, sampleEventType, sampleContext)) ?? null;
+    return { userId: await resolveAzureDevOpsSender(identity, sampleEventType, sampleContext) };
   }
   await recordUnmappedIdentity(externalId, sampleEventType, sampleContext);
   return null;
+}
+
+function logUntrustedActor(eventType: string, identity: AzureDevOpsIdentityRef, repo: string) {
+  console.log(
+    `[AzureDevOps] Skipped ${eventType} by ${identity.displayName} on ${repo}: actor is not a known swarm user or an allowed actor`,
+  );
 }
 
 /**
@@ -294,15 +301,20 @@ export async function handlePullRequestCreated(
     return { created: false };
   }
 
-  const requestedByUserId = await resolveAzureDevOpsSender(
+  // A mention is content anyone able to open a PR can post, so only known or allowlisted actors pass.
+  const sender = await authorizeAzureDevOpsActor(
     pr.createdBy,
     "pull_request",
     `PR !${pr.pullRequestId}: ${pr.title}`,
   );
+  if (!sender) {
+    logUntrustedActor("pull_request", pr.createdBy, repo);
+    return { created: false };
+  }
 
   const context = pr.description ? extractMentionContext(pr.description, botId) : "";
   const prUrl = pullRequestWebUrl(pr);
-  const result = resolveTemplate("azure-devops.pull_request.opened", {
+  const result = await resolveTemplate("azure-devops.pull_request.opened", {
     pr_id: pr.pullRequestId,
     pr_title: pr.title,
     repo,
@@ -332,7 +344,7 @@ export async function handlePullRequestCreated(
       vcsEventType: "pull_request",
       vcsNumber: pr.pullRequestId,
       vcsAuthor: externalIdOf(pr.createdBy),
-      requestedByUserId,
+      requestedByUserId: sender.userId,
       vcsUrl: prUrl,
       contextKey: azureDevOpsContextKey({
         repositoryId: pr.repository.id,
@@ -389,11 +401,15 @@ export async function handlePullRequestCommented(
     return { created: false };
   }
 
-  const requestedByUserId = await resolveAzureDevOpsSender(
+  const sender = await authorizeAzureDevOpsActor(
     comment.author,
     "pull_request_comment",
     comment.content,
   );
+  if (!sender) {
+    logUntrustedActor("pull_request_comment", comment.author, repo);
+    return { created: false };
+  }
 
   // Check if there's already an active task for this PR
   const existingTask = await findTaskByVcs(repo, pr.pullRequestId, "azure-devops");
@@ -402,7 +418,7 @@ export async function handlePullRequestCommented(
     : "";
 
   const prUrl = pullRequestWebUrl(pr);
-  const result = resolveTemplate("azure-devops.comment.mentioned", {
+  const result = await resolveTemplate("azure-devops.comment.mentioned", {
     pr_id: pr.pullRequestId,
     pr_title: pr.title,
     username: await renderAzureDevOpsIdentity(comment.author),
@@ -432,7 +448,7 @@ export async function handlePullRequestCommented(
       vcsNumber: pr.pullRequestId,
       vcsCommentId: comment.id,
       vcsAuthor: externalIdOf(comment.author),
-      requestedByUserId,
+      requestedByUserId: sender.userId,
       vcsUrl: prUrl,
       parentTaskId: existingTask?.id,
       contextKey: azureDevOpsContextKey({

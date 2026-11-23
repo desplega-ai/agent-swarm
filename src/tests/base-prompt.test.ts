@@ -1631,7 +1631,7 @@ describe("getBasePromptWithParts", () => {
   describe("template overrides", () => {
     const soulOnly: BasePromptArgs = { ...minimalArgs, soulMd: "ZZ" };
     const overrides = (bodies: Record<string, string>) =>
-      configureDbResolver((eventType) => {
+      configureDbResolver(async (eventType) => {
         const body = bodies[eventType];
         return body === undefined ? null : { template: { id: eventType, body, scope: "global" } };
       });

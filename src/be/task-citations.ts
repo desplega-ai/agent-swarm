@@ -1,10 +1,11 @@
+import type { TaskCitationTargetKind } from "@desplega/storage";
 import * as z from "zod";
 import type { TaskAttachment } from "../types";
 import { getAppUrl } from "../utils/constants";
 import { getGitHubLinkConfig } from "../utils/github-host";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { citationHttpUrl, type TaskCitation } from "../utils/task-citations";
-import { getDbClient } from "./db";
+import { getStorage } from "./storage";
 
 export const MAX_TASK_CITATIONS = 50;
 
@@ -80,6 +81,12 @@ export function buildCitationUrl(citation: CitationInput): string | null {
   }
 }
 
+const CITATION_TARGET_KINDS: readonly string[] = ["task", "memory", "page", "script-run"];
+
+function isCitationTargetKind(kind: string): kind is TaskCitationTargetKind {
+  return CITATION_TARGET_KINDS.includes(kind);
+}
+
 export function memoryQuoteMatches(body: string, quote: string): boolean {
   const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
   return normalize(body).includes(normalize(quote));
@@ -89,26 +96,16 @@ export async function upsertTaskCitations(
   taskId: string,
   citations: CitationInput[],
 ): Promise<void> {
-  const db = getDbClient();
+  const tasks = getStorage().repos.tasks;
   const indices = new Set((await getTaskCitations(taskId)).map((entry) => entry.index));
   for (const citation of citations.slice(0, MAX_TASK_CITATIONS)) {
     if (!CitationInputSchema.safeParse(citation).success) continue;
     if (!indices.has(citation.index) && indices.size >= MAX_TASK_CITATIONS) continue;
     indices.add(citation.index);
     let verified: TaskCitation["verified"] = "unchecked";
-    const tables = {
-      task: "agent_tasks",
-      memory: "agent_memory",
-      page: "pages",
-      "script-run": "script_runs",
-    };
-    if (citation.kind in tables) {
-      const table = tables[citation.kind as keyof typeof tables];
+    if (isCitationTargetKind(citation.kind)) {
       try {
-        const row = await db.get<{ content?: string }>(
-          `SELECT ${citation.kind === "memory" ? "content" : "id"} FROM ${table} WHERE id = ?`,
-          [citation.ref],
-        );
+        const row = await tasks.findCitationTarget(citation.kind, citation.ref);
         verified =
           row &&
           (citation.kind !== "memory" ||
@@ -121,36 +118,24 @@ export async function upsertTaskCitations(
         verified = "unchecked";
       }
     }
-    await db.run(
-      `INSERT INTO task_citations
-      (task_id, citation_index, kind, ref, label, quote, resolved_url, verified, general)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(task_id, citation_index) DO UPDATE SET
-        kind=excluded.kind, ref=excluded.ref, label=excluded.label, quote=excluded.quote,
-        resolved_url=excluded.resolved_url, verified=excluded.verified, general=excluded.general,
-        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-      [
-        taskId,
-        citation.index,
-        citation.kind,
-        citation.ref,
-        citation.label ?? null,
-        citation.quote ?? null,
-        buildCitationUrl(citation),
-        verified,
-        citation.general ? 1 : 0,
-      ],
-    );
+    await tasks.upsertTaskCitation(taskId, {
+      index: citation.index,
+      kind: citation.kind,
+      ref: citation.ref,
+      label: citation.label ?? null,
+      quote: citation.quote ?? null,
+      resolvedUrl: buildCitationUrl(citation),
+      verified,
+      general: !!citation.general,
+    });
   }
 }
 
 export async function getTaskCitations(taskId: string): Promise<TaskCitation[]> {
-  const rows = await getDbClient().query<Omit<TaskCitation, "general"> & { general: number }>(
-    `SELECT citation_index AS "index", kind, ref, label, quote,
-    resolved_url AS resolvedUrl, verified, general FROM task_citations
-    WHERE task_id = ? ORDER BY citation_index`,
-    [taskId],
-  );
+  const rows = (await getStorage().repos.tasks.listTaskCitations(taskId)) as (Omit<
+    TaskCitation,
+    "general"
+  > & { general: number })[];
   return rows.map((row) => ({ ...row, general: row.general === 1 }));
 }
 
@@ -168,14 +153,10 @@ export async function getTaskCitationsForTasks(
   const byTask = new Map<string, TaskCitation[]>(ids.map((id) => [id, []]));
   for (let i = 0; i < ids.length; i += TASK_ID_CHUNK) {
     const chunk = ids.slice(i, i + TASK_ID_CHUNK);
-    const rows = await getDbClient().query<
-      Omit<TaskCitation, "general"> & { general: number; taskId: string }
-    >(
-      `SELECT task_id AS taskId, citation_index AS "index", kind, ref, label, quote,
-      resolved_url AS resolvedUrl, verified, general FROM task_citations
-      WHERE task_id IN (${chunk.map(() => "?").join(",")}) ORDER BY task_id, citation_index`,
-      chunk,
-    );
+    const rows = (await getStorage().repos.tasks.listTaskCitationsForTasks(chunk)) as (Omit<
+      TaskCitation,
+      "general"
+    > & { general: number; taskId: string })[];
     for (const { taskId, ...row } of rows) {
       byTask.get(taskId)?.push({ ...row, general: row.general === 1 });
     }
@@ -188,10 +169,5 @@ export async function getTaskCitationsForTasks(
  * is an `agent_log` row, so it also shows in the task's activity timeline.
  */
 export async function hasTaskCitationCheckRefusal(taskId: string): Promise<boolean> {
-  return Boolean(
-    await getDbClient().get<{ id: string }>(
-      "SELECT id FROM agent_log WHERE taskId = ? AND eventType = 'task_citation_check_refused' LIMIT 1",
-      [taskId],
-    ),
-  );
+  return getStorage().repos.agents.hasTaskLogEvent(taskId, "task_citation_check_refused");
 }

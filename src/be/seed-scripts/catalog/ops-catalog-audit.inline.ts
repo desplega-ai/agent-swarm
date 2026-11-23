@@ -50,9 +50,31 @@ function rowsToObjects(res: any): any[] {
   );
 }
 
-async function query(ctx: any, sql: string, params?: unknown[]): Promise<any[]> {
+// db_query runs the engine's own dialect and each response states it. A
+// statement with no portable text carries one text per dialect; the dialect
+// comes from the responses seen so far (a missing field means SQLite), or from
+// one `SELECT 1` when none has arrived yet.
+type Sql = string | { sqlite: string; postgres: string };
+type DialectState = { dialect?: "sqlite" | "postgres" };
+
+function noteDialect(state: DialectState, res: any): void {
+  state.dialect = (res?.data ?? res)?.dialect === "postgres" ? "postgres" : "sqlite";
+}
+
+async function query(
+  ctx: any,
+  state: DialectState,
+  sql: Sql,
+  params?: unknown[],
+): Promise<any[]> {
   try {
-    return rowsToObjects(await ctx.swarm.db_query({ sql, params }));
+    if (typeof sql !== "string" && !state.dialect) {
+      noteDialect(state, await ctx.swarm.db_query({ sql: "SELECT 1 AS one" }));
+    }
+    const text = typeof sql === "string" ? sql : state.dialect === "postgres" ? sql.postgres : sql.sqlite;
+    const res = await ctx.swarm.db_query({ sql: text, params });
+    noteDialect(state, res);
+    return rowsToObjects(res);
   } catch (error) {
     return [{ unavailable: error instanceof Error ? error.message : String(error) }];
   }
@@ -170,13 +192,15 @@ export default async function opsCatalogAudit(args: any, ctx: any) {
     "swarm-postdeploy-memory",
   ];
 
+  const db: DialectState = {};
   const scheduleRows = await query(
     ctx,
-    `SELECT s.*, a.name as targetAgentName, a.role as targetAgentRole,
-            a.description as targetAgentDescription, a.capabilities as targetAgentCapabilities,
-            a.provider as targetAgentProvider, a.harness_provider as targetAgentHarnessProvider
-     FROM scheduled_tasks s LEFT JOIN agents a ON a.id = s.targetAgentId
-     WHERE s.enabled = 1 ORDER BY s.name ASC`,
+    db,
+    `SELECT s.*, a.name AS "targetAgentName", a.role AS "targetAgentRole",
+            a.description AS "targetAgentDescription", a.capabilities AS "targetAgentCapabilities",
+            a.provider AS "targetAgentProvider", a.harness_provider AS "targetAgentHarnessProvider"
+     FROM scheduled_tasks s LEFT JOIN agents a ON a.id = s."targetAgentId"
+     WHERE s.enabled = true ORDER BY s.name ASC, s.id ASC`,
   );
   const schedules = scheduleRows.filter((r) => !r.unavailable);
   const agentsById = new Map<string, any>();
@@ -248,8 +272,9 @@ export default async function opsCatalogAudit(args: any, ctx: any) {
 
   const workflowRows = await query(
     ctx,
-    `SELECT id, name, description, enabled, definition, triggers, input, triggerSchema, createdAt, lastUpdatedAt
-     FROM workflows ORDER BY name ASC`,
+    db,
+    `SELECT id, name, description, enabled, definition, triggers, input, "triggerSchema", "createdAt", "lastUpdatedAt"
+     FROM workflows ORDER BY name ASC, id ASC`,
   );
   const workflows = workflowRows.filter((r) => !r.unavailable);
   const enabledWorkflows = workflows.filter((w: any) => asBool(w.enabled));
@@ -294,8 +319,9 @@ export default async function opsCatalogAudit(args: any, ctx: any) {
 
   const promptRows = await query(
     ctx,
-    `SELECT id, eventType, scope, scopeId, state, body, isDefault, version, createdBy, updatedAt
-     FROM prompt_templates ORDER BY eventType ASC, scope ASC`,
+    db,
+    `SELECT id, "eventType", scope, "scopeId", state, body, "isDefault", version, "createdBy", "updatedAt"
+     FROM prompt_templates ORDER BY "eventType" ASC, scope ASC, id ASC`,
   );
   const prompts = promptRows.filter((r) => !r.unavailable);
   const expectedEvents = new Set(CODE_REGISTRY_EVENTS);
@@ -328,14 +354,21 @@ export default async function opsCatalogAudit(args: any, ctx: any) {
   const contradictoryPrompts = prompts
     .filter((p: any) => CONTRADICTORY_RE.test(p.body || ""))
     .map((p: any) => ({ id: p.id, eventType: p.eventType, scope: p.scope }));
-  const skillDuplicateRows = await query(
-    ctx,
-    `SELECT name, count(*) as count,
-            group_concat(scope || ':' || coalesce(ownerAgentId, 'global'), ', ') as locations
+  // group_concat (SQLite) and string_agg (Postgres), each ordered.
+  const skillDuplicateRows = await query(ctx, db, {
+    sqlite: `SELECT name, count(*) AS count,
+            group_concat(scope || ':' || coalesce("ownerAgentId", 'global'), ', '
+              ORDER BY scope || ':' || coalesce("ownerAgentId", 'global')) AS locations
      FROM skills
-     WHERE isEnabled = 1 AND systemDefault = 1
+     WHERE "isEnabled" = true AND "systemDefault" = true
      GROUP BY name HAVING count(*) > 1 ORDER BY count DESC, name ASC`,
-  );
+    postgres: `SELECT name, count(*) AS count,
+            string_agg(scope || ':' || coalesce("ownerAgentId", 'global'), ', '
+              ORDER BY scope || ':' || coalesce("ownerAgentId", 'global')) AS locations
+     FROM skills
+     WHERE "isEnabled" = true AND "systemDefault" = true
+     GROUP BY name HAVING count(*) > 1 ORDER BY count DESC, name ASC`,
+  });
   const systemDefaultSkillDuplicates = skillDuplicateRows.filter((r) => !r.unavailable);
   const skillDuplicateUnavailable = skillDuplicateRows.find((r) => r.unavailable)?.unavailable;
 
