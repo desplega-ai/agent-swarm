@@ -217,6 +217,9 @@ describe("copyIntoPostgres", () => {
       item(5, [text("json"), int(1), text('{"a":"\\u0000"}'), NULL, NULL, NULL, NULL, NULL]),
       item(6, [text("broken"), int(1), text("{nope"), NULL, NULL, NULL, NULL, NULL]),
       item(7, [text("nullflag"), NULL, NULL, NULL, NULL, NULL, NULL, NULL]),
+      // Date.parse accepts both and rolls them into March; Postgres refuses them.
+      item(8, [text("feb30"), int(1), NULL, text("2026-02-30 10:00:00"), NULL, NULL, NULL, NULL]),
+      item(9, [text("feb31"), int(1), NULL, text("2026-02-31T10:00:00Z"), NULL, NULL, NULL, NULL]),
     ];
     const report = await run(fullSource(bad));
     expect(report.ok).toBe(false);
@@ -228,6 +231,8 @@ describe("copyIntoPostgres", () => {
       ["rowid 5", "doc", "JSON holds a \\u0000 character"],
       ["rowid 6", "doc", "invalid JSON"],
       ["rowid 7", "flag", "NULL in a NOT NULL column"],
+      ["rowid 8", "at", "invalid timestamp"],
+      ["rowid 9", "at", "invalid timestamp"],
     ]);
     expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
     expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");

@@ -254,6 +254,15 @@ function timestampText(text: string): string | null {
   const zone = match[3] ?? "Z";
   const time = match[2]?.length === 5 ? `${match[2]}:00` : match[2];
   const iso = `${match[1]}T${time}${zone}`;
+  // Date.parse rolls February 30 over to March 2; Postgres refuses it. Check the
+  // calendar day first, so the report names the row instead of failing the batch.
+  const [year, month, day] = (match[1] as string).split("-").map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  if (month < 1 || month > 12 || day < 1) return null;
+  if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
   return Number.isFinite(Date.parse(iso)) ? iso : null;
 }
 
