@@ -324,3 +324,35 @@ export async function dropPostgresRole(role: string): Promise<void> {
     await client.close();
   }
 }
+
+/**
+ * Set a task's stored `createdAt` on the running SUT, for a scenario that needs a
+ * timestamp in the past. On SQLite `stored` is the exact text the row keeps (either
+ * `YYYY-MM-DD HH:MM:SS` or ISO); on Postgres it is read as a UTC instant.
+ */
+export async function setTaskCreatedAt(
+  sutEnv: Readonly<Record<string, string>>,
+  taskId: string,
+  stored: string,
+): Promise<void> {
+  const url = sutEnv.DATABASE_URL;
+  if (url && /^postgres(ql)?:\/\//.test(url)) {
+    const client = new Bun.SQL({ url, max: 1 });
+    try {
+      await client.unsafe(
+        `UPDATE agent_tasks SET "createdAt" = ($1::timestamp AT TIME ZONE 'UTC') WHERE id = $2`,
+        [stored, taskId],
+      );
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  const db = new Database(sutEnv.DATABASE_PATH as string);
+  try {
+    db.run("PRAGMA busy_timeout = 5000");
+    db.run('UPDATE agent_tasks SET "createdAt" = ? WHERE id = ?', [stored, taskId]);
+  } finally {
+    db.close();
+  }
+}

@@ -8,6 +8,7 @@ import {
   getMetric,
   getMetricVersion,
   getMetricVersions,
+  isPostgresEngine,
   listAllMetrics,
   listMetricsByAgent,
   updateMetric,
@@ -31,15 +32,23 @@ import { jsonError } from "./utils";
 
 const DEFAULT_METRIC_MAX_ROWS = 100;
 const HARD_METRIC_MAX_ROWS = 500;
-// `{{key}}` binds the variable. `{{key:since}}` binds the instant the variable's
-// relative range starts ("-30 days" -> an ISO 8601 UTC timestamp): a time
-// filter as a bound value runs the same on both storage engines
-// (`"createdAt" >= $1`), with no engine-only date function.
+// `{{key}}` binds the variable. `{{key:since}}` binds the start of the variable's
+// relative range: a time filter as a bound value runs the same on both storage
+// engines (`"createdAt" >= $1`), with no engine-only date function.
 const VARIABLE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*)(?::(since))?\}\}$/;
 const RANGE_MODIFIER_RE = /^\s*([+-]?\d+)\s+(minute|hour|day)s?\s*$/i;
 const RANGE_UNIT_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 } as const;
 
-/** The start of a relative range such as "-30 days", as an ISO 8601 UTC timestamp. */
+/**
+ * The start of a relative range such as "-30 days".
+ *
+ * A day range starts at 00:00 UTC of its first day. SQLite stores timestamps as
+ * text in two formats (`YYYY-MM-DD HH:MM:SS` and ISO `YYYY-MM-DDTHH:MM:SSZ`) and
+ * compares them as strings, so no instant inside a day compares right with both.
+ * The bare date `YYYY-MM-DD` sorts below every timestamp of that day in either
+ * format, so SQLite counts the first day as Postgres does with the same instant.
+ * A minute or hour range binds the exact instant as ISO 8601 UTC.
+ */
 function rangeStart(key: string, modifier: MetricParam, now = Date.now()): string {
   const match = typeof modifier === "string" ? RANGE_MODIFIER_RE.exec(modifier) : null;
   if (!match) {
@@ -48,7 +57,10 @@ function rangeStart(key: string, modifier: MetricParam, now = Date.now()): strin
     );
   }
   const unit = match[2]!.toLowerCase() as keyof typeof RANGE_UNIT_MS;
-  return new Date(now + Number(match[1]) * RANGE_UNIT_MS[unit]).toISOString();
+  const start = new Date(now + Number(match[1]) * RANGE_UNIT_MS[unit]);
+  if (unit !== "day") return start.toISOString();
+  const day = start.toISOString().slice(0, 10);
+  return isPostgresEngine() ? `${day}T00:00:00.000Z` : day;
 }
 const MetricRunBodySchema = z
   .object({

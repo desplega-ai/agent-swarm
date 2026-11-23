@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
+import { setTaskCreatedAt } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
-import { registerWorker } from "./core-helpers";
+import { createAssignedTask, registerWorker } from "./core-helpers";
 
 // The seeded starter dashboard runs on the engine that seeded it: every widget query
 // and every variable options query, for each time range and with the filters set.
@@ -97,6 +98,39 @@ export const metricsStarterDashboard: Scenario = {
       const total = rows.reduce((sum, row) => sum + Number(row.tasks), 0);
       expect(total === 1, `the UI template counted ${total} tasks over ${String(rangeModifier)}`);
     }
+
+    // The first day of a range counts whole on both engines, whatever text format
+    // SQLite keeps: one task per stored format on the first day of "-30 days", and
+    // one per format on the day before it, which no range of 30 days counts.
+    const dayMs = 86_400_000;
+    const first = new Date(Date.now() - 30 * dayMs).toISOString().slice(0, 10);
+    const before = new Date(Date.parse(`${first}T00:00:00.000Z`) - dayMs)
+      .toISOString()
+      .slice(0, 10);
+    const boundaryAgent = await registerWorker(ctx, "metrics-boundary");
+    for (const stored of [
+      `${first} 00:00:01`,
+      `${first}T00:00:02.000Z`,
+      `${before} 23:59:59`,
+      `${before}T23:59:59.000Z`,
+    ]) {
+      const id = await createAssignedTask(ctx, boundaryAgent, `metrics boundary ${stored}`);
+      await setTaskCreatedAt(ctx.sutEnv, id, stored);
+    }
+    const boundary = await ctx.api("POST", `/api/metrics/definitions/${templateId}/run`, {
+      body: { variables: { rangeModifier: "-30 days", agentFilter: boundaryAgent } },
+    });
+    expectStatus(boundary, [200], "run the UI template over the first day of -30 days");
+    const boundaryRows = asRecords(
+      asRecord(asRecords(boundary.json, "widgets")[0]?.result),
+      "rows",
+    );
+    const boundaryTotal = boundaryRows.reduce((sum, row) => sum + Number(row.tasks), 0);
+    expect(
+      boundaryTotal === 2,
+      `the UI template counted ${boundaryTotal} of the 2 tasks on ${first}, the first day of -30 days (one per SQLite text format), with the day before excluded`,
+    );
+
     for (const variables of [{}, { agentFilter: agentId, userFilter: "nobody" }]) {
       const run = await ctx.api("POST", `/api/metrics/definitions/${templateId}/run`, {
         body: { variables },
