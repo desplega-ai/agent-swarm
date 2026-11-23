@@ -67,6 +67,9 @@ It writes `./e2e-results.json` by default.
 It checks decryption with the saved key and verifies that the API releases its original connections.
 Set `E2E_POSTGRES_URL` to a disposable PostgreSQL 16 server with pgvector. Put its matching `pg_dump` and `pg_restore` clients on `PATH`.
 
+To verify a built API image, run `bash scripts/smoke-api-storage.sh <local-api-image>`.
+It writes a task on each engine, replaces both API containers, and reads the tasks from their original volumes.
+
 `bun run e2e --strict` is the CI contract: it fails when any route operation, MCP tool or
 workflow node type the server exposes is neither covered nor excluded with a reason in
 `scripts/e2e/coverage-manifest.json`, when an exclusion is stale or dead, or when a pinned
