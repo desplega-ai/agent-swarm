@@ -214,6 +214,8 @@ const globalState = globalThis as typeof globalThis & {
   __runId?: string;
   __closeRealtime?: () => void;
   __stopExtensions?: () => Promise<void>;
+  /** Closes the Postgres engine of the previous module instance (pool and lock watcher). */
+  __closeDatabase?: () => Promise<void>;
 };
 
 const API_GC_INTERVAL_MS = 5 * 60 * 1000;
@@ -283,6 +285,16 @@ if (globalState.__httpServer) {
   await globalState.__stopExtensions?.();
   console.log("[HTTP] Hot reload detected, closing previous server...");
   globalState.__httpServer.close();
+  // A reload re-evaluates the db module, so its Postgres engine would leak its
+  // pool and ownership lock. Retire it before the new start below.
+  const closePrevious = globalState.__closeDatabase;
+  globalState.__closeDatabase = undefined;
+  await closePrevious?.().catch((err) =>
+    console.error(
+      "[HTTP] Closing the previous Postgres engine failed:",
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    ),
+  );
 }
 
 const transports: Record<string, StreamableHTTPServerTransport> = globalState.__transports ?? {};
@@ -679,6 +691,7 @@ startEventLoopLagProbe();
 if (isPostgresEngine()) {
   try {
     await startPostgres();
+    globalState.__closeDatabase = closeDatabase;
   } catch (err) {
     console.error(
       "[startup] Postgres start failed:",
