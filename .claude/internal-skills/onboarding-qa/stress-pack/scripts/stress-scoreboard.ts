@@ -192,6 +192,46 @@ async function build(ctx: ScriptContext, level: number) {
   if (failedSteps.length > 0)
     problems.push(`${failedSteps.length} workflow node(s) failed outside the planned failures`);
 
+  // PostgreSQL only: transaction counters since the last scoreboard. A rolled
+  // back transaction is a serialization retry or a refused statement.
+  let engine: Record<string, unknown> | undefined;
+  if (dialect === "postgres") {
+    const stat = (
+      await q(
+        "postgres statistics",
+        "select xact_commit, xact_rollback, deadlocks, numbackends from pg_stat_database where datname = current_database()",
+      )
+    )[0];
+    if (stat) {
+      const prev = (await kvValue(ctx, "stress/pgstat")) ?? {};
+      const cur = {
+        commits: Number(stat.xact_commit),
+        rollbacks: Number(stat.xact_rollback),
+        deadlocks: Number(stat.deadlocks),
+        at: now,
+      };
+      await ctx.swarm.kv_set({ namespace: NS, key: "stress/pgstat", value: cur });
+      const commits = cur.commits - Number(prev.commits ?? cur.commits);
+      const rollbacks = cur.rollbacks - Number(prev.rollbacks ?? cur.rollbacks);
+      const deadlocks = cur.deadlocks - Number(prev.deadlocks ?? cur.deadlocks);
+      engine = {
+        connections: Number(stat.numbackends),
+        sinceLastBoard: {
+          seconds: Math.round((now - Number(prev.at ?? now)) / 1000),
+          commits,
+          rollbacks,
+          rollbackPct:
+            commits + rollbacks > 0
+              ? Math.round((1000 * rollbacks) / (commits + rollbacks)) / 10
+              : 0,
+          deadlocks,
+        },
+      };
+      if (deadlocks > 0)
+        problems.push(`${deadlocks} PostgreSQL deadlock(s) since the last scoreboard`);
+    }
+  }
+
   // 3. Delete old result records and old scratch keys.
   let deleted = 0;
   for (const prefix of SCRATCH_PREFIXES) {
@@ -252,6 +292,7 @@ async function build(ctx: ScriptContext, level: number) {
     ),
     failing,
     slowest,
+    engine,
     stuckRuns: stuck,
     failedSteps,
     sickSchedules,

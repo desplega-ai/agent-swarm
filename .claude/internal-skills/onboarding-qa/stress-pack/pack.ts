@@ -321,6 +321,12 @@ async function status(box: Box, asJson: boolean): Promise<void> {
   }
   console.log(`  workflow runs  last 10 min: ${kv(board.workflowRuns?.last10m)}`);
   console.log(`                 since install: ${kv(board.workflowRuns?.sinceInstall)}`);
+  const since = board.engine?.sinceLastBoard;
+  if (since) {
+    console.log(
+      `  postgres       ${board.engine.connections} connections. Last ${since.seconds} s: ${since.commits} commits, ${since.rollbacks} rollbacks (${since.rollbackPct}%), ${since.deadlocks} deadlocks`,
+    );
+  }
   console.log(
     `\n  ${"piece".padEnd(15)}${"10m pass/fail".padEnd(15)}${"total pass/fail".padEnd(17)}${"avg ms".padEnd(8)}${"max ms".padEnd(8)}last (UTC)`,
   );
