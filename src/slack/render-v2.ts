@@ -1346,8 +1346,13 @@ async function mayPostLeadFollowUpCard(
   ) {
     return false;
   }
-  if (isSlackQuietLeadThreadsEnabled() && task.status === "completed" && !isDeferredTask(task)) {
-    // The Lead answers with slack-reply when it has something to say; its output is a note.
+  if (
+    isSlackQuietLeadThreadsEnabled() &&
+    task.taskType === "follow-up" &&
+    task.status === "completed" &&
+    !isDeferredTask(task)
+  ) {
+    // A follow-up's output is a note when the Lead did not reply; a resume's output may be the only answer.
     await settleOutcomeWithoutCard(task, "quiet_lead_threads: Lead follow-up not posted");
     return false;
   }

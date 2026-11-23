@@ -228,7 +228,7 @@ A Lead follow-up or resume result can merge into the previous outcome card inste
 - No message, from a person or a bot, came after the previous card.
 - One card holds at most 5 results, and the merged text fits one card.
 
-Set `SLACK_RENDER_V2_QUIET_LEAD_THREADS=true` to keep Lead threads to the Lead's replies: a Lead deferral posts no ⏳ waiting card, and a successful Lead follow-up or resume that ends without `slack-reply` posts no card; failed or cancelled runs still post their cards. See [Quiet Lead threads](/docs/ui/configuration#quiet-lead-threads-in-slack).
+Set `SLACK_RENDER_V2_QUIET_LEAD_THREADS=true` to keep Lead threads to the Lead's replies: a Lead deferral posts no ⏳ waiting card, and a successful Lead follow-up that ends without `slack-reply` posts no card; failed or cancelled follow-ups and resumed asks still post their cards. See [Quiet Lead threads](/docs/ui/configuration#quiet-lead-threads-in-slack).
 
 Set `SLACK_REPLY_FOOTER_ENABLED=false` to hide the task details footer from outcome cards, agent replies, and replies mirrored from Sessions. The footer is enabled by default. Reply content, citations, and attachments still appear.
 

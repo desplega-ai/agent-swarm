@@ -5751,4 +5751,27 @@ describe("quiet Lead threads (SLACK_RENDER_V2_QUIET_LEAD_THREADS)", () => {
     ]);
     expect((await getSlackOutcomeMessage(followUps[0]!.id))?.deliveryAbandonedAt).toBeTruthy();
   });
+
+  test("a Lead resume that answers without a reply still posts its card", async () => {
+    const { lead, ask, channelId, threadTs } = await leadAsk("C_QUIET_RESUME");
+    await failTask(ask.id, "The worker restarted.");
+    await processSlackRenderV2();
+    calls.length = 0;
+
+    const resume = await createTaskExtended("[Resume] answer when the review is in", {
+      agentId: lead.id,
+      source: "system",
+      taskType: "resume",
+      parentTaskId: ask.id,
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      followUpConfig: { disabled: true },
+    });
+    await startTask(resume.id);
+    await completeTask(resume.id, "The review passed.");
+    await processSlackRenderV2();
+
+    const streams = calls.filter((call) => call.method === "chat.startStream");
+    expect(streams.map((call) => call.payload.markdown_text)).toEqual(["✅ The review passed."]);
+  });
 });

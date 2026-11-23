@@ -787,8 +787,9 @@ Turn it on when a Lead fans work out and answers with `slack-reply` once everyth
 
 - A Lead deferral (`defer-task`) posts no ⏳ waiting card. The task tree shows the wait,
   and the request keeps its 👀 reaction until a wake-up answers.
-- A Lead follow-up or resume that completes without `slack-reply` posts no card. Its
-  output stays on the task. A failed or cancelled one still posts its card.
+- A Lead follow-up that completes without `slack-reply` posts no card. Its output stays
+  on the task. A failed or cancelled one still posts its card, and so does a resume,
+  whose output may be the only answer to the request.
 
 The thread then shows the request, the task tree and the Lead's replies. A wake-up that
 finishes without replying still posts its result card. With the task tree off, nothing
