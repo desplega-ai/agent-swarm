@@ -943,6 +943,18 @@ async function viewDiffs(
   return [];
 }
 
+/** A SQLite view whose definition is not the `sqlite` text of its port in VIEW_PORTS. */
+function sqliteViewDiff(name: string, sql: string): Diff | null {
+  const port = VIEW_PORTS[name];
+  if (!port) return null;
+  const flat = (text: string) => text.replace(/\s+/g, " ").replace(/;\s*$/, "").trim();
+  if (flat(port.sqlite) === flat(sql)) return null;
+  return {
+    key: `view:${name}`,
+    detail: `the SQLite definition differs from the one its Postgres port was written from: ${flat(sql)} vs ${flat(port.sqlite)}`,
+  };
+}
+
 /**
  * A view's name and columns can stay while its body changes. Compare what each
  * view returns on the two empty databases and its Postgres definition with the
@@ -959,6 +971,14 @@ async function compareViewBehavior(
   const errors: string[] = [];
   for (const v of head.views) {
     if (!pg.views.has(v.name)) continue;
+    // A SQLite body change can return the same rows on an empty database (a
+    // view that answers only while agent_tasks is empty). The SQLite text must
+    // still be the one the Postgres port was written from.
+    const sqliteDiff = sqliteViewDiff(v.name, v.sql);
+    if (sqliteDiff) diffs.push(sqliteDiff);
+    if (!sqliteViewDiff(v.name, `${v.sql} WHERE 0`)) {
+      errors.push(`view control: a changed SQLite ${v.name} was not detected`);
+    }
     const rows = sqliteViewRows.get(v.name) ?? [];
     diffs.push(...(await viewDiffs(pgClient, v.name, "public", rows)));
     await pgClient.run("CREATE SCHEMA parity_view_control");
