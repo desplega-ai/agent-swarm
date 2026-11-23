@@ -18,7 +18,12 @@ import {
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
 import { isUnmappedIdentityDismissed } from "../be/unmapped-identities";
-import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
+import {
+  findOrCreateUserByEmail,
+  findUserByEmail,
+  findUserByExternalId,
+  linkIdentity,
+} from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -103,7 +108,8 @@ const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  *
  * Cascade (Q17):
  *   1. Fast path — `findUserByExternalId('gitlab', user.username)`.
- *   2. If missing AND `user.email` is an email address, run
+ *   2. If missing AND `user.email` is an email address that an existing user
+ *      owns (or the sender is in GITLAB_ALLOWED_SENDERS), run
  *      `findOrCreateUserByEmail` + `linkIdentity`. GitLab sends other values
  *      for senders without a public email (`""` on some installations — Q17.E
  *      manual spot-check — or a redaction marker such as `[REDACTED]`). Many
@@ -122,9 +128,13 @@ async function resolveGitLabSender(
   if (existing) return existing.id;
 
   // Inline-email cascade — only run when email is an address. Empty strings and
-  // redaction markers fall through to the unmapped tracker.
+  // redaction markers fall through to the unmapped tracker. A linked sender may
+  // open tasks with a mention, so a new user is created only for an allowed sender.
   const inlineEmail = typeof user.email === "string" ? user.email.trim() : "";
-  if (EMAIL_ADDRESS_RE.test(inlineEmail)) {
+  if (
+    EMAIL_ADDRESS_RE.test(inlineEmail) &&
+    (isAllowedGitLabSender(user.username) || (await findUserByEmail(inlineEmail)))
+  ) {
     const { user: linked } = await findOrCreateUserByEmail(
       inlineEmail,
       { name: user.name },
@@ -149,6 +159,29 @@ async function resolveGitLabSender(
   });
   await incrKv(UNMAPPED_NAMESPACE, `${user.username}:count`, 1);
   return undefined;
+}
+
+function isAllowedGitLabSender(username: string): boolean {
+  return (process.env.GITLAB_ALLOWED_SENDERS ?? "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(username.toLowerCase());
+}
+
+/**
+ * Whether a sender may open a lead task with a mention, which anyone able to
+ * comment on the project can post: a linked swarm user or a username listed in
+ * GITLAB_ALLOWED_SENDERS (comma-separated).
+ */
+function isTrustedGitLabSender(username: string, requestedByUserId: string | undefined): boolean {
+  return !!requestedByUserId || isAllowedGitLabSender(username);
+}
+
+function logUntrustedSender(eventType: string, username: string, repo: string) {
+  console.log(
+    `[GitLab] Skipped ${eventType} mention by ${username} on ${repo}: sender is not a linked user or an allowed sender`,
+  );
 }
 
 /**
@@ -191,6 +224,10 @@ export async function handleMergeRequest(
       const hasMention = detectMention(mr.description);
       if (!hasMention) {
         console.log(`[GitLab] MR opened without bot mention, skipping`);
+        return { created: false };
+      }
+      if (!isTrustedGitLabSender(user.username, requestedByUserId)) {
+        logUntrustedSender("merge_request", user.username, repo);
         return { created: false };
       }
 
@@ -304,15 +341,17 @@ export async function handleIssue(
   switch (action) {
     case "open": {
       const hasMention = detectMention(issue.description);
-      if (!hasMention) {
-        // Check if bot is in assignees
-        const isBotAssigned = event.assignees?.some(
-          (a) => a.username.toLowerCase() === getGitLabBotName().toLowerCase(),
-        );
-        if (!isBotAssigned) {
-          console.log(`[GitLab] Issue opened without bot mention/assignment, skipping`);
-          return { created: false };
-        }
+      const isBotAssigned = event.assignees?.some(
+        (a) => a.username.toLowerCase() === getGitLabBotName().toLowerCase(),
+      );
+      if (!hasMention && !isBotAssigned) {
+        console.log(`[GitLab] Issue opened without bot mention/assignment, skipping`);
+        return { created: false };
+      }
+      // Assigning an issue already needs at least Reporter access, so only a bare mention is gated.
+      if (!isBotAssigned && !isTrustedGitLabSender(user.username, requestedByUserId)) {
+        logUntrustedSender("issue", user.username, repo);
+        return { created: false };
       }
 
       const context = issue.description ? extractMentionContext(issue.description) : "";
@@ -393,6 +432,10 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {
+    return { created: false };
+  }
+  if (!isTrustedGitLabSender(user.username, requestedByUserId)) {
+    logUntrustedSender("note", user.username, repo);
     return { created: false };
   }
 

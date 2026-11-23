@@ -100,18 +100,20 @@ agent in the loop, so these fields are ignored for those targets.
 
 Tasks, schedules, and workflow `agent-task` nodes store these optional fields:
 
-- `profile`: a named harness + model + effort (preferred; see [Model profiles](#model-profiles)). Exclusive with the other two.
+- `profile`: a named harness + model + effort (preferred; see [Model profiles](#model-profiles)). Exclusive with the others.
+- `modelGroup`: an ordered list of profiles that may span harnesses (see [Model groups](#model-groups)). Exclusive with the others.
 - `model`: concrete provider/harness-specific override.
-- `modelTier`: portable tier intent. Deprecated: pass `profile: "<harness>-<tier>"` for the same model.
+- `modelTier`: portable tier intent. Deprecated: pass `modelGroup: "<tier>"` (the tier's group) or `profile: "<harness>-<tier>"` (the same model).
 
 The API server resolves the model when a worker claims the task (`/api/poll`, both the directly-assigned and the pool-claim path; `src/be/model-tier-resolution.ts`), in this order:
 
 1. `task.model` → `modelSource = model`.
 2. `task.profile` → `profile:task` (see [Model profiles](#model-profiles)).
+2b. `task.modelGroup` → `profile:group`: the group's first member that runs on the claiming agent (see [Model groups](#model-groups)).
 3. The claiming worker's env override for its harness provider (`agents.modelTierOverrides`) → `worker-env`. Deprecated: logs `[model-tier] deprecated: worker-env override for <h>-<t>; edit profile <h>-<t> instead`.
 4. `swarm_config` `MODEL_TIER_<PROVIDER>_<TIER>` → `tier-config`. Deprecated, with the same log line.
-5. The seeded `<harness>-<tier>` profile → `profile:tier-alias` (see [Model profiles](#model-profiles)); `DEFAULT_MODEL_TIER_MAP` → `tier-default` when that profile is missing or does not apply.
-6. With no `model`, `profile` or `modelTier`: the claiming agent's default profile → `profile:agent-default`.
+5. The group named after the tier, else the seeded `<harness>-<tier>` profile → `profile:tier-alias` (see [Model profiles](#model-profiles)); `DEFAULT_MODEL_TIER_MAP` → `tier-default` when neither applies.
+6. With no `model`, `profile`, `modelGroup` or `modelTier`: the claiming agent's default profile → `profile:agent-default`.
 
 Each layer's value is judged against the claiming worker's harness (see [Harness compatibility](#harness-compatibility)). A worker-env, tier-config or tier-default value that does not run on the harness is skipped with the log line `[model-tiers] <source> value <value> does not run on <harness>; trying next layer`. A task `model` that does not run on it is not skipped: the claim returns `modelUnsupported` with a `[model-harness-mismatch]` reason and the worker fails the task without starting a CLI.
 
@@ -125,7 +127,7 @@ The session report also records `resolvedEffort`: the reasoning effort the sessi
 
 The worker still runs `resolveTaskModelSelection` locally. When the server sent a `resolvedModel`, the worker uses it; if its local result differs (for example a stale override sent before a restart, or a tier-config value the worker does not read), it logs `model resolution mismatch ... using server value`. Without a server value (older API) the worker keeps the local order: task `model`, `modelTier` with its env overrides, `MODEL_OVERRIDE`, then the adapter default.
 
-This is deliberate: pool claims, delegations, workflow fan-out, and schedules resolve against the worker that actually runs the task, not the agent or API process that created it. Schedules and workflow steps store only `profile`/`model`/`modelTier`; each spawned task records its own resolution.
+This is deliberate: pool claims, delegations, workflow fan-out, and schedules resolve against the worker that actually runs the task, not the agent or API process that created it. Schedules and workflow steps store only `profile`/`modelGroup`/`model`/`modelTier`; each spawned task records its own resolution.
 
 ## Model profiles
 
@@ -155,11 +157,17 @@ A profile's `fallbacks` lists profiles on the same harness, in order (`model_pro
 
 ## Model groups
 
-A model group is a named, ordered list of profiles that may span harnesses (`model_groups` + `model_group_members`, migration `308`, `src/be/db/model-groups.ts`). The first member is preferred. Nothing resolves a task through a group yet: `agent_tasks.modelGroup` and `scheduled_tasks.modelGroup` exist with their reference triggers, but no create path writes them and claim ignores them.
+A model group is a named, ordered list of profiles that may span harnesses (`model_groups` + `model_group_members`, migration `308`, `src/be/db/model-groups.ts`). The first member is preferred. On one agent a group means its first member on the agent's harness that passes `checkProfileForAgent` there (`resolveGroupForAgent`, `src/be/model-group-resolution.ts`).
 
 - **Seeds.** Every boot inserts the four tier groups `smol` (description "Cheap"), `regular`, `smart` and `ultra` when missing (`src/be/seed-model-groups.ts`, after the profile seeds), `seededFrom = tier:<tier>`. Each lists the seeded `<harness>-<tier>` profiles that exist, one per harness, in the order claude, claude-managed, codex, cursor, grok, amp, pi, opencode, dsh, fx, devin. On any one harness the only member is today's tier profile, so the seeds change no task's model. An existing group is never touched, so an edited order or description survives every boot. A tier name a profile already holds is skipped with a warning.
 - **One name space.** A group may not take a profile's name, and the reverse (409 at the API). Migration `308`'s insert triggers enforce it in the database (`model-name-taken:`), so neither write order can slip through. Names are fixed after create.
 - **Members.** At least one, at most 20, no repeats, every one an existing profile on any harness. `PUT /api/model-groups/{name}/members` replaces the whole list in one transaction, so a reader never sees half an order. A profile that is a member cannot be deleted (409 naming the groups, checked in the DELETE statement; the foreign key backs it).
+- **Where a group is set.** `modelGroup` on `send-task`, `task-action` create, `POST /api/tasks`, schedules (`create-schedule` / `update-schedule` / `patch-schedule`, `POST` / `PUT` / `PATCH /api/schedules`) and workflow `agent-task` nodes (also a `foreach` body). It is exclusive with `model`, `modelTier` and `profile`. The group must exist, and with a known agent one member must pass there; otherwise HTTP 400 or a tool error, for example `[model-group-unavailable] no member of "smart" runs on this codex agent: claude-opus-5-5 (harness: runs on claude)`. A schedule update that sets a group clears `profile`, `model` and `modelTier`, and setting any of those clears the group; moving a grouped schedule re-runs the check. The scheduler copies the group onto every fired task. Workflow saves judge a static group; the node re-checks at run.
+- **Claim.** The task's group resolves to a member, then claim applies that member as a task profile: `modelSource = profile:group`, `resolvedProfile = <member>`. One `task_model_group_resolved` log entry records the member and the members skipped with their reason (`harness: runs on claude`, `harness-credentials: ...`). A missing group or no passing member is a hard stop (`[model-group-missing]`, `[model-group-unavailable]`) and the worker fails the task without a spawn.
+- **Pool.** A pool group task is claimed only by a worker whose harness has a member (`poolTaskRunsOnHarness`), and the poll scan and automatic routing skip a worker where no member passes the check. Ranking agents by member order is not done yet; routing keeps its order.
+- **Tier tasks.** `modelTier` reads the group named after the tier first, where the tier chain lands on `tier-default`. A member that passes on the agent resolves as `profile:group` (the group decided, so hops walk its order) unless the group lists only the seeded `<harness>-<tier>` on that harness, which stays `profile:tier-alias` with the profile's own `fallbacks`. No passing member (or no group) falls back to the seeded `<harness>-<tier>` profile as `profile:tier-alias`, then the tier map, so a tier task never hard-fails where it ran before. Untouched seeds list only `<harness>-<tier>` on each harness, so the model and its hops are unchanged. A `worker-env` or `tier-config` win records its own source and never hops through the group. A resolution to a member other than the seed logs `task_model_group_resolved`.
+- **Hops.** On a group task, or a tier task claim resolved as `profile:group` (its group is the tier's), a provider error hops through the group order instead of the member's `fallbacks`: the members after the current one, on the same harness, that the work has not run on and that pass the check. The resume gets `profile = <member>`, keeps `modelGroup` (a tier task's resume gets the tier's group), and carries `fallbackHops`; claim honors `profile` over `modelGroup` (the create-time exclusivity binds creators only). No member runs twice, so the chain ends at the last member. Key retries work as for a profile and keep the group the same way.
+- **Resume.** A task's `modelGroup` travels to its resumes and follow-ups like `profile`.
 - **API.** `GET /api/model-groups` and `GET /api/model-groups/{name}` are open to any caller. `POST`, `PATCH` (description only), `PUT .../members` and `DELETE` need `models.groups.write`: the lead, the operator or a dashboard user; workers are refused. Delete is a 409 for a seeded tier group and while a schedule names the group or a task holds it (same rule as profiles: unfinished, or superseded and still owed its resume).
 
 ## Explicit model ids are checked

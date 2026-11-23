@@ -23,6 +23,13 @@
  *   `$chain = { leafTaskId: null, newTaskId: null }` — explicit absence, so a
  *   `parentTaskId: { "$chain": "leafTaskId" }` param is dropped and the
  *   task becomes the session's root.
+ * - `attachments` set: both composers take files (attach button, drop, paste)
+ *   within its limits. A send uploads them to `attachments.dir` with the
+ *   viewer's agent-fs key first, then runs `onDispatch` with
+ *   `$form = { message, attachments: [{ path, name, mimeType, size }] }`. A
+ *   failed upload sends nothing and keeps the text and files. Files never
+ *   steer: a box with files sends a follow-up. The person bubble shows the
+ *   `input.attachments` of each app action prompt as chips.
  * - A session: the shared `SessionConversation` (turn timeline, "Latest"
  *   jump, `TaskComposer`), with the app keeping control of sends:
  *   - steer: the newest unfinished task of ANY agent (`steerTarget="any"`),
@@ -52,25 +59,30 @@ import { getByPath, type InferComponentProps } from "@json-render/core";
 import { useActions, useStateStore } from "@json-render/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { SquarePen } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { SESSION_LIST_KEY, useSession, useSessions } from "@/api/hooks/use-sessions";
 import type { AgentTask } from "@/api/types";
-import { ComposerDock } from "@/components/sessions/composer-dock";
+import { ComposerDock, DEFAULT_ATTACHMENT_LIMITS } from "@/components/sessions/composer-dock";
 import { SessionConversation } from "@/components/sessions/session-conversation";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { cn } from "@/lib/utils";
 import { useAppScopeId } from "./app-scope";
 import type { ActionChain, swarmCatalog } from "./catalog";
+import { useFormFileUploader } from "./form-file";
+import { ThreadMessageFiles } from "./session-thread-files";
 import {
   dispatchAppId,
   isDispatchSettled,
   isValidSessionKey,
   pickSessionRoot,
   runDispatchChain,
+  threadAttachmentConfig,
   threadContextKey,
+  threadRequestAttachments,
   threadRequestText,
+  uploadThreadAttachments,
 } from "./session-thread-model";
 
 export type SessionThreadProps = InferComponentProps<typeof swarmCatalog, "SessionThread">;
@@ -89,6 +101,12 @@ const ROUTE_LABEL = "Runs this page's action";
 
 /** Stable empty chain while the session loads. */
 const EMPTY_CHAIN: AgentTask[] = [];
+
+/** The chips of a person bubble (`SessionConversation`'s `requestFiles`). */
+function threadRequestFiles(task: AgentTask): ReactNode {
+  const files = threadRequestAttachments(task);
+  return files.length > 0 ? <ThreadMessageFiles files={files} /> : null;
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -165,6 +183,8 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const pageAppId = useAppScopeId();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [startFiles, setStartFiles] = useState<File[]>([]);
+  const upload = useFormFileUploader();
   // "New session": only roots created after this one's `createdAt` count. Kept
   // per context key, so another app, key or viewer starts without a cutoff.
   const [cutoff, setCutoff] = useState<{ contextKey: string; after: string } | null>(null);
@@ -180,6 +200,7 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   const scope = props.scope === "shared" ? "shared" : "user";
   const sessionKey = isValidSessionKey(props.sessionKey) ? props.sessionKey : null;
   const appId = dispatchAppId(onDispatchChain, pageAppId);
+  const attachments = threadAttachmentConfig(props.attachments, DEFAULT_ATTACHMENT_LIMITS);
   const contextKey =
     appId && sessionKey && userId ? threadContextKey(appId, sessionKey, userId) : null;
   const lookupReady = gate.supported && scope === "user" && contextKey !== null;
@@ -214,21 +235,29 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   getSnapshotRef.current = getSnapshot;
   const detailRef = useRef(detail);
   detailRef.current = detail;
+  const uploadRef = useRef(upload);
+  uploadRef.current = upload;
 
   /**
-   * Runs `onDispatch`. Returns the new task's id when one was created (the
-   * send waits for it to show up), else null.
+   * Uploads the files (with the `attachments` prop), then runs `onDispatch`.
+   * Returns the new task's id when one was created (the send waits for it to
+   * show up), else null.
    */
-  const dispatch = async (message: string, leafTaskId: string | null) => {
+  const dispatch = async (message: string, leafTaskId: string | null, files: File[]) => {
     const onDispatch = propsRef.current.onDispatch as ActionChain | undefined;
     if (!onDispatch || onDispatch.length === 0) {
       throw new Error("This thread has no onDispatch action chain.");
     }
     if (!sessionKey) throw new Error("This thread has no valid sessionKey.");
+    const config = threadAttachmentConfig(propsRef.current.attachments, DEFAULT_ATTACHMENT_LIMITS);
+    const uploaded = config
+      ? await uploadThreadAttachments({ files, dir: config.dir, upload: uploadRef.current })
+      : undefined;
     const { newTaskId } = await runDispatchChain({
       onDispatch,
       message,
       leafTaskId,
+      attachments: uploaded,
       session: { key: sessionKey, scope },
       execute: executeRef.current,
       getSnapshot: getSnapshotRef.current,
@@ -244,11 +273,13 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
     if (message.length === 0 || starting) return;
     setStarting(true);
     setStartError(null);
+    const files = attachments ? startFiles : [];
     try {
-      const pendingTaskId = await dispatch(message, null);
+      const pendingTaskId = await dispatch(message, null, files);
       // Clear the draft only if it still holds the message that was sent.
       const current = getByPath(getSnapshotRef.current(), draftPath);
       if (typeof current === "string" && current.trim() === message) set(draftPath, "");
+      if (files.length > 0) setStartFiles((held) => held.filter((file) => !files.includes(file)));
       if (pendingTaskId) await waitForTask(pendingTaskId);
     } catch (error) {
       setStartError(errorMessage(error, "Failed to send the message"));
@@ -258,13 +289,13 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
   };
 
   /** `TaskComposer`'s follow-up: chain a new task off the leaf. */
-  const followUp = async (message: string, parentTaskId: string | undefined) => {
+  const followUp = async (message: string, parentTaskId: string | undefined, files: File[]) => {
     const loaded = detailRef.current;
     if (!loaded) throw new Error("The conversation is still loading.");
     if (loaded.chain.length === 0 || !parentTaskId) {
       throw new Error("Conversation not found — sending is disabled.");
     }
-    const pendingTaskId = await dispatch(message, parentTaskId);
+    const pendingTaskId = await dispatch(message, parentTaskId, files);
     if (pendingTaskId) await waitForTask(pendingTaskId);
   };
 
@@ -344,7 +375,9 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
           steerTarget="any"
           steerSource="app-page"
           onFollowUp={followUp}
+          followUpAttachments={attachments?.limits}
           requestText={threadRequestText}
+          requestFiles={attachments ? threadRequestFiles : undefined}
           value={draft}
           onValueChange={setDraft}
           placeholder={placeholder}
@@ -364,6 +397,9 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
             onChange={setDraft}
             onSubmit={() => void start()}
             isPending={starting}
+            attachments={attachments ? startFiles : undefined}
+            onAttachmentsChange={attachments ? setStartFiles : undefined}
+            attachmentLimits={attachments?.limits}
             isError={startError !== null}
             errorMessage={startError ?? undefined}
             placeholder={placeholder}

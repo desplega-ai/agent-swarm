@@ -57,14 +57,9 @@ export function getOperatorActor(req: IncomingMessage, res: ServerResponse): Ide
   const rawKey = extractBearer(req);
   const swarmKey = getApiKey();
 
-  // If no key is configured server-side, the public-route guard already
-  // skipped the bearer check. We still need *some* fingerprint for the audit
-  // event — fall back to a stable placeholder so callers see consistent shapes.
-  if (!swarmKey) {
-    return { kind: "operator", id: fingerprintApiKey("") };
-  }
-
-  if (!rawKey || !verifyTokenEquality(swarmKey, rawKey)) {
+  // With no swarm key configured there is no operator credential to match, so
+  // a non-user caller (such as an agent session token) is refused here too.
+  if (!swarmKey || !rawKey || !verifyTokenEquality(swarmKey, rawKey)) {
     jsonError(res, "Unauthorized", 401);
     return null;
   }

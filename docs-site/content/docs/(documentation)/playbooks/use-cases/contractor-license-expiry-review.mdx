@@ -1,0 +1,101 @@
+---
+title: 'Preparing contractor credential expiry checks for human review with AI agents'
+description: "Agent Swarm assembles a contractor's credential records against one assignment's requirements, flags the gaps in a sourced packet, and a person decides."
+agent:
+  offer: false
+  when: "Someone wants an operations team to check contractor credential expiry and missing documents before assigning field work"
+---
+
+Agent Swarm can be configured to assemble a contractor's credential records against the requirements of one proposed assignment, flag the documents that are missing and the dates that fall before or inside the assignment window, and hand a named operations owner one packet with a source link and a read timestamp on every line. The owner decides whether the contractor is eligible and whether the work is assigned. What the workflow removes is the assembly. The contractor record sits in a vendor or HR system, the licenses arrive as uploaded scans, the assignment's requirements live in a job template or client contract, and the person approving dispatch holds all three in memory.
+
+The scope is one contractor and one proposed assignment, checked before anyone is dispatched. It is not a supplier's security evidence ([supplier security evidence review](/docs/playbooks/use-cases/supplier-security-evidence-review)), not an asset's content license ([digital content license rights review](/docs/playbooks/use-cases/digital-content-license-rights-review)), and not one maintenance request ([maintenance work order triage](/docs/playbooks/use-cases/maintenance-work-order-triage)).
+
+## When another tool fits better
+
+**A credentialing or workforce compliance platform that already stores credentials as structured fields.** If the system holds each credential as a field with its own expiry alert, verifies it against the issuing body at the source, and blocks an assignment the contractor is not cleared for, that is a control, not a report. A packet in front of it adds a queue to a system that already said no.
+
+**Direct manual review, when the roster is small.** At a few dozen contractors with one coordinator who knows them, a spreadsheet with an expiry column and a reminder is the honest answer.
+
+Agent Swarm fits a different shape. The roster is too large to hold in anyone's head, the credentials arrive as scans rather than fields, the requirement set changes per client and site, and the decision sits with an owner who trusts none of the sources alone. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is an illustrative custom setup, not a built-in credentialing integration and not a customer result. It needs source integrations and matching rules your team configures and tests.
+
+<Mermaid title="Illustrative contractor credential review flow, from a contractor's records and an assignment's requirements to a human assignment decision." chart={`flowchart LR
+  A["Contractor records<br/>+ assignment requirements<br/>+ supplied certificates"] --> B["Collection scripts<br/>swarm-script to JSON"]
+  B --> C["Deterministic checks<br/>missing documents, name<br/>mismatches, expiry in window"]
+  C --> D["Agent assembles<br/>source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>operations owner"}}
+  G -- "assign" --> R["Owner assigns<br/>the work"]
+  G -- "hold" --> S["Owner holds and<br/>requests evidence"]
+`} />
+
+**1. The team scopes one contractor and one assignment.** The contractor, the client, the site, and the assignment's start and end dates. Requirements are read from the assignment: which credentials the work needs, which issuer or scheme each one must come from, and whether the client adds conditions. An assignment with no end date has no window to compare an expiry against, so it is reported as incomplete before anything is collected.
+
+**2. Configured scripts collect the approved records.** One collection step per source, each emitting JSON, so no model fetches a document or does date arithmetic. Scripts reach each system through [script connections](/docs/guides/script-connections), which register a system once as a connection or a credential binding, and the [credential broker](/docs/guides/scripts-credential-broker) substitutes the secret only for allowlisted hosts, so no key sits in a script's source or arguments. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split between deterministic collection and synthesis.
+
+**3. The comparison runs in code.** A required document that is absent, a name or identifier that differs between the contractor record and the certificate, an expiry that falls before or inside the assignment window, and an issuer that is not on the approved list are checked by deterministic steps. The same inputs produce the same flags on every run. A document that cannot be reduced to a date, a name or a list entry is copied with its location rather than read by the model.
+
+**4. An agent assembles the packet.** Each item carries the record's value, the requirement's value, a link to the record and when that record was read. Anything it could not compare is listed with what is missing and who could supply it, not resolved by inference.
+
+**5. A named operations owner decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) stops the run, posts a summary and a link to the full packet, and resumes only when a person answers. The owner assigns the work, holds it, or holds it and asks for the evidence.
+
+## A fictional example
+
+Nordhaven Field Services is invented, and so are the contractor and Ana Ferreira, Nordhaven's field operations manager. It is a field-service provider that installs and services commercial kitchen equipment; the contractor is a refrigeration technician under consideration for a two-week assignment at a client site. Nothing below reports a real person, a real certificate or a measured result.
+
+The assignment runs from 3 to 16 March 2027 and requires four items: a refrigerant handling certificate, a working-at-height certificate, a public liability insurance certificate and photo identification. The technician's record was read on 9 February 2027. In the packet each line carries a link to the record it came from and the time it was read; the addresses below are illustrative placeholders, not real records.
+
+| Field | Record says | Requirement / certificate says | Flag | Source |
+| --- | --- | --- | --- | --- |
+| Refrigerant handling certificate | Expires 11 March 2027 | Required for the whole assignment, 3 to 16 March 2027 | Expiry falls inside the assignment window, five days before it ends | `https://docs.nordhaven.example/uploads/MO-0417/refrigerant-handling.pdf` read 09:14 |
+| Name on the working-at-height certificate | `M. Okonjo` | Contractor record is `Michael Okonjo`, date of birth agrees | An abbreviation the workflow cannot confirm as the same person | `https://docs.nordhaven.example/uploads/MO-0417/working-at-height.pdf` read 09:14 |
+| Public liability insurance | No certificate on file | Required for every client-site assignment | Required document missing | `https://records.nordhaven.example/contractors/MO-0417` read 09:11 |
+| Issuer of the working-at-height certificate | `Ridgeway Training Ltd` | Approved issuer list names `Ridgeway Training` and three others | Issuer does not match an approved entry | `https://docs.nordhaven.example/uploads/MO-0417/working-at-height.pdf` read 09:14 |
+| Photo identification | Passport, expires August 2029 | Valid identification for the assignment period | No flag | `https://records.nordhaven.example/contractors/MO-0417` read 09:11 |
+
+What the packet hands Ferreira: the records with their links and read timestamps, each requirement beside the contractor's documents, the missing insurance certificate named as a gap with the party who can supply it, and the certificate's own wording behind each date. It does not say whether the technician may be dispatched. Ferreira may know the refrigerant certificate is being renewed that week, or may need the training provider to confirm the abbreviated name. Either way the answer comes from a person who saw the evidence in one place.
+
+When a document is missing or has expired, the order does not change. The packet names the gap and who can supply it: the contractor, the agency that placed them, or the training provider. Ferreira holds the assignment. Ferreira, not the agent, asks the contractor for the document. Anything unresolved, or turning on what the client's site requires, goes to whoever owns credential policy; a question about what a certificate legally permits goes to counsel.
+
+## Limits and escalation
+
+**Source coverage is the limit.** The packet knows only the sources the workflow is connected to. A certificate emailed to a supervisor and never filed, an insurance renewal confirmed by phone, a client requirement written into a contract nobody linked: all invisible, and a packet that looks complete while missing one is worse than a named gap.
+
+**Stored copies and dates can be wrong.** The workflow reads what the sources hold: it does not verify that a certificate is authentic, does not call the issuing body, and cannot tell an edited scan from an original. A copy can lag the issuer's own record, and a date can be mistyped. An expiry date in the future is not proof of current eligibility either: a credential can be suspended or revoked before its printed date, can carry conditions the certificate does not show, and can fail a jurisdiction-specific requirement. The packet shows every value with its source and read time, and never decides which document governs.
+
+**Access is a written decision.** Who may read the contractor and vendor systems, and who grants it, belongs in the team's governance record ([AI operations governance](/docs/playbooks/use-cases/ai-operations-governance)). A record the swarm cannot reach is reported by name with the owner who could grant access. Nobody is asked to paste a passport scan into a thread instead.
+
+Stated plainly: no autonomous eligibility decisions, no automatic dispatch, no legal advice, no compliance guarantee. The run produces a packet for a person, and the decision ends with that person.
+
+## Review checklist
+
+The operations owner runs this before assigning the contractor:
+
+- The name and identifier on each certificate match the contractor record, with no abbreviation left unresolved.
+- Every credential the assignment requires is present, including the hardest to find.
+- Every expiry date is later than the assignment's end date, not only its start date.
+- Issuer evidence was checked at the source, not read off the uploaded copy alone.
+- The jurisdiction and the client-site requirement were confirmed for where the work happens.
+- Any condition, restriction or endorsement on the certificate was read, not just its date.
+- Every gap is resolved, or the assignment is held until it is.
+- The decision and its reason are recorded against the packet.
+
+## What stays human-owned
+
+- **Verifying issuer evidence and jurisdictional requirements.** Confirming a certificate is genuine and its scope fits the site is a check against the issuing body.
+- **Deciding eligibility.** No run ends with a contractor cleared.
+- **Assigning or dispatching work.** The workflow never books a site visit, notifies a client or releases a job.
+- **All communication with the contractor or the client**, including a request for a missing document and a note that an assignment is on hold.
+
+## Building blocks
+
+Every piece here exists in agent-swarm today and has its own docs page. Pointing it at a credential review is the part that has to be designed.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): the `swarm-script` and `script-run` pattern for deterministic JSON collection, and the Researcher-style synthesis over it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the `human-in-the-loop` node, its approve and escalate paths, its timeout and fallback, and the message it posts.
+- [Script connections](/docs/guides/script-connections) and [scripts credential broker](/docs/guides/scripts-credential-broker): how a collection step reaches a vendor system or a document store with no raw secret in source.
+- [Per-customer working directories](/docs/playbooks/patterns/per-customer-working-directories): only if the same contractor is reviewed across assignments and the packet must persist between runs.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, role permissions and approval thresholds, written down.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): which option fits your team.

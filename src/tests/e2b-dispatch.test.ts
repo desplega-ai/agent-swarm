@@ -406,7 +406,13 @@ describe("E2B dispatch helpers", () => {
 
   test("buildImageTemplate forwards cancellation to the E2B SDK", async () => {
     const abort = new AbortController();
-    const build = spyOn(Template, "build").mockResolvedValue({
+    // e2b >= 2.63 exports `Template` as a Proxy that caches a bound copy of each
+    // static method on first read, so spying on the proxy never reaches the call
+    // site. Spy on the underlying class instead, before anything reads `build`.
+    // shortcut: the proxy keeps the bound spy cached after mockRestore; fine while
+    // no other test in this file calls Template.build for real.
+    const TemplateClass = Template.prototype.constructor as typeof Template;
+    const build = spyOn(TemplateClass, "build").mockResolvedValue({
       alias: "worker",
       name: "worker",
       tags: [],

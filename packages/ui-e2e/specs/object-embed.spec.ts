@@ -107,7 +107,10 @@ test("ObjectEmbed sheet: an edited cell saves, recalculates and survives a reloa
     const grid = page.locator('[data-object-kind="sheet"]');
     const a2 = grid.locator('.ag-row[row-id="2"] [col-id="A"]');
     const b2 = grid.locator('.ag-row[row-id="2"] [col-id="B"]');
-    await expect(b2).toHaveText("4");
+    // A cold page load parses the app, fetches the sheet and builds the grid; on a
+    // loaded CI runner that took 3.8 s and 5.5 s, past the 5 s expect default.
+    const pageLoad = { timeout: 15_000 };
+    await expect(b2).toHaveText("4", pageLoad);
 
     await a2.dblclick();
     const editor = grid.locator(".ag-cell-editor input");
@@ -123,7 +126,7 @@ test("ObjectEmbed sheet: an edited cell saves, recalculates and survives a reloa
     await editor.press("Escape");
 
     await page.reload();
-    await expect(a2).toHaveText("21");
+    await expect(a2).toHaveText("21", pageLoad);
     await expect(b2).toHaveText("42");
     await clean.assertClean();
   } finally {

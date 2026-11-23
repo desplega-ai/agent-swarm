@@ -29,7 +29,7 @@ jobs:
       !startsWith(github.event.pull_request.title, 'release:') &&
       !contains(github.event.pull_request.labels.*.name, 'skip-pr-body-check')
     runs-on: ubuntu-latest
-    # Checkout, plus reading the PR's file list; GITHUB_TOKEN needs nothing else.
+    # Checkout only; GITHUB_TOKEN needs nothing else.
     permissions:
       contents: read
       pull-requests: read
@@ -48,14 +48,6 @@ jobs:
         with:
           bun-version-file: package.json
 
-      - name: List changed files
-        # A UI change requires the Before / after section.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-        run: gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' > "$RUNNER_TEMP/changed-files.txt"
-
       - name: Check PR body against the template
         id: check
         env:
@@ -64,7 +56,6 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           # Bot-authored bodies also get the leak check and need Swarm provenance; contributors do not.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_CHANGED_FILES_FILE: ${{ runner.temp }}/changed-files.txt
           # A low-risk diff of 50 lines or fewer may skip the Change outline.
           # Expressions have no arithmetic, so the shell adds them.
           PR_ADDITIONS: ${{ github.event.pull_request.additions }}

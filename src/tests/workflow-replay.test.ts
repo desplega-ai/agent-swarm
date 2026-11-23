@@ -14,6 +14,7 @@ import { runBootScrubSweep } from "../be/boot-scrub-sweep";
 import { __resetEncryptionKeyForTests, encryptSecret, resolveEncryptionKey } from "../be/crypto";
 import {
   closeDb,
+  createApprovalRequest,
   createUser,
   createWaitState,
   createWorkflow,
@@ -24,6 +25,7 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
+  resolveApprovalRequest,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
@@ -434,8 +436,18 @@ describe("a live resume with an unreadable sealed context fails the run", () => 
 
   test("approval.resolved", async () => {
     const { runId, stepId } = await parkedRunWithRotatedContext("review", "human-in-the-loop");
+    const requestId = crypto.randomUUID();
+    await createApprovalRequest({
+      id: requestId,
+      title: "Review",
+      questions: [{ id: "q1", type: "approval", label: "Approve?", required: true }],
+      approvers: { policy: "any" },
+      workflowRunId: runId,
+      workflowRunStepId: stepId,
+    });
+    await resolveApprovalRequest(requestId, { status: "approved", responses: {} });
     eventBus.emit("approval.resolved", {
-      requestId: crypto.randomUUID(),
+      requestId,
       status: "approved",
       responses: {},
       workflowRunId: runId,

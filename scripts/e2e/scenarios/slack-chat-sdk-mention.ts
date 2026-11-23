@@ -5,6 +5,7 @@ import {
   CHAT_SDK_SLACK_WEBHOOK,
   enableChatSdkSlack,
   expectHttpTransport,
+  GENERAL_CHANNEL,
   waitForChatTask,
 } from "./slack-http-helpers";
 
@@ -14,11 +15,14 @@ export const slackChatSdkMention: Scenario = {
   // in_progress tasks earlier scenarios left 5s after a restart, and the strict gate needs
   // that status in the final database, so nothing may run for long after that restart.
   order: 686,
+  // The Chat SDK renders the same reply under both Slack renderer profiles, so one leg is enough.
+  groups: ["visuals-v2"],
   async run(ctx) {
     const flip = await enableChatSdkSlack(ctx);
     try {
       const leadId = await registerLead(ctx, "e2e-lead-chat-sdk-mention");
       const message = await ask(flip.ctx, `swarm#${leadId} say hello from the Chat SDK`);
+      flip.ctx.markThread("chat-sdk-mention", GENERAL_CHANNEL, message.ts);
 
       const task = await waitForChatTask(ctx, message.ts);
       expect(task.source === "chat", `Chat SDK task ${task.id} has source ${task.source}`);

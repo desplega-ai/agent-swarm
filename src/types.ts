@@ -1002,6 +1002,10 @@ export const AgentTaskSchema = z
     // the agent's default). Unset when no profile applied.
     profile: z.string().optional(),
     resolvedProfile: z.string().optional(),
+    // Model group (runbooks/model-tiers.md § Model groups): the creator's ask.
+    // Claim runs the first member that passes on the claiming agent; a
+    // fallback hop's resume also sets `profile` to the member it picked.
+    modelGroup: z.string().optional(),
     // Provider-error fallback hops so far, oldest first; carried by every
     // resume of the same work. Unset when the work never hopped.
     fallbackHops: z.array(FallbackHopSchema).optional(),
@@ -1141,6 +1145,7 @@ export const CreateTaskOptionsSchema = z.object({
   modelTier: ModelTierSchema.optional(),
   effort: ReasoningEffortSchema.optional(),
   profile: z.string().optional(),
+  modelGroup: z.string().optional(),
   /** Internal: the fallback hops a resume carries over (`createResumeFollowUp`). */
   fallbackHops: z.array(FallbackHopSchema).optional(),
   scheduleId: z.string().optional(),
@@ -2068,6 +2073,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
+  // Claim ran a model group's member; metadata lists the members it skipped
+  "task_model_group_resolved",
   // Reboot sweep moved a never-started dependent from the swept task to its retry
   "task_dependency_repointed",
   "task_released",
@@ -2355,6 +2362,8 @@ export const ScheduledTaskSchema = z
     modelTier: ModelTierSchema.optional(),
     /** Model profile copied onto every fired task; exclusive with model/modelTier. */
     profile: z.string().optional(),
+    /** Model group copied onto every fired task; exclusive with model/modelTier/profile. */
+    modelGroup: z.string().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     targetType: ScheduledTaskTargetTypeSchema.default("agent-task"),
     workflowId: z.uuid().optional(),
@@ -3604,6 +3613,7 @@ export type AgentTaskSummary = Pick<
   | "resolvedEffort"
   | "profile"
   | "resolvedProfile"
+  | "modelGroup"
   | "provider"
   | "requestedByUserId"
   | "progress"

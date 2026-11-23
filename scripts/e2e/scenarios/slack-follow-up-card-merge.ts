@@ -12,8 +12,8 @@ import {
   registerWorker,
 } from "./slack-helpers";
 
-// A Lead follow-up that finishes soon after the Lead's previous card in the
-// same thread merges into that card (one chat.update, no new message), so the
+// A Lead follow-up that finishes after the Lead's previous card in the
+// same thread, with nothing posted in between, merges into that card (one chat.update, no new message), so the
 // thread reads as one answer and sends one notification. A later message in
 // the thread, or a failed follow-up, keeps the follow-up a separate card.
 //

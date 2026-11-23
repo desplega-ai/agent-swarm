@@ -8,6 +8,8 @@ export type HttpSlackOptions = {
   signingSecret: string;
   /** Fixed port, so the SUT can be pointed at the mock's Web API before the mock exists. Default: any free port. */
   port?: number;
+  /** Journal file for the visuals renderer. Default: no journal. */
+  dataFile?: string;
 };
 
 /**
@@ -19,6 +21,7 @@ export function startHttpSlackMock(options: HttpSlackOptions): Promise<SlackMock
   return SlackMock.start({
     port: options.port ?? 0,
     manifest: `${repoRoot}/slack-manifest.json`,
+    ...(options.dataFile ? { dataFile: options.dataFile } : {}),
     httpDelivery: {
       eventsUrl: options.eventsUrl,
       signingSecret: options.signingSecret,

@@ -3,6 +3,7 @@ import { onAuthorizationRefreshed } from "../oauth/ensure-token";
 import { getPublicMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { resetLinearClient } from "./client";
+import { linearApiUrl, linearWebUrl } from "./host";
 import { initLinearOutboundSync, teardownLinearOutboundSync } from "./outbound";
 
 let initialized = false;
@@ -61,8 +62,8 @@ export async function initLinear(): Promise<boolean> {
   await upsertOAuthApp("linear", {
     clientId,
     clientSecret,
-    authorizeUrl: "https://linear.app/oauth/authorize",
-    tokenUrl: "https://api.linear.app/oauth/token",
+    authorizeUrl: linearWebUrl("/oauth/authorize"),
+    tokenUrl: linearApiUrl("/oauth/token"),
     redirectUri,
     scopes: "read,write,issues:create,comments:create,app:assignable,app:mentionable",
     // Linear requires comma-separated scopes in the authorize URL (RFC default

@@ -1264,6 +1264,48 @@ export function scrubSecrets(text: string | null | undefined): ScrubbedText {
   return scrubWithMatcher(text, getMatcher());
 }
 
+/**
+ * `scrubSecrets` over a JSON-serializable value, keeping its shape. The
+ * serialized form is scrubbed first, so key context (`"token": "…"`) still
+ * redacts. A key pass can reach across a JSON string boundary, though: an
+ * unclosed `KEY='` inside a string value runs to the end of the text and
+ * swallows the closing quote, so the result no longer parses. Then every
+ * string leaf and key is scrubbed on its own (`scrubObject`), after a string
+ * under a sensitive key is redacted whole, as the serialized pass would have.
+ */
+export function scrubJson<T>(value: T): T {
+  if (value === undefined) return value;
+  try {
+    return JSON.parse(scrubSecrets(JSON.stringify(value))) as T;
+  } catch {
+    return scrubObject(redactSensitiveKeys(value) as T);
+  }
+}
+
+const WHOLE_JSON_KEY_RE = new RegExp(`^${JSON_KEY}$`);
+
+/**
+ * The leaf-by-leaf walk never sees the `"key": "value"` adjacency that
+ * `redactJsonValues` reads in the serialized form, so the key context is
+ * applied here: same keys, same placeholder rule, string values only.
+ */
+function redactSensitiveKeys(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => redactSensitiveKeys(item, seen));
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const sensitive =
+      typeof child === "string" &&
+      WHOLE_JSON_KEY_RE.test(key) &&
+      isSensitiveKeyPath(key) &&
+      !isPlaceholderValue(child);
+    out[key] = sensitive ? `[REDACTED:${key}]` : redactSensitiveKeys(child, seen);
+  }
+  return out;
+}
+
 function scrubWithMatcher(text: string, matcher: KnownValueMatcher): ScrubbedText {
   let out = text;
 
@@ -1580,9 +1622,11 @@ export function scrubObject<T>(
   seen = new WeakSet<object>(),
   // Rows of one result repeat the same keys: scrub each distinct key once per call.
   keyCache = new Map<string, string>(),
+  // A hot caller passes `createSweepScrubber()` to skip rules a text cannot trigger.
+  scrub: (text: string) => string = scrubSecrets,
 ): T {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return scrubSecrets(value) as T;
+  if (typeof value === "string") return scrub(value) as T;
   if (typeof value !== "object") return value;
 
   if (seen.has(value)) {
@@ -1591,7 +1635,7 @@ export function scrubObject<T>(
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((item) => scrubObject(item, seen, keyCache)) as T;
+    return value.map((item) => scrubObject(item, seen, keyCache, scrub)) as T;
   }
 
   // Keys are scrubbed too: a map keyed by a token leaks it as a key. Two keys
@@ -1603,7 +1647,7 @@ export function scrubObject<T>(
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     let scrubbed = keyCache.get(key);
     if (scrubbed === undefined) {
-      scrubbed = scrubSecrets(key);
+      scrubbed = scrub(key);
       keyCache.set(key, scrubbed);
     }
     let outKey = scrubbed;
@@ -1613,7 +1657,7 @@ export function scrubObject<T>(
         n++;
       nextSuffix.set(scrubbed, n + 1);
     }
-    out[outKey] = scrubObject(child, seen, keyCache);
+    out[outKey] = scrubObject(child, seen, keyCache, scrub);
   }
   return out as T;
 }

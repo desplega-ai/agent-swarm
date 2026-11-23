@@ -183,6 +183,20 @@ Then render both profiles:
 bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
+The renderer writes `frames/<scenario>/<label>/final-thread.png` for each thread a scenario marked with `ctx.markThread(label, channel, ts)`.
+Mark the `ts` of the thread root. A label matches `^[a-z0-9-]+$`, and any other label throws.
+Pick the group by renderer. `visuals-v2` runs with `SLACK_RENDER_V2=true` and is the usual choice. Use `visuals-legacy` for a change in the legacy renderer, and both groups when both renderers change.
+
+A PR that changes what users see in Slack attaches a frame pair in `## Before / after`:
+
+- A flag: mark one thread per state in one scenario (`slack-reply-footer-toggle` marks `footer-off` and `footer-on`).
+- A changed rendering: run the scenario on `main` and on the branch.
+- A new scenario or new marks: `main` cannot render them. Copy the scenario file into a `main` worktree for the before frame, or show the after frame alone when the output itself is new.
+
+The renderer needs Chrome. Set `SLACK_MOCK_CHROME=<path>` when it does not find one. In a swarm worker container Chrome starts only with `--no-sandbox`, so point `SLACK_MOCK_CHROME` at a wrapper script that adds the flag.
+
+A Chat SDK Slack scenario runs on its own HTTP-mode mock. With `--visuals`, that mock writes `slack-http-journal-<scenario>-<n>.jsonl` next to `slack-journal.jsonl`. The runner names the file (`ctx.slackJournal()`), and `flip.ctx.markThread` records which journal holds the thread. `channel.png` always shows the Socket Mode workspace of the run.
+
 Use `--harness claude,codex,pi,opencode,dsh,cursor,amp,grok,fx,acp` to add real worker legs after the contract layer.
 Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
@@ -194,7 +208,7 @@ Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), a
 Fx needs a preinstalled `fx` executable (worker-full ships the pinned release) and defaults to `openrouter/openai/gpt-5-mini` on `OPENROUTER_API_KEY`. A bare `E2E_MODEL_FX=gpt-5-mini` needs `OPENAI_API_KEY`, and `vercel/<vendor>/<id>` needs `AI_GATEWAY_API_KEY`. Run `bun run e2e --only health --harness fx`.
 Acp runs `HARNESS_PROVIDER=acp` with `ACP_TARGET=opencode`, needs a preinstalled `opencode` executable plus the opencode credentials, defaults to `openrouter/deepseek/deepseek-v4-flash`, and requires a cost record with input and output tokens. The nightly workflow has no acp leg.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.2-rc.5` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.3-alpha.2` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.
@@ -520,7 +534,7 @@ agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --file /tmp/
 | Doc (plan, research, report) | The live app link `${AGENT_FS_LIVE_URL}/file/~/<org>/<drive>/<path>`, under `## Swarm provenance`. `agent-fs share-create <path> --expires-in 604800` only when the requester asks for one or a reader has no agent-fs login |
 | `live.agent-fs.dev` links, swarm task links | Only under `## Swarm provenance` |
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must fill `## Before / after` with `agent-browser` screenshots of the change running locally: a before (main) and after table of `![caption](<attachment-url>)`. Interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also need a recording, as an attachment mp4 on its own line. The PR Body check requires the section for those paths; the media itself is a reviewer convention.
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must fill `## Before / after`. For a visible change, use `agent-browser` screenshots of the change running locally: a before (main) and after table of `![caption](<attachment-url>)`. A new or changed interaction or flow (navigation, form, modal, drag, animation, or multi-step flow) also needs a recording, as an attachment mp4 on its own line. One more instance of an existing control is not a changed interaction. A new configuration-catalog entry that reuses an existing control `kind` shows its key and default as a table, not a screenshot. When nothing visible changes (a type-only refactor, a test fix), write `No visible change: <reason>` and capture no media. The PR Body check requires the section for those paths; the media itself is a reviewer convention.
 
 ### Port-conflict resolution
 

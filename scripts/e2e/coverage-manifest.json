@@ -266,7 +266,13 @@
     },
     "app-engine": {
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
-      "scenarios": ["knowledge-apps", "knowledge-apps-large-model", "knowledge-apps-limits", "knowledge-apps-primitives"]
+      "scenarios": [
+        "knowledge-apps",
+        "knowledge-apps-large-model",
+        "knowledge-apps-limits",
+        "knowledge-apps-primitives",
+        "knowledge-apps-session-thread-files"
+      ]
     },
     "asset-namespaces": {
       "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit; an operator-key dashboard writes only its logged-in user's personal keys",
@@ -363,6 +369,10 @@
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
     },
+    "github-provider-emulated": {
+      "description": "Against @emulators/github: a maintainer's mention in an issue comment and a PR body become tasks through signed App webhooks, an outsider's mention and a mention-free issue do not, the minted installation token writes as the App bot, and a real merge wakes a vcs.pr.merged waiter",
+      "scenarios": ["github-emulate-flows"]
+    },
     "github-app-worker-tokens": {
       "description": "POST /api/github/installation-token with a repo: only an owner listed in the deployment-only GITHUB_APP_REPO_OWNERS gets its repo's own installation, and only for a repo registered on the configured GitHub host; a worker-registered repo of an unlisted owner gets the fixed installation, a spoofed host or unregistered repo is 403, an installation of an unlisted account is 502, and the owner list cannot be stored in swarm_config",
       "scenarios": ["github-installation-token-repos"]
@@ -382,6 +392,10 @@
     "kv": {
       "description": "KV store over HTTP and MCP: namespaces, types, TTL, views, authorization, and the 24 hour MCP overflow spill.",
       "scenarios": ["script-kv"]
+    },
+    "linear-provider-emulated": {
+      "description": "Against @emulators/linear: OAuth consent, actor=app install, code exchange, refresh and revoke; delegating a Todo issue creates a task and acknowledges the AgentSession, a Backlog issue is gated, completion ends the session with the output, and Canceled cancels the task; LINEAR_URL and LINEAR_API_URL cannot be stored in swarm_config",
+      "scenarios": ["linear-emulate-flows"]
     },
     "mcp-server-lifecycle": {
       "description": "MCP server definitions created over HTTP and MCP tools, installed per agent, OAuth client pre-registered, deleted.",
@@ -408,8 +422,8 @@
       "scenarios": ["platformb-models"]
     },
     "model-groups": {
-      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards",
-      "scenarios": ["platformb-model-groups"]
+      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards; groups resolve at create, claim, pool and fallback hops",
+      "scenarios": ["platformb-model-groups", "model-group-resolution"]
     },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
@@ -424,12 +438,16 @@
       "scenarios": ["platform-oauth-locks"]
     },
     "page-publishing": {
-      "description": "create page, serve public/authed/password, version history, feedback task, delete",
-      "scenarios": ["knowledge-pages"]
+      "description": "create page, serve public/authed/password, version history, feedback task, delete, and a dashboard launch that acts as the picked user",
+      "scenarios": ["knowledge-pages", "knowledge-page-dashboard-user"]
     },
     "org-design-system": {
       "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
       "scenarios": ["design-system"]
+    },
+    "otel-log-export": {
+      "description": "OTEL_EXPORT_API_LOGS mirrors API console output to an OTLP/HTTP collector through the SDK-registered LoggerProvider, with exported request spans as the reachability control",
+      "scenarios": ["platform-otel-log-export"]
     },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
@@ -448,8 +466,8 @@
       "scenarios": ["knowledge-prompt-templates"]
     },
     "provider-webhooks": {
-      "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore.",
-      "scenarios": ["platform-webhooks"]
+      "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore. Linear, Jira, workflow, GitHub, AgentMail and Kapso receivers refuse a body over 5 MiB.",
+      "scenarios": ["platform-webhooks", "webhook-body-limit"]
     },
     "realtime-room-state": {
       "description": "room reset/change/decode over HTTP, MCP, WebSocket and workflow wait",
@@ -501,7 +519,12 @@
     },
     "script-retry": {
       "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), a ctx.swarm call that retries a real 429 from the API, and ctx.swarm plus the script-run tool reaching the API over loopback while MCP_BASE_URL is closed.",
-      "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge", "script-api-loopback"]
+      "scenarios": [
+        "script-retry-helper",
+        "script-retry-fetch",
+        "script-retry-bridge",
+        "script-api-loopback"
+      ]
     },
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
@@ -545,7 +568,7 @@
     },
     "slack-agent-tools": {
       "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread, and a slack-reply json-render card",
-      "scenarios": ["platformb-slack-tools", "slack-reply-card"]
+      "scenarios": ["platformb-slack-tools", "slack-reply-card", "slack-reply-footer-toggle"]
     },
     "slack-file-download-bounds": {
       "description": "Slack file downloads stay inside the download directory and send the bot token only to Slack file hosts",
@@ -592,11 +615,12 @@
       ]
     },
     "slack-delegation": {
-      "description": "Delegated child results, failed and late children, the flag-off repro, Lead follow-up and resume cards, merged follow-up cards, and the flag state shard 4 starts from",
+      "description": "Delegated child results, failed and late children, the flag-off repro, Lead follow-up and resume cards, merged follow-up cards, one card per fix across a coder and its reviewer, and the flag state shard 4 starts from",
       "scenarios": [
         "slack-delegation-flag-off-repro",
         "slack-lead-follow-up-card",
         "slack-follow-up-card-merge",
+        "slack-thread-one-card",
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
@@ -727,13 +751,18 @@
       ]
     },
     "workflow-engine-nodes": {
-      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",
+      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction; code-match and string wait filters run outside the API realm and read only config interpolation sources; swarm-script and sub-workflow nodes act as the creator only when the pinned definition was last saved by the creator, a lead or a person",
       "scenarios": [
         "workflow-engine-instant-nodes",
         "workflow-engine-async-nodes",
         "workflow-wait-event-loop",
         "workflow-engine-system-one",
-        "workflow-script-node"
+        "workflow-script-node",
+        "workflow-predicate-sandbox",
+        "workflow-predicate-compat",
+        "workflow-script-node-executor-setting",
+        "workflow-executable-config-sources",
+        "workflow-edited-script-principal"
       ]
     },
     "workflow-savings": {
@@ -751,6 +780,10 @@
     "route-caller-identity": {
       "description": "An agent-bound token acts only as its own agent for a script endpoint's run-as agent, a manual schedule run and indexed memory; the lead token and the shared key keep their access",
       "scenarios": ["route-caller-identity"]
+    },
+    "llm-emulator-backend": {
+      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429, and task auto-titling lands a title from a streamed set_title tool call",
+      "scenarios": ["llm-emulate-ai"]
     },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",

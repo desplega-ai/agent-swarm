@@ -95,9 +95,9 @@ Workers read all four keys live, so a saved change needs no restart. Rules and l
 | Harness & tools | `CLAUDE_TRUST_PRESEED`, `WORKTREE_REAPER_MODE`, `WORKTREE_TTL_HOURS`, `WORKTREE_SWEEP_INTERVAL_MINUTES`, `WORKTREE_REAPER_EXTRA_ROOTS`, `CODEX_OAUTH_KEEP_WARM_MAX_AGE_HOURS`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `SWARM_ENABLED_TOOLS`, `OPENROUTER_BASE_URL`, `OPENROUTER_APP_ATTRIBUTION`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `CONTEXT_BOUND_NOTE_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `CREDENTIAL_SELECTION_STRATEGY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
 | Model tiers | `MODEL_TIER_<PROVIDER>_<TIER>` for every provider with a tier mapping |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_WORKER_POOL_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_SESSION_MAX_MB`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `SCRIPT_RUNS_RETENTION_DAYS`, `WORKFLOW_RUNS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS`, `APPS_JSON_COLUMN_MAX_BYTES`, `APPS_MAX_MODELS`, `APPS_MAX_COLUMNS_PER_MODEL`, `APPS_MAX_ACTIONS` |
-| Integrations | `MCP_USER_EVENTS_ENABLED` (see [MCP Events](/docs/guides/mcp-events)), `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_TASK_TREE_ENABLED`, `SLACK_RENDER_V2_DELEGATION`, `UI_SPEC_ENABLED`, `UI_SPEC_ACTIONS_ENABLED`, `UI_SPEC_SCRIPT_ACTIONS`, `SLACK_TASK_WATCHER_INTERVAL_MS`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `SLACK_SESSION_MIRROR`, `SLACK_THREAD_WAKE_ON_ANY_MESSAGE`, `SLACK_LEAVE_THREAD_DISABLE`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `CHAT_SDK_OWNER_WINDOW_MIN`, `AGENT_FS_PUBLIC_URL`, `AGENT_FS_LINK_TARGET`, `AGENT_FS_PROXY`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_REACTION_SKIPPED`, `SLACK_STATUS_ICON_COMPLETED` |
+| Integrations | `MCP_USER_EVENTS_ENABLED` (see [MCP Events](/docs/guides/mcp-events)), `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_TASK_TREE_ENABLED`, `SLACK_REPLY_FOOTER_ENABLED`, `SLACK_RENDER_V2_DELEGATION`, `UI_SPEC_ENABLED`, `UI_SPEC_ACTIONS_ENABLED`, `UI_SPEC_SCRIPT_ACTIONS`, `SLACK_TASK_WATCHER_INTERVAL_MS`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `SLACK_BLOCK_EXTERNAL_CHANNELS`, `SLACK_SESSION_MIRROR`, `SLACK_THREAD_WAKE_ON_ANY_MESSAGE`, `SLACK_LEAVE_THREAD_DISABLE`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `CHAT_SDK_ENABLED`, `CHAT_SDK_BUFFER_MS`, `CHAT_SDK_OWNER_WINDOW_MIN`, `AGENT_FS_PUBLIC_URL`, `AGENT_FS_LINK_TARGET`, `AGENT_FS_PROXY`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED`, `SLACK_REACTION_SKIPPED`, `SLACK_STATUS_ICON_COMPLETED` |
 | Security & access | `COMPANY_EMAIL_DOMAINS` (see below), `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `BOOT_SCRUB_MODE` (see below), `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `MCP_USER_EVENTS_ALLOW_PRIVATE_CALLBACKS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults), `PAGES_FRAME_ANCESTORS` (extra origins that may iframe public pages) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `WORKFLOW_INPUT_ENV_ALLOWLIST`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER`, `FOLLOW_UP_GATE_MODE`, `FOLLOW_UP_GATE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_VERIFIER_SCRIPT`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED`, `SEED_SCHEDULES_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `WORKFLOW_INPUT_ENV_ALLOWLIST`, `SCHEDULER_INTERVAL_MS`, `SYSTEM_ONE_DEFAULT_PROVIDER`, `SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER`, `FOLLOW_UP_GATE_MODE`, `FOLLOW_UP_GATE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS`, `FOLLOW_UP_GATE_VERIFIER_SCRIPT`, `SCRIPT_EXECUTOR`, `SCRIPT_QUICKJS_POOL_SIZE`, `SCRIPT_EGRESS_ALLOW_PRIVATE`, `SCRIPT_EGRESS_ALLOWLIST`, `SEED_AUTOMATIONS_ENABLED`, `SEED_SCRIPTS_ENABLED`, `SEED_SKILLS_ENABLED`, `SEED_WORKFLOWS_ENABLED`, `SEED_SCHEDULES_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `EVENT_LOOP_STALL_WARN_MS`, `ANONYMIZED_TELEMETRY`, `IMPROVEMENTS_ENABLED` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_ORG_WEBSITE`, `SWARM_ORG_TEAM_SIZE`, `SWARM_ORG_USE_CASE`, `SWARM_ORG_ACQUISITION_SOURCE`, `SWARM_BRAND_COLOR`, `SWARM_ORG_LOGO_URL`, `APP_URL`, `DASHBOARD_URL` (deprecated), the "Show our logo on agent-swarm.dev" switch (`SWARM_USED_BY_CONSENT`), and the public ranking opt-in (`PUBLIC_RANKING_ENABLED`) |
 
@@ -239,13 +239,17 @@ compact state, and the setup prompt, without creating a prompt or writing KV.
 
 When a worker finishes a task, the Lead gets a follow-up task to review the result. For scheduled
 runs whose output a script can check, the follow-up gate measures how often that review could be
-skipped. It only records; it never skips or delays a follow-up.
+skipped. Shadow mode only records. Enforce mode skips the follow-up for the schedules you list.
 
 - `FOLLOW_UP_GATE_MODE`: `off` (default) runs nothing. `shadow` records a decision for each gated
-  run. Config writes reject any other value, including `enforce`.
+  run. `enforce` does the same, and skips follow-ups for the schedules in
+  `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS`. Config writes reject any other value.
 - `FOLLOW_UP_GATE_SCHEDULE_IDS`: comma-separated schedule ids to evaluate. Empty (the default)
   evaluates nothing. Config writes reject a value that is not a UUID. Leave off any schedule
   whose follow-up does required work.
+- `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS`: comma-separated schedule ids whose follow-ups enforce mode
+  may skip. Ignored unless the mode is `enforce`. Same UUID check. A schedule here does not need to
+  be in `FOLLOW_UP_GATE_SCHEDULE_IDS` too.
 - `FOLLOW_UP_GATE_VERIFIER_SCRIPT`: a global script that runs as the Lead with `{ taskId }` and
   returns `{ ok: true | false | null, controls: { ok: boolean }, check?, detail?, unverified? }`.
 
@@ -258,11 +262,25 @@ for the worker task. Its metadata holds `followUpTaskId`, `decision`, `reason`, 
 | --- | --- |
 | `would_skip` | `ok` is `true` and `controls.ok` is `true` |
 | `would_keep` | any other result: `ok` is `false` or `null`, or the controls did not pass |
-| `ineligible` | a failed run, or a task whose `followUpConfig` carries `onCompleted` or `onFailed` instructions. The verifier does not run. |
+| `ineligible` | a failed run, a task whose `followUpConfig` carries `onCompleted` or `onFailed` instructions, or a completion whose `chainedTaskId` was rejected (`chain_rejected`). The verifier does not run. |
 | `error` | the verifier threw, timed out, returned no object, is not configured or not found (`no_verifier`), or two runs were already in flight (`concurrency_cap`) |
 
 Runs of schedules that are not on the list, and tasks with no schedule, write nothing. All three
 keys apply to the next follow-up without a restart. Rows follow `AGENT_LOG_RETENTION_DAYS`.
+
+### Enforce
+
+For a completed run of an enforced schedule, the follow-up is not created up front. After the
+run commits, the verifier runs with the same deadline and cap. `would_skip` skips the follow-up
+and also writes a `task_follow_up_suppressed` row with reason `follow_up_gate`. Every other
+decision creates the follow-up: `would_keep`, `ineligible`, and each `error` reason (the verifier
+threw, timed out, is missing, or hit the cap). A failed run, a run with follow-up instructions,
+and a completion with a rejected `chainedTaskId` always get their follow-up up front.
+The `task_follow_up_gate_shadow` row carries `mode: "enforce"`, `skipped`, and a `followUpTaskId`
+that is `null` when the follow-up was skipped. Shadow-only schedules keep `mode: "shadow"`.
+
+A follow-up that waits on the verifier is created up to 60 seconds late. If the server restarts
+during that wait, the follow-up is not created.
 
 ## Workflow env allowlist
 
@@ -763,6 +781,10 @@ This setting requires `SLACK_RENDER_V2=true`. With V2 off, the legacy renderer i
 and the tree preference is retained. It applies live through the normal global config
 reload. A saved value overrides deployment env at boot and reload; removing it restores
 the deployment value, or On when unset.
+
+### Slack reply footer
+
+**Show Slack reply footer** (`SLACK_REPLY_FOOTER_ENABLED`) is On by default. Turn it off to hide the task details footer from future replies. The change applies when global config reloads.
 
 ### Slack session mirror
 

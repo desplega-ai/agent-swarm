@@ -348,8 +348,8 @@ export const SystemOneExtractionAnswerSchema = z.strictObject({
   confidence: UnitInterval.optional(),
   /** `[start, end)` character offsets of the answer in `state`. */
   span: Span.optional(),
-  /** One span per list item. */
-  spans: z.array(Span).optional(),
+  /** One span per list item; null for an item the model could not locate in `state`. */
+  spans: z.array(Span.nullable()).optional(),
   unit: z.string().optional(),
   mean: z.union([Point, z.array(Point)]).optional(),
   median: z.union([Point, z.array(Point)]).optional(),
@@ -591,11 +591,12 @@ function validateAnswer(
       );
       if (!ok)
         fail(`${at}.value items must all be ${field.items === "number" ? "numbers" : "strings"}`);
-      if (raw.spans !== undefined) {
-        if (!Array.isArray(raw.spans) || !raw.spans.every(isSpan)) {
+      // clairic-27b sends `null` for an item it could not locate in the state.
+      if (raw.spans !== undefined && raw.spans !== null) {
+        if (!Array.isArray(raw.spans) || !raw.spans.every((s) => s === null || isSpan(s))) {
           fail(`${at}.spans must be a list of [start, end] offsets`);
         }
-        answer.spans = raw.spans as [number, number][];
+        answer.spans = raw.spans as ([number, number] | null)[];
       }
       break;
     }
@@ -630,7 +631,9 @@ function validateAnswer(
     }
     default:
       checkScalar(at, field, raw.value);
-      if (raw.span !== undefined) {
+      // clairic-27b sends `span: null` when it could not locate the answer in the state,
+      // which includes every null value. The span is then left out.
+      if (raw.span !== undefined && raw.span !== null) {
         if (!isSpan(raw.span)) fail(`${at}.span must be [start, end] offsets`);
         answer.span = raw.span;
       }

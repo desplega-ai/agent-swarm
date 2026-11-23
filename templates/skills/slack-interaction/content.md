@@ -37,6 +37,10 @@ The task carries `slackChannelId` and `slackThreadTs` in its metadata. A follow-
 
 Files attached to your task already come with download commands in the task message. Use those before `slack-download-file`. `slack-read` on your task also attaches the files in the thread and gives each one a `fetchCommand`. Don't look for Slack files under `/app/shared` or `/workspace/shared/downloads`: those paths are the API server's disk.
 
+### Bulk history (lead)
+
+`slack-read` returns at most 100 messages of a thread or a channel, with no cursor. A worker that needs more than that asks the lead; it never reads channel history around `slack-read`. As the lead, first call `slack-read` with the `channelId`: if it refuses the channel (permission, external or unverified), stop there. Only after it succeeds, for the full history, page the Slack Web API from a script, with the bot token through a script credential binding: `conversations.history` with the channel id, following `response_metadata.next_cursor` until it is empty. Write the collected messages to a file, not into a message or the task output.
+
 ## Message limits
 
 - Text sent without `blocks` is split into sections under Slack's 3,000-character section limit for you. With explicit `blocks`, keep each section's text at or under 3,000 characters yourself.

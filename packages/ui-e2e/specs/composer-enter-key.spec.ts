@@ -17,11 +17,20 @@ import { expect, test } from "../fixtures";
  * mid-swap types into a node React just detached and the text is lost (seen on
  * the mobile-iphone shard, 2026-11-18). Matching only the contenteditable
  * waits for the editor to take over.
+ *
+ * The editor is also `contenteditable="false"` (and `aria-disabled`) until the
+ * dashboard resolves the acting user, which waits on the users and whoami
+ * requests. A loaded CI runner took longer than the default 5 s expect window
+ * for that (merge-queue run on 2026-11-19), so the wait for it gets its own budget.
  */
 function goalComposer(page: import("@playwright/test").Page) {
   return page
     .getByRole("textbox", { name: "What's the goal?" })
     .and(page.locator('[contenteditable="true"]'));
+}
+
+async function expectGoalComposerReady(page: import("@playwright/test").Page) {
+  await expect(goalComposer(page)).toBeVisible({ timeout: 30_000 });
 }
 
 async function interceptTaskCreate(page: import("@playwright/test").Page) {
@@ -42,7 +51,7 @@ test("desktop: Enter submits, Shift+Enter inserts a newline", async ({ page, see
   const calls = await interceptTaskCreate(page);
   await page.goto("/sessions");
   const composer = goalComposer(page);
-  await expect(composer).toBeVisible();
+  await expectGoalComposerReady(page);
 
   await composer.fill("line one");
   await composer.press("Shift+Enter");
@@ -72,7 +81,7 @@ test("mobile: Enter inserts a newline, blank lines survive, the send button subm
   // The sessions v2 phone layout opens on the list. Its New session screen holds the composer.
   await page.getByRole("button", { name: "New session" }).click();
   const composer = goalComposer(page);
-  await expect(composer).toBeVisible();
+  await expectGoalComposerReady(page);
 
   await composer.fill("line one");
   await composer.press("Enter"); // soft-keyboard Return: newline, not submit
@@ -99,7 +108,7 @@ test("IME composition never submits the composer, on any device", async ({
   const calls = await interceptTaskCreate(page);
   await page.goto("/sessions");
   const composer = goalComposer(page);
-  await expect(composer).toBeVisible();
+  await expectGoalComposerReady(page);
 
   await composer.fill("こんにちは");
   await composer.dispatchEvent("keydown", {

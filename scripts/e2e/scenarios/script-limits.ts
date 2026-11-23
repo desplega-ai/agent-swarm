@@ -151,6 +151,46 @@ export const scriptLimits: Scenario = {
       Array.isArray(warnings) && warnings.some((entry) => String(entry).includes("stdlib.glob")),
       `saving a quickjs script that needs the filesystem must warn: ${saved.text}`,
     );
+
+    // A body method repeated on a later line is a second call site, not a duplicate:
+    // the warning names both lines (here a Response and a fetch result, as in a zip reader).
+    const bodyMethods = await ctx.api("POST", "/api/scripts/upsert", {
+      agentId,
+      body: {
+        name: `e2e-compat-lines-${ctx.nonce}`,
+        source: `async function inflate(stream: any) {
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+export default async function (args: { url: string }) {
+  const res = await fetch(args.url);
+  return [inflate, new Uint8Array(await res.arrayBuffer())];
+}`,
+      },
+    });
+    expectStatus(bodyMethods, [200], "save a script with two arrayBuffer() call sites");
+    const bodyWarnings = asRecord(bodyMethods.json).warnings;
+    expect(
+      Array.isArray(bodyWarnings) &&
+        bodyWarnings.some((entry) => String(entry).includes("(responseBody, lines 2, 6)")),
+      `both arrayBuffer() call sites must be named: ${bodyMethods.text}`,
+    );
+    // Control: a quickjs-safe script that reads bodies with text()/json() saves clean.
+    const safeBodies = await ctx.api("POST", "/api/scripts/upsert", {
+      agentId,
+      body: {
+        name: `e2e-compat-clean-${ctx.nonce}`,
+        source: `export default async function (args: { url: string }) {
+  const res = await fetch(args.url);
+  const text = await res.text();
+  return { bytes: new TextEncoder().encode(text).buffer.byteLength, json: await (await fetch(args.url)).json() };
+}`,
+      },
+    });
+    expectStatus(safeBodies, [200], "save a quickjs-safe script");
+    expect(
+      asRecord(safeBodies.json).warnings === undefined,
+      `a quickjs-safe script must save without warnings: ${safeBodies.text}`,
+    );
     const listed = await ctx.api("GET", "/api/scripts?scope=agent");
     const listedProbe = asRecord(listed.json).scripts;
     expect(

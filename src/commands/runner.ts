@@ -34,6 +34,10 @@ import { type RelevantMemory, renderMemoriesPrompt } from "../prompts/memories.t
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import {
+  readClaudeRequestSettings,
+  removeClaudeSessionTranscript,
+} from "../providers/claude-request-settings";
+import {
   authJsonToCredentialSelection,
   credentialsToAuthJson,
 } from "../providers/codex-oauth/auth-json.js";
@@ -3129,11 +3133,13 @@ async function saveProviderSessionId(
   if (model !== undefined && model !== "") body.model = model;
   if (harnessVariant !== undefined) body.harnessVariant = harnessVariant;
   if (harnessVariantMeta !== undefined) body.harnessVariantMeta = harnessVariantMeta;
-  await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
+  const response = await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
     method: "PUT",
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
   });
+  if (!response.ok) throw new Error(`Session update returned HTTP ${response.status}`);
 }
 
 async function findBridgeFailureArtifact(cwd: string): Promise<string | undefined> {
@@ -3185,11 +3191,13 @@ async function updateHarnessVariantMeta(
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
+  const response = await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
     method: "PUT",
     headers,
     body: JSON.stringify({ claudeSessionId, harnessVariantMeta: meta }),
+    signal: AbortSignal.timeout(5000),
   });
+  if (!response.ok) throw new Error(`Session update returned HTTP ${response.status}`);
 }
 
 /** Cache of tasks that already have VCS linked — prevents repeated gh pr list calls */
@@ -5070,6 +5078,7 @@ export async function spawnProviderProcess(
   let providerSessionId = session.sessionId;
   let pendingHarnessVariant: string | undefined;
   let pendingHarnessVariantMeta: Record<string, unknown> | undefined;
+  let sessionIdReport = Promise.resolve();
   let acpStatusReport: Promise<void> | undefined;
   let runningTaskForSessionInit: RunningTask | undefined;
   const activeToolSpans = new Map<
@@ -5182,18 +5191,22 @@ export async function spawnProviderProcess(
             }).catch((err) => console.warn(`[runner] Failed to report ACP options: ${err}`));
           }
           if (realTaskId) {
-            saveProviderSessionId(
-              opts.apiUrl,
-              opts.apiKey,
-              realTaskId,
-              event.sessionId,
-              event.provider,
-              event.providerMeta,
-              model,
-              event.harnessVariant,
-              event.harnessVariantMeta,
-              sessionEffort,
-            ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+            sessionIdReport = sessionIdReport
+              .then(() =>
+                saveProviderSessionId(
+                  opts.apiUrl,
+                  opts.apiKey,
+                  realTaskId,
+                  event.sessionId,
+                  event.provider,
+                  event.providerMeta,
+                  model,
+                  event.harnessVariant,
+                  event.harnessVariantMeta,
+                  sessionEffort,
+                ),
+              )
+              .catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
           } else {
             // Pool task: save provider session ID on active session so it can be
             // propagated to the real task when the agent claims one
@@ -5516,6 +5529,32 @@ export async function spawnProviderProcess(
         // Keep the agent-level ACP option snapshot ordered before the poll
         // loop can publish a post-task credential snapshot for a harness swap.
         await acpStatusReport;
+
+        if (adapter.name === "claude" && realTaskId && result.sessionId) {
+          const settings = await readClaudeRequestSettings(
+            result.sessionId,
+            config.env ?? process.env,
+          );
+          if (settings) {
+            await sessionIdReport;
+            pendingHarnessVariantMeta = { ...pendingHarnessVariantMeta, ...settings };
+            if (runningTaskForSessionInit)
+              runningTaskForSessionInit.harnessVariantMeta = pendingHarnessVariantMeta;
+            await updateHarnessVariantMeta(
+              opts.apiUrl,
+              opts.apiKey,
+              realTaskId,
+              result.sessionId,
+              pendingHarnessVariantMeta,
+            ).catch((err) =>
+              console.warn(`[runner] Failed to save Claude request settings: ${err}`),
+            );
+          }
+        }
+        // shortcut: a crashed runner leaves the transcript to Claude Code's own
+        // cleanupPeriodDays pruning; add a boot sweep if worker disks fill up.
+        if (adapter.name === "claude" && result.sessionId)
+          await removeClaudeSessionTranscript(result.sessionId, config.env ?? process.env);
 
         // Final log flush
         if (shouldStream && logBuffer.lines.length > 0) {
@@ -6124,6 +6163,7 @@ export async function checkCompletedProcesses(
                   taskId,
                   result.sessionId,
                   {
+                    ...harnessVariantMeta,
                     failureArtifact: bridgeDiagnostics.artifactPath,
                   },
                 ).catch((err) =>

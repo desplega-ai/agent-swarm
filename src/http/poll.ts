@@ -26,6 +26,7 @@ import {
   updateAgentStatusFromCapacity,
   upsertChannelActivityCursor,
 } from "../be/db";
+import { resolveGroupForAgent } from "../be/model-group-resolution";
 import { checkProfileForAgent } from "../be/model-profile-check";
 import {
   modelTierOverridesDiffer,
@@ -330,6 +331,7 @@ const commitCursorsRoute = route({
     },
     400: { description: "Invalid request" },
   },
+  rbac: { ungated: "lead worker commits its channel-activity cursors; no user flow calls it" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -669,13 +671,31 @@ export async function handlePoll(
               profileOk.set(memoKey, ok);
               return ok;
             };
+            // A model group task waits, the same way, for an agent with a member that
+            // passes; otherwise claim would hard-stop it with [model-group-unavailable].
+            const groupOk = new Map<string, boolean>();
+            const passesGroupCheck = async (
+              group: string,
+              vcsRepo: string | null | undefined,
+            ): Promise<boolean> => {
+              const memoKey = JSON.stringify([group, vcsRepo ?? null]);
+              const cached = groupOk.get(memoKey);
+              if (cached !== undefined) return cached;
+              const ok =
+                (await resolveGroupForAgent(group, myAgentId, { vcsRepo, includeRepoSecrets }))
+                  .kind !== "none";
+              groupOk.set(memoKey, ok);
+              return ok;
+            };
             // The filter runs inside the paginated scan, so incompatible rows never use up the limit.
             const unassignedIds = await getUnassignedTaskIdsForAgent(
               myAgentId,
               5,
               async (task) =>
                 (await poolTaskRunsOnHarness(task, harness)) &&
-                (!task.profile || (await passesProfileCheck(task.profile, task.vcsRepo))),
+                (task.profile
+                  ? await passesProfileCheck(task.profile, task.vcsRepo)
+                  : !task.modelGroup || (await passesGroupCheck(task.modelGroup, task.vcsRepo))),
             );
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.

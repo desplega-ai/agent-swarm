@@ -889,7 +889,7 @@ export async function cancelWorkflowRunStep(
 /**
  * Resume a workflow after a linked approval request is resolved.
  *
- * 1. Verify run and step are in "waiting" state
+ * 1. Verify run and step are in "waiting" state and the stored request is resolved
  * 2. Checkpoint step completion with approval response data
  * 3. Route to the appropriate port (approved/rejected/timeout)
  * 4. Continue the graph walk
@@ -916,10 +916,23 @@ async function resumeFromApprovalResolutionUnguarded(
   const workflow = await getRunWorkflow(run);
   if (!workflow) return;
 
-  if (event.status === "cancelled") {
+  // Route on the stored request bound to this step, as the recovery sweep does.
+  // The event payload is a notification, not the source of the answer.
+  const approval = await getApprovalRequestById(event.requestId);
+  if (!approval || approval.workflowRunId !== run.id || approval.workflowRunStepId !== step.id) {
+    return;
+  }
+  if (approval.status === "cancelled") {
     console.warn(
-      `[workflows] approval ${event.requestId} is cancelled; step ${event.workflowRunStepId} stays waiting for the run cancel path`,
+      `[workflows] approval ${approval.id} is cancelled; step ${step.id} stays waiting for the run cancel path`,
     );
+    return;
+  }
+  if (
+    approval.status !== "approved" &&
+    approval.status !== "rejected" &&
+    approval.status !== "timeout"
+  ) {
     return;
   }
 
@@ -934,7 +947,11 @@ async function resumeFromApprovalResolutionUnguarded(
     workflow.definition,
     step.nodeId,
     step.output,
-    { requestId: event.requestId, status: event.status, responses: event.responses },
+    {
+      requestId: approval.id,
+      status: approval.status,
+      responses: (approval.responses ?? null) as Record<string, unknown> | null,
+    },
   );
 
   // Use port-based routing to determine the correct successors.

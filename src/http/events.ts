@@ -49,6 +49,7 @@ const createEventRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const createEventsBatchRoute = route({
@@ -69,6 +70,7 @@ const createEventsBatchRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const getEventsRoute = route({

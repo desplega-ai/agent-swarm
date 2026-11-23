@@ -178,7 +178,7 @@ export function MentionMenu({
         align="start"
         sideOffset={4}
         hideWhenDetached
-        // Opened by typing: no open or close motion (apps/ui/CLAUDE.md, Motion).
+        // Opened by typing: no open or close motion (apps/ui/docs/motion.md).
         // Hidden, not unmounted, while nothing matches: the groups keep searching.
         className={hasRows ? "w-80 p-1 animate-none!" : "hidden"}
         onOpenAutoFocus={(event) => event.preventDefault()}

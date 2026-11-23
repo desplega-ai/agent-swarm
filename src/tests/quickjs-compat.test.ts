@@ -108,7 +108,10 @@ const bytes = new TextEncoder().encode(url.href);
 const id = setInterval(() => {}, 10);
 clearInterval(id);
 await fetch(url, { method: "POST", body: bytes });
-return structuredClone([new TextDecoder().decode(bytes), crypto.randomUUID(), crypto.getRandomValues(new Uint8Array(4))]);`);
+const res = await fetch(url);
+const body = new TextEncoder().encode(await res.text()).buffer;
+const parsed = await (await fetch(url))["json"]();
+return structuredClone([new TextDecoder().decode(bytes), body.byteLength, parsed, crypto.randomUUID(), crypto.getRandomValues(new Uint8Array(4))]);`);
     expect(checkQuickJSCompat(source)).toEqual({ compatible: true, findings: [] });
   });
 
@@ -199,15 +202,48 @@ export default async () => { const process = { env: {} }; return [decode({ from:
     );
   });
 
-  test("reports each rule and name once, with its first line", () => {
+  test("reports each rule and name once, with every line it recurs on", () => {
     const report = checkQuickJSCompat(wrap("Bun.sleep(1);\nBun.sleep(2);\nreturn process.pid;"));
     expect(report.findings).toEqual([
-      { rule: "bunGlobal", message: "Bun.* is not available under quickjs", line: 2 },
+      {
+        rule: "bunGlobal",
+        message: "Bun.* is not available under quickjs",
+        line: 2,
+        lines: [2, 3],
+      },
       { rule: "process", message: "process is not available under quickjs", line: 4 },
     ]);
     expect(quickJSCompatWarnings(report, "actions.sync")).toEqual([
-      "actions.sync: quickjs compat (bunGlobal, line 2): Bun.* is not available under quickjs",
+      "actions.sync: quickjs compat (bunGlobal, lines 2, 3): Bun.* is not available under quickjs",
       "actions.sync: quickjs compat (process, line 4): process is not available under quickjs",
+    ]);
+
+    // A zip reader: arrayBuffer() on a Response and later on a fetch result. Before,
+    // the second call site was dropped as a duplicate of the first.
+    const zip = wrap(`const stream = new Blob([args.data]).stream();
+const inflated = new Uint8Array(await new Response(stream).arrayBuffer());
+const res = await fetch(args.url);
+const buf = new Uint8Array(await res.arrayBuffer());
+const raw = await (await fetch(args.url))["blob"]();
+return [inflated, buf, raw];`);
+    expect(checkQuickJSCompat(zip).findings.filter((f) => f.rule === "responseBody")).toEqual([
+      {
+        rule: "responseBody",
+        message:
+          ".arrayBuffer() on a fetch Response is not available under quickjs (text() and json() are)",
+        line: 3,
+        lines: [3, 5],
+      },
+      {
+        rule: "responseBody",
+        message:
+          ".blob() on a fetch Response is not available under quickjs (text() and json() are)",
+        line: 6,
+      },
+    ]);
+    const many = wrap(Array.from({ length: 12 }, () => "Bun.sleep(1);").join("\n"));
+    expect(quickJSCompatWarnings(checkQuickJSCompat(many))).toEqual([
+      "quickjs compat (bunGlobal, lines 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, +2 more): Bun.* is not available under quickjs",
     ]);
   });
 });

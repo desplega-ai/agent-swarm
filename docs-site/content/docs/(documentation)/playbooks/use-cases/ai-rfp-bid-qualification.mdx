@@ -1,0 +1,117 @@
+---
+title: 'Preparing a bid or no-bid review for an incoming RFP with AI agents'
+description: "Agent Swarm can assemble a source-linked evidence packet for one incoming RFP, and a named commercial owner makes the bid or no-bid call."
+agent:
+  offer: false
+  when: "Someone wants commercial, operations and engineering to decide whether to pursue an incoming RFP before anyone writes a response"
+---
+
+Agent Swarm, configured for the job, can assemble a source-linked evidence packet for one incoming RFP, matching each requirement the buyer wrote to the record that answers it across the sales, operations and engineering systems the team already runs, and a named commercial owner takes that packet into the bid or no-bid decision while the operations and engineering owners confirm the capacity and feasibility it reports. The team hands over the gathering and the cross-referencing, not the judgement.
+
+The scope is one decision: whether to pursue one RFP, covering commercial fit, operational capacity and technical feasibility. It is not answering a customer security questionnaire, a different job documented in [the security questionnaire workflow](https://www.agent-swarm.dev/blog/omnia/ai-security-questionnaire-workflow). It is not a sales forecast, a pipeline data-quality review, or the partner launch decision that follows an established relationship.
+
+## When another tool fits better
+
+Two existing options handle part of this work well.
+
+**A dedicated proposal or RFP-management platform.** If the company answers many RFPs a year, keeps a content library, writes into templates and submits through buyer portals, a product built for that workflow fits better.
+
+**Human review alone.** If the company sees a handful of RFPs a year and one person holds the full context, that person reading the document is the cheaper control. A workflow in front of a decision one person reaches in an hour adds a queue.
+
+Agent Swarm fits a different shape: the evidence is scattered and several owners hold a piece of it. Bid criteria and prior pricing sit with sales, capacity with operations, certifications with engineering. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) compares those arrangements.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in RFP feature, not a native RFP connector and not a customer result. Source integrations and bid rules are custom configuration your team sets up and tests.
+
+<Mermaid title="Illustrative RFP bid or no-bid review, from criteria written by a commercial owner to a human decision at a gate." chart={`flowchart LR
+  A["Bid criteria written<br/>by commercial owner"] --> B["Configured collection<br/>(swarm-script to JSON)"]
+  B --> C["Agent writes<br/>requirement-to-evidence packet"]
+  C --> G{{"human-in-the-loop<br/>commercial owner,<br/>operations, engineering"}}
+  G -- "bid" --> R["Response work starts<br/>through the normal process"]
+  G -- "no-bid" --> S["Record the reason<br/>and close the review"]
+  G -- "clarify" --> T["Request clarification<br/>from the buyer"]
+`} />
+
+**1. The commercial owner writes the bid criteria.** Before anything is collected, that owner states which requirements make a bid viable, the certifications needed, the oldest evidence date that still counts, who confirms capacity, and the gaps that mean no bid. Those criteria live in the workflow's [governance](/docs/playbooks/use-cases/ai-operations-governance) entry before the first run.
+
+**2. The configured sources collect only approved records.** Capacity plans, delivery records, the certification register and prior agreements are read from the systems the team keeps them in, under the access the RFP terms allow. Scripts reach those systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret sits in source.
+
+**3. Collection runs as deterministic steps.** The configured `swarm-script` steps fetch the records available to them and emit JSON, so no model chooses which document to open or which figure to trust. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split.
+
+**4. An agent assembles the packet.** The agent reads the RFP against the bid criteria and writes one row per requirement: what the buyer asked for, the record that answers it, the date on that record, and the gap where nothing answers it. Every row links its record.
+
+**5. The packet is stored as a file and linked from the gate message.** It lives on [agent-fs](https://github.com/desplega-ai/agent-fs) beside the RFP document, and the gate message carries a short summary and the link, as the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends.
+
+**6. People respond at the gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) blocks the run and posts the ask to Slack, and it continues only when a person answers. Operations confirms the capacity the packet reports, engineering confirms feasibility, and the commercial owner decides. Give the gate a timeout and a fallback, so silence ends the run instead of advancing it. The capacity side has its own guide in [service capacity planning](/docs/playbooks/use-cases/ai-service-capacity-planning).
+
+## The illustrative RFP
+
+Everything in this section is illustrative. The buyer is fictional and every value is a placeholder.
+
+The buyer is a regional infrastructure operator with field sites across two provinces, issuing a five-year support contract and asking for a response within five weeks.
+
+In this example the owners are named by role: a regional sales director as the commercial owner who decides, a regional delivery manager who confirms capacity, and an engineering lead who confirms feasibility.
+
+| Requirement as written | What the RFP states | Where the evidence sits |
+| --- | --- | --- |
+| Submission deadline | Responses due 11 December, 17:00 local | The RFP cover page |
+| Go-live date | All sites live by 1 April | The regional delivery plan |
+| On-site support | Two engineers on site within four hours, weekdays 07:00 to 19:00 | The support rota |
+| Asset certification | Current certification, issued in the last three years | The certification register |
+| Data residency | Operational data held in the buyer's country | The architecture record |
+| Contract term | Five years, plus a two-year extension at the buyer's option | Prior comparable agreements |
+
+The approved capacity record shows six field engineers allocated to the region, four finishing a committed project in February, and two of those promised to another account from March. The approved capability evidence is the certification register, an architecture record naming the hosting region, two delivery plans and the support rota.
+
+| Requirement | Packet row | What the packet shows |
+| --- | --- | --- |
+| Data residency | Evidence found | The architecture record states the hosting region, dated 30 September, read 13 November, linked |
+| On-site support | Missing | No coverage record for 07:00 to 19:00 there; the rota starts at 08:00 and names no four-hour response |
+| Go-live date | Ambiguous | One section says all sites, another phase one; the site lists differ by eleven and no clarification is logged |
+| Asset certification | Conflicting | The register shows expiry 31 August; a capability summary dated 20 May states it current. Both are linked |
+| Submission deadline | Evidence found | The RFP cover page states responses due 11 December, 17:00 local, read 13 November, linked; a placeholder gate close date of 20 November leaves time for response work |
+| Contract term | Stale | Prior comparable agreements answer the term, but the closest is dated before the cutoff the commercial owner set, so the owner decides whether it still counts; linked |
+
+## What the packet flags
+
+Five conditions belong in the criteria, because each changes the decision.
+
+- **A requirement with no evidence.** The row names the record the owner expected and who could confirm it exists.
+- **An ambiguous requirement.** Two readings of one sentence, quoted from both places. The packet never picks the one that suits the bid.
+- **Conflicting records.** Two internal records disagree about one fact, both linked, plus the owner who can settle which is current.
+- **Stale evidence.** A record older than the commercial owner's cutoff, with its date, so the owner can decide whether it is still current for this buyer.
+- **A requirement with no owner.** Nobody has confirmed the row.
+
+## Privacy, access and stale evidence
+
+**Decide who may read the RFP before it is collected.** The governance record states who may read the RFP and the internal capacity data, written before the first run. The [governance guide](/docs/playbooks/use-cases/ai-operations-governance) covers roles and one named owner per workflow, plus its limits: RBAC gates user-token requests, not operator-key or agent calls.
+
+**Collect only what the RFP terms allow.** Where the buyer's terms restrict sharing, the packet names the restriction rather than working around it, and the owner decides whether the review can proceed on what remains.
+
+**Every row carries a read date.** Capacity and certification records move before the decision, so the three owners re-check each row against its linked source. Evidence found is evidence found on the day it was read.
+
+## What stays human-owned
+
+People keep six decisions here, whatever the setup looks like.
+
+- **The bid or no-bid decision.** The packet informs it and does not recommend it. Weighing a certification gap against a strategic account is a commercial judgement with a name attached.
+- **Eligibility.** Whether the company qualifies to bid is a person's reading of the buyer's rules. The packet never asserts eligibility or contract compliance.
+- **Pricing and commitments.** The agent never prices, discounts or accepts a term.
+- **Legal and contract interpretation.** Clauses, liability and service levels sit with the people who own the contract.
+- **The submission.** The agent has no path to a buyer portal; the response goes out through the team's normal process.
+- **The clarification request.** Asking the buyer a question carries a relationship, so the owner decides how to ask.
+
+As the HITL guide puts it, gate what cannot be undone and let the rest run. Collecting records and writing the packet can be undone. A submitted bid and a contractual commitment cannot.
+
+## Building blocks
+
+These pieces exist in agent-swarm today, each documented. Pointing them at an RFP review is the illustrative part.
+
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node, approve and reject branches, the timeout and fallback.
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then an agent that synthesizes it.
+- [Script connections](/docs/guides/script-connections): register an OpenAPI, GraphQL or MCP API once and call it from a script with a typed client.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): how scripts authenticate outbound calls without the raw secret in source.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, RBAC roles, approval thresholds and source-of-truth rules.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): how to choose between a proposal platform, human review and a shared agent platform.
+- [Lead prospecting](/docs/playbooks/lead-prospecting): the documented example of agent collection and drafting, then a human gate before anything irreversible.

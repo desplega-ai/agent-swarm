@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getDbClient, upsertPromptTemplate } from "@/be/db";
+import { getAgentById, getDbClient, upsertPromptTemplate } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { PromptTemplateScopeSchema, PromptTemplateStateSchema } from "@/types";
 
@@ -65,6 +66,19 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
       if (scope !== "global" && !scopeId) {
         return toolErr(`scopeId is required for scope '${scope}'.`, {
           details: `scopeId is required for scope '${scope}'. Provide an agent ID or repo ID.`,
+          data: { yourAgentId: requestInfo.agentId },
+        });
+      }
+
+      const agent = await getAgentById(requestInfo.agentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
+        verb: "prompt-template.write",
+        resource: { kind: "owned", ownerAgentId: scope === "agent" ? scopeId : null },
+        source: "mcp",
+      });
+      if (!decision.allow) {
+        return toolErr("Only a lead can set global or repo templates, or another agent's.", {
           data: { yourAgentId: requestInfo.agentId },
         });
       }

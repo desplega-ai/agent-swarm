@@ -1,0 +1,98 @@
+---
+title: 'Preparing a workplace near-miss evidence packet for a human investigator with AI agents'
+description: "Agent Swarm can be configured to assemble a source-linked evidence packet for a workplace near miss: a dated timeline, the gaps and the conflicts, for the qualified person who investigates."
+agent:
+  offer: false
+  when: "Someone wants agents to gather and check the evidence for a workplace near miss that a qualified person will investigate"
+---
+
+Agent Swarm can be configured to help assemble a source-linked near-miss evidence packet for a qualified human investigator. Configured scripts read the approved near-miss report and the equipment record for what was involved. A second step reads the procedure that was in force and the witness notes already on file. Deterministic checks flag what is missing and what conflicts. An agent then writes one dated timeline with a gap list, where every line names the source it came from and when it was read. The investigator reads the packet, gathers what a document cannot hold, and decides what happened.
+
+What the workflow removes is the assembly. The report sits in one system and the maintenance record in another. The procedure lives in a document store, and the witness notes in a shared drive or an email thread. Someone collects all of it by hand in the days after an event, often the same person who then has to run the investigation.
+
+The scope is one physical workplace near miss, after the site's immediate safety procedures have been followed: the area made safe, anyone hurt treated, the report filed and approved as the procedure requires. It is not the [business continuity tabletop exercise](/docs/playbooks/use-cases/business-continuity-tabletop-preparation), which rehearses a future disruption in a room. It is not a technology incident review, where the evidence is logs and deploy history. And it is not a root-cause analysis. It puts the evidence in one place for the person qualified to investigate, and stops there.
+
+## When an incident-management system or a checklist fits better
+
+**An EHS or incident-management system, when it is already the record of incidents.** Where the site runs one, that system holds the report and the assigned investigator, and it tracks each action to closure. A packet assembled outside it is a copy of that record. Agent Swarm ships no safety product: no incident register, no root-cause analysis, no regulatory forms, no compliance certification and no integration with any named EHS tool.
+
+**A regulated process, when a regulator or an insurer expects its own form and a named person.** The requirement there is a named format signed by a competent person, and the process meets it. An agent that assembles documents does not.
+
+**A simple checklist, when the site is small and the sources are few.** One site with one equipment log and two supervisors needs a named list of records to attach, not a workflow. A paper or digital checklist is faster to run.
+
+Agent Swarm fits a different shape. The sources are spread across four systems, and the investigator is rarely the person who filed the report. The packet has to show later what was read and when. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is a fictional, custom design your team builds and configures: a hypothetical adaptation of documented mechanics, not a documented deployment, a built-in feature, a customer result or a safety product. Source access and the checks are yours to write and test. So is the packet template.
+
+<Mermaid title="Illustrative near-miss packet preparation, from a report a person approves to an investigation people run." chart={`flowchart LR
+  A["Near-miss report<br/>filed and approved<br/>by a person"] --> B["Configured source scripts<br/>collect equipment record,<br/>dated procedure,<br/>witness notes"]
+  B --> C["Deterministic checks<br/>missing, conflicting,<br/>out of date<br/>(swarm-script to JSON)"]
+  C --> D["Agent assembles<br/>source-linked timeline<br/>and gap list"]
+  D --> G{{"human-in-the-loop<br/>named investigator"}}
+  G --> R["People investigate"]
+`} />
+
+**1. A person files and approves the report.** The shift supervisor, or whoever the site's procedure names, files the near-miss report after the immediate safety steps and approves it as the record to work from. Nothing starts from an inference an agent made about an event.
+
+**2. Configured source scripts read only the authorized sources.** Custom connections your team builds pull the approved report and the equipment record. A second connection reads the dated procedure and the witness notes. Scripts reach each system through [script connections](/docs/guides/script-connections), with credentials from the [credential broker](/docs/guides/scripts-credential-broker), so no raw secret sits in script source.
+
+**3. Deterministic checks compare the records in code.** A `swarm-script` step compares timestamps, equipment identifiers, procedure versions and the account each witness gives, then emits JSON. The same inputs produce the same flags on every run, and no model decides what counts as a conflict. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split between deterministic collection and agent synthesis.
+
+**4. The agent writes the packet.** The JSON and the collected records become one document with a source and a read time on every line. Where two sources disagree, both appear and the disagreement is named. The agent resolves nothing.
+
+**5. The workflow pauses for the named investigator.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) blocks the run and resumes only when the investigator responds. They read the packet, decide which gaps to close and what to ask whom, and the investigation is theirs from that point.
+
+## What the packet contains
+
+- **A dated timeline.** Each entry carries the time recorded in its source, the source itself and when it was read.
+- **A list of missing evidence.** A record the workflow expected and could not find is named, with the source that should hold it.
+- **A list of conflicting evidence.** Witness times that disagree, an equipment identifier that differs between the report and the maintenance record, a procedure version in force that is not the version on file: each one appears with both sources and both read times.
+- **The named investigator**, the person the gate is waiting for.
+- **Questions the evidence raises**, one per gap, addressed to the person or team who can answer.
+
+It contains no root cause and no corrective action. Those are the investigator's output, not the packet's input.
+
+## Example: a fictional warehouse
+
+The site below is invented, it is not a customer, and nothing here is a measured outcome.
+
+At a distribution centre, a forklift reversing at a loading bay came within about a metre of a marked pedestrian walkway. The driver stopped and the area was made safe; nobody was hurt. The shift supervisor filed the near-miss report the same afternoon.
+
+The packet the investigator opens holds four things. The approved report, with the time it was filed and who approved it. The forklift's maintenance record, with its last inspection date and the identifier the fleet system carries, which differs in one character from the identifier on the report. The traffic-management procedure, with the version in force on the day and the version now on file, which are not the same. And two witness notes, one from the driver and one from a picker on the walkway, whose times for the near miss differ by four minutes. The bay camera is listed as missing evidence, because the recorder's log was unreachable from the workflow.
+
+The packet orders those items against one timeline and names the question each one raises. It does not say whether the walkway marking was adequate or whether the driver was rushing. Those answers belong to the investigator.
+
+## Limits
+
+**The packet reflects only the sources the workflow can read.** A system nobody connected is absent rather than reported as a gap, unless a check knows to look for it. A complete-looking packet that is missing a source is worse than a named gap.
+
+**An AI-generated packet may omit or misstate evidence.** An agent writing prose over records can compress a timestamp, drop a caveat or read one note against another. Anyone acting on the packet has to check it against the sources it cites, which is why every line carries one.
+
+**Stale or wrong source data passes through unless a check catches it.** A maintenance record entered late reads as current. The checks find missing entries and disagreeing dates. A version that cannot be reconciled is flagged as well. They cannot tell whether the procedure is good or the equipment safe.
+
+**Agents do not respond to emergencies.** They are not paged and they have no part in making an area safe; that stays with the site's existing procedure and the people trained for it.
+
+**Agents do not interview anyone, decide a root cause, make a safety decision, certify compliance, file a regulatory report, choose a corrective action or communicate externally.** Each of those stays with people: the investigator, the safety owner, counsel where the question is legal, and whoever the site's procedure names for a regulator or an insurer.
+
+**The evidence is sensitive personal data.** Witness names and statements, with any injury or health detail, carry a lawful basis, a retention window and a set of people allowed to see them. [RBAC](/docs/playbooks/use-cases/ai-operations-governance) gates requests made with a user token; operator-key and agent calls are not affected. Swarm-scoped [memory](/docs/architecture/memory) is searchable by every agent in the swarm, so keep witness data in the system that owns it.
+
+**Retention is the team's decision, made before the first run.** How long a packet and its run logs are kept is a policy question. On a new install the server stores default retention windows and permanently deletes rows past them; an existing install keeps its own settings until someone sets them. Agree the window for a packet that describes a personal event before the first run, then set it: see [database retention](/docs/guides/deployment#database-retention) and [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance).
+
+## Operator checklist before the first packet
+
+- **Source permissions.** Grant the least, read-only access that answers the question, and no write access to the incident record or the equipment system.
+- **A named investigator and a backup.** One person the gate waits for, and one who takes over when they are unavailable, both recorded in the workflow.
+- **An escalation path for an unresolved hazard.** If the packet surfaces something still dangerous, it goes to the safety owner immediately under the existing procedure, not to the agent and not into a queue.
+- **A procedure version check.** Confirm the packet compared the version in force on the day, not only the version on file today.
+- **Personal data scope and redaction.** Decide what the packet may quote from witness notes, who may see it, and what is summarised instead of quoted.
+- **Retention agreed.** Record the window for packets and run logs before the first run, not after the first request to delete one.
+- **Investigator sign-off through the gate.** The approval is the gate response, not a message in a thread.
+
+## Building blocks
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then an agent that writes from it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking node, both branches, the timeout and the fallback.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): when an incident-management system, a checklist or a shared agent platform fits.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, access scopes and approval thresholds.

@@ -4002,6 +4002,9 @@
     },
     "sourceStepId": {
       "exempt": "identifier"
+    },
+    "principal": {
+      "exempt": "server-built WorkflowRunPrincipal JSON: agent ids plus the workflow name, which workflows.name already exempts"
     }
   },
   "workflow_versions": {

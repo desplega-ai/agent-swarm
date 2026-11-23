@@ -866,6 +866,7 @@ const postTestConnection = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "reads worker-reported credential status over POST; writes nothing" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

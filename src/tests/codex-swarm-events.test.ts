@@ -1,9 +1,15 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as toolLoop from "../hooks/tool-loop-detection";
+import { CodexAdapter } from "../providers/codex-adapter";
 import {
   type CodexSwarmEventHandlerOpts,
   createCodexSwarmEventHandler,
 } from "../providers/codex-swarm-events";
 import type { ProviderEvent } from "../providers/types";
+import { makeFakeAppServer } from "./fixtures/codex-app-server-client";
 
 /**
  * Captured fetch invocation, recorded by the stub installed for each test.
@@ -288,5 +294,70 @@ describe("createCodexSwarmEventHandler", () => {
       const malformed = { type: "tool_start", toolCallId: "x", toolName: "bash", args: null };
       expect(() => handler(malformed as unknown as ProviderEvent)).not.toThrow();
     });
+  });
+});
+
+describe("Codex web search loop detection", () => {
+  test.each([
+    { scenario: "distinct queries", count: 20, blocked: false },
+    { scenario: "identical queries", count: 15, blocked: true },
+    { scenario: "distinct batches sharing the first query", count: 20, blocked: false },
+    { scenario: "distinct queries alternating with bash", count: 8, blocked: false },
+  ])("checks completed web searches for loops: $scenario", async ({ scenario, count, blocked }) => {
+    const taskId = crypto.randomUUID();
+    const dir = mkdtempSync(join(tmpdir(), "codex-web-search-"));
+    installFetchStub(() => Response.json({}));
+    const check = spyOn(toolLoop, "checkToolLoop");
+    const withBash = scenario === "distinct queries alternating with bash";
+    try {
+      const fake = makeFakeAppServer((method, _params, emit) => {
+        if (method === "thread/start") return { thread: { id: "thread-search" } };
+        if (method !== "turn/start") return {};
+        for (let i = 0; i < count; i++) {
+          const search = { type: "webSearch", id: `search-${i}` };
+          const query = `query ${i}`;
+          emit("item/started", { item: { ...search, query: "" } });
+          const args =
+            scenario === "distinct batches sharing the first query"
+              ? { query: "shared", action: { type: "search", queries: ["shared", query] } }
+              : { query: blocked ? "same query" : query };
+          emit("item/completed", { item: { ...search, ...args } });
+          if (withBash) {
+            const item = { type: "commandExecution", id: `cmd-${i}`, command: "pwd", exitCode: 0 };
+            emit("item/started", { item });
+            emit("item/completed", { item });
+          }
+        }
+        emit("turn/completed", { turn: { id: "turn-search", status: "completed" } });
+        return { turn: { id: "turn-search" } };
+      });
+      const session = await new CodexAdapter({
+        bypassSubprocess: true,
+        appServerFactory: () => fake.client,
+      }).createSession({
+        prompt: "search",
+        systemPrompt: "",
+        model: "gpt-5.4",
+        role: "worker",
+        agentId: "agent-1",
+        taskId,
+        apiUrl: "http://test-api",
+        apiKey: "test",
+        cwd: dir,
+        logFile: join(dir, "session.log"),
+        env: { CODEX_HOME: dir },
+      });
+      await session.waitForCompletion();
+
+      // The guard serializes its file writes and the adapter fires it asynchronously.
+      const checks = await Promise.all(check.mock.results.map((call) => call.value));
+      expect(checks).toHaveLength(count * (withBash ? 2 : 1));
+      expect(checks.slice(0, -1).every((result) => !result.blocked)).toBe(true);
+      expect(checks.at(-1)?.blocked).toBe(blocked);
+    } finally {
+      check.mockRestore();
+      await toolLoop.clearToolHistory(taskId);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

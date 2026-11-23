@@ -30,8 +30,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_BIND_ADDRESS:-127.0.0.1}:9000:9000"
+      - "${MINIO_BIND_ADDRESS:-127.0.0.1}:9001:9001"
     volumes:
       - local_agent_fs_minio:/data
     healthcheck:
@@ -59,7 +59,7 @@ services:
 
   agent-fs:
     container_name: swarm-agent-fs
-    image: ghcr.io/desplega-ai/agent-fs:0.18.34
+    image: ghcr.io/desplega-ai/agent-fs:0.18.37
     platform: linux/amd64
     depends_on:
       minio-init:

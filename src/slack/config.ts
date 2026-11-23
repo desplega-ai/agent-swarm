@@ -29,3 +29,7 @@ export function isSlackConfigured(env: NodeJS.ProcessEnv = process.env): boolean
   const config = getSlackConfiguration(env);
   return !config.disabled && config.mode !== null && config.missingCredentials.length === 0;
 }
+
+export function isSlackReplyFooterEnabled(): boolean {
+  return isEnvFlagEnabled("SLACK_REPLY_FOOTER_ENABLED", true);
+}

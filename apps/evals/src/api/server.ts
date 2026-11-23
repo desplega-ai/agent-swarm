@@ -506,6 +506,24 @@ function unauthorized(): Response {
   return json({ error: "missing or invalid EVALS_API_KEY bearer token" }, 401);
 }
 
+/**
+ * Without EVALS_API_KEY nothing ties a write to this server's own UI, so refuse a browser
+ * request from another origin, and a JSON route body sent as anything but application/json
+ * (a plain form or text body skips the CORS preflight). CLI and server callers send no Origin.
+ */
+function openModeWriteRefusal(req: Request, jsonBody: boolean): Response | null {
+  if (process.env.EVALS_API_KEY) return null;
+  const origin = req.headers.get("origin");
+  if (origin !== null && URL.parse(origin)?.host !== req.headers.get("host")) {
+    return json({ error: "writes from another origin need EVALS_API_KEY" }, 403);
+  }
+  const type = req.headers.get("content-type")?.toLowerCase() ?? "";
+  if (jsonBody && !type.startsWith("application/json")) {
+    return json({ error: "content-type must be application/json" }, 415);
+  }
+  return null;
+}
+
 function warnIfApiOpen(): void {
   if (process.env.EVALS_API_KEY || warnedOpenApi) return;
   warnedOpenApi = true;
@@ -618,6 +636,8 @@ export async function startServer(
         },
         POST: async (req) => {
           if (!(await isAuthorized(req))) return unauthorized();
+          const refused = openModeWriteRefusal(req, true);
+          if (refused) return refused;
           const capped = concurrentRunsResponse();
           if (capped) return capped;
           const body = (await req.json().catch(() => null)) as {
@@ -719,6 +739,8 @@ export async function startServer(
       "/api/runs/:id/resume": {
         POST: async (req) => {
           if (!(await isAuthorized(req))) return unauthorized();
+          const refused = openModeWriteRefusal(req, false);
+          if (refused) return refused;
           const run = await getRun(db, req.params.id);
           if (!run) return json({ error: "run not found" }, 404);
           if (activeRuns.has(run.id)) return json({ error: "run is already executing" }, 409);
@@ -793,6 +815,8 @@ export async function startServer(
       "/api/runs/:id/cancel": {
         POST: async (req) => {
           if (!(await isAuthorized(req))) return unauthorized();
+          const refused = openModeWriteRefusal(req, false);
+          if (refused) return refused;
           const run = await getRun(db, req.params.id);
           if (!run) return json({ error: "run not found" }, 404);
           const controller = activeRuns.get(run.id);
@@ -987,6 +1011,8 @@ export async function startServer(
         },
         POST: async (req) => {
           if (!(await isAuthorized(req))) return unauthorized();
+          const refused = openModeWriteRefusal(req, true);
+          if (refused) return refused;
           const result = await createConfig(db, await req.json().catch(() => null));
           if (!result.ok) return json({ error: result.error }, result.status);
           return json(
@@ -998,6 +1024,8 @@ export async function startServer(
       "/api/configs/:id": {
         PATCH: async (req) => {
           if (!(await isAuthorized(req))) return unauthorized();
+          const refused = openModeWriteRefusal(req, true);
+          if (refused) return refused;
           const result = await patchConfig(db, req.params.id, await req.json().catch(() => null));
           if (!result.ok) return json({ error: result.error }, result.status);
           return json(
@@ -1040,6 +1068,8 @@ export async function startServer(
       "/api/models/refresh": {
         POST: async (req) => {
           if (!(await isAuthorized(req))) return unauthorized();
+          const refused = openModeWriteRefusal(req, false);
+          if (refused) return refused;
           const result = await refreshCatalog({ db });
           const { source, fetchedAt } = await getCatalog();
           return json(

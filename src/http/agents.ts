@@ -200,6 +200,7 @@ const registerAgent = route({
       description: "An operator deleted this agent id (`agent_deleted`); the worker must stop",
     },
   },
+  rbac: { ungated: "worker self-registration at boot; no user flow calls it" },
 });
 
 const setAgentHarnessProviderRoute = route({
@@ -219,6 +220,7 @@ const setAgentHarnessProviderRoute = route({
     400: { description: "Validation error (unknown provider)" },
     404: { description: "Agent not found" },
   },
+  rbac: { permission: "config.write.any" },
 });
 
 const LocalHarnessProviderSchema = z.enum([
@@ -316,6 +318,7 @@ const updateAgentRuntimeRoute = route({
     400: { description: "Validation error, or `{ error, check }` when the profile check fails" },
     404: { description: "Agent not found" },
   },
+  rbac: { permission: "config.write.any" },
 });
 
 class ClaudeTransportConflictError extends Error {}
@@ -460,6 +463,7 @@ const updateAgentNameRoute = route({
     404: { description: "Agent not found" },
     409: { description: "Name conflict" },
   },
+  rbac: { permission: "agent.profile.update.any" },
 });
 
 const getAgentSetupScript = route({
@@ -584,6 +588,7 @@ const updateAgentProfileRoute = route({
     },
     404: { description: "Agent not found, or changedByAgentId names no agent" },
   },
+  rbac: { permission: "agent.profile.update.any" },
 });
 
 const updateAgentActivityRoute = route({
@@ -596,6 +601,7 @@ const updateAgentActivityRoute = route({
   responses: {
     204: { description: "Activity updated" },
   },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const getAgent = route({
@@ -653,6 +659,7 @@ const updateAgentCredentialStatusRoute = route({
     400: { description: "Missing X-Runtime-Instance-ID in multi-runtime mode" },
     404: { description: "Agent not found" },
   },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const getAgentCredentialStatusRoute = route({

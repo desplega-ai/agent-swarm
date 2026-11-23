@@ -13,13 +13,15 @@ name: Slack Visuals
 
 on:
   pull_request:
-    # The frames come from the Slack renderer, the prompts, the runner, and the scenarios in
-    # the visuals-legacy and visuals-v2 groups. loadScenarios() (scripts/e2e/scenarios/
+    # The frames come from the Slack renderer, the Chat SDK adapter (Slack frames from an
+    # HTTP-mode mock), the prompts, the runner, and the scenarios in the visuals-legacy and
+    # visuals-v2 groups. loadScenarios() (scripts/e2e/scenarios/
     # registry.ts) keeps those scenarios in slack-*.ts files, which import only *-helpers.ts
     # files. Another scenario file, a runner doc or the coverage manifest cannot change a
     # frame, so they do not start this workflow. A later pattern overrides an earlier one.
     paths:
       - "src/slack/**"
+      - "src/integrations/chat-sdk/**"
       - "src/prompts/**"
       - "scripts/e2e/**"
       - "!scripts/e2e/scenarios/**"

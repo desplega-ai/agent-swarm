@@ -71,6 +71,10 @@ route({
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "the page-session cookie is the credential; the handler allowlists the target and re-issues it to /api/*",
+  },
 });
 route({
   method: "put",
@@ -88,6 +92,10 @@ route({
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "the page-session cookie is the credential; the handler allowlists the target and re-issues it to /api/*",
+  },
 });
 route({
   method: "delete",
@@ -105,6 +113,10 @@ route({
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "the page-session cookie is the credential; the handler allowlists the target and re-issues it to /api/*",
+  },
 });
 route({
   method: "patch",
@@ -122,6 +134,10 @@ route({
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "the page-session cookie is the credential; the handler allowlists the target and re-issues it to /api/*",
+  },
 });
 
 const PROXY_PREFIX = "/@swarm/api/";

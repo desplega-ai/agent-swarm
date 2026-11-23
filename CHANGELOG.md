@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.3] - 2026-11-22
+
+### Added
+- SDK: `@desplega.ai/agent-swarm-sdk`, a typed TypeScript client for the swarm API that sends a task and waits for its result (#3482).
+- Integrations: `GITLAB_ALLOWED_SENDERS` and `BITBUCKET_ALLOWED_SENDERS`; GitLab, Bitbucket and Azure DevOps mentions now need a linked swarm user or an allowlisted sender (#3541).
+- Examples: a review loop skill for the agent that edits a video (#3544) and a top bar with links and a theme button on the video review page (#3547).
+
+### Changed
+- Dependencies: claude-code, anthropic sdk, amp, grok, qwen (#3537) and amp, acp sdk (#3551) worker harness bumps.
+- Performance: scripts keep three warm spares per native executor spec (#3548).
+- CI: the timings-snapshot artifact hand-off retries once (#3534).
+- Docs: Hive Slack themes in the README (#3543), win-loss and onboarding playbook clarifications (#3545, #3546), swarm-scripts skill seed patches (#3535); `.env.example` lists the GitLab variables.
+
+### Fixed
+- Azure DevOps: allowlisted actors with no linked user can create tasks (#3556).
+- Slack: one live card per ask with honest PR links (#3550); `/agent-swarm-status` applies the sender allowlist (#3536).
+- Codex: web search loop checks count completed queries (#3539); reasoning effort is preserved for live catalog models (#3540).
+- HTTP: public webhook receivers limit raw-body size (#3538).
+- UI: `apps/ui/node_modules` is pruned before the Vercel install (#3542).
+
+## [2.14.2] - 2026-11-21
+
+### Added
+- PR bodies: a readable template with before/after evidence on every PR (#3468), template-declared evidence paths and Slack mock frames (#3465).
+- Examples: a video review page, swarm bundle and docs guide (#3517), with a share card, logo and visit counts (#3526) and a light theme plus a first-deploy fix (#3527).
+- Linear: `LINEAR_URL` and `LINEAR_API_URL` override the web and API bases (defaults unchanged, deployment env only); E2E scenarios cover GitHub and Linear provider flows with emulators (#3519).
+
+### Changed
+- agent-fs pins bumped 0.18.35 -> 0.18.36 (#3503) and 0.18.36 -> 0.18.37.
+- Dependencies: the minor-and-patch npm group (#3501); pi, amp, goose (#3516) and claude-code, codex, amp, gemini, anthropic sdk (#3493) worker harness bumps; Dependabot ignores majors and groups each ecosystem into one weekly PR (#3483).
+- Compose: the MinIO login is read from `.env` and dev MinIO ports bind to loopback (#3504, #3505).
+- Performance: app sync pull records are scrubbed with the sweep scrubber (#3506).
+- Docs: CLAUDE.md slimmed under the Codex size cap with a size check (#3466); Omnia use-case guides moved under Playbooks > Use cases (#3512); new guides for first-day onboarding readiness (#3508), meeting decision follow-up (#3507), near-miss investigation evidence packets (#3492) and campaign launch review (#3491); win-loss and training evidence review updates (#3490, #3489); TLA+ specs synced (#3495); skill updates (#3488, #3531).
+
+### Fixed
+- Security: shared prompt template writes require a lead, operator or user (#3518); RBAC posture declared on every backlogged route (#3515), `POST /api/tasks/{id}/progress` (#3514) and `POST /api/memory/re-embed` (#3502); workflow signal routes refuse extension-bridged event names (#3486); edited script nodes run as the creator only after the creator or a lead saves (#3494).
+- API: self-calls from the API (Codex keep-warm, task auto-title, `memory_rate`) use loopback instead of a stored `MCP_BASE_URL` (#3497).
+- x402: the signed amount field is selected by protocol version (#3523) and v1 `maxAmountRequired` is read before spending-limit checks (#3521).
+- Workflows: a resumed approval step routes on its stored request (#3485).
+- Slack: Lead review cards list the reviewed worker's deliverables (#3511); Slack mock frames render emoji inside the worker image (#3524).
+- UI: a top-level link asks before switching the dashboard connection (#3529); the connector code goes only to the exact connect page (#3525); fenced code gets the message column width (#3522).
+- Scripts: quickjs compat findings report every line they recur on (#3498).
+- Tests: UI E2E timing and search fixes (#3500, #3499, #3487); the db-query payload-cap test seeds in one statement (#3496); one E2E scenario trials `@emulators/ai` as the LLM backend (#3513).
+
+## [2.14.1] - 2026-11-20
+
+### Added
+- Models: model groups resolve at `send-task`, schedules, workflows and claim, and provider-error fallbacks hop through the group order (#3396).
+- Follow-ups: `FOLLOW_UP_GATE_MODE=enforce` lets schedules listed in `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS` skip a follow-up the verifier marks `would_skip`; every other outcome keeps the follow-up (#3479).
+- Workflows: code-match nodes and string wait filters run in QuickJS (#3463), limited to config interpolation sources (#3476).
+- Slack: `SLACK_REPLY_FOOTER_ENABLED=false` hides the task details footer on replies (#3448).
+
+### Changed
+- agent-fs pins bumped 0.18.34 -> 0.18.35.
+- Dependencies: non-harness npm deps bumped to versions at least 7 days old (#3475); claude-code, cursor, amp, gemini and kiro worker harness bumps (#3444, #3461); vulnerable docs-site dependencies bumped (#3446); Dependabot runs weekly bun and docs-site npm updates with a 7-day cooldown (#3467).
+- Performance: `db-query` skips scrub rules a clean row cannot trigger (#3450).
+- Prompts: the merge policy lines separate agent hand-merge from swarm auto-merge (#3435).
+- Docs: a user MCP guide for ChatGPT, Claude, Codex, Cursor and Grok (#3449); TLA+ specs synced (#3447); skill seed patches (#3443); playbook link order fix (#3452).
+
+### Fixed
+- Security: identity routes without a swarm key require a user or operator principal (#3445); a stored `CLAUDE_BINARY` stays out of the API process env (#3451); `PUT /api/repos/{id}` declares `repo.exec-config.write` (#3477); Docker auto-clone skips paths that start with a dash (#3439).
+- Workflows: script nodes are refused when `SCRIPT_EXECUTOR` is quickjs (#3480); system-one-extraction accepts null spans (#3442, #3474).
+- Scripts: native args schema extraction is skipped on quickjs deployments (#3436); schedule script arguments must be JSON objects (#3459).
+- UI: Sessions show work in time order with Lead follow-up answers (#3434); keyboard access for the phone session tree (#3460) and Kanban card actions (#3407); the selected schedule execution type is shown (#3458).
+- Providers: amp names a model on the plugin agent mode instead of `extends` (#3462).
+- Worker: Husky install uses the version-appropriate command (#3454).
+- Tests: retention-defaults boot retries on a taken port (#3464); Linear outbound tests wait for handlers (#3440); UI e2e waits for the composer and retries `route.fetch` on socket resets (#3437, #3478); the worktree reaper git fixture is scoped (#3453).
+
 ## [2.14.0] - 2026-11-19
 
 ### Added

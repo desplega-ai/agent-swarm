@@ -7,7 +7,15 @@
  */
 
 import { ChevronDown, Lock } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { sessionErrorStatus, useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
@@ -60,8 +68,12 @@ export interface SessionConversationProps {
   steerSource?: TaskComposerProps["steerSource"];
   /** Hands follow-ups to the caller; see `TaskComposerProps.onFollowUp`. */
   onFollowUp?: TaskComposerProps["onFollowUp"];
+  /** Files the caller's follow-up takes; see `TaskComposerProps.followUpAttachments`. */
+  followUpAttachments?: TaskComposerProps["followUpAttachments"];
   /** The person's words in a wrapped task prompt; see `TurnTimeline`. Turns timeline only. */
   requestText?: (task: AgentTask) => string | null;
+  /** The files sent with a wrapped task prompt; see `TurnTimeline`. Turns timeline only. */
+  requestFiles?: (task: AgentTask) => ReactNode;
   /** Controlled composer draft. Omit both to keep the draft in the composer. */
   value?: string;
   onValueChange?: (next: string) => void;
@@ -85,7 +97,9 @@ export function SessionConversation({
   steerTarget = "lead",
   steerSource,
   onFollowUp,
+  followUpAttachments,
   requestText,
+  requestFiles,
   value,
   onValueChange,
   placeholder,
@@ -236,6 +250,7 @@ export function SessionConversation({
                 typing={typingViewers}
                 onLayoutChange={recheck}
                 requestText={requestText}
+                requestFiles={requestFiles}
               />
             ) : (
               <SessionTimeline
@@ -334,6 +349,7 @@ export function SessionConversation({
             className={composerLayout?.className}
             steerSource={steerSource}
             onFollowUp={onFollowUp}
+            followUpAttachments={followUpAttachments}
             placeholder={placeholder}
             routeLabel={routeLabel}
             value={value}

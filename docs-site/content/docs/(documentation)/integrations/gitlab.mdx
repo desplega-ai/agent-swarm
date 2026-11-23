@@ -34,6 +34,9 @@ GITLAB_URL=https://gitlab.com
 # Optional: Bot name for @mentions (default: agent-swarm-bot)
 GITLAB_BOT_NAME=your-bot-name
 
+# Optional: usernames allowed to trigger mention tasks without a linked swarm user
+GITLAB_ALLOWED_SENDERS=alex,external-reviewer
+
 # Optional: Disable GitLab integration
 GITLAB_DISABLE=true
 ```
@@ -45,6 +48,8 @@ GITLAB_DISABLE=true
 | Bot assigned to MR/issue | Creates a task for the lead agent |
 | `@bot-name` in comment/issue/MR | Creates a task with the mention context |
 | Pipeline failure (on MRs with existing tasks) | Creates a CI notification task |
+
+A mention creates a task only when the sender is a linked swarm user or a username listed in `GITLAB_ALLOWED_SENDERS` (comma-separated, case-insensitive). A sender whose public email belongs to an existing swarm user is linked to that user on first contact; other senders are dropped, logged, and listed as unmapped identities on the People page. Assigning the bot to an issue needs Reporter access on GitLab, so it is not gated.
 
 ## Worker Git Configuration
 

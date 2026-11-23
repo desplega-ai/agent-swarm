@@ -1295,6 +1295,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_REPLY_FOOTER_ENABLED",
+        label: "Show Slack reply footer",
+        description: "Show task details below Slack replies, including the task link.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}integrations/slack#outcome-cards-and-message-provenance`,
+      },
+      {
         key: "SLACK_RENDER_V2_DELEGATION",
         label: "Slack delegated-result delivery",
         description:
@@ -1889,9 +1897,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "FOLLOW_UP_GATE_MODE",
         label: "Follow-up gate mode",
         description:
-          "off runs nothing. shadow runs the verifier script on each completed run of a gated schedule after its Lead follow-up is created, and logs whether the follow-up could have been skipped. Shadow never skips or delays a follow-up.",
+          "off runs nothing. shadow runs the verifier script on each completed run of a gated schedule after its Lead follow-up is created, and logs whether the follow-up could have been skipped. Shadow never skips or delays a follow-up. enforce keeps shadow for the gated schedules and skips the follow-up of an enforced schedule's run when the verifier says it can.",
         kind: "enum",
-        options: ["off", "shadow"],
+        options: ["off", "shadow", "enforce"],
         defaultValue: "off",
         docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
       },
@@ -1900,6 +1908,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Follow-up gate schedules",
         description:
           "Comma-separated schedule ids whose runs the follow-up gate evaluates. Empty evaluates nothing. Leave off any schedule whose follow-up does required work.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS",
+        label: "Follow-up gate enforced schedules",
+        description:
+          "Comma-separated schedule ids whose follow-ups enforce mode may skip. Each completed run waits for the verifier: would_skip skips the follow-up; any other result, an error or a timeout creates it. Failed runs always get one. Ignored unless the mode is enforce.",
         kind: "string",
         defaultValue: "",
         docsUrl: `${DOCS}ui/configuration#follow-up-gate`,

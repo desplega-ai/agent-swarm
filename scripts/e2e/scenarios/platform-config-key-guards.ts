@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
-import { cleanupStack, putConfig, reloadConfig } from "./platform-helpers";
+import { cleanupStack, putConfig, registerAgent, reloadConfig } from "./platform-helpers";
 
 /** A stand-in for the telemetry proxy's `/v1/improvements`. */
 function startProxy() {
@@ -19,8 +19,9 @@ function startProxy() {
 /**
  * Guards on swarm_config writes: `envPath` is stored but never written to disk,
  * keys that cannot be env names are refused, `OPENCODE_SDK_PATH` is deployment
- * env only, process-control keys stay out of the API process env on reload, and
- * an improvement send goes through the outbound URL guard.
+ * env only, process-control keys stay out of the API process env on reload, API
+ * self-calls ignore a stored `MCP_BASE_URL`, and an improvement send goes
+ * through the outbound URL guard.
  */
 export const platformConfigKeyGuards: Scenario = {
   name: "platform-config-key-guards",
@@ -84,11 +85,50 @@ export const platformConfigKeyGuards: Scenario = {
       await track({ key: plainKey, value: "plain" });
       await track({ key: "NODE_PATH", value: `/nonexistent-${ctx.nonce}` });
       await track({ key: loaderKey, value: "unused" });
+      await track({ key: "CLAUDE_BINARY", value: `/nonexistent-${ctx.nonce}/claude` });
       const reloaded = await reloadConfig(ctx);
       const updated = Array.isArray(reloaded.keysUpdated) ? reloaded.keysUpdated : [];
       expect(updated.includes(plainKey), `plain key not injected: ${JSON.stringify(updated)}`);
       expect(!updated.includes("NODE_PATH"), "NODE_PATH reached the API process env");
       expect(!updated.includes(loaderKey), `${loaderKey} reached the API process env`);
+      expect(!updated.includes("CLAUDE_BINARY"), "CLAUDE_BINARY reached the API process env");
+
+      // ── API self-calls ignore a stored MCP_BASE_URL ────────────────────────
+      // The row is injected into the API env, but calls the API makes to itself
+      // with its own key (keep-warm sweep, script tool proxy, memory_rate) stay on loopback.
+      const redirect = startProxy();
+      cleanup.add("stop redirect listener", async () => redirect.server.stop(true));
+      const baseRow = await track({ key: "MCP_BASE_URL", value: redirect.origin });
+      const injected = await reloadConfig(ctx);
+      expect(
+        Array.isArray(injected.keysUpdated) && injected.keysUpdated.includes("MCP_BASE_URL"),
+        `MCP_BASE_URL not injected: ${JSON.stringify(injected.keysUpdated)}`,
+      );
+      response = await ctx.api("POST", "/api/oauth/keep-warm/codex");
+      expectStatus(response, [200], "keep-warm with a stored MCP_BASE_URL");
+      const agentId = await registerAgent(ctx, "self-call");
+      const mcp = await ctx.connectMcp(agentId);
+      try {
+        await mcp.callTool("script-search", { query: ctx.nonce });
+      } finally {
+        await mcp.close();
+      }
+      // memory_rate posts the rating back to this API with its own key.
+      const taskMcp = await ctx.connectMcp(agentId, {
+        headers: { "X-Source-Task-ID": crypto.randomUUID() },
+      });
+      try {
+        await taskMcp.callTool("memory_rate", { id: crypto.randomUUID(), useful: true });
+      } finally {
+        await taskMcp.close();
+      }
+      expect(
+        redirect.received.length === 0,
+        `API self-calls reached a stored MCP_BASE_URL: ${JSON.stringify(redirect.received)}`,
+      );
+      // Drop the row now so the restarts below boot with the deployment value.
+      await ctx.api("DELETE", `/api/config/${String(baseRow.id)}`);
+      await reloadConfig(ctx);
 
       // ── improvement sends use the outbound URL guard ───────────────────────
       // Outside development and test, a loopback http endpoint is refused.

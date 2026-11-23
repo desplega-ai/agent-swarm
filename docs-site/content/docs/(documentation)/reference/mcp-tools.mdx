@@ -176,6 +176,7 @@ The authenticated user MCP exposes only task content and model controls. It assi
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | string | No | Reasoning effort for this task: `off`, `low`, `medium`, `high`, `xhigh`, or `max` when the selected model and harness support it (`codex`, `cursor`, `opencode`, `pi`). |
 | `profile` | string | No | Model profile name (see `list-model-profiles`): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with `model` and `modelTier`; a set `effort` still wins over the profile's. |
+| `modelGroup` | string | No | Model group name (`GET /api/model-groups`): an ordered list of profiles that may span harnesses. The claiming agent runs the first member on its harness that passes the profile check; a provider error hops to the next one. With `agentId`, one member must run on that agent. Exclusive with `model`, `modelTier` and `profile`. |
 | `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
 | `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
@@ -599,6 +600,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list; without it an unknown model id is rejected (only used with `create` action) |
 | `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or `max` when supported (`codex`, `cursor`, `opencode`, `pi`) |
 | `profile` | string | No | Model profile name for the created pool task (see `list-model-profiles`); only workers on its harness claim it. Exclusive with `model` and `modelTier` (only used with `create` action) |
+| `modelGroup` | string | No | Model group name for the created pool task; only workers where a member runs claim it. Exclusive with `model`, `modelTier` and `profile` (only used with `create` action) |
 | `requiredCapabilities` | array | No | Capabilities required for routing the newly created task |
 | `leadOnly` | boolean | No | Structured authorization constraint for a newly created privileged task. Only Lead agents may claim it. |
 
@@ -664,7 +666,7 @@ Compare two versions of a context file. Shows a unified diff.
 
 ### create-schedule / list-schedules / update-schedule / patch-schedule / delete-schedule / run-schedule-now
 
-Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support both a concrete `model` override and a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`) that is passed through to the tasks they create. A `model` the model catalog does not list is rejected unless `allowCustomModel: true` is set.
+Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support a concrete `model` override, a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`), a `profile` and a `modelGroup`, passed through to the tasks they create. A `model` the model catalog does not list is rejected unless `allowCustomModel: true` is set.
 
 Schedules accept a logical asset `key`; tasks they create inherit that namespace. `list-schedules` supports exact `key` and subtree `keyPrefix` filters, while `update-schedule` and `patch-schedule` can move a schedule by updating its key.
 

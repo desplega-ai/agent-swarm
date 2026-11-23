@@ -102,6 +102,10 @@ const scriptApiRoute = route({
     },
     501: { description: "workspace-rw scripts are not supported" },
   },
+  rbac: {
+    ungated:
+      "external script endpoint: its per-endpoint bearer is the credential; script.api.* gates who exposes it",
+  },
 });
 
 function extractBearer(req: IncomingMessage): string | null {

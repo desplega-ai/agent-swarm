@@ -15,10 +15,16 @@ import {
   SUPERSEDED_WORKFLOW_TASK_REASON,
 } from "../../types";
 import {
+  groupUnavailableMessage,
+  modelGroupMemberHarnesses,
+  resolveGroupForAgent,
+} from "../model-group-resolution";
+import {
   checkProfileForAgent,
   formatProfileCheckFailures,
   vcsRepoId,
 } from "../model-profile-check";
+import { getAgentById } from "./agents";
 import { getDbClient } from "./runtime";
 import { SUPERSEDED_RESUME_REPAIR_WINDOW_MS } from "./tasks/read";
 
@@ -445,15 +451,22 @@ export async function repoModelOverrideKeys(
  * (harness, model, credentials, allowlist). A pooled task (no agent) is judged
  * per agent at claim instead. `profile` is exclusive with `model` and
  * `modelTier`, which pick the model another way.
+ *
+ * A `modelGroup` is judged the same way: exclusive with `model`, `modelTier`
+ * and `profile`, the group must exist, and with a known agent one of its
+ * members must run there (`resolveGroupForAgent`).
  */
 export async function taskProfileError(check: {
   profile?: string | null;
   model?: string | null;
   modelTier?: string | null;
+  modelGroup?: string | null;
   agentId?: string | null;
   /** The task's repo; its scoped credentials count, as on the worker. */
   vcsRepo?: string | null;
 }): Promise<string | null> {
+  const group = check.modelGroup?.trim();
+  if (group) return await taskModelGroupError({ ...check, modelGroup: group });
   const name = check.profile?.trim();
   if (!name) return null;
   if (check.model?.trim() || check.modelTier?.trim()) {
@@ -472,26 +485,94 @@ export async function taskProfileError(check: {
   return formatProfileCheckFailures(result);
 }
 
+async function taskModelGroupError(check: {
+  modelGroup: string;
+  profile?: string | null;
+  model?: string | null;
+  modelTier?: string | null;
+  agentId?: string | null;
+  vcsRepo?: string | null;
+}): Promise<string | null> {
+  if (check.model?.trim() || check.modelTier?.trim() || check.profile?.trim()) {
+    return "Pass `modelGroup`, or `model`/`modelTier`/`profile`, not both.";
+  }
+  if (!check.agentId) {
+    return (await modelGroupMemberHarnesses(check.modelGroup))
+      ? null
+      : unknownModelGroupMessage(check.modelGroup);
+  }
+  const resolution = await resolveGroupForAgent(check.modelGroup, check.agentId, {
+    vcsRepo: check.vcsRepo,
+  });
+  if (resolution.kind === "missing") return unknownModelGroupMessage(check.modelGroup);
+  if (resolution.kind === "resolved") return null;
+  const agent = await getAgentById(check.agentId);
+  return groupUnavailableMessage(
+    check.modelGroup,
+    agent?.harnessProvider ?? agent?.provider,
+    resolution.skipped,
+  );
+}
+
+function unknownModelGroupMessage(name: string): string {
+  return `Unknown model group "${name}". List groups with GET /api/model-groups.`;
+}
+
 /**
- * The profile half of a schedule update. `profile` and `model`/`modelTier`
- * pick the model two ways, so setting one clears the other, and sending both
- * is an error. A new profile, or a move of a profiled schedule to another
- * agent, is judged by `taskProfileError`. Returns the columns to write.
+ * Whether a model-group reference trigger (migration 314) refused a write:
+ * the group was deleted between the gate and the insert.
+ */
+export function modelGroupRefError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("model-group-missing:");
+}
+
+/**
+ * The profile and group half of a schedule update. `profile`, `modelGroup` and
+ * `model`/`modelTier` pick the model three ways, so setting one clears the
+ * others, and sending two is an error. A new profile or group, or a move of a
+ * profiled or grouped schedule to another agent, is judged by
+ * `taskProfileError`. Returns the columns to write.
  */
 export async function scheduleProfileUpdate(
-  existing: { profile?: string | null; targetAgentId?: string | null },
+  existing: {
+    profile?: string | null;
+    modelGroup?: string | null;
+    targetAgentId?: string | null;
+  },
   patch: {
     profile?: string | null;
+    modelGroup?: string | null;
     model?: string | null;
     modelTier?: string | null;
     targetAgentId?: string | null;
   },
 ): Promise<
   | { error: string }
-  | { error?: undefined; fields: { profile?: string | null; model?: null; modelTier?: null } }
+  | {
+      error?: undefined;
+      fields: {
+        profile?: string | null;
+        modelGroup?: string | null;
+        model?: null;
+        modelTier?: null;
+      };
+    }
 > {
   const profile = patch.profile === undefined ? undefined : patch.profile?.trim() || null;
+  const modelGroup = patch.modelGroup === undefined ? undefined : patch.modelGroup?.trim() || null;
   const agentId = patch.targetAgentId !== undefined ? patch.targetAgentId : existing.targetAgentId;
+  if (modelGroup) {
+    const error = await taskProfileError({
+      modelGroup,
+      profile,
+      model: patch.model,
+      modelTier: patch.modelTier,
+      agentId,
+    });
+    if (error) return { error };
+    return { fields: { modelGroup, profile: null, model: null, modelTier: null } };
+  }
   if (profile) {
     const error = await taskProfileError({
       profile,
@@ -500,18 +581,28 @@ export async function scheduleProfileUpdate(
       agentId,
     });
     if (error) return { error };
-    return { fields: { profile, model: null, modelTier: null } };
+    return { fields: { profile, modelGroup: null, model: null, modelTier: null } };
   }
-  if (patch.model?.trim() || patch.modelTier?.trim() || profile === null) {
-    return { fields: { profile: null } };
+  if (patch.model?.trim() || patch.modelTier?.trim()) {
+    return { fields: { profile: null, modelGroup: null } };
   }
+  const cleared = {
+    ...(profile === null ? { profile: null } : {}),
+    ...(modelGroup === null ? { modelGroup: null } : {}),
+  };
   const agentChanged =
     patch.targetAgentId !== undefined && patch.targetAgentId !== existing.targetAgentId;
-  if (agentChanged && existing.profile) {
-    const error = await taskProfileError({ profile: existing.profile, agentId });
+  if (agentChanged) {
+    const keptProfile = profile === null ? null : existing.profile;
+    const keptGroup = modelGroup === null ? null : existing.modelGroup;
+    const error = keptGroup
+      ? await taskProfileError({ modelGroup: keptGroup, agentId })
+      : keptProfile
+        ? await taskProfileError({ profile: keptProfile, agentId })
+        : null;
     if (error) return { error };
   }
-  return { fields: {} };
+  return { fields: cleared };
 }
 
 type OverrideRowState = { value: string; exportToEnv?: number } | null;

@@ -295,6 +295,7 @@ const ensureAgentCredentialsRoute = route({
     500: { description: "Provisioning failed" },
   },
   auth: { apiKey: true, agentId: true },
+  rbac: { ungated: "worker-only: needs X-Agent-ID, which a user token cannot send" },
 });
 
 const inviteMemberRoute = route({

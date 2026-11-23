@@ -89,6 +89,10 @@ const claudeManagedTestRoute = route({
       schema: ClaudeManagedTestResultSchema,
     },
   },
+  rbac: {
+    ungated:
+      "connection test that resolves integration secrets server-side; no verb covers it, so user roles need admin",
+  },
 });
 
 const mcpUserConfigRoute = route({

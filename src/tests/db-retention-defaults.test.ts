@@ -10,7 +10,7 @@ import { closeDb, getSwarmConfigs, initDb, upsertSwarmConfig } from "../be/db";
 import { wasDbCreatedThisBoot } from "../be/db/runtime";
 import { DB_RETENTION_TABLES } from "../be/db-retention";
 import { seedDbRetentionDefaults } from "../be/db-retention-defaults";
-import { getFreePort, waitForServer } from "./test-net";
+import { PortInUseError, startOnFreePort, waitForServer } from "./test-net";
 
 const KEYS = DB_RETENTION_TABLES.map((table) => table.envKey);
 const DEFAULTS: Record<string, string> = {
@@ -105,9 +105,34 @@ describe("retention defaults across real boots", () => {
     return dbPath;
   }
 
-  /** An `undefined` value removes the key from the inherited environment. */
+  /**
+   * Boot on a free port. getFreePort() releases the port before the child
+   * binds it, so under `--parallel` another file's server can take it: its
+   * `/health` answers, and this child dies on EADDRINUSE after it has already
+   * created the database. Only an authenticated read proves the child is ours.
+   * On a foreign answer, retry on a new port with the database as it was, so a
+   * new install is still new.
+   */
   async function bootApi(dbPath: string, env: Record<string, string | undefined>): Promise<Api> {
-    const port = await getFreePort();
+    const isNewDb = !(await Bun.file(dbPath).exists());
+    return startOnFreePort(async (port) => {
+      const api = await launchApi(port, dbPath, env);
+      const res = await fetch(`${api.base}/api/config?scope=global`, { headers });
+      if (res.status === 200) return api;
+      api.proc.kill("SIGKILL");
+      await api.proc.exited;
+      if (isNewDb)
+        for (const suffix of ["", "-wal", "-shm"]) await unlink(dbPath + suffix).catch(() => {});
+      throw new PortInUseError(`port ${port} answered ${res.status}: another server owns it`);
+    });
+  }
+
+  /** An `undefined` value removes the key from the inherited environment. */
+  async function launchApi(
+    port: number,
+    dbPath: string,
+    env: Record<string, string | undefined>,
+  ): Promise<Api> {
     const childEnv: Record<string, string | undefined> = {
       ...process.env,
       PORT: String(port),

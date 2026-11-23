@@ -246,6 +246,13 @@ async function waitFor(done: () => boolean) {
   }
 }
 
+/** Picks `files` in the dock's hidden file input. */
+async function pick(container: HTMLElement, files: File[]) {
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  Object.defineProperty(input, "files", { configurable: true, value: files });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+}
+
 const sendButton = (container: HTMLElement) =>
   container.querySelector('button[type="submit"]') as HTMLButtonElement;
 
@@ -1212,6 +1219,29 @@ describe("composer attachment types", () => {
       '"tool.exe" isn\'t an allowed file type',
     );
   });
+  test("custom limits: extensions and MIME types, the size cap and the count per message", async () => {
+    const { partitionAttachmentFiles } = await import("../sessions/composer-dock");
+    const limits = { accept: [".PDF", "image/*"], maxBytes: 20 * 1024 * 1024, maxFiles: 2 };
+    const photo = new File([new Uint8Array([1])], "photo.heic", { type: "image/heic" });
+    const spec = new File([new Uint8Array([1])], "spec.pdf");
+    const notes = new File([new Uint8Array([1])], "notes.md", { type: "text/markdown" });
+    expect(partitionAttachmentFiles([photo, spec], limits)).toEqual({
+      valid: [photo, spec],
+      error: null,
+    });
+    expect(partitionAttachmentFiles([notes, spec], limits)).toEqual({
+      valid: [spec],
+      error: '"notes.md" isn\'t an allowed file type (.PDF, image/*).',
+    });
+    const big = new File([new Uint8Array(20 * 1024 * 1024 + 1)], "flow.pdf");
+    expect(partitionAttachmentFiles([big], limits).error).toBe(
+      '"flow.pdf" exceeds the 20 MB attachment limit.',
+    );
+    expect(partitionAttachmentFiles([photo, spec], limits, 1)).toEqual({
+      valid: [photo],
+      error: "Attach up to 2 files per message.",
+    });
+  });
 });
 
 // A fake mic: `getUserMedia` hands out a stream whose track stop is counted,
@@ -1434,6 +1464,88 @@ describe("TaskComposer with a caller follow-up (an app page)", () => {
     expect(container.querySelector('button[aria-label="Attach files"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Add test file"]')).toBeNull();
     expect(container.querySelector('button[aria-label^="Record audio"]')).toBeNull();
+    await unmount();
+  });
+
+  test("with followUpAttachments the box takes files within its limits and hands them over", async () => {
+    const sent: Array<[string, string | undefined, string[]]> = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onFollowUp={async (text, parentTaskId, files) => {
+          sent.push([text, parentTaskId, files.map((file) => file.name)]);
+        }}
+        followUpAttachments={{ accept: [".png", ".pdf"], maxBytes: 10, maxFiles: 2 }}
+      />,
+    );
+    expect(container.querySelector('button[aria-label="Attach files"]')).not.toBeNull();
+    expect(container.querySelector('input[type="file"]')?.getAttribute("accept")).toBe(".png,.pdf");
+    expect(container.querySelector('button[aria-label^="Record audio"]')).toBeNull();
+    await pick(container, [new File(["x"], "photo.heic")]);
+    expect(container.textContent).toContain(
+      '"photo.heic" isn\'t an allowed file type (.png, .pdf).',
+    );
+    await pick(container, [new File(["x".repeat(11)], "big.pdf")]);
+    expect(container.textContent).toContain('"big.pdf" exceeds the 10 B attachment limit.');
+    await pick(container, [screenshot, new File(["%PDF"], "flow.pdf"), new File(["x"], "c.png")]);
+    expect(container.textContent).toContain("Attach up to 2 files per message.");
+    expect(fileInBox(container)).toBe(true);
+    await type(container, "use these");
+    await act(async () => sendButton(container).click());
+    await waitFor(() => sent.length > 0);
+    await act(async () => {});
+    expect(sent).toEqual([["use these", "done-1", ["screenshot-x.png", "flow.pdf"]]]);
+    expect(createdTasks).toEqual([]);
+    expect(textOf(container)).toBe("");
+    expect(fileInBox(container)).toBe(false);
+    await unmount();
+  });
+
+  test("a rejected caller follow-up with files keeps the text and every file", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onFollowUp={async () => {
+          throw new Error("flow.pdf failed to upload (403), so nothing was sent.");
+        }}
+        followUpAttachments={{ accept: [".png"], maxBytes: 100 }}
+      />,
+    );
+    await pick(container, [screenshot]);
+    await type(container, "hello");
+    await act(async () => sendButton(container).click());
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+    expect(textOf(container)).toBe("hello");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("files never steer: a box holding a file stays a follow-up when a task starts", async () => {
+    const limits = { accept: [".png"], maxBytes: 100 };
+    const { container, rerender, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onFollowUp={async () => {}}
+        followUpAttachments={limits}
+      />,
+    );
+    await pick(container, [screenshot]);
+    await rerender(
+      <TaskComposer
+        targetTask={runningLeadTask}
+        canSteer
+        onFollowUp={async () => {}}
+        followUpAttachments={limits}
+      />,
+    );
+    expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
+    expect(sendLabelOf(container)).toBe("Follow up");
+    expect(fileInBox(container)).toBe(true);
     await unmount();
   });
 

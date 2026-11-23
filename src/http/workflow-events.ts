@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getWorkflowRun } from "../be/db";
 import { isReservedProviderEvent } from "../event-waits";
+import { isExtensionBridgedEvent } from "../extensions/post-bridge";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -40,10 +41,14 @@ const runScopedSignalRoute = route({
       }),
     },
     404: { description: "Workflow run not found" },
-    403: { description: "Event name is reserved for provider webhooks" },
+    403: { description: "Event name is reserved for provider webhooks or server-emitted events" },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 /**
@@ -72,13 +77,26 @@ const globalSignalRoute = route({
         name: z.string(),
       }),
     },
-    403: { description: "Event name is reserved for provider webhooks" },
+    403: { description: "Event name is reserved for provider webhooks or server-emitted events" },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const RESERVED_EVENT_MESSAGE = "Event name is reserved for provider webhooks";
+const SERVER_EVENT_MESSAGE = "Event name is reserved for server-emitted events";
+
+/** The refusal message for a name only the server may emit, or null when callers may emit it. */
+function reservedEventError(name: string): string | null {
+  if (isReservedProviderEvent(name)) return RESERVED_EVENT_MESSAGE;
+  // Extension handlers trust bridged payloads (approval outcomes, task and chat events).
+  if (isExtensionBridgedEvent(name)) return SERVER_EVENT_MESSAGE;
+  return null;
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -93,8 +111,9 @@ export async function handleWorkflowEvents(
     const parsed = await runScopedSignalRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    if (isReservedProviderEvent(parsed.body.name)) {
-      jsonError(res, RESERVED_EVENT_MESSAGE, 403);
+    const reserved = reservedEventError(parsed.body.name);
+    if (reserved) {
+      jsonError(res, reserved, 403);
       return true;
     }
     const run = await getWorkflowRun(parsed.params.runId);
@@ -119,8 +138,9 @@ export async function handleWorkflowEvents(
     const parsed = await globalSignalRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    if (isReservedProviderEvent(parsed.body.name)) {
-      jsonError(res, RESERVED_EVENT_MESSAGE, 403);
+    const reserved = reservedEventError(parsed.body.name);
+    if (reserved) {
+      jsonError(res, reserved, 403);
       return true;
     }
     workflowEventBus.emit(parsed.body.name, parsed.body.payload ?? {});

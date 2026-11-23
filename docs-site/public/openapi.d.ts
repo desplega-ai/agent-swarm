@@ -16155,6 +16155,7 @@ export interface paths {
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 profile?: string;
                                 resolvedProfile?: string;
+                                modelGroup?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
@@ -16251,6 +16252,7 @@ export interface paths {
                         /** @enum {string} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                         profile?: string;
+                        modelGroup?: string;
                         draft?: boolean;
                     };
                 };
@@ -17143,6 +17145,7 @@ export interface paths {
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 profile?: string;
                                 resolvedProfile?: string;
+                                modelGroup?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
@@ -18368,7 +18371,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Launch a page session (issues HttpOnly cookie) */
+        /**
+         * Launch a page session (issues HttpOnly cookie)
+         * @description The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -20805,6 +20811,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -20873,6 +20880,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -20937,6 +20945,7 @@ export interface paths {
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
                         profile?: string;
+                        modelGroup?: string;
                         allowCustomModel?: boolean;
                         /** @enum {string} */
                         scheduleType?: "recurring" | "one_time";
@@ -21004,6 +21013,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -21128,6 +21138,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -21252,6 +21263,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -21324,6 +21336,7 @@ export interface paths {
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
                         profile?: string | null;
+                        modelGroup?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -21388,6 +21401,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -21528,6 +21542,7 @@ export interface paths {
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
                         profile?: string | null;
+                        modelGroup?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -21592,6 +21607,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -26600,6 +26616,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -26666,6 +26683,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -27448,6 +27466,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Jira webhook handler not configured */
                 503: {
                     headers: {
@@ -27931,6 +27958,15 @@ export interface paths {
                 };
                 /** @description Invalid signature */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 5 MiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30360,6 +30396,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description GitHub integration not configured */
                 503: {
                     headers: {
@@ -30615,6 +30660,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description AgentMail integration not configured or inbound archive unavailable */
                 503: {
                     headers: {
@@ -30667,6 +30721,15 @@ export interface paths {
                 };
                 /** @description Invalid signature */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 5 MiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30829,7 +30892,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks or server-emitted events */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -30908,7 +30971,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks or server-emitted events */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -32218,6 +32281,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -32674,6 +32746,7 @@ export interface components {
             resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             profile?: string;
             resolvedProfile?: string;
+            modelGroup?: string;
             fallbackHops?: {
                 from: string;
                 profile: string;
@@ -33469,7 +33542,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "task_ui_script_action_failed" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_model_group_resolved" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "task_ui_script_action_failed" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;

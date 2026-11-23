@@ -82,6 +82,9 @@ const RESERVED_KEYS = new Set([
   // tokens, so only the deployment env may redirect it.
   "GITHUB_URL",
   "GITHUB_API_URL",
+  // Linear host (E2E emulator): the API base receives the OAuth client secret and tokens.
+  "LINEAR_URL",
+  "LINEAR_API_URL",
   // Picks which App installation workers get tokens for; a config writer must not choose it.
   "GITHUB_APP_INSTALLATION_ID",
   // Owners whose repos get a token for their own installation; same reason.
@@ -109,6 +112,9 @@ const API_PROCESS_CONTROL_ENV_KEYS = new Set([
   "BUN_OPTIONS",
   "GCONV_PATH",
   "GLIBC_TUNABLES",
+  // Names the executable the API runs for its own `claude -p` calls
+  // (`defaultSpawnClaudeCli`). Workers read it from their config overlay.
+  "CLAUDE_BINARY",
 ]);
 const API_PROCESS_CONTROL_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_", "BUN_INSPECT"];
 
@@ -326,6 +332,16 @@ function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
 }
 
 /** Build a single `{ KEY: validator }` entry restricted to `options`. */
+function scheduleIdsValidator(key: string): Record<string, ConfigValidator> {
+  const message = `Invalid ${key} (must be comma-separated schedule UUIDs)`;
+  return {
+    [key]: (value: unknown) => {
+      if (typeof value !== "string") return message;
+      return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
+    },
+  };
+}
+
 function enumValidator(key: string, options: string[]): Record<string, ConfigValidator> {
   const listed = options.filter(Boolean).join(", ");
   const message = `Invalid ${key} value (must be one of: ${listed}${options.includes("") ? ", or empty" : ""})`;
@@ -639,13 +655,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
   ...enumValidator("CREDENTIAL_SELECTION_STRATEGY", [...CREDENTIAL_SELECTION_STRATEGIES]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
-  // `enforce` is deliberately absent: the follow-up gate only records decisions.
-  ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),
-  FOLLOW_UP_GATE_SCHEDULE_IDS: (value: unknown) => {
-    const message = "Invalid FOLLOW_UP_GATE_SCHEDULE_IDS (must be comma-separated schedule UUIDs)";
-    if (typeof value !== "string") return message;
-    return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
-  },
+  ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow", "enforce"]),
+  ...scheduleIdsValidator("FOLLOW_UP_GATE_SCHEDULE_IDS"),
+  ...scheduleIdsValidator("FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS"),
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
   ...enumValidator("SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", [
     ...SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS,
@@ -718,6 +730,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "CHAT_SDK_ENABLED",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_TASK_TREE_ENABLED",
+    "SLACK_REPLY_FOOTER_ENABLED",
     "SLACK_RENDER_V2_DELEGATION",
     "SLACK_BLOCK_EXTERNAL_CHANNELS",
     "GITHUB_DISABLE",

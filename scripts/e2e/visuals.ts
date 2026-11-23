@@ -1,7 +1,8 @@
 import { basename, join, relative, resolve } from "node:path";
 import { frames, SlackMock, screenshot } from "@desplega.ai/slack-mock";
 
-type ManifestThread = { label: string; channel: string; ts: string };
+/** `journal`: the thread's own journal file (an HTTP-mode mock). Default: the manifest's journal. */
+type ManifestThread = { label: string; channel: string; ts: string; journal?: string };
 type ManifestScenario = {
   name: string;
   status: "pass" | "fail" | "skip" | "flaky";
@@ -108,7 +109,8 @@ async function main(): Promise<void> {
   const manifest = JSON.parse(
     await Bun.file(join(options.visualsDir, "manifest.json")).text(),
   ) as VisualManifest;
-  const journalPath = join(options.visualsDir, manifest.journal);
+  const journalOf = (thread: ManifestThread) =>
+    join(options.visualsDir, thread.journal ?? manifest.journal);
   const ffmpeg = options.noGif ? undefined : Bun.which("ffmpeg");
   if (!options.noGif && !ffmpeg) console.log("ffmpeg not found; step GIFs will be omitted.");
   const relativeTo = (path: string) => relative(options.visualsDir, path);
@@ -127,7 +129,7 @@ async function main(): Promise<void> {
       // One PNG per journal line that touched the thread, plus final-thread.png and
       // final-desktop.png, all rendered by slack-mock from the journal in memory.
       const result = await frames({
-        journal: journalPath,
+        journal: journalOf(thread),
         channel: thread.channel,
         thread: thread.ts,
         out: threadDir,
@@ -161,11 +163,12 @@ async function main(): Promise<void> {
   const firstThread = renderedScenarios.flatMap((scenario) => scenario.threads)[0];
   if (!firstThread) throw new Error("The visual manifest has no marked Slack threads");
   // The channel view after the whole run: one screenshot, so serve the full journal once
-  // instead of rendering a frame per channel event.
+  // instead of rendering a frame per channel event. Always the run's Socket Mode workspace:
+  // a thread's own journal holds one scenario, not the run.
   const mock = await SlackMock.start({
     port: 0,
     seed: false,
-    dataFile: journalPath,
+    dataFile: join(options.visualsDir, manifest.journal),
     manifest: manifest.slackManifest,
     log: false,
   });

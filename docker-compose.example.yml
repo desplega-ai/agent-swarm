@@ -86,12 +86,15 @@ services:
   minio:
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: server /data --console-address ":9001"
+    # The root login is also agent-fs's storage key. Generate it in .env, e.g.
+    # MINIO_ROOT_PASSWORD=$(openssl rand -hex 24). Ports stay on loopback unless
+    # MINIO_BIND_ADDRESS opts in (e.g. 0.0.0.0 for a remote S3 public endpoint).
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${MINIO_BIND_ADDRESS:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - agent_fs_minio:/data
     healthcheck:
@@ -110,15 +113,20 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/agentfs &&
-      mc version enable local/agentfs
-      "
+    # List form, so the shell quotes the login and the password may hold any character.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing local/agentfs &&
+        mc version enable local/agentfs
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
 
   agent-fs:
-    image: ghcr.io/desplega-ai/agent-fs:0.18.34
+    image: ghcr.io/desplega-ai/agent-fs:0.18.37
     platform: linux/amd64
     pull_policy: always
     depends_on:
@@ -135,8 +143,8 @@ services:
       # configured, otherwise local MinIO. An explicit public endpoint wins.
       - S3_PUBLIC_ENDPOINT=${AGENT_FS_S3_PUBLIC_ENDPOINT:-${AGENT_FS_DOMAIN:+https://}${AGENT_FS_DOMAIN:-http://localhost:9000}}
       - S3_BUCKET=agentfs
-      - S3_ACCESS_KEY_ID=minioadmin
-      - S3_SECRET_ACCESS_KEY=minioadmin
+      - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       - S3_REGION=us-east-1
       - S3_PROVIDER=minio
       - EMBEDDING_PROVIDER=${AGENT_FS_EMBEDDING_PROVIDER:-local}
@@ -251,6 +259,7 @@ services:
       # Optional: Enable Slack integration
       - SLACK_DISABLE=${SLACK_DISABLE:-false}
       - SLACK_MODE=${SLACK_MODE:-socket}
+      - SLACK_REPLY_FOOTER_ENABLED=${SLACK_REPLY_FOOTER_ENABLED:-true}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-}
@@ -1012,7 +1021,7 @@ services:
   # Caddy terminates TLS with automatic Let's Encrypt certificates and proxies
   # to the API, agent-fs, and MinIO over the compose network. When you use it, stop
   # publishing 3013/7433 on a public interface (firewall or remove the `ports`
-  # entries above).
+  # entries above). MinIO 9000/9001 bind to loopback by default.
   # ---------------------------------------------------------------------------
   caddy:
     # Pinned by digest: this container terminates TLS for the API, so a floating

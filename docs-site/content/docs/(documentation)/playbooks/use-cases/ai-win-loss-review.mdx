@@ -1,0 +1,103 @@
+---
+title: 'Reviewing why sales opportunities were won or lost with AI agents'
+description: "Agent Swarm can assemble a source-linked win-loss review from authorized closed-deal records, seller notes and existing buyer feedback for a human commercial owner."
+agent:
+  offer: false
+  when: "Someone wants a source-linked win-loss review of closed opportunities, with a human commercial owner deciding what to change"
+---
+
+Agent Swarm can assemble a source-linked win-loss review for a human commercial owner: configured shared agents read the authorized closed-deal records, seller notes and buyer feedback already on file, keep buyer statements apart from seller assumptions, mark evidence that is missing or contradicts itself, and hand one review to the person who decides what changes. Agents take the gathering and cross-checking; a person decides what changed, what caused it, and what to do about it.
+
+A commercial and operations team gets one review per decision window of why opportunities were won or lost, every line pointing at a record and a read date, not another dashboard.
+
+The scope is closed-deal outcomes for a commercial decision: one review window, the opportunities that closed won and closed lost inside it, and the evidence the team already holds. It is not customer feedback for product decisions, which belongs to a product owner. It is not a review of missing or stale pipeline data, which works on open opportunities. And it is not a competitor change brief ([competitor change brief](/docs/playbooks/use-cases/competitor-change-brief)). The question is narrower: for deals already decided, what does the record support, and where does it go quiet.
+
+## When another tool fits better
+
+**Dedicated win-loss software or a research service.** If the requirement is structured buyer interviews, a large sample of deals, benchmarking against a market, or an analyst programme, a product or service built for that work fits better. Recruiting buyers and holding a benchmark are its job. No arrangement of agents replaces an interview that has not happened.
+
+**Manual review, when the set is small.** A handful of deals a quarter that one owner remembers well is a conversation and a document. A workflow in front of a judgment that person already holds only adds a queue.
+
+Agent Swarm fits a different shape: the evidence is scattered across systems, several people wrote pieces of it, and the review must stand up when someone not in the room reads it. It provides no interview tool and no win-loss dataset, and reading closed-deal records is custom configuration your team connects. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) compares the options.
+
+## An illustrative workflow
+
+This is a fictional, custom design: not a built-in win-loss feature, not a sales integration, not a measured deployment and not a customer result. Collection, checks and template are custom work your team writes and tests. Nothing here reads a CRM unless your team connects one.
+
+<Mermaid title="Illustrative win-loss review: a commercial owner authorizes a scope, deterministic collection records a source link and read date per item, checks mark missing or contradictory evidence, an agent drafts the review keeping buyer statements apart from seller assumptions, and a human gate blocks until the owner responds." chart={`flowchart TB
+  A["Review window and<br/>opportunities named<br/>by commercial owner"] --> B["Configured collection<br/>authorized records,<br/>source + read date"]
+  B --> C["Deterministic checks<br/>missing or<br/>contradictory evidence"]
+  C --> D["Agent drafts review<br/>buyer statements vs<br/>seller assumptions"]
+  D --> E["Review file in agent-fs<br/>+ human-in-the-loop gate"]
+  E -- "owner responds" --> F["Owner decides<br/>what to change"]
+  E -- "no response" --> G["Timeout: hold the review,<br/>escalate to the named owner"]
+`} />
+
+**1. The commercial owner sets the frame.** Before anything is read, the owner names the review window, the closed-won and closed-lost opportunities in scope, and which systems the workflow may read, and records that frame in the workflow's [governance](/docs/playbooks/use-cases/ai-operations-governance) record. [Scheduling](/docs/concepts/scheduling) is optional: it runs the review on a cadence, monthly or quarterly, and records each run.
+
+**2. Collection reads only the authorized records.** A `swarm-script` step reads opportunity stage history, the close reason field, seller notes, and buyer feedback already on file, such as survey answers or call notes. It writes JSON carrying a source link and a read date for every item. Scripts reach those systems through [script connections](/docs/guides/script-connections), with the runtime in [Scripts runtime](/docs/guides/scripts-runtime). [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents the split this step relies on: deterministic collection that emits JSON, then synthesis.
+
+**3. Deterministic checks mark missing evidence, differing reasons and actual contradictions.** Code, not a model, decides what is missing and what differs: missing evidence is a deal with no buyer statement or an empty close reason, and a differing reason is a seller's reason set against the reason in the buyer's own words, or stage history that points to a factor the recorded reason does not mention. Both sides can be true at once, so the review quotes them side by side and does not call them contradictions; an actual contradiction is two records that state the same fact differently and cannot both be right, such as two different close dates for one opportunity, or a closed-lost record against an order on file. Each flag names the records it compared, and every flag is an item the human owner weighs rather than a conclusion the review has reached.
+
+**4. An agent drafts the review.** A step inside a [workflow](/docs/concepts/workflows) turns the JSON and the flags into one review under two headings: BUYER STATEMENTS, quoted and attributed to their record, and SELLER ASSUMPTIONS, taken from seller notes and close reason fields. Where the evidence does not support a cause, the line reads "evidence missing" rather than the likelier story. It may turn a pattern into a question tied to a named record, and does not answer it.
+
+**5. The review lands as a file, and a gate blocks.** The review is written to [agent-fs](https://github.com/desplega-ai/agent-fs) as a file the owner keeps. A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts a summary with the file link, and resumes only when the named commercial owner responds. The gate carries a timeout and a fallback, and the workflow never proceeds on silence.
+
+**6. The owner decides what to change.** The review informs the decision and does not make it. What changes in pricing, positioning, qualification, compensation or process is the owner's call, recorded against the review. Agents change none of these.
+
+## What the review flags
+
+- **A deal with no buyer evidence.** Seller notes only, no buyer statement on file. The review says the buyer's side is unknown rather than inferring it.
+- **Reasons that differ, or history that points elsewhere.** The seller recorded price while the buyer's feedback names onboarding time, or a deal carries a budget close reason while stage history shows a technical evaluation that ran until the final week. The review quotes both side by side for the owner to weigh, since both can be true at once, and it neither picks one nor calls the pair a contradiction.
+- **A claim resting on one source.** A close reason that appears in a field and nowhere in any note. One source is recorded as one source.
+- **Records older than the window.** A note written long before the close date that still shapes the stated reason.
+- **Deals excluded for access.** An opportunity the team did not authorize is listed as excluded, not as a win or a loss.
+
+## What stays human-owned
+
+- **The cause judgment.** Why a deal was lost, and how much weight one buyer comment deserves, is a commercial judgment with a name on it.
+- **Any change to pricing, messaging, process or territories.** The review has no path to a price list, playbook or compensation plan.
+- **Contacting buyers.** Asking a buyer what happened is a relationship decision. The workflow reads what is on file and never reaches out.
+- **Sharing the review.** Whether it leaves the commercial team, and in what form, is the owner's decision.
+- **The close reason.** Where the recorded reason is thin, a person updates it. The agent writes "evidence missing" and stops.
+
+## Access restrictions
+
+Read only the records the team authorized, and scope each connection to what the review needs: opportunities, stage history, notes, feedback records. A connection that reads the whole CRM to answer a question about one quarter is wider than the job.
+
+Exclude restricted deals by name rather than hoping they do not appear, and list them, so a reader knows the sample is smaller than the pipeline. Minimize personal data: buyer contact details are not needed to review reasons. The review stays internal, never a document to send to a buyer or a public case study.
+
+## Limitations
+
+**The sample is small and biased.** A quarter holds few closed deals, and closed-lost records are thinner than closed-won ones. Sellers write their own close reasons, often after the fact, so the seller side is more confident than the buyer side.
+
+**It uses existing feedback only.** No new interviews, and no automated interviews. Where the team never recorded a buyer's words, the review reports a gap only a conversation could fill.
+
+**Correlation is not cause.** A reason that appears across several lost deals is a pattern to investigate.
+
+**The output is only as good as the records.** A pipeline whose close reasons carry a default value produces a review that says so, and no more.
+
+**No outcome is claimed.** This is a design your team builds and tests; nothing here establishes that a review changes a win rate.
+
+## Operator checks
+
+Before the owner acts on a review, confirm each of these.
+
+- **Every line has a source link and a read date.** A statement with no record behind it is removed, and evidence found is evidence found on the day it was read.
+- **Buyer statements and seller assumptions are separate.** A seller's explanation never sits under the buyer heading.
+- **Missing evidence is marked, not inferred.** "Evidence missing" appears, and no cause is filled in.
+- **Restricted deals are excluded and listed.** Nobody reads the sample as the whole pipeline.
+- **The sample size is stated.** The review names how many deals it covers.
+- **The owner is named and the gate is approved.** One person is accountable, the gate message names them, a timeout is not an approval, and a fallback does not act in their place.
+
+## Building blocks
+
+Each piece ships in agent-swarm and is documented. Connecting your systems, writing the checks and setting the template is yours.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then an agent that synthesizes it.
+- [Workflows](/docs/concepts/workflows): the steps, the collection node, and the agent step that drafts the review.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking node, the approve and reject branches, the timeout and the fallback.
+- [Scripts runtime](/docs/guides/scripts-runtime) and [script connections](/docs/guides/script-connections): what a collection script may call, and how an API is registered once.
+- [Scheduling](/docs/concepts/scheduling): the optional cadence, and a record of each run.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): a named owner per workflow, roles, and the source-of-truth rules that decide which close reason counts.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): compares those arrangements.

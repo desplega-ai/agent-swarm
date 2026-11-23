@@ -342,7 +342,9 @@ describe("deprecation note on tools that receive modelTier", () => {
     const s = result.structuredContent as Structured;
     expect(s.success).toBe(true);
     expect(s.modelTierDeprecated).toEqual({ tier: "smart", suggestedProfile: "claude-smart" });
-    expect(s.nudge).toBe('modelTier is deprecated: pass profile "claude-smart" (same model).');
+    expect(s.nudge).toBe(
+      'modelTier is deprecated: pass modelGroup "smart" (the tier\'s group) or profile "claude-smart" (same model).',
+    );
   });
 
   test("send-task to the pool has no harness to suggest", async () => {
@@ -354,7 +356,9 @@ describe("deprecation note on tools that receive modelTier", () => {
     const s = result.structuredContent as Structured;
     expect(s.success).toBe(true);
     expect(s.modelTierDeprecated).toEqual({ tier: "regular", suggestedProfile: null });
-    expect(s.nudge).toBe('modelTier is deprecated: pass profile "<harness>-regular" (same model).');
+    expect(s.nudge).toBe(
+      'modelTier is deprecated: pass modelGroup "regular" (the tier\'s group) or profile "<harness>-regular" (same model).',
+    );
   });
 
   test("send-task without modelTier carries no note", async () => {
@@ -377,6 +381,8 @@ describe("deprecation note on tools that receive modelTier", () => {
     const s = result.structuredContent as Structured;
     expect(s.success).toBe(true);
     expect(s.modelTierDeprecated).toEqual({ tier: "smol", suggestedProfile: "codex-smol" });
-    expect(s.nudge).toBe('modelTier is deprecated: pass profile "codex-smol" (same model).');
+    expect(s.nudge).toBe(
+      'modelTier is deprecated: pass modelGroup "smol" (the tier\'s group) or profile "codex-smol" (same model).',
+    );
   });
 });

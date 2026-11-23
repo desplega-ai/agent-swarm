@@ -107,7 +107,11 @@ Static UI assets and `/health` stay public. Browser users open the URL, paste th
 and the UI stores it in `localStorage`; a 401 clears the stored key and shows the prompt again.
 When `EVALS_API_KEY` is unset, the server logs a warning and leaves `/api/*` open for local dev
 and tests. With `NODE_ENV=production` (set by the image), `serve` refuses to start without a
-non-empty key unless `EVALS_ALLOW_OPEN_API=1` is set.
+non-empty key unless `EVALS_ALLOW_OPEN_API=1` is set. In open mode, write endpoints answer 403
+to a request whose `Origin` host is not the request's `Host`, and the JSON-body ones
+(`POST /api/runs`, `POST`/`PATCH /api/configs`) answer 415 unless `Content-Type` is
+`application/json`. CLI and server-side callers send no `Origin` and are unaffected. A reverse proxy in front of an open-mode API must forward the original `Host`
+header, or same-origin UI writes answer 403; set `EVALS_API_KEY` otherwise.
 
 `POST /api/runs` and `POST /api/runs/:id/resume` are also guarded by
 `EVALS_MAX_CONCURRENT_RUNS` (default `1`). The cap counts runs actively executing inside the
