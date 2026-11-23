@@ -442,6 +442,26 @@ async function metricDefinitions(ctx: ScenarioContext, agentId: string, otherId:
       },
       "Metric query rejected",
     );
+    // Saved options SQL follows the same rule as widget SQL.
+    await expectToolError(
+      conn,
+      "create_metric",
+      {
+        title: "Rejected options",
+        definition: {
+          version: 1,
+          widgets: [widget("stat", "SELECT COUNT(*) AS n FROM agents")],
+          variables: [
+            {
+              key: "pick",
+              type: "select",
+              optionsQuery: { sql: "SELECT id FROM agents; DELETE FROM agents", valueKey: "id" },
+            },
+          ],
+        },
+      },
+      "Metric query rejected",
+    );
     expectStatus(
       await ctx.api("DELETE", `/api/metrics/definitions/${toolMetricId}`),
       [204],
