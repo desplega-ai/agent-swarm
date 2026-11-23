@@ -144,6 +144,102 @@ export function normalizeExpr(expr: string): string {
   );
 }
 
+/**
+ * The Boolean structure of an expression: AND, OR and NOT nodes over atoms in
+ * their `normalizeExpr` form. `normalizeExpr` drops every parenthesis, so
+ * `(a AND b) OR c` and `a AND (b OR c)` print the same. This shape keeps the
+ * grouping, flattens nested AND/AND and OR/OR, drops redundant parentheses and
+ * sorts the operands of each node (both operators commute).
+ */
+export function booleanShape(expr: string): string {
+  const src = expr.replaceAll("[", " ( ").replaceAll("]", " ) ");
+  const toks = tokenize(src);
+  let i = 0;
+  const word = (n: number) => {
+    const t = toks[n];
+    return t && t.k === "id" ? t.v.toUpperCase() : "";
+  };
+  const isOp = (n: number, v: string) => toks[n]?.k === "op" && toks[n]?.v === v;
+  type Node = { op: "and" | "or"; args: Node[] } | { op: "not"; arg: Node } | { atom: string };
+  const render = (n: Node): string => {
+    if ("atom" in n) return n.atom;
+    if (n.op === "not") return `not(${render(n.arg)})`;
+    return `${n.op}(${n.args.map(render).sort().join(",")})`;
+  };
+  const join = (op: "and" | "or", parts: Node[]): Node => {
+    if (parts.length === 1) return parts[0] as Node;
+    const args = parts.flatMap((p) =>
+      "op" in p && p.op === op ? (p as { args: Node[] }).args : [p],
+    );
+    return { op, args };
+  };
+  // An atom: tokens up to a top-level AND / OR / `)` (BETWEEN x AND y and CASE stay whole).
+  const atom = (): Node => {
+    const start = i;
+    let depth = 0;
+    let between = false;
+    let caseDepth = 0;
+    while (i < toks.length) {
+      if (isOp(i, "(")) depth++;
+      else if (isOp(i, ")")) {
+        if (depth === 0) break;
+        depth--;
+      } else if (depth === 0) {
+        const w = word(i);
+        if (w === "CASE") caseDepth++;
+        else if (w === "END" && caseDepth > 0) caseDepth--;
+        else if (w === "BETWEEN") between = true;
+        else if (caseDepth === 0 && (w === "AND" || w === "OR")) {
+          if (w === "AND" && between) between = false;
+          else break;
+        }
+      }
+      i++;
+    }
+    const first = toks[start];
+    const last = toks[i - 1];
+    const text = first && last && i > start ? src.slice(first.s, last.e) : "";
+    return { atom: normalizeExpr(text) };
+  };
+  const primary = (): Node => {
+    if (word(i) === "NOT") {
+      i++;
+      return { op: "not", arg: primary() };
+    }
+    if (isOp(i, "(")) {
+      const save = i;
+      i++;
+      const inner = orExpr();
+      if (isOp(i, ")")) {
+        i++;
+        const next = word(i);
+        // `(x) IS NULL`, `(a + b) > 0`: the group is part of a larger atom.
+        if (i >= toks.length || isOp(i, ")") || next === "AND" || next === "OR") return inner;
+      }
+      i = save;
+    }
+    return atom();
+  };
+  const andExpr = (): Node => {
+    const parts = [primary()];
+    while (word(i) === "AND") {
+      i++;
+      parts.push(primary());
+    }
+    return join("and", parts);
+  };
+  const orExpr = (): Node => {
+    const parts = [andExpr()];
+    while (word(i) === "OR") {
+      i++;
+      parts.push(andExpr());
+    }
+    return join("or", parts);
+  };
+  const tree = orExpr();
+  return i === toks.length ? render(tree) : normalizeExpr(expr);
+}
+
 type DefaultMeaning = string | null;
 
 /** The meaning of a SQLite default for a column of a given Postgres class. */
@@ -708,6 +804,16 @@ function compareTable(
     const b = [...pChecks].sort();
     a.forEach((x, i) => {
       if (x !== b[i]) add(`check:${t.name}`, `CHECK differs: SQLite "${x}" vs Postgres "${b[i]}"`);
+    });
+    // The flat text above cannot see a regrouping (`(a AND b) OR c` vs
+    // `a AND (b OR c)`): compare the Boolean structure too.
+    const sShapes = t.checks
+      .map((c) => booleanShape(translateExpr(c, ctx, `${t.name} CHECK`)))
+      .sort();
+    const pShapes = (pg.checks.get(t.name) ?? []).map(booleanShape).sort();
+    sShapes.forEach((x, i) => {
+      if (x !== pShapes[i])
+        add(`check:${t.name}`, `CHECK grouping differs: SQLite "${x}" vs Postgres "${pShapes[i]}"`);
     });
   }
 
