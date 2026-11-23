@@ -7,7 +7,7 @@ import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { EMBEDDING_DIMENSIONS } from "./memory/constants";
-import { copySqliteFileToPostgres } from "./storage-root";
+import { copySqliteFileToPostgres, postgresUrlFromEnv } from "./storage-root";
 
 export type DataCopyArgs = {
   from?: string;
@@ -37,7 +37,7 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
     return 2;
   }
   const from = parsed.from ?? process.env.DATABASE_PATH;
-  const to = parsed.to ?? process.env.DATABASE_URL;
+  const to = parsed.to ?? (postgresUrlFromEnv() || undefined);
   if (!from) {
     console.error("db-copy needs the SQLite file: --from <path> (or DATABASE_PATH)");
     return 2;

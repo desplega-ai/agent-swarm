@@ -14,7 +14,9 @@
 services:
   api:
     environment:
-      DATABASE_URL: postgres://swarm:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/swarm
+      # The API URL-encodes DATABASE_PASSWORD into DATABASE_URL, so any password works.
+      DATABASE_URL: postgres://swarm@postgres:5432/swarm
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       DATABASE_QUERY_URL: ${DATABASE_QUERY_URL:-}
     depends_on:
       postgres:

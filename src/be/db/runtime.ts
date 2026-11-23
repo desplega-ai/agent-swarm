@@ -23,6 +23,7 @@ import {
   listAgentProfileFields,
   openPostgresEngine,
   type PostgresEngine,
+  postgresUrlFromEnv,
   removeLegacyTaskStatusCheck,
   selectStorageEngine,
 } from "../storage-root";
@@ -365,7 +366,7 @@ function errorText(err: unknown): string {
 export function startPostgres(): Promise<void> {
   if (postgres) return Promise.resolve();
   if (!postgresStarting) {
-    const url = process.env.DATABASE_URL?.trim() ?? "";
+    const url = postgresUrlFromEnv();
     postgresStarting = bootPostgres(url).catch((err) => {
       postgresStarting = null;
       throw err;

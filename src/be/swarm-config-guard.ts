@@ -97,6 +97,7 @@ const RESERVED_KEYS = new Set([
   // deployment env only, never a config row.
   "DATABASE_URL",
   "DATABASE_QUERY_URL",
+  "DATABASE_PASSWORD",
   // Locates the encryption key file before any config row is read (D2).
   "SWARM_DATA_DIR",
 ]);

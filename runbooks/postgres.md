@@ -9,6 +9,7 @@ This runbook covers: when to choose Postgres, the setup, the db-query reader rol
 | Variable | Effect |
 |---|---|
 | `DATABASE_URL` | A `postgres://` or `postgresql://` URL selects Postgres. Absent: SQLite at `DATABASE_PATH`. Any other scheme is ignored with a warning. |
+| `DATABASE_PASSWORD` | Postgres only. Optional raw password. The API URL-encodes it into `DATABASE_URL` (the Compose overlay uses it). |
 | `DATABASE_QUERY_URL` | Postgres only. The URL of the restricted role that the `db-query` tool uses. Absent or refused by the probe: `db-query` is off and says why. |
 | `DATABASE_PATH` | SQLite file. On Postgres it still locates the data directory, unless `SWARM_DATA_DIR` is set. |
 | `SWARM_DATA_DIR` | Directory of the encryption key file and the page-session secret. Default: the directory of `DATABASE_PATH` (the same paths as before). |

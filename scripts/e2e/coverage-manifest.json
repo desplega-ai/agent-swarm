@@ -252,7 +252,8 @@
         "trigger-immutability",
         "trigger-rbac-default-role",
         "trigger-cascades",
-        "postgres-chain-layouts"
+        "postgres-chain-layouts",
+        "postgres-password-env"
       ]
     },
     "live-task-claim": {

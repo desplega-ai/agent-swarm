@@ -300,3 +300,27 @@ export function makeSqliteSecretLegacy(path: string, key: string, plaintext: str
     db.close();
   }
 }
+
+/**
+ * A superuser LOGIN role with `password` on the E2E Postgres server, for a scenario
+ * that checks how the API reads a password. Drop it with `dropPostgresRole`.
+ */
+export async function createPostgresRole(role: string, password: string): Promise<void> {
+  const client = new Bun.SQL({ url: adminUrl(), max: 1 });
+  try {
+    await client.unsafe(
+      `CREATE ROLE "${role.replaceAll('"', '""')}" LOGIN SUPERUSER PASSWORD '${password.replaceAll("'", "''")}'`,
+    );
+  } finally {
+    await client.close();
+  }
+}
+
+export async function dropPostgresRole(role: string): Promise<void> {
+  const client = new Bun.SQL({ url: adminUrl(), max: 1 });
+  try {
+    await client.unsafe(`DROP ROLE IF EXISTS "${role.replaceAll('"', '""')}"`);
+  } finally {
+    await client.close();
+  }
+}

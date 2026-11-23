@@ -31,6 +31,7 @@ The first start runs `CREATE EXTENSION IF NOT EXISTS vector`. If your role may n
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | `postgres://user:pass@host:5432/swarm` selects Postgres. |
+| `DATABASE_PASSWORD` | Optional raw password of the `DATABASE_URL` role. The API URL-encodes it, so it may hold `/`, `@` or `#`. |
 | `DATABASE_QUERY_URL` | Optional URL of a read-only role for the `db-query` tool. |
 | `SWARM_DATA_DIR` | Directory of the encryption key file and the page-session secret. Default: the directory of `DATABASE_PATH`. |
 

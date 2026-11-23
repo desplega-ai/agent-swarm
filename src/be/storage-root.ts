@@ -233,6 +233,20 @@ export function selectStorageEngine(env: NodeJS.ProcessEnv = process.env): Stora
   return url && POSTGRES_URL.test(url) ? "postgres" : "sqlite";
 }
 
+/**
+ * The Postgres URL of `DATABASE_URL`, with `DATABASE_PASSWORD` (when set) as its
+ * password. The password is URL-encoded here, so a deployment such as the Compose
+ * overlay can pass a raw password that holds `/`, `@`, `#` or `%`.
+ */
+export function postgresUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string {
+  const url = env.DATABASE_URL?.trim() ?? "";
+  const password = env.DATABASE_PASSWORD;
+  if (!url || !password || !POSTGRES_URL.test(url)) return url;
+  const parsed = new URL(url);
+  parsed.password = encodeURIComponent(password);
+  return parsed.toString();
+}
+
 /** A `DATABASE_URL` that is set but selects no engine (logged by the SQLite start). */
 export function ignoredDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string | null {
   const url = env.DATABASE_URL?.trim();
