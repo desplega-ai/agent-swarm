@@ -203,7 +203,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.3.2
+ARG OPENCODE_VERSION=2.4.1
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -573,9 +573,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795406435-gdf62b3
-ARG AMP_SHA512_AMD64=3a580bdae5f578a208d688a637ff4f62b9a1c9bc979d5b92fcb0c9fe3fc6420f9bc5f418da440e8e2632994d4f8f9df3503141a8a99dc58ed59c073fd582a197
-ARG AMP_SHA512_ARM64=424d2e18795a0cd8aa5285af8ca71f170fd2b9e07c7fe3298a4708b7f546d5e4c9b10a0d3de15e17bd74066e290fea00c82e4a55579c3d8321c39fe96cd1d7fe
+ARG AMP_VERSION=0.0.1795435239-g464604
+ARG AMP_SHA512_AMD64=0b7f14eadff25ac778916024b37244ea45b2194a42d25920da536c7ed90282841c7a211ac82969c05442ce7a930ccacd7dc98f08ab3df8e60e143b39efe24d5f
+ARG AMP_SHA512_ARM64=7b02dfabb16e52c4cf42c54c30aab68dff29dd022998ac291f8a5bc0664eefd952bfe8c4bfd851154c2b4fc30ded383d09c1b7cd54e4f702bce55bf1001621e5
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
