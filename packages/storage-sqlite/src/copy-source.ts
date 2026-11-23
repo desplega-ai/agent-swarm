@@ -19,6 +19,10 @@ type XInfoRow = { name: string; type: string; pk: bigint | number; hidden: bigin
 const BOOKKEEPING: Record<string, string> = {
   _migrations: "migration bookkeeping: the target records its own chain",
   sqlite_sequence: "SQLite AUTOINCREMENT counters: the copy carries them to the target sequences",
+  // Litestream creates both in every database it replicates. They hold its
+  // replication position, which has no meaning in another engine.
+  _litestream_seq: "Litestream replication bookkeeping: not application data",
+  _litestream_lock: "Litestream replication bookkeeping: not application data",
 };
 
 /** Shadow table suffixes of FTS5 and sqlite-vec (vec0). A table like `agent_tasks_fts_state` is data. */
@@ -160,7 +164,39 @@ export function openSqliteCopySource(path: string): CopySource {
       }
       return { dimensions: width ? Number(width) : null, ids };
     },
-    *rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]> {
+    foreignKeyViolations() {
+      const copied = new Set(tables.map((t) => t.name));
+      const keyColumns = new Map<string, string[]>();
+      const columnsOf = (table: string, id: number): string[] => {
+        const key = `${table}#${id}`;
+        let columns = keyColumns.get(key);
+        if (!columns) {
+          columns = db
+            .query<{ id: bigint; seq: bigint; from: string }, []>(
+              `SELECT id, seq, "from" FROM pragma_foreign_key_list(${quoteText(table)})`,
+            )
+            .all()
+            .filter((row) => Number(row.id) === id)
+            .sort((a, b) => Number(a.seq) - Number(b.seq))
+            .map((row) => row.from);
+          keyColumns.set(key, columns);
+        }
+        return columns;
+      };
+      return db
+        .query<{ table: string; rowid: bigint | null; parent: string; fkid: bigint }, []>(
+          "PRAGMA foreign_key_check",
+        )
+        .all()
+        .filter((row) => copied.has(row.table))
+        .map((row) => ({
+          table: row.table,
+          row: row.rowid === null ? "a WITHOUT ROWID row" : `rowid ${row.rowid}`,
+          parent: row.parent,
+          columns: columnsOf(row.table, Number(row.fkid)),
+        }));
+    },
+    *rows(table: CopyTable, batchSize: number, batchBytes = Number.POSITIVE_INFINITY) {
       const pk = primaryKey(table.name);
       const select = table.columns
         .map((c, i) => {
@@ -175,17 +211,22 @@ export function openSqliteCopySource(path: string): CopySource {
       );
       const pkIndexes = pk.map((name) => table.columns.findIndex((c) => c.name === name));
       let batch: CopyRow[] = [];
+      let bytes = 0;
       for (const raw of statement.iterate()) {
         const cells: CopyCell[] = table.columns.map((_, i) => toCell(raw[`k${i}`], raw[`v${i}`]));
+        for (const cell of cells) {
+          if (cell.kind === "text" || cell.kind === "blob") bytes += cell.bytes.byteLength;
+        }
         const rowid = table.hasRowid ? (raw.__rowid as bigint) : null;
         const label =
           rowid !== null
             ? `rowid ${rowid}`
             : pkIndexes.map((i) => labelOf(cells[i] ?? { kind: "null" })).join(", ");
         batch.push({ rowid, label, cells });
-        if (batch.length >= batchSize) {
+        if (batch.length >= batchSize || bytes >= batchBytes) {
           yield batch;
           batch = [];
+          bytes = 0;
         }
       }
       if (batch.length > 0) yield batch;

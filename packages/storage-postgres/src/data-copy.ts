@@ -37,6 +37,8 @@ export type PostgresCopyOptions = {
   embeddingDimensions: number;
   /** Rows per INSERT statement (bounded by the 65,535 parameter limit). */
   batchSize?: number;
+  /** Stored bytes per INSERT statement. A larger single row still goes alone. */
+  batchBytes?: number;
   /** Problems kept in the report (all are counted). */
   maxProblems?: number;
   log?: (line: string) => void;
@@ -61,6 +63,12 @@ type Conn = {
 };
 
 const MAX_PARAMS = 60_000;
+/**
+ * Stored bytes per INSERT statement. Rows of several megabytes (a page version,
+ * a task output) would otherwise put 500 of them in one statement: gigabytes in
+ * this process and in the Postgres backend, and a message near the 1 GB limit.
+ */
+const DEFAULT_BATCH_BYTES = 16 * 1024 * 1024;
 const TABLE_ORDER_KEY = ROWID_COLUMN;
 
 function quote(name: string): string {
@@ -221,12 +229,35 @@ function decodeText(bytes: Uint8Array): Converted {
   return { ok: true, value: text };
 }
 
-function hasNulString(value: unknown): boolean {
-  if (typeof value === "string") return value.includes("\u0000");
-  if (Array.isArray(value)) return value.some(hasNulString);
-  if (value && typeof value === "object")
-    return Object.entries(value).some(([k, v]) => k.includes("\u0000") || hasNulString(v));
-  return false;
+// A high surrogate with no low surrogate after it, or a low one with no high one before it.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * Why Postgres refuses a string of a parsed JSON value, or null. JSON.parse takes
+ * both escapes; `jsonb` refuses "\u0000" and a surrogate escape with no partner
+ * (text cut in the middle of an emoji), and that error names no row.
+ */
+function jsonStringProblem(value: unknown): string | null {
+  if (typeof value === "string") {
+    if (value.includes("\u0000")) return "JSON holds a \\u0000 character";
+    if (LONE_SURROGATE.test(value))
+      return "JSON holds an unpaired surrogate escape (\\ud800 to \\udfff)";
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const problem = jsonStringProblem(item);
+      if (problem) return problem;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      const problem = jsonStringProblem(key) ?? jsonStringProblem(item);
+      if (problem) return problem;
+    }
+  }
+  return null;
 }
 
 /** SQLite timestamp text to an ISO instant; text with no zone is UTC, as SQLite reads it. */
@@ -305,8 +336,8 @@ export function convertCell(cell: CopyCell, column: TargetColumn): Converted {
       } catch {
         return { ok: false, reason: `invalid JSON: ${text.value.slice(0, 60)}` };
       }
-      if (hasNulString(parsed)) return { ok: false, reason: "JSON holds a \\u0000 character" };
-      return text;
+      const refused = jsonStringProblem(parsed);
+      return refused ? { ok: false, reason: refused } : text;
     }
     case "timestamptz":
     case "timestamp": {
@@ -404,17 +435,27 @@ function targetExpression(column: TargetColumn): string {
   }
 }
 
+/**
+ * Order-free checksum of a table in constant memory: the SHA-256 of each row,
+ * added lane by lane (eight 32-bit sums). Two tables compare equal when they
+ * hold the same rows, each the same number of times, in any order. A table of
+ * 10 million rows needs no list of row hashes and no sort.
+ */
 class TableChecksum {
-  private readonly hashes: string[] = [];
+  private readonly lanes = new Uint32Array(8);
+  private rows = 0;
   add(values: (string | null)[]): void {
-    this.hashes.push(createHash("sha1").update(JSON.stringify(values)).digest("hex"));
+    const hash = createHash("sha256").update(JSON.stringify(values)).digest();
+    for (let lane = 0; lane < 8; lane++) {
+      this.lanes[lane] = ((this.lanes[lane] as number) + hash.readUInt32BE(lane * 4)) >>> 0;
+    }
+    this.rows++;
   }
   get count(): number {
-    return this.hashes.length;
+    return this.rows;
   }
   digest(): string {
-    // Order-free: the sorted row hashes, so the engines need not agree on row order.
-    return createHash("sha256").update(this.hashes.sort().join("\n")).digest("hex");
+    return Array.from(this.lanes, (lane) => lane.toString(16).padStart(8, "0")).join("");
   }
 }
 
@@ -776,13 +817,29 @@ export async function copyIntoPostgres(
         const vectorTable = targets.has("memory_vec");
         if (vectorTable) await conn.unsafe("DELETE FROM memory_vec");
 
+        // Orphan rows first: Postgres would refuse them at the end of the copy and
+        // name only the first one. The source lists every one in seconds.
+        for (const orphan of source.foreignKeyViolations?.() ?? []) {
+          problem({
+            table: orphan.table,
+            column: orphan.columns.join(", "),
+            row: orphan.row,
+            reason: `orphan row: no row in ${orphan.parent} for this foreign key`,
+          });
+        }
+        if (report.problemCount > 0)
+          log(`[db-copy] ${report.problemCount} orphan row(s) in the source: checking values only`);
+
         const checksums = new Map<string, TableChecksum>();
         let vectors = 0;
+        // Once one value is refused the copy cannot commit: the rest of the run
+        // only checks values, which lists every problem in a fraction of the time.
+        const writing = () => report.problemCount === 0;
         for (const table of sourceTables) {
           const target = targets.get(table.name) as TargetTable;
-          const sum = await copyTable(conn, source, table, target, options, problem, log);
+          const sum = await copyTable(conn, source, table, target, options, problem, log, writing);
           checksums.set(table.name, sum.checksum);
-          if (table.name === "agent_memory" && vectorTable) {
+          if (table.name === "agent_memory" && vectorTable && writing()) {
             const widths = embeddingWidths(sum.embeddings);
             if (sum.embeddings.length > 0 && !widths.has(options.embeddingDimensions)) {
               report.error =
@@ -1018,6 +1075,7 @@ async function copyTable(
   options: PostgresCopyOptions,
   problem: (p: CopyProblem) => void,
   log: (line: string) => void,
+  writing: () => boolean = () => true,
 ): Promise<{ checksum: TableChecksum; embeddings: [string, Uint8Array][] }> {
   const { columns, rowid } = insertColumns(table, target);
   const all = rowid ? [rowid, ...columns] : columns;
@@ -1034,7 +1092,7 @@ async function copyTable(
   let failed = false;
   let copied = 0;
 
-  for (const batch of source.rows(table, batchSize)) {
+  for (const batch of source.rows(table, batchSize, options.batchBytes ?? DEFAULT_BATCH_BYTES)) {
     const params: (string | null)[] = [];
     for (const row of batch) {
       const values: (string | null)[] = rowid
@@ -1056,7 +1114,7 @@ async function copyTable(
           values.push(converted.value);
         }
       }
-      if (failed) continue;
+      if (failed || !writing()) continue;
       checksum.add(values.map((v, i) => normalizeValue((all[i] as TargetColumn).typname, v)));
       params.push(...values);
       if (table.name === "agent_memory" && idIndex >= 0 && embeddingIndex >= 0) {
@@ -1066,7 +1124,11 @@ async function copyTable(
           embeddings.push([new TextDecoder().decode(id.bytes), embedding.bytes]);
       }
     }
-    if (failed) continue;
+    if (failed || !writing()) {
+      // No statement to wait for: yield, so the collector can free this batch.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      continue;
+    }
     const rows = params.length / perRow;
     const tuples: string[] = [];
     for (let r = 0; r < rows; r++) {
@@ -1079,7 +1141,9 @@ async function copyTable(
     );
     copied += rows;
   }
-  log(`[db-copy] ${table.name}: ${failed ? "values refused" : `${copied} rows`}`);
+  log(
+    `[db-copy] ${table.name}: ${failed ? "values refused" : writing() ? `${copied} rows` : "checked, not written"}`,
+  );
   return { checksum, embeddings };
 }
 
