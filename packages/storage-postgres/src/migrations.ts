@@ -37,6 +37,12 @@ export type PostgresMigrationOptions = {
   log?: (line: string) => void;
   /** Checksum mismatch warnings; `console.warn` by default. */
   warn?: (line: string) => void;
+  /**
+   * The caller already holds a transaction on the reserved connection (the data
+   * copy): each migration runs inside it, with no BEGIN or COMMIT of its own, so
+   * the caller's ROLLBACK also undoes the chain.
+   */
+  inCallerTransaction?: boolean;
 };
 
 export type PostgresMigrationResult = {
@@ -118,16 +124,16 @@ export async function runPostgresMigrations(
       log(`[pg-migrations] Applying: ${migration.name}`);
       const started = performance.now();
       try {
-        await conn.unsafe("BEGIN");
+        if (!options.inCallerTransaction) await conn.unsafe("BEGIN");
         // No parameters: the simple query protocol runs every statement of the file.
         await conn.unsafe(migration.sql);
         await conn.unsafe(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES ($1, $2, statement_timestamp(), $3)",
           [migration.version, migration.name, migration.checksum],
         );
-        await conn.unsafe("COMMIT");
+        if (!options.inCallerTransaction) await conn.unsafe("COMMIT");
       } catch (error) {
-        await conn.unsafe("ROLLBACK").catch(() => {});
+        if (!options.inCallerTransaction) await conn.unsafe("ROLLBACK").catch(() => {});
         const detail = error instanceof Error ? error.message : String(error);
         throw new Error(
           `[pg-migrations] Migration ${migration.version} (${migration.name}) failed: ${detail}`,

@@ -19,7 +19,7 @@ import { loadPostgresMigrations, runPostgresMigrations } from "./migrations";
  * fails at COMMIT, or any other error leaves the target as it was.
  *
  * Steps (D11 numbering): the source is opened read-only by the caller (1); a
- * target with rows is refused (2); user triggers are off during the copy (3);
+ * target with any table is refused (2); user triggers are off during the copy (3);
  * each value is converted to the type of its target column (4); a value the
  * target cannot store is reported, never dropped (5); the vector table is built
  * from the copied embeddings, full text needs no rebuild because it is an
@@ -83,54 +83,34 @@ function chainSeededTables(migrationsDir: string): Set<string> {
 }
 
 /**
- * Rows the chain itself seeds per table: one per top-level `INSERT INTO`
- * statement (the baseline writes one row per statement). An INSERT inside a
- * trigger or function body is indented, so it does not count: those tables
- * start empty.
- */
-function chainSeedRowCounts(migrationsDir: string): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const migration of loadPostgresMigrations(migrationsDir)) {
-    for (const match of migration.sql.matchAll(/^INSERT\s+INTO\s+"?([A-Za-z0-9_]+)"?/gim)) {
-      if (match[1]) counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
-    }
-  }
-  return counts;
-}
-
-/**
- * What the target holds before and after the chain runs. A table the chain does
- * not seed must be empty. A table it seeds may hold only rows that a chain
- * migration wrote and nobody changed since: each such row carries the `xmin` of
- * its migration's `_migrations` row (one transaction per migration). An edited
- * seed row (a renamed channel, a retitled starter widget) has another `xmin`.
- * A later chain migration that rewrites an edited seed row would hide the edit,
- * so the copy runs the chain only on a target with no tables (a target at an
- * older head is refused before the chain).
+ * What the target holds. The copy writes only into a database with no tables:
+ * it runs the chain itself, so every seed row in the target is one the chain
+ * just wrote. A database an API (or a restore) already migrated may hold edited
+ * seed rows (a renamed channel, a retitled starter widget), and no check on the
+ * migrated target can tell every edit apart from what the chain wrote: a later
+ * migration that rewrites an edited row hides the edit. Such a target is refused
+ * before anything is written. After the chain runs, the same function reads the
+ * head (`requireEmpty: false`).
  */
 async function inspectTarget(
   conn: Conn,
-  migrationsDir: string,
+  chainHead: number | null,
+  requireEmpty: boolean,
 ): Promise<{ head: number | null; error?: string }> {
   const tables = (
     await conn.unsafe(`
-      SELECT c.relname AS name,
-             EXISTS (SELECT 1 FROM pg_attribute a
-                      WHERE a.attrelid = c.oid AND a.attname = ${quoteLiteral(TABLE_ORDER_KEY)}
-                        AND NOT a.attisdropped) AS "hasRowid"
+      SELECT c.relname AS name
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')
        ORDER BY c.relname`)
-  ).map((r) => ({ name: String(r.name), hasRowid: r.hasRowid === true }));
+  ).map((r) => String(r.name));
   if (tables.length === 0) return { head: null };
-  if (!tables.some((t) => t.name === "_migrations")) {
+  const named = tables.slice(0, 10).join(", ");
+  if (!tables.includes("_migrations")) {
     return {
       head: null,
-      error: `the target database holds tables but no _migrations history (${tables
-        .slice(0, 10)
-        .map((t) => t.name)
-        .join(", ")}). Copy into an empty database only.`,
+      error: `the target database holds tables but no _migrations history (${named}). Copy into an empty database only.`,
     };
   }
   // Another tool's `_migrations` (for example `id`, `name`) is not this chain's history.
@@ -152,50 +132,22 @@ async function inspectTarget(
   }
   const headRow = await conn.unsafe("SELECT MAX(version)::bigint AS v FROM _migrations");
   const head = headRow[0]?.v === null || headRow[0]?.v === undefined ? null : Number(headRow[0].v);
-  const chain = loadPostgresMigrations(migrationsDir);
-  const chainStart = chain[0]?.version ?? 0;
-  const seeded = chainSeededTables(migrationsDir);
-  const seedCounts = chainSeedRowCounts(migrationsDir);
-  // The xmin rule needs one transaction per migration. A history written in
-  // one transaction (pg_restore --single-transaction, a scripted replay) gives
-  // every row the same xmin, so an edited seed row would pass as chain-written:
-  // then any row in a seeded table counts as occupied.
-  const [history] = await conn.unsafe(
-    `SELECT COUNT(*)::bigint AS n, COUNT(DISTINCT xmin::text)::bigint AS distinct_xmin
-       FROM _migrations WHERE version >= ${chainStart}`,
-  );
-  const xminTrusted = Number(history?.n ?? 0) === Number(history?.distinct_xmin ?? 0);
-  const occupied: string[] = [];
-  for (const table of tables) {
-    if (table.name === "_migrations") continue;
-    if (!seeded.has(table.name)) {
-      const rows = await conn.unsafe(
-        `SELECT EXISTS(SELECT 1 FROM ${quote(table.name)}) AS present`,
-      );
-      if (rows[0]?.present === true) occupied.push(table.name);
-      continue;
-    }
-    const expected = seedCounts.get(table.name) ?? 0;
-    const rows = await conn.unsafe(
-      `SELECT COUNT(*)::bigint AS n,
-              ${table.hasRowid ? `COALESCE(MAX(${quote(TABLE_ORDER_KEY)}), 0)::bigint` : "0::bigint"} AS top,
-              COUNT(*) FILTER (WHERE xmin::text NOT IN (
-                SELECT xmin::text FROM _migrations WHERE version >= ${chainStart}))::bigint AS changed
-         FROM ${quote(table.name)}`,
-    );
-    const count = Number(rows[0]?.n ?? 0);
-    const top = Number(rows[0]?.top ?? 0);
-    const changed = Number(rows[0]?.changed ?? 0);
-    if (count > expected || top > expected || changed > 0 || (!xminTrusted && count > 0))
-      occupied.push(table.name);
-  }
-  if (occupied.length > 0) {
+  if (!requireEmpty) return { head };
+  if (head !== chainHead) {
     return {
       head,
-      error: `the target database holds rows (tables: ${occupied.slice(0, 10).join(", ")}). Copy into an empty database only: the copy would replace them, so nothing was changed.`,
+      error:
+        `the target database is at migration ${head}, this build at ${chainHead}. ` +
+        "The copy runs the migrations itself: copy into a new, empty database. Nothing was written.",
     };
   }
-  return { head };
+  return {
+    head,
+    error:
+      `the target database already holds tables (${named}). The copy runs the migrations itself ` +
+      "and needs a database with no tables: a migrated database may hold edited seed rows the copy " +
+      "would replace. Copy into a new, empty database, and do not start an API on it first. Nothing was written.",
+  };
 }
 
 /** The reserved copy session as the pool the migration runner reserves from. */
@@ -754,7 +706,7 @@ export async function copyIntoPostgres(
         "Start the API of this build on the SQLite file once (it applies the chain), stop it, then copy.";
       // Inspect the target before the chain touches it: a refusal must leave its
       // schema and rows as they were.
-      const before = await inspectTarget(conn, options.migrationsDir);
+      const before = await inspectTarget(conn, chainHead, true);
       if (before.error) {
         report.error = before.error;
         return report;
@@ -763,62 +715,56 @@ export async function copyIntoPostgres(
         report.error = headError(before.head);
         return report;
       }
-      // Migrations commit one by one, so a later refusal cannot roll them back. A
-      // target with a migration history must already be at this build's head:
-      // otherwise the chain would move it forward even when the copy refuses.
-      if (before.head !== null && before.head !== chainHead) {
-        report.error =
-          `the target database is at migration ${before.head}, this build at ${chainHead}. ` +
-          "Copy into a new empty database, or start the API of this build on the target once, stop it, then copy. Nothing was written.";
-        return report;
-      }
-      // A database with no table gets the chain; one at the head keeps it.
-      await runPostgresMigrations(onConnection(conn), {
-        migrationsDir: options.migrationsDir,
-        log: (line) => log(line),
-      });
-      const after = await inspectTarget(conn, options.migrationsDir);
-      if (after.error) {
-        report.error = after.error;
-        return report;
-      }
-      if (after.head !== chainHead) {
-        report.error = headError(after.head);
-        return report;
-      }
-      const targets = await readTargetTables(conn);
-      const seeded = chainSeededTables(options.migrationsDir);
-
-      const sourceTables = source.tables();
-      const sourceNames = new Set(sourceTables.map((t) => t.name));
-      const rebuiltTables = new Set(["memory_vec"]);
-      const missing = sourceTables.filter((t) => !targets.has(t.name)).map((t) => t.name);
-      const extra = [...targets.keys()].filter(
-        (name) => name !== "_migrations" && !sourceNames.has(name) && !rebuiltTables.has(name),
-      );
-      if (missing.length > 0 || extra.length > 0) {
-        report.error = `the schemas differ: only in SQLite [${missing.join(", ")}], only in Postgres [${extra.join(", ")}]`;
-        return report;
-      }
-
-      // The width SQLite searches with today decides the rebuilt index, not the
-      // widths of every stored embedding (an old model can leave other widths).
-      const sourceIndex = source.vectorIndex?.() ?? null;
-      if (
-        targets.has("memory_vec") &&
-        sourceIndex?.dimensions &&
-        sourceIndex.dimensions !== options.embeddingDimensions
-      ) {
-        report.error =
-          `the SQLite vector index has ${sourceIndex.dimensions} dimensions, ` +
-          `but this copy indexes ${options.embeddingDimensions}. ` +
-          `Set EMBEDDING_DIMENSIONS=${sourceIndex.dimensions} (the value the API uses), then copy again. Nothing was written.`;
-        return report;
-      }
+      // The chain runs inside the copy transaction: a refusal at any later step
+      // rolls the schema back too, so the target stays empty for a re-run.
       const toPlan: PendingPlan[] = [];
       await conn.unsafe("BEGIN");
       let committed = false;
       try {
+        // The target has no table: the chain writes the schema and its seed rows.
+        await runPostgresMigrations(onConnection(conn), {
+          migrationsDir: options.migrationsDir,
+          log: (line) => log(line),
+          inCallerTransaction: true,
+        });
+        const after = await inspectTarget(conn, chainHead, false);
+        if (after.error) {
+          report.error = after.error;
+          return report;
+        }
+        if (after.head !== chainHead) {
+          report.error = headError(after.head);
+          return report;
+        }
+        const targets = await readTargetTables(conn);
+        const seeded = chainSeededTables(options.migrationsDir);
+
+        const sourceTables = source.tables();
+        const sourceNames = new Set(sourceTables.map((t) => t.name));
+        const rebuiltTables = new Set(["memory_vec"]);
+        const missing = sourceTables.filter((t) => !targets.has(t.name)).map((t) => t.name);
+        const extra = [...targets.keys()].filter(
+          (name) => name !== "_migrations" && !sourceNames.has(name) && !rebuiltTables.has(name),
+        );
+        if (missing.length > 0 || extra.length > 0) {
+          report.error = `the schemas differ: only in SQLite [${missing.join(", ")}], only in Postgres [${extra.join(", ")}]`;
+          return report;
+        }
+
+        // The width SQLite searches with today decides the rebuilt index, not the
+        // widths of every stored embedding (an old model can leave other widths).
+        const sourceIndex = source.vectorIndex?.() ?? null;
+        if (
+          targets.has("memory_vec") &&
+          sourceIndex?.dimensions &&
+          sourceIndex.dimensions !== options.embeddingDimensions
+        ) {
+          report.error =
+            `the SQLite vector index has ${sourceIndex.dimensions} dimensions, ` +
+            `but this copy indexes ${options.embeddingDimensions}. ` +
+            `Set EMBEDDING_DIMENSIONS=${sourceIndex.dimensions} (the value the API uses), then copy again. Nothing was written.`;
+          return report;
+        }
         await conn.unsafe("SET CONSTRAINTS ALL DEFERRED");
         for (const table of targets.values()) {
           if (table.hasUserTriggers)
@@ -1023,9 +969,12 @@ export async function copyIntoPostgres(
         if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
         report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${(error as Error).message}`;
         return report;
+      } finally {
+        // An early refusal returns without COMMIT: undo the chain and every write.
+        if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
       }
     } catch (error) {
-      // A failure before the copy transaction (target inspection, the chain):
+      // A failure before the copy transaction (target inspection):
       // it still goes into the report, so --json is written.
       report.error = `the copy did not start, no row was copied: ${(error as Error).message}`;
       return report;

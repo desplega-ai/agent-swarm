@@ -142,6 +142,15 @@ afterAll(async () => {
   for (const s of scratch) await s.drop();
 });
 
+/** Tables in the target schema: a refused copy rolls the chain back, so 0. */
+const tableCount = async () =>
+  (
+    await sql.unsafe(
+      `SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')`,
+    )
+  )[0].n;
+
 const run = (src: CopySource) =>
   copyIntoPostgres(src, { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} });
 
@@ -248,8 +257,7 @@ describe("copyIntoPostgres", () => {
       ["rowid 10", "at", "invalid timestamp"],
       ["rowid 11", "at", "invalid timestamp"],
     ]);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
-    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+    expect(await tableCount()).toBe(0);
   });
 
   test("copies the timestamp edges Postgres accepts", async () => {
@@ -284,7 +292,7 @@ describe("copyIntoPostgres", () => {
     const report = await run(fullSource(goodItems(), [item(1, [text("c1"), text("missing")])]));
     expect(report.ok).toBe(false);
     expect(report.error).toMatch(/nothing was written.*foreign key/);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
+    expect(await tableCount()).toBe(0);
   });
 
   test("a checksum difference rolls the copy back, so a re-run is not refused", async () => {
@@ -298,8 +306,7 @@ describe("copyIntoPostgres", () => {
     expect(report.ok).toBe(false);
     expect(report.error).toMatch(/checksum differs.*nothing was written/);
     expect(report.tables.find((t) => t.table === "items")?.equal).toBe(false);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
-    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+    expect(await tableCount()).toBe(0);
     const again = await run(fullSource());
     expect(again.error).toMatch(/checksum differs/);
   });
@@ -308,7 +315,7 @@ describe("copyIntoPostgres", () => {
     expect((await run(fullSource())).ok).toBe(true);
     const again = await run(fullSource());
     expect(again.ok).toBe(false);
-    expect(again.error).toMatch(/holds rows \(tables: [^)]*\bitems\b/);
+    expect(again.error).toMatch(/already holds tables \([^)]*\bitems\b/);
 
     const other = await createScratchDatabase("copyhead");
     scratch.push(other);
@@ -320,15 +327,17 @@ describe("copyIntoPostgres", () => {
     expect(behind.error).toMatch(/migration heads differ: source 0, target null/);
   });
 
-  test("refuses an operator row in a seeded table and keeps it", async () => {
+  test("refuses a target an API already migrated, even with only the chain's seed rows", async () => {
     const pool = new Bun.SQL({ url: db.url, max: 1 });
     try {
       await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
     } finally {
       await pool.close();
     }
-    // The chain's own seed row alone is no reason to refuse.
-    expect((await run(fullSource())).ok).toBe(true);
+    const refused = await run(fullSource());
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/already holds tables \([^)]*\bseeded\b/);
+    expect((await sql.unsafe("SELECT count(*)::int AS n FROM items"))[0].n).toBe(0);
 
     const other = await createScratchDatabase("copyseed");
     scratch.push(other);
@@ -336,14 +345,14 @@ describe("copyIntoPostgres", () => {
     try {
       await runPostgresMigrations(otherSql as never, { migrationsDir: dir, log: () => {} });
       await otherSql.unsafe("INSERT INTO seeded (name) VALUES ('operator row')");
-      const refused = await copyIntoPostgres(fullSource(), {
+      const withRow = await copyIntoPostgres(fullSource(), {
         url: other.url,
         migrationsDir: dir,
         embeddingDimensions: 4,
         log: () => {},
       });
-      expect(refused.ok).toBe(false);
-      expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+      expect(withRow.ok).toBe(false);
+      expect(withRow.error).toMatch(/already holds tables/);
       expect(
         (await otherSql.unsafe("SELECT name FROM seeded ORDER BY id")).map(
           (r: { name: string }) => r.name,
@@ -352,6 +361,36 @@ describe("copyIntoPostgres", () => {
     } finally {
       await otherSql.close();
     }
+  });
+
+  test("refuses an edited seed row that a later migration rewrote, and keeps the edit", async () => {
+    // The API's own runner migrates the target: 001 seeds the row, the operator
+    // edits it, 002 rewrites another column of that row. The UPDATE gives the
+    // edited row the xmin of a chain migration, so only an empty target is safe.
+    const migrate = async () => {
+      const pool = new Bun.SQL({ url: db.url, max: 1 });
+      try {
+        await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
+      } finally {
+        await pool.close();
+      }
+    };
+    await migrate();
+    await sql.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
+    writeFileSync(
+      join(dir, "002_next.sql"),
+      "ALTER TABLE seeded ADD COLUMN note text;\nUPDATE seeded SET note = 'set by 002';",
+    );
+    await migrate();
+    const refused = await copyIntoPostgres(
+      { ...fullSource(), migrationHead: () => 2 },
+      { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/already holds tables/);
+    expect(await sql.unsafe("SELECT name, note FROM seeded")).toEqual([
+      { name: "operator edit", note: "set by 002" },
+    ]);
   });
 
   test("refuses an edited seed row and keeps the edit", async () => {
@@ -365,7 +404,7 @@ describe("copyIntoPostgres", () => {
     await sql.unsafe("UPDATE seeded SET name = 'operator edit' WHERE id = 1");
     const refused = await run(fullSource());
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect(refused.error).toMatch(/already holds tables/);
     expect(
       (await sql.unsafe("SELECT name FROM seeded ORDER BY id")).map(
         (r: { name: string }) => r.name,
@@ -391,7 +430,7 @@ describe("copyIntoPostgres", () => {
       { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
     );
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect(refused.error).toMatch(/already holds tables/);
     expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("operator edit");
   });
 
@@ -410,7 +449,7 @@ describe("copyIntoPostgres", () => {
       { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
     );
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/holds rows \(tables: seeded\)/);
+    expect(refused.error).toMatch(/target database is at migration 1, this build at 2/);
     expect((await sql.unsafe("SELECT MAX(version)::int AS v FROM _migrations"))[0].v).toBe(1);
     expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("operator edit");
   });
@@ -443,13 +482,7 @@ describe("copyIntoPostgres", () => {
     ).toBe(0);
   });
 
-  test("a late rollback leaves the target sequence where it was", async () => {
-    const pool = new Bun.SQL({ url: db.url, max: 1 });
-    try {
-      await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
-    } finally {
-      await pool.close();
-    }
+  test("a late rollback undoes the chain too, so a re-run copies", async () => {
     // A duplicate history row fails the copy after the sequences restarted.
     const src = {
       ...fullSource(),
@@ -462,10 +495,12 @@ describe("copyIntoPostgres", () => {
     const report = await run(src);
     expect(report.ok).toBe(false);
     expect(report.error).toMatch(/nothing was written/);
+    expect(await tableCount()).toBe(0);
+    expect((await run(fullSource())).ok).toBe(true);
     const next = await sql.unsafe(
       "INSERT INTO seeded (name) VALUES ('next') RETURNING id::int AS id",
     );
-    expect(next[0].id).toBe(2);
+    expect(next[0].id).toBe(6);
   });
 
   test("carries an AUTOINCREMENT counter above 2^53 exactly", async () => {
@@ -492,23 +527,19 @@ describe("copyIntoPostgres", () => {
     );
   });
 
-  test("an exhausted counter on a refused copy leaves the sequence where it was", async () => {
-    const pool = new Bun.SQL({ url: db.url, max: 1 });
-    try {
-      await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
-    } finally {
-      await pool.close();
-    }
+  test("an exhausted counter on a refused copy leaves nothing behind", async () => {
     const report = await run({
       ...fullSource(),
       autoincrementCounters: () => ({ seeded: 9_223_372_036_854_775_807n }),
       migrationHistory: () => [HISTORY[0] as CopyMigration, ...HISTORY],
     });
     expect(report.ok).toBe(false);
+    expect(await tableCount()).toBe(0);
+    expect((await run(fullSource())).ok).toBe(true);
     const next = await sql.unsafe(
       "INSERT INTO seeded (name) VALUES ('next') RETURNING id::int AS id",
     );
-    expect(next[0].id).toBe(2);
+    expect(next[0].id).toBe(6);
   });
 
   test("refuses while another session holds the one-process lock", async () => {
@@ -603,7 +634,7 @@ CREATE TABLE memory_vec (memory_id text PRIMARY KEY, embedding vector);
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/have 8 dimensions, but this copy indexes 4/);
     expect(refused.error).toMatch(/EMBEDDING_DIMENSIONS=8/);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM agent_memory"))[0].n).toBe(0);
+    expect(await tableCount()).toBe(0);
 
     const copied = await copyIntoPostgres(memorySource(), {
       url: db.url,
@@ -662,7 +693,7 @@ CREATE TABLE memory_vec (memory_id text PRIMARY KEY, embedding vector);
     const byWidth = await run(mixed({ dimensions: 8, ids: ["new1", "new2"] }));
     expect(byWidth.ok).toBe(false);
     expect(byWidth.error).toMatch(/SQLite vector index has 8 dimensions.*EMBEDDING_DIMENSIONS=8/);
-    expect((await sql.unsafe("SELECT count(*)::int AS n FROM memory_vec"))[0].n).toBe(0);
+    expect(await tableCount()).toBe(0);
 
     // Width unknown, IDs known: a searchable memory the rebuild drops is refused.
     const byIds = await run(mixed({ dimensions: null, ids: ["new1", "new2"] }));

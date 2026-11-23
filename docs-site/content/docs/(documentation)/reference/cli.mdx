@@ -183,8 +183,8 @@ help and exits non-zero.
 
 Copy a SQLite database file into an empty Postgres database at the same
 migration head. Stop the API first. The command opens the SQLite file
-read-only, refuses a target that holds rows, and writes nothing when a value
-cannot be stored in Postgres. It compares the row count and a checksum of every
+read-only, refuses a target that already holds tables, and writes nothing when
+a value cannot be stored in Postgres. It compares the row count and a checksum of every
 table and exits 1 when one differs.
 
 ```bash

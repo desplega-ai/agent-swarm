@@ -95,7 +95,7 @@ In the window:
 
 Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the untouched SQLite file. Writes made on Postgres after the cutover are not copied back.
 
-What the copy does, step by step: opens the SQLite file read-only; refuses a target that holds rows (rows the Postgres chain seeds are replaced); disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table.
+What the copy does, step by step: opens the SQLite file read-only; refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table.
 
 ## Known differences
 
@@ -123,8 +123,8 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 | `db-query is off: DATABASE_QUERY_URL is not set` / `failed its probe` | Create the reader role (above). The log names the failed probe rule. |
 | `type "vector" does not exist` at the first start | Create the pgvector extension as a superuser, then start again. |
 | `db-copy: migration heads differ` | Start this build once on the SQLite file, stop it, copy again. |
-| `db-copy: the target database holds rows` | Copy into a new, empty database. A table the migrations seed (channels, roles, pricing, ...) may hold only those seed rows, unchanged. A target restored from a dump in one transaction cannot prove that, so its seed rows count as rows. |
-| `db-copy: the target database is at migration N, this build at M` | The copy runs the migrations only on a database with no tables. Copy into a new, empty database. |
+| `db-copy: the target database already holds tables` | Copy into a new, empty database. The copy runs the migrations itself. A migrated database (an API started on it, a restored dump) may hold edited seed rows (a renamed channel, a retitled widget) that the copy would replace, so it is refused. |
+| `db-copy: the target database is at migration N, this build at M` | Same cause: the target already holds tables. Copy into a new, empty database. |
 | `db-copy: the source embeddings have N dimensions` | Set `EMBEDDING_DIMENSIONS=N` (the API's value) and copy again. Nothing was written. |
 | `db-copy: --json ... is the SQLite source` | Write the report to another path. |
 | `[db-copy] ATTENTION metrics ...` | Edit that dashboard query into Postgres SQL (`$n` placeholders, quoted camelCase columns) after the cutover. |
