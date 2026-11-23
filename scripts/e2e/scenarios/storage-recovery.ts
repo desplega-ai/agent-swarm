@@ -1,6 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   createPostgresDatabase,
   dropPostgresDatabase,
@@ -62,8 +63,13 @@ async function sqliteRecovery(nonce: string) {
     sut.tempPaths.push(dir);
     const restored = join(dir, "recovered.sqlite");
     await Bun.write(restored, Bun.file(sut.dbPath));
-    const mainOnly = openReadOnlyDb(restored);
+    // This copy has no WAL sidecars. Read its checkpoint without creating any.
+    const mainOnly = openReadOnlyDb(`${pathToFileURL(restored).href}?immutable=1`);
     try {
+      expect(
+        mainOnly.get(sql`SELECT id FROM agent_tasks WHERE id = ${oldId}`),
+        "Missing historical task in the checkpoint",
+      );
       expect(
         mainOnly.get(sql`SELECT id FROM agent_tasks WHERE id = ${acknowledged.id}`) === null,
         "The acknowledged task was already checkpointed, so this fixture cannot prove WAL recovery",
