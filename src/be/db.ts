@@ -968,7 +968,7 @@ export async function getSlackTasksInThread(
   threadTs: string,
 ): Promise<AgentTask[]> {
   const rows = await getStorage().repos.tasks.listTasksInSlackThread(channelId, threadTs);
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -1014,11 +1014,11 @@ export async function updateTaskVcs(
   },
 ): Promise<AgentTask | null> {
   const row = await getStorage().transaction(async () => {
-    const updated = (await getStorage().repos.tasks.setTaskVcs(
+    const updated = await getStorage().repos.tasks.setTaskVcs(
       taskId,
       vcs,
       new Date().toISOString(),
-    )) as AgentTaskRow | null;
+    );
     if (updated) {
       await reconcileTaskPullRequestAttachments(taskId, updated.agentId, [
         updated.output,
@@ -1851,7 +1851,7 @@ export async function findRecentSimilarTasks(opts: {
     agentId: opts.agentId,
     limit: opts.limit ?? 50,
   });
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 type RoutingDecisionWorkerStatus = {
@@ -2417,7 +2417,7 @@ export async function createTaskExtended(
       });
 
       const provenance = getCurrentRunProvenance();
-      const inserted = (await tasks.insertTask({
+      const inserted = await tasks.insertTask({
         id,
         key: insertKey,
         agentId: options?.agentId ?? null,
@@ -2484,7 +2484,7 @@ export async function createTaskExtended(
         // can run that node inside the request of the script that triggered it.
         sourceStepId: options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
         sourceScriptRunId: options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
-      })) as AgentTaskRow | null;
+      });
       if (!inserted) throw new Error("Failed to create task");
 
       if (routingDecisionSnapshot) {
@@ -2618,7 +2618,7 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
     } catch {}
   }
 
-  const result = row ? rowToAgentTask(row as AgentTaskRow) : null;
+  const result = row ? rowToAgentTask(row) : null;
   // Notify lifecycle subscribers only after the claim commits: a replayed
   // or retried transaction runs this callback more than once.
   if (result) {
@@ -2666,7 +2666,7 @@ export async function releaseTask(
       });
   }
 
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 export async function acceptTask(taskId: string, agentId: string): Promise<AgentTask | null> {
@@ -2714,7 +2714,7 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
     getStorage().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
   }
 
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 export async function rejectTask(
@@ -2752,7 +2752,7 @@ export async function rejectTask(
       });
   }
 
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 /**
@@ -2778,7 +2778,7 @@ export async function moveTaskToBacklog(taskId: string): Promise<AgentTask | nul
     } catch {}
   }
 
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 /**
@@ -2803,7 +2803,7 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
     } catch {}
   }
 
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 /**
@@ -2833,7 +2833,7 @@ export async function promoteDraftTask(taskId: string): Promise<AgentTask | null
     } catch {}
   }
 
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 /**
@@ -2908,7 +2908,7 @@ export async function releaseStaleOfferedTasksForOfflineAgents(
 
 export async function getOfferedTasksForAgent(agentId: string): Promise<AgentTask[]> {
   const rows = await getStorage().repos.tasks.listOfferedTasksForAgent(agentId);
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -2957,7 +2957,7 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
       // Log creation is best-effort
     }
   }
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 export async function getUnassignedTasksCount(): Promise<number> {
@@ -3013,7 +3013,7 @@ export async function getUnassignedTaskIdsForAgent(
     if (rows.length === 0) break;
 
     for (const row of rows) {
-      const task = rowToAgentTask(row as AgentTaskRow);
+      const task = rowToAgentTask(row);
       if (isAgentEligibleForTask(agent, task) && (!accept || (await accept(task)))) {
         eligible.push(task.id);
         if (eligible.length >= limit) break;
@@ -3065,7 +3065,7 @@ export async function getDependentTasks(
 ): Promise<AgentTask[]> {
   const rows = await getStorage().repos.tasks.listDependentTasks(parentId);
 
-  const tasks = rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  const tasks = rows.map((row) => rowToAgentTask(row));
   if (opts?.includeTerminal) return tasks;
   return tasks.filter((t) => !isTerminalTaskStatus(t.status));
 }
@@ -5638,7 +5638,7 @@ export async function findTaskByAgentMailThread(
   agentmailThreadId: string,
 ): Promise<AgentTask | null> {
   const row = await getStorage().repos.tasks.findLatestTaskByAgentMailThread(agentmailThreadId);
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 // ============================================================================
@@ -5750,7 +5750,7 @@ export async function getStalledInProgressTasks(
 ): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
   const rows = await getStorage().repos.tasks.listStalledInProgressTasks(cutoff);
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -5788,7 +5788,7 @@ export async function getStalledInProgressTasks(
 export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
   const rows = await getStorage().repos.tasks.listStalePinnedResumes(cutoff);
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -5831,7 +5831,7 @@ export async function failPendingResumeIfUnclaimed(
     } catch {}
   }
 
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 /**
@@ -5864,7 +5864,7 @@ export async function getUnassignedPoolTasks(
   offset: number = 0,
 ): Promise<AgentTask[]> {
   const rows = await getStorage().repos.tasks.listUnassignedTasks(limit, offset);
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -5875,13 +5875,13 @@ export async function getUnassignedPoolTasks(
  */
 export async function getStaleUnassignedAffinityTasks(cutoffIso: string): Promise<AgentTask[]> {
   const rows = await getStorage().repos.tasks.listStaleUnassignedAffinityTasks(cutoffIso);
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 export async function getRecentFailedTasks(hours: number = 6): Promise<AgentTask[]> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   const rows = await getStorage().repos.tasks.listRecentFailedTasks(since, 20);
-  return rows.map((row) => rowToAgentTask(row as AgentTaskRow));
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 export async function getRecentCompletedCount(hours: number = 24): Promise<number> {
@@ -6455,7 +6455,7 @@ export async function getCompletedStepNodeIds(runId: string): Promise<string[]> 
 
 export async function getTaskByWorkflowRunStepId(stepId: string): Promise<AgentTask | null> {
   const row = await getStorage().repos.tasks.findTaskByWorkflowRunStepId(stepId);
-  return row ? rowToAgentTask(row as AgentTaskRow) : null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 export async function detachTaskFromWorkflowRunStep(taskId: string): Promise<void> {
@@ -9778,7 +9778,7 @@ export async function listTaskTemplates(opts?: {
  * `totalCostUsd`, so the session header can total the whole chain, not only the root.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
-  const rows = (await getStorage().repos.sessions.listChainWithCosts(rootTaskId)) as AgentTaskRow[];
+  const rows = await getStorage().repos.sessions.listChainWithCosts(rootTaskId);
   return rows.map(rowToAgentTask);
 }
 

@@ -4,7 +4,11 @@ import {
   TASK_PREVIEW_LENGTH,
   TASK_SIBLING_BLOCK,
   type TaskListFilters,
+  type TaskRoutingReason,
+  type TaskRoutingSource,
   type TaskRow,
+  type TaskSource,
+  type TaskStatus,
 } from "@desplega/storage";
 import { normalizeAssetKey } from "../../../assets/key";
 import type {
@@ -56,19 +60,21 @@ export function configureTaskReadDependencies(value: TaskReadDependencies): void
 
 /** Preview length for a task's `task` text (pool-triage needs to read it): TASK_PREVIEW_LENGTH. */
 
-export type AgentTaskRow = Omit<
-  TaskRow,
-  "status" | "source" | "routing_reason" | "routing_source"
-> & {
-  status: AgentTaskStatus;
-  source: AgentTaskSource;
-  routing_reason: RoutingReason | null;
-  routing_source: RoutingSource | null;
-};
+/** The repository row. Storage types its enum columns with the domain values. */
+export type AgentTaskRow = TaskRow;
 
-/** The repository row, typed with the enum columns `src/types.ts` narrows. */
+// Compile-time drift check: storage and `src/types.ts` list the same values.
+type SameValues<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+const enumColumnsMatch: [
+  SameValues<TaskStatus, AgentTaskStatus>,
+  SameValues<TaskSource, AgentTaskSource>,
+  SameValues<TaskRoutingReason, RoutingReason>,
+  SameValues<TaskRoutingSource, RoutingSource>,
+] = [true, true, true, true];
+void enumColumnsMatch;
+
 function toTask(row: TaskRow): AgentTask {
-  return rowToAgentTask(row as AgentTaskRow);
+  return rowToAgentTask(row);
 }
 
 function tasksRepo() {
@@ -772,16 +778,17 @@ export async function getAllTasks(
   filters?: TaskFilters,
   opts?: { slim?: boolean; fields?: "timeline" },
 ): Promise<AgentTask[] | AgentTaskSummary[] | AgentTaskTimelineItem[]> {
-  const fields =
-    opts?.fields === "timeline" ? "timeline" : opts?.slim ? ("slim" as const) : ("full" as const);
-  const rows = await tasksRepo().listTasks(
-    toListFilters(filters),
-    { orderBy: filters?.orderBy, limit: filters?.limit ?? 25, offset: filters?.offset ?? 0 },
-    fields,
-  );
+  // One call per projection, so each branch sees the row type of its own fields value.
+  const listFilters = toListFilters(filters);
+  const page = {
+    orderBy: filters?.orderBy,
+    limit: filters?.limit ?? 25,
+    offset: filters?.offset ?? 0,
+  };
 
-  if (fields === "timeline") {
-    return (rows as AgentTaskTimelineRow[]).map(rowToAgentTaskTimelineItem);
+  if (opts?.fields === "timeline") {
+    const rows = await tasksRepo().listTasks(listFilters, page, "timeline");
+    return rows.map(rowToAgentTaskTimelineItem);
   }
 
   // Filter for ready tasks (dependencies met) if requested. Both the full and
@@ -798,13 +805,15 @@ export async function getAllTasks(
     return items.filter((_, i) => readyFlags[i]);
   };
 
-  if (fields === "slim") {
-    let tasks = (rows as AgentTaskSummaryRow[]).map(rowToAgentTaskSummary);
+  if (opts?.slim) {
+    const rows = await tasksRepo().listTasks(listFilters, page, "slim");
+    let tasks = rows.map(rowToAgentTaskSummary);
     if (filters?.readyOnly) tasks = await filterReady(tasks);
     return tasks;
   }
 
-  let tasks = (rows as AgentTaskRow[]).map(rowToAgentTask);
+  const rows = await tasksRepo().listTasks(listFilters, page, "full");
+  let tasks = rows.map(rowToAgentTask);
   if (filters?.readyOnly) tasks = await filterReady(tasks);
   return tasks;
 }

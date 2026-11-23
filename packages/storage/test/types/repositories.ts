@@ -3,7 +3,13 @@
  * package fails when a directive below stops matching an error. Nothing here
  * runs.
  */
-import type { AgentsRepository, NewAgent, TasksRepository } from "../../src";
+import type {
+  AgentsRepository,
+  NewAgent,
+  NewTaskRow,
+  TaskStatus,
+  TasksRepository,
+} from "../../src";
 
 declare const agents: AgentsRepository;
 declare const tasks: TasksRepository;
@@ -34,4 +40,20 @@ export async function listProjectionsExposeOnlyTheirColumns(): Promise<void> {
   const [full] = await tasks.listTasks({}, page, "full");
   const output: string | null | undefined = full?.output;
   void output;
+}
+
+declare const newTask: NewTaskRow;
+
+export async function taskEnumColumnsAreChecked(): Promise<void> {
+  // @ts-expect-error a misspelled status fails on insert
+  await tasks.insertTask({ ...newTask, status: "in_progres" });
+  // @ts-expect-error a source outside the domain list fails on insert
+  await tasks.insertTask({ ...newTask, source: "email" });
+  // @ts-expect-error routing_reason takes only the CHECK constraint's values
+  await tasks.insertTask({ ...newTask, routing_reason: "random" });
+  const row = await tasks.findTaskById("t1");
+  const status: TaskStatus | undefined = row?.status;
+  const routing: "declared" | "engine_default" | null | undefined = row?.routing_source;
+  void status;
+  void routing;
 }

@@ -1,6 +1,10 @@
 import { nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlIdent, sqlList, sqlWhere } from "../sql";
+import type { TaskRow } from "./tasks";
+
+/** One task of a root chain (`t.*`) with the summed session cost of that task. */
+export type TaskChainRow = Omit<TaskRow, "totalCostUsd"> & { totalCostUsd: number | null };
 
 /**
  * Domain: sessions and cost (`session_logs`, `session_costs`,
@@ -506,7 +510,7 @@ export interface SessionsRepository {
    */
   listChainWithCosts(
     rootTaskId: string,
-  ): Promise<(Record<string, unknown> & { totalCostUsd: number | null })[]>;
+  ): Promise<TaskChainRow[]>;
   /** A task's lines in insert order; with `limit`, only the newest `limit` lines (still oldest first). */
   listLogsByTask(taskId: string, limit?: number): Promise<SessionLogRow[]>;
   /** One iteration's lines in insert order. */
@@ -904,7 +908,7 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   /** Insert order and the join-order hint are engine-specific. */
   abstract listChainWithCosts(
     rootTaskId: string,
-  ): Promise<(Record<string, unknown> & { totalCostUsd: number | null })[]>;
+  ): Promise<TaskChainRow[]>;
 
   /** Insert order needs the engine's insert sequence. */
   abstract listLogsByTask(taskId: string, limit?: number): Promise<SessionLogRow[]>;

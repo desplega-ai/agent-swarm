@@ -18,6 +18,7 @@ import {
   type SessionListTriageWrite,
   type SessionLogRow,
   type SessionPageMemberRow,
+  type TaskChainRow,
   type SessionRootFilterSpec,
   type SessionShareRow,
   type SessionSummaryDriftRow,
@@ -133,7 +134,7 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
 
   listChainWithCosts(
     rootTaskId: string,
-  ): Promise<(Record<string, unknown> & { totalCostUsd: number | null })[]> {
+  ): Promise<TaskChainRow[]> {
     // rowid breaks createdAt ties as idx_agent_tasks_created did. CROSS JOIN
     // keeps the chain as the outer loop: with a plain JOIN, SQLite scanned all
     // of agent_tasks to skip the sort.

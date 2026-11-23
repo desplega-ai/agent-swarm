@@ -9,6 +9,7 @@ import type {
   SessionTreeRules,
   SessionViewerSpec,
   SourceBackfillRootRow,
+  TaskChainRow,
 } from "@desplega/storage";
 import {
   BaseSessionsRepository,
@@ -146,7 +147,7 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
 
   listChainWithCosts(
     rootTaskId: string,
-  ): Promise<(Record<string, unknown> & { totalCostUsd: number | null })[]> {
+  ): Promise<TaskChainRow[]> {
     return this.db.query(sql`
       WITH RECURSIVE chain(id) AS (
         SELECT id FROM agent_tasks WHERE id = ${rootTaskId}

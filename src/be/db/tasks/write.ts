@@ -1,4 +1,3 @@
-import type { TaskRow } from "@desplega/storage";
 import pkg from "../../../../package.json";
 import { defaultAssetKey } from "../../../assets/key";
 import { sessionSourceKey } from "../../../assets/source-key";
@@ -31,20 +30,10 @@ import {
   reclassifyTaskHumanFree,
   tagWriteChangesHumanFree,
 } from "./human-free";
-import {
-  type AgentTaskRow,
-  getTaskById,
-  NEVER_STARTED_TASK_STATUSES,
-  rowToAgentTask,
-} from "./read";
+import { getTaskById, NEVER_STARTED_TASK_STATUSES, rowToAgentTask } from "./read";
 
 function tasksRepo() {
   return getStorage().repos.tasks;
-}
-
-/** The repository row, typed with the enum columns `src/types.ts` narrows. */
-function asRow(row: TaskRow | null): AgentTaskRow | null {
-  return row as AgentTaskRow | null;
 }
 
 type TaskWriteDependencies = {
@@ -100,26 +89,24 @@ export async function createTask(
   const id = crypto.randomUUID();
   const source = options?.source ?? "mcp";
   const isHumanFree = await classifyTaskHumanFree({ source });
-  const row = asRow(
-    await tasksRepo().insertSimpleTask({
-      id,
-      key:
-        sessionSourceKey({
-          id,
-          slackChannelId: options?.slackChannelId,
-          slackThreadTs: options?.slackThreadTs,
-        }) ?? defaultAssetKey("task", id),
-      agentId,
-      task: scrubSecrets(task),
-      status: "pending",
-      source,
-      slackChannelId: options?.slackChannelId ?? null,
-      slackThreadTs: options?.slackThreadTs ?? null,
-      slackUserId: options?.slackUserId ?? null,
-      swarmVersion: pkg.version,
-      isHumanFree,
-    }),
-  );
+  const row = await tasksRepo().insertSimpleTask({
+    id,
+    key:
+      sessionSourceKey({
+        id,
+        slackChannelId: options?.slackChannelId,
+        slackThreadTs: options?.slackThreadTs,
+      }) ?? defaultAssetKey("task", id),
+    agentId,
+    task: scrubSecrets(task),
+    status: "pending",
+    source,
+    slackChannelId: options?.slackChannelId ?? null,
+    slackThreadTs: options?.slackThreadTs ?? null,
+    slackUserId: options?.slackUserId ?? null,
+    swarmVersion: pkg.version,
+    isHumanFree,
+  });
   if (!row) throw new Error("Failed to create task");
   try {
     await dependencies.createLogEntry({
@@ -185,7 +172,7 @@ export async function getPendingTaskForAgent(
   probe?: PendingTaskProbe,
 ): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
-  const rows = (await tasksRepo().listPendingTasksForAgent(agentId)) as AgentTaskRow[];
+  const rows = await tasksRepo().listPendingTasksForAgent(agentId);
 
   const agent = await getAgentById(agentId);
   if (!agent) return null;
@@ -259,29 +246,27 @@ export async function assignUnassignedTaskPending(
   const now = new Date().toISOString();
   const snapshot = options.routingSnapshot;
   // Revalidate snapshots and capacity in the write itself, without holding a lock during routing.
-  const row = asRow(
-    await tasksRepo().assignUnassignedTask({
-      taskId,
-      agentId,
-      now,
-      poolWakeAt: options.poolWakeAt ?? null,
-      guards: {
-        snapshot: snapshot
-          ? {
-              taskLastUpdatedAt: snapshot.task.lastUpdatedAt,
-              agentLastUpdatedAt: snapshot.agent.lastUpdatedAt,
-            }
-          : undefined,
-        pool: snapshot?.pool
-          ? {
-              id: snapshot.pool.id,
-              updatedAt: snapshot.pool.updatedAt,
-              at: options.poolWakeAt ?? now,
-            }
-          : undefined,
-      },
-    }),
-  );
+  const row = await tasksRepo().assignUnassignedTask({
+    taskId,
+    agentId,
+    now,
+    poolWakeAt: options.poolWakeAt ?? null,
+    guards: {
+      snapshot: snapshot
+        ? {
+            taskLastUpdatedAt: snapshot.task.lastUpdatedAt,
+            agentLastUpdatedAt: snapshot.agent.lastUpdatedAt,
+          }
+        : undefined,
+      pool: snapshot?.pool
+        ? {
+            id: snapshot.pool.id,
+            updatedAt: snapshot.pool.updatedAt,
+            at: options.poolWakeAt ?? now,
+          }
+        : undefined,
+    },
+  });
 
   if (row) {
     try {
@@ -309,7 +294,7 @@ export async function startTask(taskId: string): Promise<AgentTask | null> {
     return null;
   }
 
-  const row = asRow(await tasksRepo().startTask(taskId));
+  const row = await tasksRepo().startTask(taskId);
   if (row && oldTask) {
     try {
       await dependencies.createLogEntry({
@@ -340,21 +325,19 @@ export async function updateTaskClaudeSessionId(
   /** Effort the session runs at; null records that the harness default applied. */
   resolvedEffort?: ReasoningEffort | null,
 ): Promise<AgentTask | null> {
-  const row = asRow(
-    await tasksRepo().setTaskSessionColumns(
-      taskId,
-      {
-        claudeSessionId,
-        provider,
-        providerMeta: providerMeta !== undefined ? JSON.stringify(providerMeta) : undefined,
-        model,
-        harnessVariant,
-        harnessVariantMeta:
-          harnessVariantMeta !== undefined ? JSON.stringify(harnessVariantMeta) : undefined,
-        resolvedEffort,
-      },
-      new Date().toISOString(),
-    ),
+  const row = await tasksRepo().setTaskSessionColumns(
+    taskId,
+    {
+      claudeSessionId,
+      provider,
+      providerMeta: providerMeta !== undefined ? JSON.stringify(providerMeta) : undefined,
+      model,
+      harnessVariant,
+      harnessVariantMeta:
+        harnessVariantMeta !== undefined ? JSON.stringify(harnessVariantMeta) : undefined,
+      resolvedEffort,
+    },
+    new Date().toISOString(),
   );
   return row ? rowToAgentTask(row) : null;
 }
@@ -383,7 +366,7 @@ export async function updateTaskTitle(
   title: string | null,
 ): Promise<AgentTask | null> {
   const normalized = title === null ? null : title.trim() || null;
-  const row = asRow(await tasksRepo().setTaskTitle(taskId, normalized));
+  const row = await tasksRepo().setTaskTitle(taskId, normalized);
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -407,7 +390,7 @@ export async function updateTaskTags(
       (tag) => !removed.has(tag),
     );
     const nextTagsJson = JSON.stringify(nextTags);
-    const updated = asRow(await repo.setTaskTags(taskId, nextTagsJson, false));
+    const updated = await repo.setTaskTags(taskId, nextTagsJson, false);
     if (updated && tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
       await reclassifyTaskHumanFree([taskId]);
     }
@@ -428,7 +411,7 @@ export async function setTaskTitleIfUnset(
 ): Promise<AgentTask | null> {
   const normalized = title.trim();
   if (!normalized) return null;
-  const row = asRow(await tasksRepo().setTaskTitleIfUnset(taskId, normalized));
+  const row = await tasksRepo().setTaskTitleIfUnset(taskId, normalized);
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -462,24 +445,22 @@ export async function completeTask(
     // The status predicate re-checks the idempotency guard atomically: the
     // await between the guard read above and this write lets a racing
     // terminal transition (e.g. heartbeat failTask) land first.
-    let completed = asRow(
-      await repo.finishTask(id, {
-        status: "completed",
-        statusKind: options?.statusKind ?? null,
-        finishedAt,
-      }),
-    );
+    let completed = await repo.finishTask(id, {
+      status: "completed",
+      statusKind: options?.statusKind ?? null,
+      finishedAt,
+    });
     if (!completed) return null;
 
     if (scrubbedOutput) {
-      completed = asRow(await repo.setTaskOutput(id, scrubbedOutput));
+      completed = await repo.setTaskOutput(id, scrubbedOutput);
     }
     if (completed && options?.addTags?.length) {
       const existingTags: string[] = completed.tags ? JSON.parse(completed.tags) : [];
       const nextTags = Array.from(new Set([...existingTags, ...options.addTags]));
       const previousTagsJson = completed.tags;
       const nextTagsJson = JSON.stringify(nextTags);
-      completed = asRow(await repo.setTaskTags(id, nextTagsJson, true));
+      completed = await repo.setTaskTags(id, nextTagsJson, true);
       // Only a tag the classifier reads (e.g. "heartbeat") can flip the flag;
       // a "deferred" write must not walk the task's whole subtree.
       if (tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
@@ -487,9 +468,7 @@ export async function completeTask(
       }
     }
     if (completed && options?.deferredAt) {
-      completed = asRow(
-        await repo.setTaskDeferral(id, options.deferredAt, options.deferredUntil ?? null),
-      );
+      completed = await repo.setTaskDeferral(id, options.deferredAt, options.deferredUntil ?? null);
     }
     if (completed) {
       await dependencies.reconcileTaskPullRequestAttachments(id, completed.agentId, [
@@ -596,15 +575,13 @@ export async function failTask(
   const scrubbedReason = scrubSecrets(reason);
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
-  const row = asRow(
-    await tasksRepo().finishTask(id, {
-      status: "failed",
-      statusKind: opts.statusKind ?? null,
-      failureReason: scrubbedReason,
-      finishedAt,
-      expectedLastUpdatedAt: opts.expectedLastUpdatedAt,
-    }),
-  );
+  const row = await tasksRepo().finishTask(id, {
+    status: "failed",
+    statusKind: opts.statusKind ?? null,
+    failureReason: scrubbedReason,
+    finishedAt,
+    expectedLastUpdatedAt: opts.expectedLastUpdatedAt,
+  });
   if (row && oldTask) {
     dependencies.emitTaskLifecycleTelemetryAfterCommit(
       "failed",
@@ -693,7 +670,7 @@ export async function overwriteTerminalTaskResultText(
       : (task.failureReason ?? null);
   const repo = tasksRepo();
   const row = await getStorage().transaction(async () => {
-    const updated = asRow(await repo.overwriteTerminalResultText(id, output, failureReason));
+    const updated = await repo.overwriteTerminalResultText(id, output, failureReason);
     if (updated && patch.output !== undefined) {
       await dependencies.reconcileTaskPullRequestAttachments(id, updated.agentId, [
         updated.output,
@@ -731,14 +708,12 @@ export async function cancelTask(
   const cancelReason = scrubSecrets(reason ?? "Cancelled by user");
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
-  const row = asRow(
-    await tasksRepo().finishTask(id, {
-      status: "cancelled",
-      statusKind: options.statusKind ?? null,
-      failureReason: cancelReason,
-      finishedAt,
-    }),
-  );
+  const row = await tasksRepo().finishTask(id, {
+    status: "cancelled",
+    statusKind: options.statusKind ?? null,
+    failureReason: cancelReason,
+    finishedAt,
+  });
 
   if (row && oldTask) {
     const recipients = new Set([row.agentId, row.offeredTo]);
@@ -861,14 +836,12 @@ export async function skipTask(
   const skipReason = scrubSecrets(reason);
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
-  const row = asRow(
-    await tasksRepo().finishTask(id, {
-      status: "skipped",
-      statusKind: opts.statusKind ?? null,
-      failureReason: skipReason,
-      finishedAt,
-    }),
-  );
+  const row = await tasksRepo().finishTask(id, {
+    status: "skipped",
+    statusKind: opts.statusKind ?? null,
+    failureReason: skipReason,
+    finishedAt,
+  });
   if (!row) return null;
 
   try {
@@ -945,15 +918,13 @@ export async function supersedeTask(
   }
 
   const finishedAt = new Date().toISOString();
-  const row = asRow(
-    await tasksRepo().finishTask(id, {
-      status: "superseded",
-      statusKind:
-        args.statusKind ?? (isTaskStatusKindFor("superseded", args.reason) ? args.reason : null),
-      finishedAt,
-      expectedLastUpdatedAt: args.expectedLastUpdatedAt,
-    }),
-  );
+  const row = await tasksRepo().finishTask(id, {
+    status: "superseded",
+    statusKind:
+      args.statusKind ?? (isTaskStatusKindFor("superseded", args.reason) ? args.reason : null),
+    finishedAt,
+    expectedLastUpdatedAt: args.expectedLastUpdatedAt,
+  });
 
   if (row && oldTask) {
     dependencies.emitTaskLifecycleTelemetryAfterCommit(
@@ -1129,7 +1100,7 @@ export async function pauseTask(id: string): Promise<AgentTask | null> {
     return null;
   }
 
-  const row = asRow(await tasksRepo().pauseTask(id));
+  const row = await tasksRepo().pauseTask(id);
 
   if (row && oldTask) {
     try {
@@ -1155,7 +1126,7 @@ export async function resumeTask(taskId: string): Promise<AgentTask | null> {
   const oldTask = await getTaskById(taskId);
   if (!oldTask || oldTask.status !== "paused") return null;
 
-  const row = asRow(await tasksRepo().resumePausedTask(taskId));
+  const row = await tasksRepo().resumePausedTask(taskId);
 
   if (row && oldTask) {
     try {
@@ -1182,7 +1153,7 @@ export async function getPausedTasksForAgent(
   agentId: string,
   readableBy?: { userId: string | null },
 ): Promise<AgentTask[]> {
-  const rows = (await tasksRepo().listPausedTasksForAgent(agentId, readableBy)) as AgentTaskRow[];
+  const rows = await tasksRepo().listPausedTasksForAgent(agentId, readableBy);
   return rows.map(rowToAgentTask);
 }
 
@@ -1191,7 +1162,7 @@ export async function getOrphanedInProgressTasksForAgent(
   minAgeSeconds = 60,
 ): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
-  const rows = (await tasksRepo().listOrphanedInProgressTasks(agentId, cutoff)) as AgentTaskRow[];
+  const rows = await tasksRepo().listOrphanedInProgressTasks(agentId, cutoff);
   return rows.map(rowToAgentTask);
 }
 
@@ -1200,7 +1171,7 @@ export async function resetOrphanedInProgressTasksForAgent(
   minAgeSeconds = 60,
 ): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
-  const rows = (await tasksRepo().resetOrphanedInProgressTasks(agentId, cutoff)) as AgentTaskRow[];
+  const rows = await tasksRepo().resetOrphanedInProgressTasks(agentId, cutoff);
 
   for (const row of rows) {
     try {
@@ -1228,11 +1199,7 @@ export async function getRecentlyCancelledTasksForAgent(
   readableBy?: { userId: string | null },
 ): Promise<AgentTask[]> {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const rows = (await tasksRepo().listRecentlyCancelledTasks(
-    agentId,
-    fiveMinutesAgo,
-    readableBy,
-  )) as AgentTaskRow[];
+  const rows = await tasksRepo().listRecentlyCancelledTasks(agentId, fiveMinutesAgo, readableBy);
   return rows.map(rowToAgentTask);
 }
 
@@ -1253,7 +1220,7 @@ export async function deleteTask(id: string): Promise<boolean> {
 
 export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {
   const scrubbedProgress = scrubSecrets(progress);
-  const row = asRow(await tasksRepo().updateTaskProgress(id, scrubbedProgress));
+  const row = await tasksRepo().updateTaskProgress(id, scrubbedProgress);
   if (row) {
     try {
       await dependencies.createLogEntry({

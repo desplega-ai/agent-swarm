@@ -15,7 +15,7 @@ import {
   MAX_EMPTY_POLLS,
   releaseTask,
 } from "../db";
-import { type AgentTaskRow, rowToAgentTask } from "../db/tasks/read";
+import { rowToAgentTask } from "../db/tasks/read";
 import { resolveGroupForAgent } from "../model-group-resolution";
 import { checkProfileForAgent, runtimeReadsRepoSecrets } from "../model-profile-check";
 import { poolTaskRunsOnHarness } from "../model-validation";
@@ -63,7 +63,7 @@ export async function routePoolTasks(
   }
   const releasedFrom = new Map<string, string>();
   if (enabled && !opts.taskIds) {
-    const pending = (await getStorage().repos.tasks.listPoolPendingTasks()) as AgentTaskRow[];
+    const pending = await getStorage().repos.tasks.listPoolPendingTasks();
     for (const task of pending.map(rowToAgentTask)) {
       const agent = allAgents.find((a) => a.id === task.agentId);
       const pool = pools.find((p) => p.id === agent?.runtimePoolId);

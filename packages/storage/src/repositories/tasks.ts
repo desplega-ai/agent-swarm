@@ -19,7 +19,69 @@ import { EMPTY, SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../s
  * (flags 0/1, JSON as text, timestamps as the text the column stores).
  */
 
-/** One `agent_tasks` row. Enum-like columns are plain text here; `src/` narrows them. */
+/**
+ * The `agent_tasks.status` values. No CHECK constraint guards this column:
+ * the typed writes below are the only writers. `src/types.ts`
+ * (`AgentTaskStatusSchema`) must list the same values; `src/be/db/tasks/read.ts`
+ * fails to compile when they drift.
+ */
+export const TASK_STATUSES = [
+  "draft",
+  "backlog",
+  "unassigned",
+  "offered",
+  "reviewing",
+  "pending",
+  "in_progress",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+  "superseded",
+  "skipped",
+] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+/**
+ * The `agent_tasks.source` values. Migration 056 dropped the column's CHECK so
+ * a new source needs no table rebuild; the typed writes below are the only
+ * writers. `AgentTaskSourceSchema` in `src/types.ts` must list the same values.
+ */
+export const TASK_SOURCES = [
+  "mcp",
+  "slack",
+  "api",
+  "ui",
+  "github",
+  "gitlab",
+  "azure-devops",
+  "bitbucket",
+  "agentmail",
+  "system",
+  "schedule",
+  "workflow",
+  "linear",
+  "jira",
+  "comb",
+  "chat",
+] as const;
+export type TaskSource = (typeof TASK_SOURCES)[number];
+
+/** The values the `agent_tasks.routing_reason` CHECK constraint allows, on both engines. */
+export const TASK_ROUTING_REASONS = [
+  "skill",
+  "continuity",
+  "overflow",
+  "human_pinned",
+  "reroute_fault",
+] as const;
+export type TaskRoutingReason = (typeof TASK_ROUTING_REASONS)[number];
+
+/** The values the `agent_tasks.routing_source` CHECK constraint allows, on both engines. */
+export const TASK_ROUTING_SOURCES = ["declared", "engine_default"] as const;
+export type TaskRoutingSource = (typeof TASK_ROUTING_SOURCES)[number];
+
+/** One `agent_tasks` row. */
 export type TaskRow = {
   id: string;
   key: string;
@@ -27,10 +89,10 @@ export type TaskRow = {
   creatorAgentId: string | null;
   task: string;
   title: string | null;
-  status: string;
-  source: string;
-  routing_reason: string | null;
-  routing_source: string | null;
+  status: TaskStatus;
+  source: TaskSource;
+  routing_reason: TaskRoutingReason | null;
+  routing_source: TaskRoutingSource | null;
   routing_note: string | null;
   pool_wake_at: string | null;
   taskType: string | null;
@@ -525,10 +587,10 @@ export type NewTaskRow = {
   agentId: string | null;
   creatorAgentId: string | null;
   task: string;
-  status: string;
-  source: string;
-  routing_reason: string | null;
-  routing_source: string | null;
+  status: TaskStatus;
+  source: TaskSource;
+  routing_reason: TaskRoutingReason | null;
+  routing_source: TaskRoutingSource | null;
   routing_note: string | null;
   taskType: string | null;
   tags: string;
