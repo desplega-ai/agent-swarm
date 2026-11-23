@@ -21,6 +21,7 @@ import {
   type TaskListFields,
   type TaskListFilters,
   type TaskListPage,
+  type TaskListRow,
   type TaskRow,
 } from "@desplega/storage";
 
@@ -217,11 +218,11 @@ export class PostgresTasksRepository extends BaseTasksRepository {
     return Number(row?.c ?? 0);
   }
 
-  async listTasks(
+  async listTasks<F extends TaskListFields>(
     filters: TaskListFilters,
     page: TaskListPage,
-    fields: TaskListFields,
-  ): Promise<Record<string, unknown>[]> {
+    fields: F,
+  ): Promise<TaskListRow<F>[]> {
     const conditions = await this.taskFilterConditions(filters, "page");
     if (!filters.includeHeartbeat) conditions.push(this.notHeartbeat());
     if (filters.readableBy) {
@@ -233,7 +234,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
       page.orderBy === "createdAt"
         ? `agent_tasks."createdAt" DESC, agent_tasks."_rowid" DESC`
         : `agent_tasks."lastUpdatedAt" DESC, agent_tasks.priority DESC, agent_tasks."_rowid" DESC`;
-    return this.db.query<Record<string, unknown>>(sql`WITH page AS (
+    return this.db.query<TaskListRow<F>>(sql`WITH page AS (
       SELECT agent_tasks."_rowid" AS rid FROM agent_tasks${sqlWhere(conditions)}
       ORDER BY ${raw(order)} LIMIT ${raw(String(page.limit))} OFFSET ${raw(String(page.offset))}
     )

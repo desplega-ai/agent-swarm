@@ -10,11 +10,15 @@ import { readableSessionSql } from "./tasks";
  * text, timestamps as the text the column stores).
  */
 
+/** The values the `agents.status` CHECK constraint allows, on both engines. */
+export const AGENT_STATUSES = ["idle", "busy", "offline", "waiting_for_credentials"] as const;
+export type AgentStatus = (typeof AGENT_STATUSES)[number];
+
 export type AgentRow = {
   id: string;
   name: string;
   isLead: number;
-  status: string;
+  status: AgentStatus;
   description: string | null;
   role: string | null;
   capabilities: string | null;
@@ -44,7 +48,7 @@ export type NewAgent = {
   id: string;
   name: string;
   isLead: boolean;
-  status: string;
+  status: AgentStatus;
   maxTasks: number;
   provider: string | null;
   harnessProvider: string | null;
@@ -76,6 +80,11 @@ export type AgentSimpleColumn =
   | "harness_provider"
   | "cred_status"
   | "credentialMissing";
+
+/** Values for `setAgentColumns`: `status` takes only the statuses the CHECK allows. */
+export type AgentColumnValues = Partial<
+  { status: AgentStatus } & Record<Exclude<AgentSimpleColumn, "status">, string | number | null>
+>;
 
 export type AgentHistoryRow = {
   id: string;
@@ -221,7 +230,7 @@ export interface AgentsRepository {
   /** Sets the given columns plus `lastUpdatedAt` to now. */
   setAgentColumns(
     id: string,
-    values: Partial<Record<AgentSimpleColumn, string | number | null>>,
+    values: AgentColumnValues,
   ): Promise<AgentRow | null>;
   /** COALESCE profile update; see {@link AgentProfileUpdate}. */
   updateAgentProfile(id: string, update: AgentProfileUpdate): Promise<AgentRow | null>;
@@ -520,7 +529,7 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
 
   setAgentColumns(
     id: string,
-    values: Partial<Record<AgentSimpleColumn, string | number | null>>,
+    values: AgentColumnValues,
   ): Promise<AgentRow | null> {
     const sets: SqlQuery[] = [];
     for (const [column, value] of Object.entries(values)) {

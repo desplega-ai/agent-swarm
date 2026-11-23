@@ -1,3 +1,4 @@
+import type { AgentRow as StorageAgentRow } from "@desplega/storage";
 import type {
   Agent,
   AgentAvatar,
@@ -40,40 +41,8 @@ export function configureAgentDependencies(value: AgentDependencies): void {
 // Agent Queries
 // ============================================================================
 
-export type AgentRow = {
-  id: string;
-  name: string;
-  isLead: number;
-  status: AgentStatus;
-  description: string | null;
-  role: string | null;
-  capabilities: string | null;
-  maxTasks: number | null;
-  emptyPollCount: number | null;
-  claudeMd: string | null;
-  soulMd: string | null;
-  identityMd: string | null;
-  setupScript: string | null;
-  toolsMd: string | null;
-  heartbeatMd: string | null;
-  lastActivityAt: string | null;
-  provider: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  /** JSON array of env-var names; populated only when status is `waiting_for_credentials`. */
-  credentialMissing: string | null;
-  /** Phase 1.5: per-agent harness provider pushed on worker registration. */
-  harness_provider: string | null;
-  /** Migration 055: worker-self-reported credential snapshot (JSON of AgentCredStatus). NULL = unreported. */
-  cred_status: string | null;
-  /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
-  avatar: string | null;
-  /** Migration 256: JSON of AgentSlackIcon. */
-  slack_icon: string | null;
-  runtime_pool_id: string | null;
-  runtime_provision_attempts: number;
-  runtime_provision_retry_at: string | null;
-};
+/** The storage row type: one canonical shape for the repository and its callers. */
+export type AgentRow = StorageAgentRow;
 
 /** Safe-parse the `avatar` JSON column. Malformed/invalid content (e.g. a
  * hand-edited row, or a future downgrade) falls back to `null` so rendering
@@ -163,10 +132,10 @@ export async function updateAgentCredentialState(
   const prev = await getAgentById(agentId);
   const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
   const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
-  const row = (await agentsRepo().setAgentColumns(agentId, {
+  const row = await agentsRepo().setAgentColumns(agentId, {
     status,
     credentialMissing: missingJson,
-  })) as AgentRow | null;
+  });
   // Only clear the accumulated empty-poll count on a genuine recovery
   // (waiting_for_credentials -> ready), so routine post-task `ready:true`
   // reports don't clobber a legitimately accumulated count and defeat the
@@ -211,7 +180,7 @@ export async function createAgent(
   const storage = getStorage();
   const row = await storage.transaction(async () => {
     if (await isAgentDeleted(id)) throw new AgentDeletedError(id);
-    return (await storage.repos.agents.insertAgent({
+    return storage.repos.agents.insertAgent({
       id,
       name: agent.name,
       isLead: agent.isLead === true,
@@ -219,7 +188,7 @@ export async function createAgent(
       maxTasks,
       provider: agent.provider ?? null,
       harnessProvider: agent.harnessProvider ?? null,
-    })) as AgentRow | null;
+    });
   });
   if (!row) throw new Error("Failed to create agent");
   try {
@@ -250,7 +219,7 @@ export async function createAgent(
 }
 
 export async function getAgentById(id: string): Promise<Agent | null> {
-  const row = (await agentsRepo().findAgentById(id)) as AgentRow | null;
+  const row = await agentsRepo().findAgentById(id);
   return row ? rowToAgent(row) : null;
 }
 
@@ -322,9 +291,9 @@ export async function getAllAgents(opts?: {
   slim?: boolean;
   includeExtensions?: boolean;
 }): Promise<Agent[]> {
-  const rows = (await agentsRepo().listAgents({
+  const rows = await agentsRepo().listAgents({
     includeExtensions: opts?.includeExtensions === true,
-  })) as AgentRow[];
+  });
   return rows.map((row) => rowToAgent(row, opts?.slim ?? false));
 }
 
@@ -358,7 +327,7 @@ export async function getLeadAgent(): Promise<Agent | null> {
 
 export async function updateAgentStatus(id: string, status: AgentStatus): Promise<Agent | null> {
   const oldAgent = await getAgentById(id);
-  const row = (await agentsRepo().setAgentColumns(id, { status })) as AgentRow | null;
+  const row = await agentsRepo().setAgentColumns(id, { status });
   if (row && oldAgent) {
     try {
       await dependencies.createLogEntry({
@@ -373,7 +342,7 @@ export async function updateAgentStatus(id: string, status: AgentStatus): Promis
 }
 
 export async function updateAgentMaxTasks(id: string, maxTasks: number): Promise<Agent | null> {
-  const row = (await agentsRepo().setAgentColumns(id, { maxTasks })) as AgentRow | null;
+  const row = await agentsRepo().setAgentColumns(id, { maxTasks });
   return row ? rowToAgent(row) : null;
 }
 
@@ -381,7 +350,7 @@ export async function updateAgentProvider(
   id: string,
   provider: ProviderName,
 ): Promise<Agent | null> {
-  const row = (await agentsRepo().setAgentColumns(id, { provider })) as AgentRow | null;
+  const row = await agentsRepo().setAgentColumns(id, { provider });
   return row ? rowToAgent(row) : null;
 }
 
@@ -396,9 +365,9 @@ export async function setAgentHarnessProvider(
   id: string,
   provider: ProviderName | null,
 ): Promise<Agent | null> {
-  const row = (await agentsRepo().setAgentColumns(id, {
+  const row = await agentsRepo().setAgentColumns(id, {
     harness_provider: provider,
-  })) as AgentRow | null;
+  });
   return row ? rowToAgent(row) : null;
 }
 
@@ -417,7 +386,7 @@ export async function updateAgentCredStatus(
   credStatus: AgentCredStatus | null,
 ): Promise<Agent | null> {
   const json = credStatus ? JSON.stringify(credStatus) : null;
-  const row = (await agentsRepo().setAgentColumns(id, { cred_status: json })) as AgentRow | null;
+  const row = await agentsRepo().setAgentColumns(id, { cred_status: json });
   return row ? rowToAgent(row) : null;
 }
 
@@ -430,7 +399,7 @@ export async function updateAgentCredStatus(
  * are still returned — the caller surfaces them as "unreported".
  */
 export async function listAgentsWithCredStatusByProvider(provider: string): Promise<Agent[]> {
-  const rows = (await agentsRepo().listAgentsByHarnessProvider(provider)) as AgentRow[];
+  const rows = await agentsRepo().listAgentsByHarnessProvider(provider);
   return rows.map((row) => rowToAgent(row));
 }
 

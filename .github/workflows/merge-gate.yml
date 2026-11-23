@@ -1035,6 +1035,12 @@ jobs:
       - name: Schema parity (SQLite chain vs Postgres chain)
         run: bun run check:schema-parity
 
+      - name: Storage package typechecks (incl. the repository contract type checks)
+        run: |
+          for pkg in storage storage-sqlite storage-postgres; do
+            (cd "packages/$pkg" && bun run tsc)
+          done
+
       - name: Storage boundary
         run: bun run check:storage-boundary
 
