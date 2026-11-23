@@ -8,6 +8,7 @@ import {
   getMetric,
   getMetricVersion,
   getMetricVersions,
+  isPostgresEngine,
   listAllMetrics,
   listMetricsByAgent,
   updateMetric,
@@ -25,13 +26,54 @@ import {
   MetricWidgetSchema,
 } from "../types";
 import { scrubObject } from "../utils/secret-scrubber";
-import { assertSelectOnlyQuery, executeReadOnlyQuery } from "./db-query";
+import { assertSelectOnlyQuery, executeReadOnlyQueryNative } from "./db-query";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
 const DEFAULT_METRIC_MAX_ROWS = 100;
 const HARD_METRIC_MAX_ROWS = 500;
-const VARIABLE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/;
+// `{{key}}` binds the variable. `{{key:since}}` binds the start of the variable's
+// relative range: a time filter as a bound value runs the same on both storage
+// engines (`"createdAt" >= $1`), with no engine-only date function.
+const VARIABLE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*)(?::(since))?\}\}$/;
+// The SQLite `datetime('now', ?)` modifiers a saved range may hold, months and
+// years included: a dashboard saved on SQLite keeps working after the move.
+const RANGE_MODIFIER_RE = /^\s*([+-]?\d+)\s+(second|minute|hour|day|month|year)s?\s*$/i;
+const RANGE_UNIT_MS = { second: 1_000, minute: 60_000, hour: 3_600_000, day: 86_400_000 } as const;
+
+/**
+ * The start of a relative range such as "-30 days".
+ *
+ * A day range starts at 00:00 UTC of its first day. SQLite stores timestamps as
+ * text in two formats (`YYYY-MM-DD HH:MM:SS` and ISO `YYYY-MM-DDTHH:MM:SSZ`) and
+ * compares them as strings, so no instant inside a day compares right with both.
+ * The bare date `YYYY-MM-DD` sorts below every timestamp of that day in either
+ * format, so SQLite counts the first day as Postgres does with the same instant.
+ * A month or year range starts at 00:00 UTC of its first day the same way. A
+ * second, minute or hour range binds the exact instant as ISO 8601 UTC.
+ */
+function rangeStart(key: string, modifier: MetricParam, now = Date.now()): string {
+  const match = typeof modifier === "string" ? RANGE_MODIFIER_RE.exec(modifier) : null;
+  if (!match) {
+    throw new Error(
+      `Metric variable "${key}" must be a relative range such as "-30 days" for {{${key}:since}}`,
+    );
+  }
+  const unit = match[2]!.toLowerCase() as keyof typeof RANGE_UNIT_MS | "month" | "year";
+  const amount = Number(match[1]);
+  let start: Date;
+  if (unit === "month" || unit === "year") {
+    // Calendar arithmetic, as SQLite does it: March 31 minus one month is March 3.
+    start = new Date(now);
+    if (unit === "month") start.setUTCMonth(start.getUTCMonth() + amount);
+    else start.setUTCFullYear(start.getUTCFullYear() + amount);
+  } else {
+    start = new Date(now + amount * RANGE_UNIT_MS[unit]);
+  }
+  if (unit !== "day" && unit !== "month" && unit !== "year") return start.toISOString();
+  const day = start.toISOString().slice(0, 10);
+  return isPostgresEngine() ? `${day}T00:00:00.000Z` : day;
+}
 const MetricRunBodySchema = z
   .object({
     variables: z
@@ -62,10 +104,14 @@ function validateMetricDefinition(definition: unknown) {
   return parsed;
 }
 
-function resolveVariableOptionValues(variable: MetricVariable) {
+async function resolveVariableOptionValues(variable: MetricVariable) {
   if (!variable.optionsQuery) return variable.options ?? [];
   assertSelectOnlyQuery(variable.optionsQuery.sql);
-  const result = executeReadOnlyQuery(variable.optionsQuery.sql, [], HARD_METRIC_MAX_ROWS);
+  const result = await executeReadOnlyQueryNative(
+    variable.optionsQuery.sql,
+    [],
+    HARD_METRIC_MAX_ROWS,
+  );
   return result.rows.map((row) => {
     const record = Object.fromEntries(
       result.columns.map((column, index) => [column, row[index] as MetricParam]),
@@ -80,18 +126,20 @@ function resolveVariableOptionValues(variable: MetricVariable) {
   });
 }
 
-function resolveVariableOptions(metric: Metric) {
+async function resolveVariableOptions(metric: Metric) {
   const optionsByKey: Record<string, Array<{ label: string; value: MetricParam }>> = {};
-  const variables = (metric.definition.variables ?? []).map((variable) => {
+  const variables: MetricVariable[] = [];
+  for (const variable of metric.definition.variables ?? []) {
     if (!variable.optionsQuery) {
-      return variable;
+      variables.push(variable);
+      continue;
     }
-    const options = resolveVariableOptionValues(variable);
+    const options = await resolveVariableOptionValues(variable);
     optionsByKey[variable.key] = options;
     // Options are query output, like widget rows: the response gets a scrubbed copy.
     // `optionsByKey` keeps the raw values for validation and parameter binding.
-    return { ...variable, options: scrubObject(options) };
-  });
+    variables.push({ ...variable, options: scrubObject(options) });
+  }
   return { variables, optionsByKey };
 }
 
@@ -148,15 +196,16 @@ function resolveWidgetParams(
     if (!(key in variables)) {
       throw new Error(`Metric variable "${key}" is not defined`);
     }
+    if (match[2] === "since") return rangeStart(key, variables[key] ?? null);
     return variables[key] ?? null;
   });
 }
 
-function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricParam>) {
+async function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricParam>) {
   assertSelectOnlyQuery(widget.query.sql);
   const requestedRows = widget.query.maxRows ?? DEFAULT_METRIC_MAX_ROWS;
   const maxRows = Math.min(requestedRows, HARD_METRIC_MAX_ROWS);
-  const result = executeReadOnlyQuery(
+  const result = await executeReadOnlyQueryNative(
     widget.query.sql,
     resolveWidgetParams(widget, variables),
     maxRows,
@@ -177,10 +226,13 @@ function runMetricWidget(widget: MetricWidget, variables: Record<string, MetricP
   };
 }
 
-function runMetric(metric: Metric, providedVariables: Record<string, unknown> = {}) {
-  const resolved = resolveVariableOptions(metric);
+async function runMetric(metric: Metric, providedVariables: Record<string, unknown> = {}) {
+  const resolved = await resolveVariableOptions(metric);
   const variables = resolveMetricVariables(metric, providedVariables, resolved.optionsByKey);
-  const widgets = metric.definition.widgets.map((widget) => runMetricWidget(widget, variables));
+  const widgets: Awaited<ReturnType<typeof runMetricWidget>>[] = [];
+  for (const widget of metric.definition.widgets) {
+    widgets.push(await runMetricWidget(widget, variables));
+  }
   return {
     metric: {
       ...metric,
@@ -476,7 +528,7 @@ export async function handleMetrics(
       return true;
     }
     try {
-      runMetricRoute.respond(res, 200, runMetric(metric, parsed.body?.variables ?? {}));
+      runMetricRoute.respond(res, 200, await runMetric(metric, parsed.body?.variables ?? {}));
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err));
     }

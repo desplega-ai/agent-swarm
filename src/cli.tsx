@@ -329,6 +329,21 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: `  ${binName} rbac bootstrap`,
   },
+  "db-copy": {
+    usage: `${binName} db-copy --from <sqlite file> --to <postgres url> [options]`,
+    description:
+      "Copy a SQLite database file into an empty Postgres database at the same migration head.\nOpens the SQLite file read-only, refuses a target that holds rows, and writes nothing\nwhen a value cannot be stored in Postgres. Compares the row count and a checksum of\nevery table and exits 1 when one differs. Stop the API before you copy.",
+    options: [
+      "  --from <path>          SQLite database file (default: DATABASE_PATH)",
+      "  --to <url>             Target postgres:// URL (default: DATABASE_URL)",
+      "  --json <path>          Write the full report (tables, checksums, problems) as JSON",
+      "  -h, --help             Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} db-copy --from ./agent-swarm-db.sqlite --to postgres://swarm@db:5432/swarm`,
+      `  DATABASE_PATH=/data/swarm.sqlite DATABASE_URL=postgres://... ${binName} db-copy --json report.json`,
+    ].join("\n"),
+  },
   "codex-login": {
     usage: `${binName} codex-login [options]`,
     description:
@@ -461,6 +476,7 @@ function printHelp(command?: string) {
     ["x", "Execute external command routes"],
     ["scripts", "Reusable scripts maintenance"],
     ["rbac", "RBAC role management (bootstrap)"],
+    ["db-copy", "Copy a SQLite database into an empty Postgres database"],
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
@@ -741,15 +757,16 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
 } else if (args.command === "version") {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
-} else if ((args.command === "onboard" || args.command === "controller") && !process.versions.bun) {
+} else if (
+  (args.command === "onboard" || args.command === "controller" || args.command === "db-copy") &&
+  !process.versions.bun
+) {
   // The published bin uses Node, but these commands require Bun APIs.
   const { spawnSync } = await import("node:child_process");
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      args.command === "onboard"
-        ? "Onboarding requires Bun. Install Bun from https://bun.sh, then retry this command."
-        : "Controller requires Bun. Install Bun from https://bun.sh, then retry this command.",
+      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : "db-copy"} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
     );
   }
   process.exit(result.status ?? 1);
@@ -799,6 +816,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   }
   const { runRbacCliCommand } = await import("./be/rbac-roles");
   await runRbacCliCommand(rbacArgs);
+} else if (args.command === "db-copy") {
+  const copyArgs = process.argv.slice(process.argv.indexOf("db-copy") + 1);
+  const { runDataCopyCommand } = await import("./be/data-copy-command");
+  process.exit(await runDataCopyCommand(copyArgs));
 } else if (args.command === "codex-login") {
   const { runCodexLogin } = await import("./commands/codex-login");
   const codexLoginArgs = process.argv.slice(process.argv.indexOf("codex-login") + 1);

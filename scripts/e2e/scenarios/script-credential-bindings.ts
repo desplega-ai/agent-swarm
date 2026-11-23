@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -140,8 +141,7 @@ export const scriptCredentialBindings: Scenario = {
         "an update by id must keep the id and replace the hosts",
       );
       const row = ctx.db.get<{ config_key: string; active: number; source: string }>(
-        "SELECT config_key, active, source FROM script_credential_bindings WHERE id = ?",
-        [headerId],
+        sql`SELECT config_key, active, source FROM script_credential_bindings WHERE id = ${headerId}`,
       );
       expect(
         row?.config_key === configKey && row.active === 1 && row.source === "user",
@@ -242,8 +242,7 @@ export const scriptCredentialBindings: Scenario = {
       );
       try {
         const managedId = ctx.db.get<{ id: string }>(
-          "SELECT id FROM script_credential_bindings WHERE managed_by_connection_id = ?",
-          [connectionId],
+          sql`SELECT id FROM script_credential_bindings WHERE managed_by_connection_id = ${connectionId}`,
         )?.id;
         expect(managedId, "the connection must own a managed binding");
         const standalone = await ctx.api("GET", "/api/credential-bindings");
@@ -303,8 +302,7 @@ export const scriptCredentialBindings: Scenario = {
         });
         expect(toolText(disabled).includes("disabled"), "disable text");
         const afterDisable = ctx.db.get<{ active: number }>(
-          "SELECT active FROM script_credential_bindings WHERE id = ?",
-          [toolBindingId],
+          sql`SELECT active FROM script_credential_bindings WHERE id = ${toolBindingId}`,
         );
         expect(afterDisable?.active === 0, "disable must deactivate the binding");
         const unknownDisable = await callToolErr(mcp, "credential-bindings", {
@@ -430,8 +428,7 @@ export const scriptCredentialBindings: Scenario = {
           query_template: string | null;
           allowed_hosts_json: string;
         }>(
-          "SELECT config_key, header_template, query_template, allowed_hosts_json FROM script_credential_bindings WHERE id = ?",
-          [id],
+          sql`SELECT config_key, header_template, query_template, allowed_hosts_json FROM script_credential_bindings WHERE id = ${id}`,
         );
         if (!stored) continue;
         await ctx.api("POST", "/api/credential-bindings", {

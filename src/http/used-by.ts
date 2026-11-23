@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDbClient, upsertSwarmConfig } from "../be/db";
+import { getStorage } from "@/be/storage";
+import { upsertSwarmConfig } from "../be/db";
 import { isTelemetryEnabled, trackRelayed } from "../telemetry";
 import { reportedUserFunction, USER_FUNCTIONS } from "../utils/company-profile";
 import { orgIdentityStatus } from "../utils/org-identity";
@@ -149,7 +150,7 @@ export async function handleUsedBy(
     return true;
   }
 
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     await upsertSwarmConfig({ scope: "global", key: CONSENT_KEY, value: String(granted) });
     await upsertSwarmConfig({ scope: "global", key: CONSENT_AT_KEY, value: changedAt });
     if (granted) {

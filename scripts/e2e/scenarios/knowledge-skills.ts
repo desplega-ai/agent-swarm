@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -78,10 +79,10 @@ export const knowledgeSkills: Scenario = {
         `created skill fields: ${JSON.stringify(skill)}`,
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM skills WHERE id = ? AND name = ?", [
-          httpId,
-          httpName,
-        ]) === 1,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM skills WHERE id = ${httpId} AND name = ${httpName}`,
+        ) === 1,
         "skill row was not persisted",
       );
       response = await ctx.api("POST", "/api/skills", {
@@ -166,10 +167,10 @@ export const knowledgeSkills: Scenario = {
         "agentSkill fields",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM agent_skills WHERE agentId = ? AND skillId = ?", [
-          other,
-          httpId,
-        ]) === 1,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM agent_skills WHERE "agentId" = ${other} AND "skillId" = ${httpId}`,
+        ) === 1,
         "agent_skills row was not persisted",
       );
       response = await ctx.api("GET", `/api/agents/${other}/skills`);
@@ -245,7 +246,7 @@ export const knowledgeSkills: Scenario = {
         "a repeated upsert must replace the content",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM skill_files WHERE skillId = ?", [httpId]) === 4,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM skill_files WHERE "skillId" = ${httpId}`) === 4,
         "skill_files rows",
       );
       response = await ctx.api("DELETE", `/api/skills/${httpId}/files/extra.txt`);
@@ -339,10 +340,10 @@ export const knowledgeSkills: Scenario = {
         "skill-create owner/scope/type",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM agent_skills WHERE agentId = ? AND skillId = ?", [
-          owner,
-          toolId,
-        ]) === 1,
+        dbCount(
+          ctx,
+          sql`SELECT count(*) AS n FROM agent_skills WHERE "agentId" = ${owner} AND "skillId" = ${toolId}`,
+        ) === 1,
         "skill-create must auto-install for the creator",
       );
       expectToolError(
@@ -760,14 +761,14 @@ export const knowledgeSkills: Scenario = {
         "skill-delete by the owner",
       );
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM skills WHERE id = ?", [publishId]) === 0,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM skills WHERE id = ${publishId}`) === 0,
         "skill-delete left the row behind",
       );
       response = await ctx.api("DELETE", `/api/skills/${httpId}`);
       expectStatus(response, [200], "delete skill over HTTP");
       expect(asRecord(response.json).success === true, "delete skill success");
       expect(
-        dbCount(ctx, "SELECT count(*) AS n FROM skill_files WHERE skillId = ?", [httpId]) === 0,
+        dbCount(ctx, sql`SELECT count(*) AS n FROM skill_files WHERE "skillId" = ${httpId}`) === 0,
         "deleting a skill must delete its bundled files",
       );
       response = await ctx.api("GET", `/api/skills/${httpId}`);

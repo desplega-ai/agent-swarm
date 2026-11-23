@@ -1,3 +1,4 @@
+import type { RuntimeControllerRow, RuntimePoolRow } from "@desplega/storage";
 import type { z } from "zod";
 import {
   type ConfigStatus,
@@ -15,42 +16,19 @@ import {
 } from "../../types";
 import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
-import { createAgent, getAgentById, getAllAgents, getDbClient, upsertSwarmConfig } from "../db";
+import { createAgent, getAgentById, getAllAgents, upsertSwarmConfig } from "../db";
 import { type AgentRow, rowToAgent } from "../db/agents";
 import { registerStoredSecret } from "../secret-registry";
+import { getStorage } from "../storage";
 import { getPoolCache, queuePoolCacheRelease } from "./cache-cleanup";
 import { RuntimePoolError } from "./errors";
 import { revokeControllerTokens } from "./tokens";
 
 export { RuntimePoolError } from "./errors";
 
-type ControllerRow = Omit<
-  RuntimeController,
-  "config" | "secretConfigKeys" | "secretConfigError"
-> & {
-  config: string;
-  secretConfig: string | null;
-};
-type PoolRow = Omit<
-  RuntimePool,
-  "placements" | "env" | "resources" | "cache" | "workspace" | "enabled"
-> & {
-  placements: string;
-  env: string;
-  resources: string | null;
-  cache: string | null;
-  workspace: string | null;
-  enabled: number;
-};
-const controllerColumns = `id, name, kind, placement, config, secret_config AS secretConfig,
-  status, last_seen_at AS lastSeenAt, last_error AS lastError, last_error_at AS lastErrorAt,
-  created_by AS createdBy, updated_by AS updatedBy, created_at AS createdAt, updated_at AS updatedAt`;
-const poolColumns = `id, name, kind, placements, image, lifecycle, idle_minutes AS idleMinutes,
-  slots_per_runtime AS slotsPerRuntime, max_runtimes AS maxRuntimes, min_runtimes AS minRuntimes,
-  delivery, env, resources, cache, workspace, ttl_sec AS ttlSec, resolved_image AS resolvedImage, enabled,
-  consecutive_failures AS consecutiveFailures, circuit_open_until AS circuitOpenUntil,
-  last_error AS lastError, last_error_at AS lastErrorAt, created_by AS createdBy,
-  updated_by AS updatedBy, created_at AS createdAt, updated_at AS updatedAt`;
+type ControllerRow = RuntimeControllerRow;
+type PoolRow = RuntimePoolRow;
+const repo = () => getStorage().repos.runtimePools;
 
 function controllerSecrets(row: ControllerRow): Record<string, string> {
   return row.secretConfig ? JSON.parse(decryptSecret(row.secretConfig, getEncryptionKey())) : {};
@@ -65,7 +43,7 @@ function rowToController(row: ControllerRow): RuntimeController {
     secretConfigError = true;
   }
   return {
-    ...publicRow,
+    ...(publicRow as Omit<RuntimeController, "config" | "secretConfigKeys" | "secretConfigError">),
     config: JSON.parse(row.config),
     secretConfigKeys,
     ...(secretConfigError ? { secretConfigError } : {}),
@@ -81,7 +59,7 @@ function rowToPool(row: PoolRow): RuntimePool {
     cache: cache ? { mountPath: cache.mountPath } : null,
     workspace: row.workspace ? JSON.parse(row.workspace) : null,
     enabled: row.enabled === 1,
-  };
+  } as RuntimePool;
 }
 function parseInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
   const result = schema.safeParse(input);
@@ -109,24 +87,14 @@ function validateRuntimeController(controller: {
 }
 
 export async function listRuntimeControllers(): Promise<RuntimeController[]> {
-  return (
-    await getDbClient().query<ControllerRow>(
-      `SELECT ${controllerColumns} FROM runtime_controllers ORDER BY name`,
-    )
-  ).map(rowToController);
+  return (await repo().listControllers()).map(rowToController);
 }
 export async function getRuntimeController(id: string): Promise<RuntimeController | null> {
-  const row = await getDbClient().get<ControllerRow>(
-    `SELECT ${controllerColumns} FROM runtime_controllers WHERE id = ?`,
-    [id],
-  );
+  const row = await repo().findController(id);
   return row ? rowToController(row) : null;
 }
 export async function getRuntimeControllerSecrets(id: string): Promise<Record<string, string>> {
-  const row = await getDbClient().get<ControllerRow>(
-    `SELECT ${controllerColumns} FROM runtime_controllers WHERE id = ?`,
-    [id],
-  );
+  const row = await repo().findController(id);
   if (!row) throw new RuntimePoolError("Controller not found", 404);
   return controllerSecrets(row);
 }
@@ -190,28 +158,13 @@ export async function checkE2bControllerConfig(
   )
     return config;
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `UPDATE runtime_controllers SET status = ?,
-     last_error = CASE WHEN last_error IS NULL OR substr(last_error, 1, ?) = ? THEN ? ELSE last_error END,
-     last_error_at = CASE WHEN last_error IS NULL OR substr(last_error, 1, ?) = ? THEN ? ELSE last_error_at END,
-     updated_at = ? WHERE id = ? AND (status != ? OR
-       ((last_error IS NULL OR substr(last_error, 1, ?) = ?) AND last_error IS NOT ?))`,
-    [
-      status,
-      prefix.length,
-      prefix,
-      error,
-      prefix.length,
-      prefix,
-      error ? now : null,
-      now,
-      controller.id,
-      status,
-      prefix.length,
-      prefix,
-      error,
-    ],
-  );
+  await repo().setControllerConfigStatus(controller.id, {
+    status,
+    prefix,
+    error,
+    errorAt: error ? now : null,
+    now,
+  });
   return config;
 }
 
@@ -222,10 +175,9 @@ export async function createRuntimeController(
 ): Promise<RuntimeController> {
   const data = parseInput(RuntimeControllerCreateSchema, input);
   validateRuntimeController(data);
-  return await getDbClient().transaction(async (tx) => {
-    if (
-      await tx.get("SELECT id FROM runtime_controllers WHERE name = ? OR id = ?", [data.name, id])
-    )
+  const storage = getStorage();
+  return await storage.transaction(async () => {
+    if (await repo().findControllerIdByNameOrId(data.name, id))
       throw new RuntimePoolError("Controller already exists", 409);
     const secrets = Object.fromEntries(
       Object.entries(data.secretConfig ?? {}).filter(
@@ -235,23 +187,19 @@ export async function createRuntimeController(
     const encrypted = Object.keys(secrets).length
       ? encryptSecret(JSON.stringify(secrets), getEncryptionKey())
       : null;
-    getDbClient().afterCommit(() => {
+    storage.afterCommit(() => {
       for (const [key, value] of Object.entries(secrets))
         registerStoredSecret(value, `runtime-controller:${id}:${key}`);
     });
-    await tx.run(
-      `INSERT INTO runtime_controllers (id, name, kind, placement, config, secret_config, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        data.name,
-        data.kind,
-        data.placement,
-        JSON.stringify(data.config),
-        encrypted,
-        actor,
-        actor,
-      ],
-    );
+    await repo().insertController({
+      id,
+      name: data.name,
+      kind: data.kind,
+      placement: data.placement,
+      configJson: JSON.stringify(data.config),
+      secretConfig: encrypted,
+      actor,
+    });
     return (await getRuntimeController(id))!;
   });
 }
@@ -261,17 +209,13 @@ export async function updateRuntimeController(
   actor: string | null = null,
 ): Promise<RuntimeController> {
   const patch = parseInput(RuntimeControllerUpdateSchema, input);
-  return await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<ControllerRow>(
-      `SELECT ${controllerColumns} FROM runtime_controllers WHERE id = ?`,
-      [id],
-    );
+  const storage = getStorage();
+  return await storage.transaction(async () => {
+    const row = await repo().findController(id);
     if (!row) throw new RuntimePoolError("Controller not found", 404);
     const data = { ...rowToController(row), ...patch };
     validateRuntimeController(data);
-    if (
-      await tx.get("SELECT id FROM runtime_controllers WHERE name = ? AND id != ?", [data.name, id])
-    )
+    if (await repo().controllerNameTaken(data.name, id))
       throw new RuntimePoolError("Controller name already exists", 409);
     const pools = await listRuntimePools();
     const oldConfig: Record<string, string> = JSON.parse(row.config);
@@ -288,9 +232,7 @@ export async function updateRuntimeController(
         configChanged ||
         secretsChanged) &&
       (pools.some((pool) => pool.cache && pool.placements.includes(id)) ||
-        (await tx.get("SELECT id FROM runtime_cache_releases WHERE controller_id = ? LIMIT 1", [
-          id,
-        ])))
+        (await repo().hasCacheReleaseForController(id)))
     )
       throw new RuntimePoolError(
         "Disable pool caches and wait for cleanup before changing controller configuration or placement",
@@ -307,49 +249,40 @@ export async function updateRuntimeController(
       encrypted = Object.keys(secrets).length
         ? encryptSecret(JSON.stringify(secrets), getEncryptionKey())
         : null;
-      getDbClient().afterCommit(() => {
+      storage.afterCommit(() => {
         for (const [key, value] of Object.entries(secrets))
           registerStoredSecret(value, `runtime-controller:${id}:${key}`);
       });
     }
-    await tx.run(
-      `UPDATE runtime_controllers SET name = ?, kind = ?, placement = ?, config = ?, secret_config = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
-      [
-        data.name,
-        data.kind,
-        data.placement,
-        JSON.stringify(data.config),
-        encrypted,
-        actor,
-        new Date().toISOString(),
-        id,
-      ],
-    );
+    await repo().updateController(id, {
+      name: data.name,
+      kind: data.kind,
+      placement: data.placement,
+      configJson: JSON.stringify(data.config),
+      secretConfig: encrypted,
+      actor,
+      now: new Date().toISOString(),
+    });
     return (await getRuntimeController(id))!;
   });
 }
 export async function deleteRuntimeController(id: string): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
+  await getStorage().transaction(async () => {
     if (!(await getRuntimeController(id))) throw new RuntimePoolError("Controller not found", 404);
     if ((await listRuntimePools()).some((pool) => pool.placements.includes(id)))
       throw new RuntimePoolError("Controller has runtime pools", 409);
-    if (await tx.get("SELECT id FROM runtime_cache_releases WHERE controller_id = ? LIMIT 1", [id]))
+    if (await repo().hasCacheReleaseForController(id))
       throw new RuntimePoolError("Controller has pending cache cleanup", 409);
     await revokeControllerTokens(id);
-    await tx.run("DELETE FROM runtime_controllers WHERE id = ?", [id]);
+    await repo().deleteController(id);
   });
 }
 
 export async function listRuntimePools(): Promise<RuntimePool[]> {
-  return (
-    await getDbClient().query<PoolRow>(`SELECT ${poolColumns} FROM runtime_pools ORDER BY name`)
-  ).map(rowToPool);
+  return (await repo().listPools()).map(rowToPool);
 }
 export async function getRuntimePool(id: string): Promise<RuntimePool | null> {
-  const row = await getDbClient().get<PoolRow>(
-    `SELECT ${poolColumns} FROM runtime_pools WHERE id = ?`,
-    [id],
-  );
+  const row = await repo().findPool(id);
   return row ? rowToPool(row) : null;
 }
 async function validatePool(data: z.output<typeof RuntimePoolCreateSchema>): Promise<void> {
@@ -379,36 +312,32 @@ export async function createRuntimePool(
   id: string = crypto.randomUUID(),
 ): Promise<RuntimePool> {
   const data = parseInput(RuntimePoolCreateSchema, input);
-  return await getDbClient().transaction(async (tx) => {
+  return await getStorage().transaction(async () => {
     await validatePool(data);
-    if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? OR id = ?", [data.name, id]))
+    if (await repo().findPoolIdByNameOrId(data.name, id))
       throw new RuntimePoolError("Pool already exists", 409);
-    await tx.run(
-      `INSERT INTO runtime_pools (id, name, kind, placements, image, lifecycle, idle_minutes, slots_per_runtime, max_runtimes, min_runtimes, delivery, env, resources, cache, workspace, ttl_sec, enabled, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        data.name,
-        data.kind,
-        JSON.stringify(data.placements),
-        data.image ?? null,
-        data.lifecycle,
-        data.idleMinutes,
-        data.slotsPerRuntime,
-        data.maxRuntimes,
-        data.minRuntimes,
-        data.delivery,
-        JSON.stringify(data.env),
-        data.resources ? JSON.stringify(data.resources) : null,
-        data.cache
-          ? JSON.stringify({ ...data.cache, key: poolCacheKey(id, crypto.randomUUID()) })
-          : null,
-        data.workspace ? JSON.stringify(data.workspace) : null,
-        data.ttlSec,
-        Number(data.enabled),
-        actor,
-        actor,
-      ],
-    );
+    await repo().insertPool({
+      id,
+      name: data.name,
+      kind: data.kind,
+      placementsJson: JSON.stringify(data.placements),
+      image: data.image ?? null,
+      lifecycle: data.lifecycle,
+      idleMinutes: data.idleMinutes,
+      slotsPerRuntime: data.slotsPerRuntime,
+      maxRuntimes: data.maxRuntimes,
+      minRuntimes: data.minRuntimes,
+      delivery: data.delivery,
+      envJson: JSON.stringify(data.env),
+      resourcesJson: data.resources ? JSON.stringify(data.resources) : null,
+      cacheJson: data.cache
+        ? JSON.stringify({ ...data.cache, key: poolCacheKey(id, crypto.randomUUID()) })
+        : null,
+      workspaceJson: data.workspace ? JSON.stringify(data.workspace) : null,
+      ttlSec: data.ttlSec,
+      enabled: data.enabled,
+      actor,
+    });
     return (await getRuntimePool(id))!;
   });
 }
@@ -418,23 +347,20 @@ export async function updateRuntimePool(
   actor: string | null = null,
 ): Promise<RuntimePool> {
   const patch = parseInput(RuntimePoolUpdateSchema, input);
-  return await getDbClient().transaction(async (tx) => {
+  return await getStorage().transaction(async () => {
     const existing = await getRuntimePool(id);
     if (!existing) throw new RuntimePoolError("Pool not found", 404);
     const data = { ...existing, ...patch };
     if (
       (data.kind !== existing.kind || data.placements[0] !== existing.placements[0]) &&
-      (await tx.get(
-        "SELECT id FROM runtime_instances WHERE pool_id = ? AND status != 'offline' LIMIT 1",
-        [id],
-      ))
+      (await repo().hasNonOfflinePoolRuntime(id))
     )
       throw new RuntimePoolError(
         "Pool has non-offline runtimes. Disable the pool and wait for teardown before changing its placement or provider kind.",
         409,
       );
     await validatePool(data);
-    if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? AND id != ?", [data.name, id]))
+    if (await repo().poolNameTaken(data.name, id))
       throw new RuntimePoolError("Pool name already exists", 409);
     const cache = data.cache
       ? {
@@ -447,35 +373,32 @@ export async function updateRuntimePool(
       : null;
     if (existing.cache && (!data.cache || data.placements[0] !== existing.placements[0]))
       await queuePoolCacheRelease(existing, actor);
-    await tx.run(
-      `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, resolved_image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, cache = ?, workspace = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
-      [
-        data.name,
-        data.kind,
-        JSON.stringify(data.placements),
-        data.image ?? null,
+    await repo().updatePool(id, {
+      name: data.name,
+      kind: data.kind,
+      placementsJson: JSON.stringify(data.placements),
+      image: data.image ?? null,
+      resolvedImage:
         data.image !== existing.image ||
         (data.resources?.cpu ?? 4) !== (existing.resources?.cpu ?? 4) ||
         (data.resources?.memoryMb ?? 8192) !== (existing.resources?.memoryMb ?? 8192)
           ? null
           : existing.resolvedImage,
-        data.lifecycle,
-        data.idleMinutes,
-        data.slotsPerRuntime,
-        data.maxRuntimes,
-        data.minRuntimes,
-        data.delivery,
-        JSON.stringify(data.env),
-        data.resources ? JSON.stringify(data.resources) : null,
-        cache ? JSON.stringify(cache) : null,
-        data.workspace ? JSON.stringify(data.workspace) : null,
-        data.ttlSec,
-        Number(data.enabled),
-        actor,
-        new Date().toISOString(),
-        id,
-      ],
-    );
+      lifecycle: data.lifecycle,
+      idleMinutes: data.idleMinutes,
+      slotsPerRuntime: data.slotsPerRuntime,
+      maxRuntimes: data.maxRuntimes,
+      minRuntimes: data.minRuntimes,
+      delivery: data.delivery,
+      envJson: JSON.stringify(data.env),
+      resourcesJson: data.resources ? JSON.stringify(data.resources) : null,
+      cacheJson: cache ? JSON.stringify(cache) : null,
+      workspaceJson: data.workspace ? JSON.stringify(data.workspace) : null,
+      ttlSec: data.ttlSec,
+      enabled: data.enabled,
+      actor,
+      now: new Date().toISOString(),
+    });
     return (await getRuntimePool(id))!;
   });
 }
@@ -484,30 +407,20 @@ export async function deleteRuntimePool(
   force = false,
   actor: string | null = null,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
+  await getStorage().transaction(async () => {
     const pool = await getRuntimePool(id);
     if (!pool) throw new RuntimePoolError("Pool not found", 404);
-    if (
-      await tx.get(
-        "SELECT id FROM runtime_instances WHERE pool_id = ? AND status != 'offline' LIMIT 1",
-        [id],
-      )
-    )
+    if (await repo().hasNonOfflinePoolRuntime(id))
       throw new RuntimePoolError(
         "Pool has non-offline runtimes. Scale to zero or disable the pool and wait for teardown before deletion.",
         409,
       );
     if (!force && (await listAgentsForPool(id)).length)
       throw new RuntimePoolError("Pool has bound agents", 409);
-    if (force) {
-      await tx.run(
-        "UPDATE agents SET runtime_pool_id = NULL, lastUpdatedAt = ?, updated_by = COALESCE(?, updated_by) WHERE runtime_pool_id = ?",
-        [new Date().toISOString(), actor, id],
-      );
-    }
+    if (force) await repo().unbindPoolAgents(id, actor, new Date().toISOString());
     await queuePoolCacheRelease(pool, actor);
     // Workspace volumes are keyed by agent, not pool, and are never released here.
-    await tx.run("DELETE FROM runtime_pools WHERE id = ?", [id]);
+    await repo().deletePool(id);
   });
 }
 export async function bindAgentToPool(
@@ -515,37 +428,23 @@ export async function bindAgentToPool(
   poolId: string | null,
   actor: string | null = null,
 ): Promise<Agent> {
-  return await getDbClient().transaction(async (tx) => {
+  return await getStorage().transaction(async () => {
     if (poolId !== null && !(await getRuntimePool(poolId)))
       throw new RuntimePoolError("Pool not found", 404);
     const agent = await getAgentById(agentId);
     if (!agent) throw new RuntimePoolError("Agent not found", 404);
-    if (
-      agent.runtimePoolId !== poolId &&
-      (await tx.get(
-        "SELECT id FROM runtime_instances WHERE agent_id = ? AND pool_id IS NOT NULL AND status != 'offline' LIMIT 1",
-        [agentId],
-      ))
-    )
+    if (agent.runtimePoolId !== poolId && (await repo().hasNonOfflineAgentPoolRuntime(agentId)))
       throw new RuntimePoolError(
         "Agent has non-offline pool runtimes. Disable its pool and wait for teardown before changing its binding.",
         409,
       );
-    const row = await tx.get<AgentRow>(
-      "UPDATE agents SET runtime_pool_id = ?, lastUpdatedAt = ?, updated_by = COALESCE(?, updated_by) WHERE id = ? RETURNING *",
-      [poolId, new Date().toISOString(), actor, agentId],
-    );
+    const row = await repo().bindAgent<AgentRow>(agentId, poolId, actor, new Date().toISOString());
     if (!row) throw new RuntimePoolError("Agent not found", 404);
     return rowToAgent(row);
   });
 }
 export async function listAgentsForPool(poolId: string): Promise<Agent[]> {
-  return (
-    await getDbClient().query<AgentRow>(
-      "SELECT * FROM agents WHERE runtime_pool_id = ? ORDER BY name",
-      [poolId],
-    )
-  ).map((row) => rowToAgent(row));
+  return (await repo().listAgentsForPool<AgentRow>(poolId)).map((row) => rowToAgent(row));
 }
 export async function getPoolForAgent(agentId: string): Promise<RuntimePool | null> {
   const agent = await getAgentById(agentId);
@@ -563,7 +462,7 @@ export async function createPoolAgent(
   actor: string | null = null,
 ): Promise<Agent> {
   const data = parseInput(RuntimePoolCreateAgentSchema, input);
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     if (!(await getRuntimePool(poolId))) throw new RuntimePoolError("Pool not found", 404);
     const agents = await getAllAgents({ includeExtensions: true });
     if (agents.some((agent) => agent.name === data.name))
@@ -585,19 +484,13 @@ export async function createPoolAgent(
         key: "TEMPLATE_ID",
         value: data.templateId,
       });
-    await getDbClient().run("UPDATE agents SET created_by = ?, updated_by = ? WHERE id = ?", [
-      actor,
-      actor,
-      agent.id,
-    ]);
+    await repo().setAgentCreatedBy(agent.id, actor);
     return await bindAgentToPool(agent.id, poolId, actor);
   });
 }
 
 export async function loadRuntimeControllerSecrets(): Promise<{ count: number; failed: number }> {
-  const rows = await getDbClient().query<ControllerRow>(
-    `SELECT ${controllerColumns} FROM runtime_controllers WHERE secret_config IS NOT NULL`,
-  );
+  const rows = await repo().listControllersWithSecrets();
   let count = 0;
   let failed = 0;
   for (const row of rows) {

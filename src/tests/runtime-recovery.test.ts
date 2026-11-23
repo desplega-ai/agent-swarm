@@ -515,7 +515,7 @@ test("rotation preserves a task claimed between the idle read and draining", asy
   let claimed = false;
   const read = spyOn(client, "get").mockImplementation(async (sql, params) => {
     const row = await original(sql, params);
-    if (!claimed && sql.startsWith("SELECT s.taskId FROM active_sessions")) {
+    if (!claimed && sql.trimStart().startsWith('SELECT s."taskId" FROM active_sessions')) {
       claimed = true;
       await startTask(task.id);
       await client.run(

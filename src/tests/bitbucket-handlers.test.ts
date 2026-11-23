@@ -191,7 +191,7 @@ describe("handlePullRequestCreated", () => {
   });
 
   test("a skip_event template override suppresses the task", async () => {
-    const override = upsertPromptTemplate({
+    const override = await upsertPromptTemplate({
       eventType: "bitbucket.pull_request.opened",
       scope: "global",
       state: "skip_event",

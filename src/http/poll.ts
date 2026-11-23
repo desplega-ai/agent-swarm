@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getStorage } from "@/be/storage";
 import { isApiDraining } from "../be/api-drain";
 import { canClaim } from "../be/budget-admission";
 import {
@@ -13,7 +14,6 @@ import {
   claimTask,
   getAgentById,
   getAllChannelActivityCursors,
-  getDbClient,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getTaskAttachments,
@@ -243,7 +243,7 @@ async function buildChecklistNudge(task: AgentTask, agent: Agent) {
     return undefined;
   }
   try {
-    return await getDbClient().transaction(async () => {
+    return await getStorage().transaction(async () => {
       // RBAC off: the legacy policy lets the Lead edit swarm items.
       const canEditSwarm = (await userGrantCanEditSwarm(userId)) ?? true;
       const item = await firstOpenItem(userId, canEditSwarm);
@@ -351,15 +351,9 @@ export async function handlePoll(
   );
   const recordRuntimeTask = async (taskId: string): Promise<void> => {
     if (!isMultiRuntimeEnabled() || !runtimeInstanceId) return;
-    await getDbClient().run(
-      "UPDATE runtime_instances SET task_id = ? WHERE id = ? AND agent_id = ?",
-      [taskId, runtimeInstanceId, myAgentId!],
-    );
+    await getStorage().repos.runtimePools.setRuntimeTask(runtimeInstanceId, myAgentId!, taskId);
     if (isRuntimePoolsEnabled()) {
-      await getDbClient().run(
-        "UPDATE agent_tasks SET runtime_instance_id = ? WHERE id = ? AND agentId = ?",
-        [runtimeInstanceId, taskId, myAgentId!],
-      );
+      await getStorage().repos.tasks.setTaskRuntimeInstance(taskId, myAgentId!, runtimeInstanceId);
     }
   };
   // Handle cursor commit endpoint
@@ -406,6 +400,11 @@ export async function handlePoll(
       // same body run again under BEGIN IMMEDIATE, where every claim and its
       // capacity/budget check stay atomic exactly as before.
       const pollBody = async (probe: boolean): Promise<PollTxnResult | typeof NEEDS_WRITE> => {
+        // The write pass runs at READ COMMITTED (see below). Its first statement
+        // locks this agent's row, so the write passes of one agent run one at a
+        // time: capacity, offers, pending tasks, mentions and runtime rows are
+        // all keyed by the agent.
+        if (!probe) await getStorage().repos.agents.lockAgent(myAgentId);
         const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
@@ -468,6 +467,8 @@ export async function handlePoll(
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
           if (probe) return NEEDS_WRITE;
+          // Lock the offer before claimOfferedTask re-reads it (READ COMMITTED).
+          await getStorage().repos.tasks.lockTask(firstOfferedTask.id);
           const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
             await recordRuntimeTask(claimedTask.id);
@@ -493,6 +494,12 @@ export async function handlePoll(
           const pendingTask = await getPendingTaskForAgent(myAgentId, pendingProbe);
           if (pendingProbe && (pendingTask || pendingProbe.skipLogDue)) return NEEDS_WRITE;
           if (pendingTask) {
+            // READ COMMITTED: lock the task, then confirm it is still this agent's
+            // and unchanged; a concurrent reassignment waits for the next poll.
+            const locked = await getStorage().repos.tasks.lockTask(pendingTask.id);
+            if (locked?.status !== pendingTask.status || locked.agentId !== myAgentId) {
+              return { trigger: null };
+            }
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
             // Phase 5 also records the dedup row + captures the side-effect
@@ -548,7 +555,7 @@ export async function handlePoll(
             // Lifecycle announcements go through `afterCommit`, not straight
             // line: they must not claim "this task started" for a claim the
             // transaction can still roll back.
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               ensure({
                 id: "started",
                 flow: "task",
@@ -688,15 +695,12 @@ export async function handlePoll(
               return ok;
             };
             // The filter runs inside the paginated scan, so incompatible rows never use up the limit.
-            const unassignedIds = await getUnassignedTaskIdsForAgent(
-              myAgentId,
-              5,
-              async (task) =>
-                (await poolTaskRunsOnHarness(task, harness)) &&
-                (task.profile
-                  ? await passesProfileCheck(task.profile, task.vcsRepo)
-                  : !task.modelGroup || (await passesGroupCheck(task.modelGroup, task.vcsRepo))),
-            );
+            const runsHere = async (task: AgentTask) =>
+              (await poolTaskRunsOnHarness(task, harness)) &&
+              (task.profile
+                ? await passesProfileCheck(task.profile, task.vcsRepo)
+                : !task.modelGroup || (await passesGroupCheck(task.modelGroup, task.vcsRepo)));
+            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5, runsHere);
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an
@@ -705,6 +709,10 @@ export async function handlePoll(
             // would have claimed). That id is stable for the duration of the
             // refusal, and the dedup is per-(task,date) so subsequent same-day
             // refusals on the same lead-candidate are suppressed.
+            // Admission per requester: the agent and global caps are the same for
+            // every candidate, the user cap is not. A claim of a later candidate
+            // (the first one is locked or taken) checks its own requester first.
+            const admittedRequesters = new Map<string, boolean>();
             if (unassignedIds.length > 0) {
               if (probe) return NEEDS_WRITE;
               const candidateId = unassignedIds[0]!;
@@ -714,6 +722,7 @@ export async function handlePoll(
                 new Date(),
                 candidateTask?.requestedByUserId,
               );
+              admittedRequesters.set(candidateTask?.requestedByUserId ?? "", admission.allowed);
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
                 const dedup = await recordBudgetRefusalNotification({
@@ -758,14 +767,51 @@ export async function handlePoll(
                 };
               }
             }
-            for (const candidateId of unassignedIds) {
+            // Decision D7: on Postgres this write pass runs at READ COMMITTED, so
+            // concurrent polls can claim every candidate of this list first. Then
+            // read the pool again (the SERIALIZABLE retry did the same), so a free
+            // task does not wait for the next poll. On SQLite the first claim wins:
+            // one writer, so the list never goes stale.
+            const tried = new Set<string>();
+            const candidates = async function* () {
+              let batch = unassignedIds;
+              // No round cap: keep reading while a read returns an untried ID.
+              // Every round tries at least one new ID, so the loop ends at the
+              // pool size (and the eligibility scan cap). A fixed cap moved the
+              // cutoff: a free task below 25 held ones was never reached.
+              while (batch.length > 0) {
+                for (const id of batch) {
+                  tried.add(id);
+                  yield id;
+                }
+                // Read past the tried IDs: a candidate a concurrent writer
+                // still holds stays at the top of the priority order. The read
+                // doubles each round, so a long held prefix costs few rounds.
+                batch = (
+                  await getUnassignedTaskIdsForAgent(myAgentId, tried.size * 2 + 5, runsHere)
+                ).filter((id) => !tried.has(id));
+              }
+            };
+            const requesterAdmitted = async (taskId: string): Promise<boolean> => {
+              const requester = (await getTaskById(taskId))?.requestedByUserId;
+              const key = requester ?? "";
+              let allowed = admittedRequesters.get(key);
+              if (allowed === undefined) {
+                allowed = (await canClaim(myAgentId, new Date(), requester)).allowed;
+                admittedRequesters.set(key, allowed);
+              }
+              return allowed;
+            };
+            for await (const candidateId of candidates()) {
+              // Over its requester's budget: skip it. The task stays in the pool.
+              if (!(await requesterAdmitted(candidateId))) continue;
               const claimed = await claimTask(candidateId, myAgentId);
               if (claimed) {
                 await recordRuntimeTask(claimed.id);
                 await updateAgentStatusFromCapacity(myAgentId);
                 // Post-commit (see the `started` path above): a rolled-back
                 // claim must not report the task as claimed.
-                getDbClient().afterCommit(() => {
+                getStorage().afterCommit(() => {
                   void emitTaskTelemetry("claimed", {
                     taskId: claimed.id,
                     source: claimed.source,
@@ -801,11 +847,20 @@ export async function handlePoll(
         // No trigger found
         return { trigger: null };
       };
-      const probed = await getDbClient().transaction(() => pollBody(true), { readOnly: true });
+      const probed = await getStorage().transaction(() => pollBody(true), { readOnly: true });
       // The write pass never returns NEEDS_WRITE: every guard above is `if (probe)`.
+      // Decision D7 opt-down: on Postgres the write pass runs at READ COMMITTED.
+      // Reason: under SERIALIZABLE, concurrent polls retried in 92% of write
+      // passes (stress-poll-claim, ledger part 6), because every poll reads the
+      // same pool rows. Locks that keep the old invariants: the agent row
+      // (one write pass per agent), the offered or pending task row before its
+      // claim, and `FOR UPDATE SKIP LOCKED` plus the status guard on the pool
+      // claim (a held candidate is skipped, never claimed twice).
       result =
         probed === NEEDS_WRITE
-          ? ((await getDbClient().transaction(() => pollBody(false))) as PollTxnResult)
+          ? ((await getStorage().transaction(() => pollBody(false), {
+              isolation: "read committed",
+            })) as PollTxnResult)
           : probed;
     } catch (error) {
       console.error("[/api/poll] Database error:", error);

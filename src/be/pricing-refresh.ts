@@ -2,7 +2,6 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   createLogEntry,
   getActivePricingRow,
-  getDbClient,
   type InsertPricingRowInput,
   insertPricingRow,
 } from "./db";
@@ -19,6 +18,7 @@ import {
 } from "./model-catalog-store";
 import type { ModelsDevCache } from "./modelsdev-cache";
 import { buildModelsDevSeedRows, type PricingSeedRow } from "./seed-pricing";
+import { getStorage } from "./storage";
 
 const MODELSDEV_API_URL = "https://models.dev/api.json";
 export const PRICING_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -66,7 +66,7 @@ async function insertChangedPricingRows(
   inserted: number;
   unchanged: number;
 }> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     let inserted = 0;
     let unchanged = 0;
 
@@ -90,24 +90,7 @@ async function insertChangedPricingRows(
 }
 
 async function prunePricingHistory(keepLatest = 2): Promise<number> {
-  const result = await getDbClient().run(
-    `DELETE FROM pricing
-     WHERE rowid IN (
-       SELECT rowid
-       FROM (
-         SELECT
-           rowid,
-           ROW_NUMBER() OVER (
-             PARTITION BY provider, model, token_class
-             ORDER BY effective_from DESC
-           ) AS rn
-         FROM pricing
-       )
-       WHERE rn > ?
-     )`,
-    [keepLatest],
-  );
-  return result.changes;
+  return getStorage().repos.sessions.prunePricingHistory(keepLatest);
 }
 
 async function auditPricingRefresh(result: PricingRefreshResult): Promise<void> {

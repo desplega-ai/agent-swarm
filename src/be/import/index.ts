@@ -8,9 +8,9 @@
  * Every failure is logged and contained; boot always continues.
  */
 
-import { getDbClient } from "../db";
 import { runSeeder } from "../seed/runner";
 import type { SeederResult } from "../seed/types";
+import { getStorage } from "../storage";
 import { ImportConfigError, loadImportSources } from "./config";
 import { type ImportPackage, ImportPackageError, loadDirPackage } from "./dir-source";
 import type { ImportSource } from "./schema";
@@ -29,26 +29,22 @@ export type ImportReport = {
 };
 
 async function storePending(source: ImportSource, pkg: ImportPackage, keys: Set<string>) {
-  await getDbClient().transaction(async (tx) => {
+  const assets = getStorage().repos.assets;
+  await getStorage().transaction(async () => {
     // Rewritten on every import, so an entry removed from the package drops out.
-    await tx.run("DELETE FROM import_pending_assignments WHERE sourceId = ?", [source.id]);
+    await assets.deletePendingAssignmentsBySource(source.id);
     const now = new Date().toISOString();
     for (const agent of pkg.agents.filter((entry) => keys.has(entry.key))) {
-      await tx.run(
-        `INSERT INTO import_pending_assignments
-           (sourceId, agentKey, agentId, agentName, instructions, instructionsHash, skillKeys, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          source.id,
-          agent.key,
-          agent.agentId,
-          agent.agentName,
-          agent.instructions?.text ?? null,
-          agent.instructions?.hash ?? null,
-          JSON.stringify(agent.skills),
-          now,
-        ],
-      );
+      await assets.insertPendingAssignment({
+        sourceId: source.id,
+        agentKey: agent.key,
+        agentId: agent.agentId,
+        agentName: agent.agentName,
+        instructions: agent.instructions?.text ?? null,
+        instructionsHash: agent.instructions?.hash ?? null,
+        skillKeys: JSON.stringify(agent.skills),
+        now,
+      });
     }
   });
 }

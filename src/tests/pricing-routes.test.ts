@@ -54,7 +54,7 @@ let port: number;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  seedPricingFromModelsDev({ quiet: true });
+  await seedPricingFromModelsDev({ quiet: true });
   server = createTestServer(API_KEY);
   port = await listenOnFreePort(server);
 });

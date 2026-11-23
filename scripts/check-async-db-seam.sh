@@ -27,14 +27,8 @@ ALLOWLIST=(
   src/be/seed-pricing.ts                        # boot: seeder
   src/be/rbac-roles.ts                          # boot: ensureRbacSeedsSynced
   src/be/boot-seeds.ts                          # boot: once-per-handle guards around the two seeders (getDb() only identifies the handle)
+  src/be/storage-root.ts                        # composition root: the engine-handle identity and the prompt-template seed inside initDb (SQLite start path)
   src/be/asset-key-audit.ts                     # boot: startup audit (raw handle param)
-  src/be/memory/providers/sqlite-store.ts       # constructor vec/FTS bootstrap; instance is boot-warmed by startMemoryGc()'s initial tick (async init = future decision)
-  src/be/script-connections.ts                  # listScriptConnections feeds default parameter expressions (must stay sync)
-  src/http/db-query.ts                          # read-only admin guard needs Statement.columnNames introspection
-  src/http/db-query-shared.ts                   # same columnNames guard (in-process fallback path)
-  src/http/db-query-bounded.ts                  # child process opens its own connection outside the seam; parent only reads getDb().filename
-  src/be/memory/search-read-worker.ts           # worker thread opens its own read-only connection outside the seam
-  src/be/memory/search-reader.ts                # host only reads getDb().filename to hand the worker the file
   src/http/assets.ts                            # passes the raw handle into the shared sync auditAssetKeys (wrapped in a client transaction at the call site)
 )
 

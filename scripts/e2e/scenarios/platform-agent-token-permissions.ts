@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { upsertScript } from "./script-helpers";
@@ -149,7 +150,7 @@ export const platformAgentTokenPermissions: Scenario = {
         "worker token deletes a repo",
       );
       expect(
-        ctx.db.get("SELECT id FROM swarm_repos WHERE id = ?", [repoId]),
+        ctx.db.get(sql`SELECT id FROM swarm_repos WHERE id = ${repoId}`),
         "a refused repo delete removed the row",
       );
       expectStatus(

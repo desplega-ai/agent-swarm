@@ -2,11 +2,11 @@ import {
   type ApprovalRequest,
   cancelApprovalRequestById,
   getApprovalRequestById,
-  getDbClient,
   getTaskById,
   resolveApprovalRequest,
 } from "../be/db";
 import { getWorkflowRunStatus } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import { can, type RbacPrincipal } from "../rbac";
 import {
   createApprovalFollowUpTask,
@@ -99,8 +99,8 @@ export async function cancelApprovalRequestAndRun(
 ): Promise<
   { request: ApprovalRequest; runCancelled: boolean } | { timedOut: ApprovalRequest } | null
 > {
-  const client = getDbClient();
-  return await client.transaction(async () => {
+  const storage = getStorage();
+  return await storage.transaction(async () => {
     // An elapsed explicit deadline wins over the cancel. A workflow run then
     // routes on its timeout port through getStuckApprovalRuns, as for a late answer.
     const current = await getApprovalRequestById(id);
@@ -140,7 +140,7 @@ export async function cancelApprovalRequestAndRun(
     }
 
     const slackReason = data.slackReason ?? data.reason;
-    client.afterCommit(async () => {
+    storage.afterCommit(async () => {
       await postApprovalCancellationUpdates([request], slackReason);
       if (runCancelled) {
         // Other requests the tree cancel closed get the run's reason.

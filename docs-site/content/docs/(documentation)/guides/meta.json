@@ -4,6 +4,7 @@
     "deployment",
     "one-click-deploy",
     "kubernetes",
+    "postgres",
     "worker-recovery-decision",
     "agent-deletion",
     "podman-rootless",

@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -30,7 +31,7 @@ export const slackRedefer: Scenario = {
       const taskId = String(task.id);
       const leadId = String(task.agentId);
       await claim(ctx, leadId, taskId);
-      const lead = ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [leadId]);
+      const lead = ctx.db.get<{ name: string }>(sql`SELECT name FROM agents WHERE id = ${leadId}`);
       expect(lead, "Assigned lead was not found");
       const firstCheck = await createChildTask(ctx, taskId, leadId, "First staging check");
       const thread = () =>
@@ -56,8 +57,7 @@ export const slackRedefer: Scenario = {
         "Expected one initial waiting card",
       );
       const firstSchedule = ctx.db.get<{ nextRunAt: string }>(
-        "SELECT nextRunAt FROM scheduled_tasks WHERE parentTaskId = ?",
-        [taskId],
+        sql`SELECT "nextRunAt" FROM scheduled_tasks WHERE "parentTaskId" = ${taskId}`,
       );
       await claim(ctx, leadId, firstCheck);
       await finish(ctx, leadId, firstCheck, { status: "completed", output: "First check passed." });
@@ -86,8 +86,7 @@ export const slackRedefer: Scenario = {
       });
       expect(!redeferred.isError, `Re-defer failed: ${JSON.stringify(redeferred)}`);
       const nextSchedule = ctx.db.get<{ nextRunAt: string }>(
-        "SELECT nextRunAt FROM scheduled_tasks WHERE parentTaskId = ?",
-        [wakeId],
+        sql`SELECT "nextRunAt" FROM scheduled_tasks WHERE "parentTaskId" = ${wakeId}`,
       );
       // The stored schedules carry the later ceiling; the Slack card shows it below.
       expect(
@@ -131,13 +130,11 @@ export const slackRedefer: Scenario = {
       try {
         // Remove deadlines/watchers before cancelling dependencies, so cleanup cannot wake them.
         const tasks = ctx.db.query<{ id: string; agentId: string; status: string }>(
-          "SELECT id, agentId, status FROM agent_tasks WHERE slackThreadTs = ?",
-          [message.ts],
+          sql`SELECT id, "agentId", status FROM agent_tasks WHERE "slackThreadTs" = ${message.ts}`,
         );
         for (const task of tasks) {
           for (const schedule of ctx.db.query<{ id: string }>(
-            "SELECT id FROM scheduled_tasks WHERE parentTaskId = ?",
-            [task.id],
+            sql`SELECT id FROM scheduled_tasks WHERE "parentTaskId" = ${task.id}`,
           )) {
             expectStatus(
               await ctx.api("DELETE", `/api/schedules/${schedule.id}`),

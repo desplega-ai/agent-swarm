@@ -14,13 +14,14 @@
  */
 
 import { withAgentChatRegistrySections } from "@desplega/model-catalog";
+import type {
+  ModelCatalogFactRow,
+  ModelCatalogFactValues,
+  ModelCatalogOverlayRow,
+  ModelCatalogRow,
+} from "@desplega/storage";
 import { type RuntimeCatalog, setRuntimeModelCatalog } from "../utils/runtime-model-catalog";
-import {
-  getActivePricingRow,
-  getDbClient,
-  type InsertPricingRowInput,
-  insertPricingRow,
-} from "./db";
+import { getActivePricingRow, type InsertPricingRowInput, insertPricingRow } from "./db";
 import {
   CATALOG_PROVIDER_IDS,
   type CatalogModel,
@@ -36,6 +37,7 @@ import {
 } from "./models-catalog";
 import type { ModelsDevCache } from "./modelsdev-cache";
 import { buildModelsDevSeedRows } from "./seed-pricing";
+import { getStorage } from "./storage";
 
 export interface ModelCatalogPricing {
   input?: number;
@@ -85,33 +87,6 @@ export interface ModelCatalogMeta {
   lastCheckedAt: number | null;
 }
 
-interface FactRow {
-  provider: string;
-  modelId: string;
-  name: string | null;
-  family: string | null;
-  releaseDate: string | null;
-  contextWindow: number | null;
-  maxOutput: number | null;
-  reasoning: number | null;
-  reasoningOptions: string | null;
-  pricing: string | null;
-  status: string | null;
-}
-
-interface CatalogRow extends FactRow {
-  providerName: string | null;
-  checkedAt: number;
-}
-
-interface OverlayRow extends FactRow {
-  reason: string;
-  verifiedBy: string | null;
-  expiresWhenUpstreamMatches: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
 const FACT_KEYS = [
   "name",
   "family",
@@ -133,7 +108,7 @@ function parseJson<T>(value: string | null): T | null {
   }
 }
 
-function rowToFacts(row: FactRow): ModelCatalogFacts {
+function rowToFacts(row: ModelCatalogFactRow): ModelCatalogFacts {
   return {
     name: row.name,
     family: row.family,
@@ -147,18 +122,19 @@ function rowToFacts(row: FactRow): ModelCatalogFacts {
   };
 }
 
-function factParams(facts: ModelCatalogFacts): (string | number | null)[] {
-  return [
-    facts.name ?? null,
-    facts.family ?? null,
-    facts.releaseDate ?? null,
-    facts.contextWindow ?? null,
-    facts.maxOutput ?? null,
-    facts.reasoning === undefined || facts.reasoning === null ? null : facts.reasoning ? 1 : 0,
-    facts.reasoningOptions ? JSON.stringify(facts.reasoningOptions) : null,
-    facts.pricing ? JSON.stringify(facts.pricing) : null,
-    facts.status ?? null,
-  ];
+function factValues(facts: ModelCatalogFacts): ModelCatalogFactValues {
+  return {
+    name: facts.name ?? null,
+    family: facts.family ?? null,
+    releaseDate: facts.releaseDate ?? null,
+    contextWindow: facts.contextWindow ?? null,
+    maxOutput: facts.maxOutput ?? null,
+    reasoning:
+      facts.reasoning === undefined || facts.reasoning === null ? null : Boolean(facts.reasoning),
+    reasoningOptions: facts.reasoningOptions ? JSON.stringify(facts.reasoningOptions) : null,
+    pricing: facts.pricing ? JSON.stringify(facts.pricing) : null,
+    status: facts.status ?? null,
+  };
 }
 
 // ─── models.dev projection ───────────────────────────────────────────────────
@@ -231,27 +207,20 @@ export function buildCatalogEntries(raw: ModelsDevCache, checkedAt: number): Mod
  * keys that were not in the table before.
  */
 export async function replaceModelCatalog(entries: ModelCatalogEntry[]): Promise<string[]> {
-  return await getDbClient().transaction(async (tx) => {
-    const before = await tx.query<{ provider: string; modelId: string }>(
-      "SELECT provider, modelId FROM model_catalog",
-    );
+  const models = getStorage().repos.models;
+  return await getStorage().transaction(async () => {
+    const before = await models.listCatalogKeys();
     const known = new Set(before.map((r) => `${r.provider}/${r.modelId}`));
-    await tx.run("DELETE FROM model_catalog");
+    await models.deleteAllCatalog();
     const added: string[] = [];
     for (const entry of entries) {
-      await tx.run(
-        `INSERT INTO model_catalog
-           (provider, modelId, name, family, releaseDate, contextWindow, maxOutput, reasoning,
-            reasoningOptions, pricing, status, providerName, checkedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          entry.provider,
-          entry.modelId,
-          ...factParams(entry),
-          entry.providerName ?? null,
-          entry.checkedAt,
-        ],
-      );
+      await models.insertCatalogRow({
+        provider: entry.provider,
+        modelId: entry.modelId,
+        ...factValues(entry),
+        providerName: entry.providerName ?? null,
+        checkedAt: entry.checkedAt,
+      });
       const key = `${entry.provider}/${entry.modelId}`;
       // An empty table before means first population, not "new models".
       if (known.size > 0 && !known.has(key)) added.push(key);
@@ -261,13 +230,11 @@ export async function replaceModelCatalog(entries: ModelCatalogEntry[]): Promise
 }
 
 export async function touchModelCatalogCheckedAt(now: number): Promise<void> {
-  await getDbClient().run("UPDATE model_catalog SET checkedAt = ?", [now]);
+  await getStorage().repos.models.touchCatalogCheckedAt(now);
 }
 
 export async function listModelCatalog(): Promise<ModelCatalogEntry[]> {
-  const rows = await getDbClient().query<CatalogRow>(
-    "SELECT * FROM model_catalog ORDER BY provider, modelId",
-  );
+  const rows: ModelCatalogRow[] = await getStorage().repos.models.listCatalog();
   return rows.map((row) => ({
     provider: row.provider,
     modelId: row.modelId,
@@ -278,35 +245,28 @@ export async function listModelCatalog(): Promise<ModelCatalogEntry[]> {
 }
 
 export async function countModelCatalog(): Promise<number> {
-  const row = await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM model_catalog");
-  return row?.n ?? 0;
+  return await getStorage().repos.models.countCatalog();
 }
 
 export async function getModelCatalogMeta(): Promise<ModelCatalogMeta> {
-  const row = await getDbClient().get<ModelCatalogMeta>(
-    "SELECT etag, lastModified, lastFetchAt, lastCheckedAt FROM model_catalog_meta WHERE id = 1",
-  );
+  const row = await getStorage().repos.models.getCatalogMeta();
   return row ?? { etag: null, lastModified: null, lastFetchAt: null, lastCheckedAt: null };
 }
 
 export async function updateModelCatalogMeta(patch: Partial<ModelCatalogMeta>): Promise<void> {
   const current = await getModelCatalogMeta();
   const next = { ...current, ...patch };
-  await getDbClient().run(
-    `INSERT INTO model_catalog_meta (id, etag, lastModified, lastFetchAt, lastCheckedAt)
-     VALUES (1, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       etag = excluded.etag,
-       lastModified = excluded.lastModified,
-       lastFetchAt = excluded.lastFetchAt,
-       lastCheckedAt = excluded.lastCheckedAt`,
-    [next.etag, next.lastModified, next.lastFetchAt, next.lastCheckedAt],
-  );
+  await getStorage().repos.models.upsertCatalogMeta({
+    etag: next.etag,
+    lastModified: next.lastModified,
+    lastFetchAt: next.lastFetchAt,
+    lastCheckedAt: next.lastCheckedAt,
+  });
 }
 
 // ─── Overlay ─────────────────────────────────────────────────────────────────
 
-function overlayRowToEntry(row: OverlayRow): ModelCatalogOverlayEntry {
+function overlayRowToEntry(row: ModelCatalogOverlayRow): ModelCatalogOverlayEntry {
   return {
     provider: row.provider,
     modelId: row.modelId,
@@ -320,9 +280,7 @@ function overlayRowToEntry(row: OverlayRow): ModelCatalogOverlayEntry {
 }
 
 export async function listModelCatalogOverlay(): Promise<ModelCatalogOverlayEntry[]> {
-  const rows = await getDbClient().query<OverlayRow>(
-    "SELECT * FROM model_catalog_overlay ORDER BY provider, modelId",
-  );
+  const rows = await getStorage().repos.models.listOverlay();
   return rows.map(overlayRowToEntry);
 }
 
@@ -336,46 +294,19 @@ export async function upsertModelCatalogOverlay(
 ): Promise<ModelCatalogOverlayEntry> {
   const now = opts.now ?? Date.now();
   const userId = opts.userId ?? null;
-  await getDbClient().run(
-    `INSERT INTO model_catalog_overlay
-       (provider, modelId, name, family, releaseDate, contextWindow, maxOutput, reasoning,
-        reasoningOptions, pricing, status, reason, verifiedBy, expiresWhenUpstreamMatches,
-        createdAt, updatedAt, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(provider, modelId) DO UPDATE SET
-       name = excluded.name,
-       family = excluded.family,
-       releaseDate = excluded.releaseDate,
-       contextWindow = excluded.contextWindow,
-       maxOutput = excluded.maxOutput,
-       reasoning = excluded.reasoning,
-       reasoningOptions = excluded.reasoningOptions,
-       pricing = excluded.pricing,
-       status = excluded.status,
-       reason = excluded.reason,
-       verifiedBy = excluded.verifiedBy,
-       expiresWhenUpstreamMatches = excluded.expiresWhenUpstreamMatches,
-       updatedAt = excluded.updatedAt,
-       updated_by = excluded.updated_by`,
-    [
-      input.provider,
-      input.modelId,
-      ...factParams(input),
-      input.reason,
-      input.verifiedBy ?? null,
-      input.expiresWhenUpstreamMatches === false ? 0 : 1,
-      now,
-      now,
-      userId,
-      userId,
-    ],
-  );
+  await getStorage().repos.models.upsertOverlay({
+    provider: input.provider,
+    modelId: input.modelId,
+    ...factValues(input),
+    reason: input.reason,
+    verifiedBy: input.verifiedBy ?? null,
+    expiresWhenUpstreamMatches: input.expiresWhenUpstreamMatches !== false,
+    now,
+    actor: userId,
+  });
   await applyOverlayPricingRows(now);
   markModelsCatalogStale();
-  const row = await getDbClient().get<OverlayRow>(
-    "SELECT * FROM model_catalog_overlay WHERE provider = ? AND modelId = ?",
-    [input.provider, input.modelId],
-  );
+  const row = await getStorage().repos.models.findOverlay(input.provider, input.modelId);
   if (!row) throw new Error("overlay row vanished after upsert");
   return overlayRowToEntry(row);
 }
@@ -384,12 +315,9 @@ export async function deleteModelCatalogOverlay(
   provider: string,
   modelId: string,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM model_catalog_overlay WHERE provider = ? AND modelId = ?",
-    [provider, modelId],
-  );
+  const changes = await getStorage().repos.models.deleteOverlay(provider, modelId);
   markModelsCatalogStale();
-  return result.changes > 0;
+  return changes > 0;
 }
 
 function factEquals(key: (typeof FACT_KEYS)[number], overlay: unknown, upstream: unknown): boolean {
@@ -470,7 +398,7 @@ export async function applyOverlayPricingRows(now = Date.now()): Promise<number>
       .map(tripleKey)
       .filter((key) => !fallbackKeys.has(key)),
   );
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     let inserted = 0;
     for (const row of rows) {
       const existing = await getActivePricingRow(row.provider, row.model, row.tokenClass, now);
@@ -478,9 +406,13 @@ export async function applyOverlayPricingRows(now = Date.now()): Promise<number>
         if (!overlayOwned.has(tripleKey(row))) continue;
         if (existing.pricePerMillionUsd === row.pricePerMillionUsd) continue;
         if (existing.effectiveFrom === now) {
-          await getDbClient().run(
-            "UPDATE pricing SET price_per_million_usd = ?, lastUpdatedAt = ? WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
-            [row.pricePerMillionUsd, now, row.provider, row.model, row.tokenClass, now],
+          await getStorage().repos.sessions.updatePricingPrice(
+            row.provider,
+            row.model,
+            row.tokenClass,
+            now,
+            row.pricePerMillionUsd,
+            now,
           );
           inserted += 1;
           continue;

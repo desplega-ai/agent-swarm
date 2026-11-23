@@ -99,7 +99,7 @@ export async function emitBudgetRefusalSideEffects(
         const taskDesc = ctx.task.task.slice(0, 200);
         const spendSummary = formatSpendSummary(ctx);
 
-        const resolved = resolveTemplate(
+        const resolved = await resolveTemplate(
           "task.budget.refused",
           {
             cause: ctx.cause,

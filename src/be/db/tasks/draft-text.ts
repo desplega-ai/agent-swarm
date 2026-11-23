@@ -1,4 +1,4 @@
-import { getDbClient } from "../runtime";
+import { getStorage } from "../../storage";
 
 /**
  * Append a block to a draft's task text (an uploaded voice note's transcript),
@@ -7,9 +7,10 @@ import { getDbClient } from "../runtime";
  * whether the task was still a draft.
  */
 export async function appendDraftTaskText(taskId: string, block: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE agent_tasks SET task = task || ?, lastUpdatedAt = ? WHERE id = ? AND status = 'draft'",
-    [`\n\n${block}`, new Date().toISOString(), taskId],
+  const changes = await getStorage().repos.tasks.appendDraftTaskText(
+    taskId,
+    `\n\n${block}`,
+    new Date().toISOString(),
   );
-  return result.changes > 0;
+  return changes > 0;
 }
