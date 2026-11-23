@@ -106,8 +106,12 @@ export type ScenarioContext = {
   /**
    * Boot a second API on a named fixture or a prepared SQLite image (Slack off).
    * The main SUT keeps running. Call `stop` when done; the runner stops it otherwise.
+   * `env` adds variables to this API only.
    */
-  startFixtureSut: (fixture: string | DbFixture) => Promise<FixtureSut>;
+  startFixtureSut: (
+    fixture: string | DbFixture,
+    env?: Record<string, string>,
+  ) => Promise<FixtureSut>;
   /**
    * The data copy of decision D11 (check 20), whatever engine the run uses: boot a new
    * source API on a SQLite file. `copy()` stops it, runs `agent-swarm db-copy` into a new
@@ -341,13 +345,13 @@ async function bootStack(
         sut.flushLog();
         return Bun.file(sut.logPath).text();
       },
-      async startFixtureSut(source) {
+      async startFixtureSut(source, env = {}) {
         const fixtureStack: Stack = {};
         stacks.add(fixtureStack);
         const { sut: fixtureSut, fixture } = await startFixtureSut(
           options.keep,
           source,
-          options.sutEnv,
+          { ...options.sutEnv, ...env },
           options.engine,
         );
         fixtureStack.sut = fixtureSut;

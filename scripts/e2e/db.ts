@@ -356,3 +356,32 @@ export async function loadMetricRangeFixture(
     db.close();
   }
 }
+
+/**
+ * Put tasks of one agent in a private copy of the base fixture before the API starts.
+ * The status and source are stored as given, so a row can hold a value that no
+ * current build writes.
+ */
+export async function loadHistoricalTaskFixture(
+  agentId: string,
+  tasks: readonly { id: string; status: string; source: string }[],
+): Promise<DbFixture> {
+  const fixture = await loadDbFixture("base-db");
+  const db = Database.deserialize(fixture.file);
+  try {
+    db.run(
+      `INSERT INTO agents (id, name, status, createdAt, lastUpdatedAt)
+       VALUES (?, 'historical tasks', 'offline', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [agentId],
+    );
+    const insert = db.prepare(
+      `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'historical task', ?, ?, ?, ?)`,
+    );
+    const now = new Date().toISOString();
+    for (const task of tasks) insert.run(task.id, agentId, task.status, task.source, now, now);
+    return { ...fixture, name: "historical-tasks", file: db.serialize() };
+  } finally {
+    db.close();
+  }
+}
