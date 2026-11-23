@@ -727,8 +727,16 @@ export async function copyIntoPostgres(
         report.error = headError(before.head);
         return report;
       }
-      // A database with no table, or one that holds only the chain's own rows,
-      // gets the rest of the chain.
+      // Migrations commit one by one, so a later refusal cannot roll them back. A
+      // target with a migration history must already be at this build's head:
+      // otherwise the chain would move it forward even when the copy refuses.
+      if (before.head !== null && before.head !== chainHead) {
+        report.error =
+          `the target database is at migration ${before.head}, this build at ${chainHead}. ` +
+          "Copy into a new empty database, or start the API of this build on the target once, stop it, then copy. Nothing was written.";
+        return report;
+      }
+      // A database with no table gets the chain; one at the head keeps it.
       await runPostgresMigrations(onConnection(conn), {
         migrationsDir: options.migrationsDir,
         log: (line) => log(line),

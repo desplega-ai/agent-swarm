@@ -351,6 +351,24 @@ describe("copyIntoPostgres", () => {
     expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("operator edit");
   });
 
+  test("refuses an untouched target at an older head and leaves it at that head", async () => {
+    const pool = new Bun.SQL({ url: db.url, max: 1 });
+    try {
+      await runPostgresMigrations(pool as never, { migrationsDir: dir, log: () => {} });
+    } finally {
+      await pool.close();
+    }
+    writeFileSync(join(dir, "002_next.sql"), "UPDATE seeded SET name = 'rewritten by 002';");
+    const refused = await copyIntoPostgres(
+      { ...fullSource(), migrationHead: () => 2 },
+      { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} },
+    );
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/target database is at migration 1, this build at 2/);
+    expect((await sql.unsafe("SELECT MAX(version)::int AS v FROM _migrations"))[0].v).toBe(1);
+    expect((await sql.unsafe("SELECT name FROM seeded"))[0].name).toBe("from the chain");
+  });
+
   test("a late rollback leaves the target sequence where it was", async () => {
     const pool = new Bun.SQL({ url: db.url, max: 1 });
     try {
