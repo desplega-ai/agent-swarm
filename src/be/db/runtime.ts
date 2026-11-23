@@ -327,28 +327,39 @@ export function closeDb(): void {
   }
   sqliteVecAvailable = false;
   dbCreatedThisBoot = false;
-  if (postgres) {
-    const engine = postgres;
-    postgres = null;
-    postgresStarting = null;
-    engine.close().catch((err) => console.error("[db] Postgres close failed:", errorText(err)));
-  }
+  retirePostgres().catch((err) => console.error("[db] Postgres close failed:", errorText(err)));
+}
+
+/**
+ * Detach the Postgres engine and close it. A start still in flight is retired
+ * too: the close waits for it to settle and then closes the engine it opened,
+ * so no pool or lock outlives the close.
+ */
+function retirePostgres(): Promise<void> {
+  const starting = postgresStarting;
+  const current = postgres;
+  postgresStarting = null;
+  postgres = null;
+  if (!starting) return current ? current.close() : Promise.resolve();
+  return starting.then(
+    (engine) => {
+      if (postgres === engine) postgres = null;
+      return engine.close();
+    },
+    // A failed start closed its own engine.
+    () => undefined,
+  );
 }
 
 /**
  * Close the database and wait for it: the Postgres pool drains and the
- * one-process lock is released. On SQLite the same as `closeDb()`.
+ * one-process lock is released, also for a start still in flight. On SQLite
+ * the same as `closeDb()`.
  */
 export async function closeDatabase(): Promise<void> {
-  if (!postgres) {
-    closeDb();
-    return;
-  }
-  const engine = postgres;
-  postgres = null;
-  postgresStarting = null;
+  const retired = retirePostgres();
   closeDb();
-  await engine.close();
+  await retired;
 }
 
 function errorText(err: unknown): string {
@@ -364,13 +375,15 @@ function errorText(err: unknown): string {
  * Idempotent: later calls wait for the same start.
  */
 export function startPostgres(): Promise<void> {
-  if (postgres) return Promise.resolve();
+  // The engine is assigned before the seed and key checks end (they read
+  // through it), so readiness is the start promise, not the engine variable.
   if (!postgresStarting) {
     const url = postgresUrlFromEnv();
-    postgresStarting = bootPostgres(url).catch((err) => {
-      postgresStarting = null;
+    const starting = bootPostgres(url).catch((err) => {
+      if (postgresStarting === starting) postgresStarting = null;
       throw err;
     });
+    postgresStarting = starting;
   }
   return postgresStarting.then(() => undefined);
 }

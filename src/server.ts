@@ -416,6 +416,13 @@ export async function createServer(
     excludedTools?: readonly string[];
   } = {},
 ) {
+  // Initialize database with WAL mode
+  // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
+  // DATABASE_URL with a postgres:// scheme selects the Postgres engine instead (async start).
+  // Before the config load below: it is the first database read.
+  if (isPostgresEngine()) await startPostgres();
+  else initDb(process.env.DATABASE_PATH);
+
   // Reload env
   await loadGlobalConfigsIntoEnv(true);
 
@@ -437,12 +444,6 @@ export async function createServer(
     opts.fullSurface === true ||
     toolAllowlist !== undefined ||
     (cap === "chat-sdk" ? isChatSdkEnabled() : getCapabilities().has(cap));
-
-  // Initialize database with WAL mode
-  // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
-  // DATABASE_URL with a postgres:// scheme selects the Postgres engine instead (async start).
-  if (isPostgresEngine()) await startPostgres();
-  else initDb(process.env.DATABASE_PATH);
 
   // Phase 2: project the vendored models.dev snapshot into the pricing table.
   // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0). This runs
