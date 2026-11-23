@@ -5,7 +5,6 @@ import {
   type KeyCostSummaryRow,
   type KeyWindowUsageRow,
   type NewBudgetRefusalNotification,
-  narrowTaskStatus,
   type RequestCompositionRow,
   type SessionCostAgentSummaryRow,
   type SessionCostCredentialSummaryRow,
@@ -133,11 +132,11 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
     );
   }
 
-  async listChainWithCosts(rootTaskId: string): Promise<TaskChainRow[]> {
+  listChainWithCosts(rootTaskId: string): Promise<TaskChainRow[]> {
     // rowid breaks createdAt ties as idx_agent_tasks_created did. CROSS JOIN
     // keeps the chain as the outer loop: with a plain JOIN, SQLite scanned all
     // of agent_tasks to skip the sort.
-    const rows = await this.db.query<TaskChainRow>(sql`
+    return this.db.query(sql`
       WITH RECURSIVE chain(id) AS (
         SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
         UNION ALL
@@ -149,7 +148,6 @@ export class SqliteSessionsRepository extends BaseSessionsRepository {
       FROM chain
       CROSS JOIN agent_tasks t ON t.id = chain.id
       ORDER BY t."createdAt", t.rowid`);
-    return rows.map(narrowTaskStatus);
   }
 
   listLogsBySession(sessionId: string, iteration: number): Promise<SessionLogRow[]> {

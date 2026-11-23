@@ -8,7 +8,6 @@ import {
   type HumanFreeClassifyInput,
   jsonText,
   likeAsciiCi,
-  narrowTaskStatus,
   nowIso,
   readableSessionSql,
   SqlQuery,
@@ -187,7 +186,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
 
   listTasksDispatchedFrom(taskIds: readonly string[]): Promise<TaskRow[]> {
     if (taskIds.length === 0) return Promise.resolve([]);
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT t.*,
         (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = t.id) AS "totalCostUsd"
       FROM agent_tasks t
@@ -235,14 +234,13 @@ export class PostgresTasksRepository extends BaseTasksRepository {
       page.orderBy === "createdAt"
         ? `agent_tasks."createdAt" DESC, agent_tasks."_rowid" DESC`
         : `agent_tasks."lastUpdatedAt" DESC, agent_tasks.priority DESC, agent_tasks."_rowid" DESC`;
-    const rows = await this.db.query<TaskListRow<F>>(sql`WITH page AS (
+    return this.db.query<TaskListRow<F>>(sql`WITH page AS (
       SELECT agent_tasks."_rowid" AS rid FROM agent_tasks${sqlWhere(conditions)}
       ORDER BY ${raw(order)} LIMIT ${raw(String(page.limit))} OFFSET ${raw(String(page.offset))}
     )
     SELECT ${raw(LIST_COLUMNS[fields])}, ${raw(TOTAL_COST_SQL)}
     FROM page JOIN agent_tasks ON agent_tasks."_rowid" = page.rid
     ORDER BY ${raw(order)}`);
-    return rows.map(narrowTaskStatus);
   }
 
   /**
@@ -581,14 +579,14 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   }
 
   listDependentTasks(parentId: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT t.* FROM agent_tasks t, ${jsonArrayElements(sql`t."dependsOn"`)} AS dep(value)
       WHERE dep.value = ${parentId}
       ORDER BY t."_rowid"`);
   }
 
   listStalledInProgressTasks(cutoff: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       SELECT * FROM agent_tasks WHERE status = 'in_progress' AND "lastUpdatedAt" < ${cutoff}
       ORDER BY "lastUpdatedAt" ASC, "_rowid" ASC`);
   }
@@ -601,7 +599,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   }
 
   listRootTaskChain(rootTaskId: string): Promise<TaskRow[]> {
-    return this.taskRows(sql`
+    return this.db.query<TaskRow>(sql`
       WITH RECURSIVE chain(id) AS (
         SELECT id FROM agent_tasks WHERE id = ${rootTaskId}
         UNION ALL
