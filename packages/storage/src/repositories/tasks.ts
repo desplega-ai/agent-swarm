@@ -392,8 +392,8 @@ export type NewSimpleTask = {
   key: string;
   agentId: string;
   task: string;
-  status: string;
-  source: string;
+  status: TaskStatus;
+  source: TaskSource;
   slackChannelId: string | null;
   slackThreadTs: string | null;
   slackUserId: string | null;
@@ -1345,7 +1345,12 @@ export interface TasksRepository {
   /** offered/reviewing -> unassigned, clearing the offer. */
   rejectOfferedTask(taskId: string, reason: string | null, now: string): Promise<TaskRow | null>;
   /** `from` -> `to` (plain status move, guarded on the current status). */
-  moveTaskStatus(taskId: string, from: string, to: string, now: string): Promise<TaskRow | null>;
+  moveTaskStatus(
+    taskId: string,
+    from: TaskStatus,
+    to: TaskStatus,
+    now: string,
+  ): Promise<TaskRow | null>;
   /** draft -> offered / pending / unassigned (by offeree and assignee). */
   promoteDraftTask(taskId: string, now: string): Promise<TaskRow | null>;
   refreshDraftTaskLease(taskId: string, now: string): Promise<void>;
@@ -1384,7 +1389,7 @@ export interface TasksRepository {
   /** pending -> `status` with its failure fields. */
   failPendingTask(
     taskId: string,
-    f: { status: string; statusKind: string; failureReason: string; now: string },
+    f: { status: TaskStatus; statusKind: string; failureReason: string; now: string },
   ): Promise<TaskRow | null>;
   /** Unassigned tasks with routing affinity created before `cutoff`, oldest first, then insertion order. */
   listStaleUnassignedAffinityTasks(cutoff: string): Promise<TaskRow[]>;
@@ -3282,7 +3287,12 @@ export abstract class BaseTasksRepository implements TasksRepository {
       WHERE id = ${taskId} AND status IN ('offered', 'reviewing') RETURNING *`);
   }
 
-  moveTaskStatus(taskId: string, from: string, to: string, now: string): Promise<TaskRow | null> {
+  moveTaskStatus(
+    taskId: string,
+    from: TaskStatus,
+    to: TaskStatus,
+    now: string,
+  ): Promise<TaskRow | null> {
     return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks SET status = ${to}, "lastUpdatedAt" = ${now}
       WHERE id = ${taskId} AND status = ${from} RETURNING *`);
@@ -3429,7 +3439,7 @@ export abstract class BaseTasksRepository implements TasksRepository {
 
   failPendingTask(
     taskId: string,
-    f: { status: string; statusKind: string; failureReason: string; now: string },
+    f: { status: TaskStatus; statusKind: string; failureReason: string; now: string },
   ): Promise<TaskRow | null> {
     return this.db.get<TaskRow>(sql`
       UPDATE agent_tasks

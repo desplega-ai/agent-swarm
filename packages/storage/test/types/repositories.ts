@@ -51,6 +51,17 @@ export async function taskEnumColumnsAreChecked(): Promise<void> {
   await tasks.insertTask({ ...newTask, source: "email" });
   // @ts-expect-error routing_reason takes only the CHECK constraint's values
   await tasks.insertTask({ ...newTask, routing_reason: "random" });
+  // @ts-expect-error a misspelled destination fails on a status move
+  await tasks.moveTaskStatus("t1", "pending", "in_progres", "2026-01-01T00:00:00.000Z");
+  // @ts-expect-error a misspelled guard status fails on a status move
+  await tasks.moveTaskStatus("t1", "pendng", "in_progress", "2026-01-01T00:00:00.000Z");
+  await tasks.failPendingTask("t1", {
+    // @ts-expect-error a misspelled status fails on a failure write
+    status: "faild",
+    statusKind: "error",
+    failureReason: "x",
+    now: "2026-01-01T00:00:00.000Z",
+  });
   const row = await tasks.findTaskById("t1");
   const status: TaskStatus | undefined = row?.status;
   const routing: "declared" | "engine_default" | null | undefined = row?.routing_source;
