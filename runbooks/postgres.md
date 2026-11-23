@@ -116,6 +116,17 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 - A list method states a total order (no reliance on insertion order); `bun run test:storage` runs the repository contract suite on both engines.
 - Prove a change on both engines: `bun run e2e --only <scenario>` and `bun run e2e --engine postgres --only <scenario>` (needs `E2E_POSTGRES_URL`, a role that may create databases).
 
+## Type assertions
+
+A repository returns the row type its callers use. Do not redeclare a storage row in `src/` and assert into it. An enum column takes its values from a `const` tuple in the storage package (`AGENT_STATUSES`, `TASK_STATUSES`), and `src/be/db/tasks/read.ts` fails to compile when a tuple drifts from `src/types.ts`. Narrow a caught value with `instanceof Error`, never `as Error`.
+
+These assertion groups stay, with the reason:
+
+- **Driver values in the engine packages.** `bun:sqlite` and the Postgres driver return untyped column values. A cast is allowed only where the SQL fixes the type (`COUNT(*)`, a `BLOB`, an `int8` as `bigint`), on the line that reads the value.
+- **Contract tests.** A test narrows a projection union to read its ids, or passes a test double as `never` to a driver parameter. Both stay in `packages/storage*/test`.
+- **Scripts.** E2E scenarios and `scripts/storage-checks` read JSON HTTP bodies and driver rows. A scenario asserts the fields it then checks.
+- **The Bun SQL spike** under `thoughts/` is research and does not ship.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
