@@ -156,6 +156,11 @@ export function isSlackDelegationEnabled(): boolean {
   return isEnvFlagEnabled("SLACK_RENDER_V2_DELEGATION", false);
 }
 
+/** Lead threads post the Lead's replies, not its waiting cards or unreplied follow-up results. */
+export function isSlackQuietLeadThreadsEnabled(): boolean {
+  return isEnvFlagEnabled("SLACK_RENDER_V2_QUIET_LEAD_THREADS", false);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1341,6 +1346,11 @@ async function mayPostLeadFollowUpCard(
   ) {
     return false;
   }
+  if (isSlackQuietLeadThreadsEnabled() && task.status === "completed" && !isDeferredTask(task)) {
+    // The Lead answers with slack-reply when it has something to say; its output is a note.
+    await settleOutcomeWithoutCard(task, "quiet_lead_threads: Lead follow-up not posted");
+    return false;
+  }
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs) return false;
   const blockReason = await getChannelBlockReason(app.client, task.slackChannelId);
@@ -1364,6 +1374,12 @@ async function cardOnlyRepeatsSlackReply(task: AgentTask): Promise<boolean> {
   if (await outcomeUiSpec(task)) return false;
   const content = await outcomeContent(task, true);
   return (await outcomeCaptionBlocks(task, content)).length === 0;
+}
+
+/** A Lead deferral that, with quiet Lead threads on, posts no ⏳ card. */
+async function isQuietLeadDeferral(task: AgentTask): Promise<boolean> {
+  if (!isSlackQuietLeadThreadsEnabled() || !isDeferredTask(task) || !task.agentId) return false;
+  return !!(await getAgentById(task.agentId))?.isLead;
 }
 
 /**
@@ -2539,6 +2555,11 @@ async function processSlackThread(
       if ((!card || isPendingSlackMessage(card)) && (await cardOnlyRepeatsSlackReply(task))) {
         await settleOutcomeWithoutCard(task, "slack_reply_sent: completed card not posted");
         await finalizeTerminalSlackReactions([task]);
+        continue;
+      }
+      if ((!card || isPendingSlackMessage(card)) && (await isQuietLeadDeferral(task))) {
+        // The tree shows the wait; the ask keeps 👀 until a wake-up answers.
+        await settleOutcomeWithoutCard(task, "quiet_lead_threads: deferral card not posted");
         continue;
       }
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;

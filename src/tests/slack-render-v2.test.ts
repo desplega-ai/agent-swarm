@@ -5652,3 +5652,103 @@ describe("Slack outcome window across closures, deliveries and wakes", () => {
     expect(streamTexts()).toHaveLength(0);
   });
 });
+
+describe("quiet Lead threads (SLACK_RENDER_V2_QUIET_LEAD_THREADS)", () => {
+  beforeEach(() => {
+    process.env.SLACK_RENDER_V2_QUIET_LEAD_THREADS = "true";
+  });
+  afterEach(() => {
+    delete process.env.SLACK_RENDER_V2_QUIET_LEAD_THREADS;
+  });
+
+  async function leadAsk(label: string) {
+    const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(label);
+    const triggerTs = `${slackAddressSequence}.2`;
+    const ask = await createTaskExtended("answer when the review is in", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    return { lead, ask, channelId, threadTs, triggerTs };
+  }
+
+  test("a Lead deferral posts no waiting card, and its wake-up still answers", async () => {
+    const { lead, ask, channelId, triggerTs } = await leadAsk("C_QUIET_DEFER");
+    await completeTask(ask.id, "Waiting on Reviewer — or today at 18:38 at the latest", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect((await getSlackOutcomeMessage(ask.id))?.deliveryAbandonedAt).toBeTruthy();
+    const doneReaction = {
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
+    };
+    expect(calls).not.toContainEqual(doneReaction);
+
+    const schedule = await createScheduledTask({
+      name: "quiet-wake",
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    await completeTask(wake.id, "The review passed.");
+    calls.length = 0;
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const streams = calls.filter((call) => call.method === "chat.startStream");
+    expect(streams.map((call) => call.payload.markdown_text)).toEqual(["✅ The review passed."]);
+    expect(calls).toContainEqual(doneReaction);
+  });
+
+  test("a Lead follow-up that ends without a reply posts no card; a failed one still does", async () => {
+    const { lead, ask, channelId, threadTs } = await leadAsk("C_QUIET_FOLLOW_UP");
+    await completeTask(ask.id, "Asked two workers.");
+    await processSlackRenderV2();
+    calls.length = 0;
+
+    const followUps = [];
+    for (const status of ["completed", "failed"] as const) {
+      const followUp = await createTaskExtended(`[Follow-up] ${status}`, {
+        agentId: lead.id,
+        source: "system",
+        taskType: "follow-up",
+        parentTaskId: ask.id,
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        followUpConfig: { disabled: true },
+      });
+      await startTask(followUp.id);
+      if (status === "completed") {
+        await completeTask(followUp.id, "I posted nothing in Slack: one worker is still running.");
+      } else {
+        await failTask(followUp.id, "Could not read the worker result.");
+      }
+      followUps.push(followUp);
+    }
+    await processSlackRenderV2();
+
+    const streams = calls.filter((call) => call.method === "chat.startStream");
+    expect(streams.map((call) => call.payload.markdown_text)).toEqual([
+      "❌ **Failed:** Could not read the worker result.",
+    ]);
+    expect((await getSlackOutcomeMessage(followUps[0]!.id))?.deliveryAbandonedAt).toBeTruthy();
+  });
+});
