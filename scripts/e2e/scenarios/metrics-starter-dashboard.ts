@@ -67,9 +67,16 @@ export const metricsStarterDashboard: Scenario = {
     const template = await Bun.file(
       resolve(import.meta.dir, "../../../apps/ui/src/pages/metrics/new-metric-definition.json"),
     ).json();
+    // An operator added SQLite calendar ranges to the template's options.
+    const saved = structuredClone(template);
+    const savedRange = asRecords(saved, "variables").find((v) => v.key === "rangeModifier");
+    (asRecord(savedRange).options as unknown[]).push(
+      { label: "Last month", value: "-1 month" },
+      { label: "Last year", value: "-1 year" },
+    );
     const created = await ctx.api("POST", "/api/metrics/definitions", {
       agentId,
-      body: { title: `New dashboard template ${ctx.nonce}`, definition: template },
+      body: { title: `New dashboard template ${ctx.nonce}`, definition: saved },
     });
     expectStatus(created, [201], "create a dashboard from the UI template");
     const templateId = asString(asRecord(created.json).id, "template metric id");
@@ -89,7 +96,8 @@ export const metricsStarterDashboard: Scenario = {
       "options",
     ).map((option) => option.value);
     expect(templateRanges.length === 3, "The UI template lost its time range");
-    for (const rangeModifier of templateRanges) {
+    // A range an operator saved on SQLite, such as "-1 month", runs on both engines.
+    for (const rangeModifier of [...templateRanges, "-1 month", "-1 year"]) {
       const run = await ctx.api("POST", `/api/metrics/definitions/${templateId}/run`, {
         body: { variables: { rangeModifier, agentFilter: agentId } },
       });

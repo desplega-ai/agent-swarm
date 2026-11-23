@@ -36,8 +36,10 @@ const HARD_METRIC_MAX_ROWS = 500;
 // relative range: a time filter as a bound value runs the same on both storage
 // engines (`"createdAt" >= $1`), with no engine-only date function.
 const VARIABLE_TOKEN_RE = /^\{\{([a-zA-Z][a-zA-Z0-9_]*)(?::(since))?\}\}$/;
-const RANGE_MODIFIER_RE = /^\s*([+-]?\d+)\s+(minute|hour|day)s?\s*$/i;
-const RANGE_UNIT_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 } as const;
+// The SQLite `datetime('now', ?)` modifiers a saved range may hold, months and
+// years included: a dashboard saved on SQLite keeps working after the move.
+const RANGE_MODIFIER_RE = /^\s*([+-]?\d+)\s+(second|minute|hour|day|month|year)s?\s*$/i;
+const RANGE_UNIT_MS = { second: 1_000, minute: 60_000, hour: 3_600_000, day: 86_400_000 } as const;
 
 /**
  * The start of a relative range such as "-30 days".
@@ -47,7 +49,8 @@ const RANGE_UNIT_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 } as co
  * compares them as strings, so no instant inside a day compares right with both.
  * The bare date `YYYY-MM-DD` sorts below every timestamp of that day in either
  * format, so SQLite counts the first day as Postgres does with the same instant.
- * A minute or hour range binds the exact instant as ISO 8601 UTC.
+ * A month or year range starts at 00:00 UTC of its first day the same way. A
+ * second, minute or hour range binds the exact instant as ISO 8601 UTC.
  */
 function rangeStart(key: string, modifier: MetricParam, now = Date.now()): string {
   const match = typeof modifier === "string" ? RANGE_MODIFIER_RE.exec(modifier) : null;
@@ -56,9 +59,18 @@ function rangeStart(key: string, modifier: MetricParam, now = Date.now()): strin
       `Metric variable "${key}" must be a relative range such as "-30 days" for {{${key}:since}}`,
     );
   }
-  const unit = match[2]!.toLowerCase() as keyof typeof RANGE_UNIT_MS;
-  const start = new Date(now + Number(match[1]) * RANGE_UNIT_MS[unit]);
-  if (unit !== "day") return start.toISOString();
+  const unit = match[2]!.toLowerCase() as keyof typeof RANGE_UNIT_MS | "month" | "year";
+  const amount = Number(match[1]);
+  let start: Date;
+  if (unit === "month" || unit === "year") {
+    // Calendar arithmetic, as SQLite does it: March 31 minus one month is March 3.
+    start = new Date(now);
+    if (unit === "month") start.setUTCMonth(start.getUTCMonth() + amount);
+    else start.setUTCFullYear(start.getUTCFullYear() + amount);
+  } else {
+    start = new Date(now + amount * RANGE_UNIT_MS[unit]);
+  }
+  if (unit !== "day" && unit !== "month" && unit !== "year") return start.toISOString();
   const day = start.toISOString().slice(0, 10);
   return isPostgresEngine() ? `${day}T00:00:00.000Z` : day;
 }
