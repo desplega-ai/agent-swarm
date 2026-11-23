@@ -134,7 +134,13 @@ export const platformbModelGroups: Scenario = {
 
       // ===== members =====
       response = await ctx.api("POST", "/api/model-profiles", {
-        body: { name: profileName, harness: "codex", model: "gpt-5", allowCustomModel: true },
+        // A custom id no catalog lists, so a models.dev deprecation cannot reject it.
+        body: {
+          name: profileName,
+          harness: "codex",
+          model: "e2e-custom-codex-model",
+          allowCustomModel: true,
+        },
       });
       expectStatus(response, [201], "create a member profile");
       response = await ctx.api("PUT", `/api/model-groups/${groupName}/members`, {
