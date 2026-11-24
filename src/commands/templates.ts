@@ -82,6 +82,16 @@ registerTemplate({
   category: "task_lifecycle",
 });
 
+// Sent at most once per session by the codex adapter when a task with an
+// outputSchema ends with no matching result (see CodexSession.runSession).
+registerTemplate({
+  eventType: "task.nudge.structured_output_missing",
+  header: "",
+  defaultBody: `Your last message was not valid JSON for the required schema. Call store-progress with output matching it.`,
+  variables: [],
+  category: "task_lifecycle",
+});
+
 registerTemplate({
   eventType: "task.trigger.unread_mentions",
   header: "",

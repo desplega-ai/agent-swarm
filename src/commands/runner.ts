@@ -109,7 +109,11 @@ import {
 import { isGitHubUrl, scopeGitHubTokenToEnterprise } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
-import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
+import {
+  isEffectiveOutputSchema,
+  matchOutputSchema,
+  normalizeOutputSchema,
+} from "../utils/output-schema.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -131,7 +135,6 @@ import {
 } from "../vcs/azure-devops.ts";
 import { bitbucketFullName, isBitbucketUrl, parseBitbucketRepoUrl } from "../vcs/bitbucket.ts";
 import { detectVcsProvider, type VcsProvider } from "../vcs/index.ts";
-import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
   buildContextPreamble,
@@ -1818,27 +1821,13 @@ async function validateProviderOutputIfNeeded(
     }
 
     // The first candidate is the raw text, so a final message that is already
-    // bare JSON keeps its exact bytes. Later candidates recover JSON that the
-    // model wrapped in a ```json fence or a line of prose.
-    let firstValidationErrors: string[] | undefined;
-    for (const [index, candidate] of jsonOutputCandidates(providerOutput).entries()) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(candidate);
-      } catch {
-        continue;
-      }
-      const validationErrors = validateJsonSchema(taskData.outputSchema, parsed);
-      if (validationErrors.length === 0) {
-        return index === 0 ? { ok: true } : { ok: true, output: candidate };
-      }
-      firstValidationErrors ??= validationErrors;
-    }
-
-    if (firstValidationErrors) {
+    // bare JSON keeps its exact bytes.
+    const match = matchOutputSchema(taskData.outputSchema, providerOutput);
+    if (match.ok) return match;
+    if (match.errors) {
       return {
         ok: false,
-        failReason: `Structured output did not match outputSchema: ${firstValidationErrors.join("; ")}`,
+        failReason: `Structured output did not match outputSchema: ${match.errors.join("; ")}`,
       };
     }
     return {
@@ -1849,33 +1838,6 @@ async function validateProviderOutputIfNeeded(
   } catch {
     return { ok: true };
   }
-}
-
-/**
- * Texts that may hold the JSON in an agent's final message, in the order to
- * try them: the whole message, each fenced code block from last to first, then
- * the span from the first `{` (or `[`) to the last `}` (or `]`). Agents often
- * answer a schema-bound task with "Here is the result:" plus a ```json block
- * instead of calling store-progress, and `JSON.parse` on the whole message
- * fails on that. Fences run last to first because an earlier fence is often an
- * example or a draft that also matches the schema, and the answer comes last.
- */
-function jsonOutputCandidates(text: string): string[] {
-  const candidates = [text];
-  const fenced: string[] = [];
-  for (const match of text.matchAll(/```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g)) {
-    if (match[1]?.trim()) fenced.push(match[1].trim());
-  }
-  candidates.push(...fenced.reverse());
-  for (const [open, close] of [
-    ["{", "}"],
-    ["[", "]"],
-  ] as const) {
-    const start = text.indexOf(open);
-    const end = text.lastIndexOf(close);
-    if (start >= 0 && end > start) candidates.push(text.slice(start, end + 1));
-  }
-  return [...new Set(candidates)];
 }
 
 function finalUpdateDeadline(): number {
@@ -4646,6 +4608,8 @@ export async function spawnProviderProcess(
     /** Claim-time profile (task.resolvedProfile) and its pooled-key allowlist. */
     resolvedProfile?: string;
     credentialAllowlist?: Record<string, string[]>;
+    /** The task's effective outputSchema; codex enforces it natively. */
+    outputSchema?: Record<string, unknown>;
   },
   logDir: string,
 ): Promise<RunningTask> {
@@ -4873,6 +4837,7 @@ export async function spawnProviderProcess(
     contextKey: opts.contextKey,
     reasoningEffort: reasoningEffortOverride,
     onPromptSkill: skillInvokes.promptSkill,
+    outputSchema: opts.outputSchema,
   };
 
   // Both new and resumed tasks reach this boundary with the current harness
@@ -7627,6 +7592,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: (task as { contextKey?: string }).contextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: resumeSession.parts,
+              outputSchema: normalizeOutputSchema(task.outputSchema),
               resolvedProfile: task.resolvedProfile,
               credentialAllowlist: task.credentialAllowlist,
             },
@@ -8282,6 +8248,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: taskContextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: taskSession.parts,
+              outputSchema: normalizeOutputSchema(
+                (trigger.task as { outputSchema?: unknown } | undefined)?.outputSchema,
+              ),
               resolvedProfile: (trigger.task as { resolvedProfile?: string } | undefined)
                 ?.resolvedProfile,
               credentialAllowlist: (
