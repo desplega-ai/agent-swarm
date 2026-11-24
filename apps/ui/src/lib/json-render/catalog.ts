@@ -615,6 +615,33 @@ const timelineProps = z.object({
   onSelect: actionChainSchema.optional(),
 });
 
+const logStreamProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }` or an action result: one entry per row, newest first. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  loading: z.boolean().optional(),
+  /** Row field with the entry time (ISO date, or epoch s/ms/ns). Shown as HH:mm:ss.SSS. */
+  timeField: z.string(),
+  /** Row field with the log body (a string, or an object shown as JSON). */
+  bodyField: z.string(),
+  /** Row field with the severity text or OTel number; it colours the bar. */
+  severityField: z.string().optional(),
+  serviceField: z.string().optional(),
+  /** Row fields with attribute objects (or JSON strings of one), shown when a line is expanded. */
+  attributesField: z.string().optional(),
+  resourceField: z.string().optional(),
+  /** Row field with a trace id: an expanded line links to it through `onTrace`. */
+  traceField: z.string().optional(),
+  /** Row field with a unique id; keeps expanded lines open across refreshes. */
+  keyField: z.string().optional(),
+  /** Keep the newest entry in view; when the viewer scrolls away, show "N new". */
+  follow: z.boolean().optional(),
+  height: z.string().optional(),
+  fill: z.boolean().optional(),
+  emptyMessage: z.string().optional(),
+  /** Chain run from an expanded line's trace link; `$row` = the entry, `$rowIndex` its index. */
+  onTrace: actionChainSchema.optional(),
+});
+
 const badgeProps = z.object({
   text: z.union([z.string(), z.number()]),
   tone: z.enum(BADGE_TONES).optional(),
@@ -1473,6 +1500,7 @@ export type MetricTrend = z.infer<typeof metricTrendSchema>;
 export type ChartProps = z.infer<typeof chartProps>;
 export type DateRangeProps = z.infer<typeof dateRangeProps>;
 export type TimelineProps = z.infer<typeof timelineProps>;
+export type LogStreamProps = z.infer<typeof logStreamProps>;
 export type ChartColor = (typeof CHART_COLORS)[number];
 export type UiToastParams = z.infer<typeof uiToastActionSchema>;
 
@@ -1729,6 +1757,11 @@ export const swarmCatalogSpec = {
       props: timelineProps,
       description:
         "Vertical event list over rows, newest first, grouped under day headings (Today, Yesterday, then dates). Bind `data`/`loading` to a named query like Table. `timeField` (ISO date or epoch ms; rows that do not parse are left out), `titleField`, optional `descriptionField`, and `statusField` with `tones` (value → pill tone, lifecycle values get the status chip) shape each event; `icon` replaces the marker dot. `onSelect` runs with `$row` and `$rowIndex` when an event is clicked. No rows renders `emptyMessage`.",
+    },
+    LogStream: {
+      props: logStreamProps,
+      description:
+        'A log tail, not a table: one dense monospace line per entry, newest first, with the time (HH:mm:ss.SSS), a severity colour bar (OTel text or number), the service and the one-line body. Click a line to expand the full body, `attributesField` and `resourceField` as key/value lists, and a trace link that runs `onTrace` with `$row`. Virtualized, so thousands of rows stay fast. `follow: true` keeps the newest entry in view; once the viewer scrolls down, a refresh that adds entries on top shows an "N new" pill. 480 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. Feed it from a query or an action result, and refresh with `OnEnter.everyMs` for a live tail.',
     },
     SchemaForm: {
       props: schemaFormProps,
