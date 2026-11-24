@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.14.5] - 2026-11-24
+
+### Added
+- Storage: Postgres as a second storage engine, with a Postgres deployment guide (#3562).
+- Workflows: GitHub and Jira event triggers (#3600).
+- Slack: listed bots can start `slack.message` workflows (#3598).
+- OpenTelemetry: database statement metrics and spans through the StatementObserver (#3585).
+- UI: a chromeless mode for the Pages viewer (#3568).
+
+### Changed
+- Dependencies: opencode and amp (#3581) and amp (#3574) worker harness bumps.
+- Storage: a token's `lastUsedAt` is written at most once a minute (#3596).
+- Docs: `OTEL_METRIC_EXPORT_INTERVAL` is listed in the environment variable reference.
+
+### Fixed
+- db-copy: a replicated SQLite database copies, and every refused row is named (#3602).
+- Slack: the waiting card is deleted when the wake-up already replied (#3586).
+- HTTP: a malformed JSON body gets a 400 (#3601).
+- Memory: demotion evidence is read on the engine's search reader (#3594).
+- Storage: the API exits when its Postgres connections go dead (#3587).
+- Defer: `checks_done` reads authenticate with `GITHUB_TOKEN` when the GitHub App has no installation (#3593).
+- VCS: self-managed GitLab remotes are recognized (#3578).
+- SQLite storage: relay polls are planned from their pending obligations (#3584).
+
 ## [2.14.4] - 2026-11-23
 
 ### Added

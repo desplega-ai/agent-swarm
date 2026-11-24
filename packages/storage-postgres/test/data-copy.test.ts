@@ -241,6 +241,11 @@ describe("copyIntoPostgres", () => {
         NULL,
       ]),
       item(11, [text("year0"), int(1), NULL, text("0000-01-01 00:00:00"), NULL, NULL, NULL, NULL]),
+      // JSON.parse takes a surrogate escape with no partner (text cut inside an emoji);
+      // jsonb refuses it with an error that names no row.
+      item(12, [text("high"), int(1), text('{"a":"cut \\ud83d"}'), NULL, NULL, NULL, NULL, NULL]),
+      item(13, [text("low"), int(1), text('["\\ude00 tail"]'), NULL, NULL, NULL, NULL, NULL]),
+      item(14, [text("key"), int(1), text('{"\\ud83d":1}'), NULL, NULL, NULL, NULL, NULL]),
     ];
     const report = await run(fullSource(bad));
     expect(report.ok).toBe(false);
@@ -256,6 +261,134 @@ describe("copyIntoPostgres", () => {
       ["rowid 9", "at", "invalid timestamp"],
       ["rowid 10", "at", "invalid timestamp"],
       ["rowid 11", "at", "invalid timestamp"],
+      ["rowid 12", "doc", "JSON holds an unpaired surrogate escape (\\ud800 to \\udfff)"],
+      ["rowid 13", "doc", "JSON holds an unpaired surrogate escape (\\ud800 to \\udfff)"],
+      ["rowid 14", "doc", "JSON holds an unpaired surrogate escape (\\ud800 to \\udfff)"],
+    ]);
+    expect(await tableCount()).toBe(0);
+  });
+
+  test("copies a surrogate pair written as two JSON escapes", async () => {
+    const pair = item(30, [
+      text("pair"),
+      int(1),
+      text('{"a":"ok \\ud83d\\ude00"}'),
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+    ]);
+    const report = await run(fullSource([...goodItems(), pair]));
+    expect(report.problems).toEqual([]);
+    expect(report.ok).toBe(true);
+    const rows = await sql.unsafe("SELECT doc FROM items WHERE id = 'pair'");
+    expect(rows[0].doc).toEqual({ a: "ok \u{1F600}" });
+  });
+
+  test("compares a table larger than one fetch, with a row wider than the byte limit", async () => {
+    // 1,300 rows need several fetches of the checksum cursor; one 300 KB row
+    // shrinks the next fetch when the limit is 64 KB.
+    const many: CopyRow[] = [];
+    for (let i = 1; i <= 1300; i++) {
+      const note = i === 700 ? "w".repeat(300_000) : `note ${i}`;
+      many.push(item(i, [text(`id-${i}`), int(i % 2), NULL, NULL, int(i), NULL, NULL, text(note)]));
+    }
+    const report = await copyIntoPostgres(fullSource(many), {
+      url: db.url,
+      migrationsDir: dir,
+      embeddingDimensions: 4,
+      batchBytes: 64 * 1024,
+      log: () => {},
+    });
+    expect(report.error).toBeUndefined();
+    expect(report.tables.find((t) => t.table === "items")).toMatchObject({
+      sourceRows: 1300,
+      targetRows: 1300,
+      equal: true,
+    });
+    const wide = await sql.unsafe("SELECT length(note)::int AS n FROM items WHERE id = 'id-700'");
+    expect(wide[0].n).toBe(300_000);
+  });
+
+  test("gathers planner statistics after the commit", async () => {
+    const report = await run(fullSource());
+    expect(report.ok).toBe(true);
+    expect(report.warnings).toBeUndefined();
+    const analyzed = await sql.unsafe(
+      `SELECT relname FROM pg_stat_user_tables
+        WHERE last_analyze IS NOT NULL AND relname IN ('items', 'seeded', 'children') ORDER BY relname`,
+    );
+    expect(analyzed.map((r: { relname: string }) => r.relname)).toEqual([
+      "children",
+      "items",
+      "seeded",
+    ]);
+  });
+
+  test("lists every orphan row of the source before it writes a row", async () => {
+    const lines: string[] = [];
+    const src = fullSource(goodItems(), [
+      item(1, [text("c1"), text("missing")]),
+      item(2, [text("c2"), text("gone")]),
+    ]);
+    src.foreignKeyViolations = () => [
+      { table: "children", row: "rowid 1", parent: "items", columns: ["item"] },
+      { table: "children", row: "rowid 2", parent: "items", columns: ["item"] },
+    ];
+    const report = await copyIntoPostgres(src, {
+      url: db.url,
+      migrationsDir: dir,
+      embeddingDimensions: 4,
+      log: (line) => lines.push(line),
+    });
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/2 value\(s\) cannot be stored/);
+    expect(report.problems).toEqual([
+      {
+        table: "children",
+        column: "item",
+        row: "rowid 1",
+        reason: "orphan row: no row in items for this foreign key",
+      },
+      {
+        table: "children",
+        column: "item",
+        row: "rowid 2",
+        reason: "orphan row: no row in items for this foreign key",
+      },
+    ]);
+    // Every table is still checked, and none is written.
+    expect(lines.filter((line) => line.includes("checked, not written"))).toEqual([
+      "[db-copy] items: checked, not written",
+      "[db-copy] seeded: checked, not written",
+      "[db-copy] children: checked, not written",
+    ]);
+    expect(await tableCount()).toBe(0);
+  });
+
+  test("after the first refused value the other tables are checked, not written", async () => {
+    const lines: string[] = [];
+    const bad = [item(1, [text("nul"), int(1), NULL, NULL, NULL, NULL, NULL, text("a\u0000b")])];
+    const src = fullSource(bad, [
+      item(1, [text("c1"), { kind: "text", bytes: new Uint8Array([0xc3, 0x28]) }]),
+    ]);
+    const report = await copyIntoPostgres(src, {
+      url: db.url,
+      migrationsDir: dir,
+      embeddingDimensions: 4,
+      log: (line) => lines.push(line),
+    });
+    expect(report.ok).toBe(false);
+    // The later table still reports its own refused value.
+    expect(report.problems.map((p) => [p.table, p.column, p.reason])).toEqual([
+      ["items", "note", "NUL byte in text"],
+      ["children", "item", "invalid UTF-8"],
+    ]);
+    expect(lines.filter((line) => /^\[db-copy\] (items|seeded|children): /.test(line))).toEqual([
+      "[db-copy] items: values refused",
+      "[db-copy] seeded: checked, not written",
+      "[db-copy] children: values refused",
     ]);
     expect(await tableCount()).toBe(0);
   });

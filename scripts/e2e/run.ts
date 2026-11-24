@@ -124,7 +124,18 @@ export type ScenarioContext = {
 };
 export type DataCopyPair = {
   source: ApiClient;
-  copy: () => Promise<{
+  /**
+   * `beforeCopy` runs after the source API stopped and before the copy that the target
+   * boots on: a scenario can change the SQLite file as a deployment would leave it, and
+   * run copies that must be refused (`runCopy`) into the same empty target database.
+   */
+  copy: (step?: {
+    beforeCopy?: (at: {
+      sourcePath: string;
+      targetUrl: string;
+      runCopy: () => Promise<CliResult>;
+    }) => Promise<void>;
+  }) => Promise<{
     cli: CliResult;
     target: ApiClient;
     /** The same copy again into the target database, while the target API holds it. */
@@ -389,7 +400,7 @@ async function bootStack(
           });
         return {
           source: createApiClient(source.baseUrl, source.apiKey),
-          async copy() {
+          async copy(step = {}) {
             await stopSutProcess(source);
             stacks.add(targetStack);
             let cli: CliResult | undefined;
@@ -401,7 +412,13 @@ async function bootStack(
               "postgres",
               async (prepared) => {
                 await copySutKey(source, prepared);
-                cli = await copyCli(prepared.databaseUrl ?? "");
+                const targetUrl = prepared.databaseUrl ?? "";
+                await step.beforeCopy?.({
+                  sourcePath: source.dbPath,
+                  targetUrl,
+                  runCopy: () => copyCli(targetUrl),
+                });
+                cli = await copyCli(targetUrl);
               },
             );
             targetStack.sut = target;
