@@ -579,6 +579,18 @@ function normalizeV2Text(value: string): string {
 }
 
 /**
+ * True when the work last to end in a settled thread was cancelled, even if the
+ * ask itself finished first and only its delegated work was stopped. A tie with
+ * any other outcome, or a task with no finish time, reads as not stopped.
+ */
+function endedByCancel(tasks: AgentTask[]): boolean {
+  if (tasks.some((task) => !task.finishedAt)) return false;
+  const ends = tasks.map((task) => Date.parse(task.finishedAt!));
+  const last = Math.max(...ends);
+  return tasks.every((task, index) => ends[index] !== last || task.status === "cancelled");
+}
+
+/**
  * The tree's first line, replacing the old constant "🧵 worked for <duration>".
  * A timed-out ask closure outranks a stalled member outranks plain activity —
  * each of those states implies a non-terminal member is still sitting there,
@@ -598,6 +610,7 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
     return `🧵 🔄 working — ${duration}`;
   // A parked deferral is stored `completed`, but the ask is not answered yet.
   if (tasks.some((task) => isAwaitingWake(task, tasks))) return `🧵 ⏳ waiting — ${duration}`;
+  if (endedByCancel(tasks)) return `🧵 🚫 stopped — ${duration}`;
   const hasFailure = tasks.some((task) => task.status === "failed");
   return hasFailure
     ? `🧵 ❌ done with failures — ${duration}`

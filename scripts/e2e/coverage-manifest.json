@@ -660,7 +660,8 @@
         "slack-task-output-citations",
         "slack-task-tree-toggle",
         "slack-task-output-ui-spec",
-        "slack-pre-task-create-block"
+        "slack-pre-task-create-block",
+        "slack-cancelled-task"
       ]
     },
     "slack-deferrals": {
