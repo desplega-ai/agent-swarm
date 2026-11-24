@@ -66,6 +66,7 @@ import {
   type SlackReactionChoice,
 } from "./ack";
 import { getSlackApp } from "./app";
+import { slackAskAncestorId, slackAskOf } from "./ask-chain";
 import {
   buildCaptionBlock,
   getTaskLink,
@@ -1221,34 +1222,6 @@ async function isSlackContinuation(task: AgentTask): Promise<boolean> {
 
 /** Lead review tasks the engine creates when a worker finishes or a session resumes. */
 const SLACK_LEAD_FOLLOW_UP_TYPES = new Set(["follow-up", "resume"]);
-/** Guards the ancestor walk against a corrupt parent cycle or a pathological chain. */
-const SLACK_ANCESTOR_WALK_LIMIT = 50;
-
-/** The nearest task in `task`'s parent chain a person started in Slack, or undefined. */
-async function slackAskAncestorId(
-  task: AgentTask,
-  threadTasks: readonly AgentTask[],
-): Promise<string | undefined> {
-  const byId = new Map(threadTasks.map((candidate) => [candidate.id, candidate]));
-  const seen = new Set<string>([task.id]);
-  let parentId = task.parentTaskId;
-  while (parentId && !seen.has(parentId) && seen.size <= SLACK_ANCESTOR_WALK_LIMIT) {
-    seen.add(parentId);
-    const parent = byId.get(parentId) ?? (await getTaskById(parentId));
-    if (!parent) return undefined;
-    if (parent.source === "slack") return parent.id;
-    parentId = parent.parentTaskId;
-  }
-  return undefined;
-}
-
-/** The Slack ask a task answers: itself when a person started it in Slack, else its nearest such ancestor. */
-async function slackAskOf(
-  task: AgentTask,
-  threadTasks: readonly AgentTask[],
-): Promise<string | undefined> {
-  return task.source === "slack" ? task.id : await slackAskAncestorId(task, threadTasks);
-}
 
 /** True for a Lead review task the engine created (a worker completion or a session resume). */
 function isLeadFollowUpTask(task: AgentTask): boolean {
@@ -1260,7 +1233,7 @@ function isLeadFollowUpTask(task: AgentTask): boolean {
  * started in Slack is "eligible": its output is the answer the thread waits
  * for, so it gets an outcome card like the ask did. Before this, the thread
  * stayed silent until someone asked "status?". A Lead follow-up with Slack
- * context but no Slack ask in its parent chain is an "orphan": it posts
+ * context but no Slack ask in its parent or dispatch chain is an "orphan": it posts
  * nothing, and its card is settled so the thread does not wait on it.
  */
 async function classifyLeadFollowUp(

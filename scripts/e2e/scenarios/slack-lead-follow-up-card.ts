@@ -88,6 +88,11 @@ async function expectFinalizedCard(
   );
 }
 
+/** The prompt the Lead reads for follow-up `taskId`. */
+function followUpPrompt(ctx: ScenarioContext, taskId: string): string {
+  return ctx.db.get<{ task: string }>(sql`SELECT task FROM agent_tasks WHERE id = ${taskId}`)?.task ?? "";
+}
+
 /** Lets `leadId` hold several tasks at once, through agent re-registration. */
 async function allowSeveralTasks(ctx: ScenarioContext, leadId: string): Promise<void> {
   const name = ctx.db.get<{ name: string }>(
@@ -315,6 +320,106 @@ export const slackLeadFollowUpCard: Scenario = {
       threadMessages(ctx, GENERAL, posted.threadTs, pinnedOutput).length === 0,
       "A Lead follow-up with no Slack ask in its parent chain posted a card",
     );
+    // The Lead learns this while it reviews, not after its answer was dropped.
+    const pinnedPrompt = followUpPrompt(ctx, pinnedFollowUpId);
+    expect(
+      pinnedPrompt.includes("Result card NOT posted: no_slack_ask") &&
+        pinnedPrompt.includes("slack-reply"),
+      `The pinned follow-up's prompt does not say its card will not post: ${pinnedPrompt}`,
+    );
+
+    // 1c. A worker the Lead dispatched from a Slack ask, with parentTaskId set
+    // to an older non-Slack task for context, posts its follow-up card: the ask
+    // is on the dispatch edge only. Before the fix the walk followed only
+    // parentTaskId, settled this card as no_slack_ask and the thread got nothing.
+    const older = await ctx.api("POST", "/api/tasks", {
+      body: {
+        task: `older non-Slack task ${ctx.nonce}`,
+        routingReason: "human_pinned",
+        agentId: workerId,
+        source: "api",
+      },
+    });
+    expectStatus(older, [201], "create the older non-Slack context task");
+    const olderId = String(asRecord(older.json).id);
+    await claim(ctx, workerId, olderId);
+    await finish(ctx, workerId, olderId, { status: "completed", output: "older work done" });
+    // Its own follow-up would be the Lead's next poll; clear it first.
+    const olderFollowUpId = await findWorkerFollowUp(ctx, posted.leadId, olderId);
+    await claim(ctx, posted.leadId, olderFollowUpId);
+    await finish(ctx, posted.leadId, olderFollowUpId, { status: "completed", output: "noted" });
+    const dispatchMessage = await ctx.slack.postMessage({
+      channel: GENERAL,
+      user: asker(),
+      text: `<@${ctx.slack.bot.userId}> dispatched: reuse the earlier work and report back`,
+    });
+    ctx.markThread("lead-follow-up-dispatched", GENERAL, dispatchMessage.ts);
+    const dispatchAsk = await findSlackTask(ctx, dispatchMessage.ts);
+    const dispatchAskId = String(dispatchAsk.id);
+    const dispatchLeadId = String(dispatchAsk.agentId);
+    await claim(ctx, dispatchLeadId, dispatchAskId);
+    const askConn = await ctx.connectMcp(dispatchLeadId, {
+      headers: { "X-Source-Task-ID": dispatchAskId },
+    });
+    let dispatchedId = "";
+    try {
+      const sent = expectToolOk(
+        await callTool(askConn, "send-task", {
+          agentId: workerId,
+          task: `dispatched worker task ${ctx.nonce}`,
+          parentTaskId: olderId,
+          routingReason: "skill",
+          routingNote: "e2e: parentTaskId points at an older task for context",
+          slackChannelId: GENERAL,
+          slackThreadTs: dispatchMessage.ts,
+        }),
+        "send-task from the Slack ask with an older parentTaskId",
+      );
+      dispatchedId = String(asRecord(sent.data.task).id);
+    } finally {
+      await askConn.close();
+    }
+    const dispatched = ctx.db.get<{ parentTaskId: string; dispatchedByTaskId: string }>(
+      sql`SELECT "parentTaskId", "dispatchedByTaskId" FROM agent_tasks WHERE id = ${dispatchedId}`,
+    );
+    expect(
+      dispatched?.parentTaskId === olderId && dispatched.dispatchedByTaskId === dispatchAskId,
+      `The dispatched worker task does not carry both edges: ${JSON.stringify(dispatched)}`,
+    );
+    await finish(ctx, dispatchLeadId, dispatchAskId, {
+      status: "completed",
+      output: `dispatched ask answer ${ctx.nonce}`,
+    });
+    await claim(ctx, workerId, dispatchedId);
+    await finish(ctx, workerId, dispatchedId, {
+      status: "completed",
+      output: "dispatched worker done",
+    });
+    const dispatchedFollowUpId = await findWorkerFollowUp(ctx, dispatchLeadId, dispatchedId);
+    const dispatchedPrompt = followUpPrompt(ctx, dispatchedFollowUpId);
+    expect(
+      !dispatchedPrompt.includes("Result card NOT posted"),
+      `The dispatched follow-up's prompt says its card will not post: ${dispatchedPrompt}`,
+    );
+    await claim(ctx, dispatchLeadId, dispatchedFollowUpId);
+    const dispatchedOutput = `dispatched follow-up review ${ctx.nonce}`;
+    await finish(ctx, dispatchLeadId, dispatchedFollowUpId, {
+      status: "completed",
+      output: dispatchedOutput,
+    });
+    const dispatchedLanded = await pollUntil(
+      () => threadMessages(ctx, GENERAL, dispatchMessage.ts, dispatchedOutput).length > 0,
+      30_000,
+    );
+    expect(
+      dispatchedLanded,
+      `The dispatched follow-up's card never posted: ${JSON.stringify(
+        ctx.db.get(
+          sql`SELECT delivery_last_error FROM slack_messages WHERE kind = 'outcome' AND task_id = ${dispatchedFollowUpId}`,
+        ),
+      )}`,
+    );
+    await expectFinalizedCard(ctx, dispatchedFollowUpId, dispatchMessage.ts, "dispatched follow-up");
 
     // 2. A graceful-shutdown resume of the ask posts its output the same way.
     const resumeAsk = await ctx.slack.postMessage({
