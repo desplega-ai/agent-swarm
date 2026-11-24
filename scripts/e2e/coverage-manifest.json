@@ -236,6 +236,7 @@
         "divergence-fulltext-search",
         "divergence-vector-search",
         "divergence-like-case",
+        "divergence-seeded-schedule-sql",
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",

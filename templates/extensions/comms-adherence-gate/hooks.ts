@@ -466,16 +466,20 @@ const selfTest = async (swarm: Swarm, cfg: Cfg, signal?: AbortSignal): Promise<v
   }
 };
 
-const TASK_SQL = `SELECT t.source, t.slackThreadTs, t.agentId, t.requestedByUserId,
-       json_extract(u.metadata, '$.comms') AS comms, u.name,
-       substr(t.task, 1, 400) AS askHead,
-       substr(t.task, -1400) AS askTail,
-       t.creatorAgentId
+// db_query runs the SQL of the active engine (SQLite or Postgres). This SQL runs
+// on both: quoted camelCase columns, $n placeholders, `metadata -> 'comms'` (SQLite
+// reads a bare label as '$.comms'; Postgres reads jsonb), and a CASE in place of a
+// negative substr() start, which Postgres does not count from the end.
+const TASK_SQL = `SELECT t.source, t."slackThreadTs", t."agentId", t."requestedByUserId",
+       u.metadata -> 'comms' AS comms, u.name,
+       substr(t.task, 1, 400) AS "askHead",
+       CASE WHEN length(t.task) > 1400 THEN substr(t.task, length(t.task) - 1399) ELSE t.task END AS "askTail",
+       t."creatorAgentId"
 FROM agent_tasks t
-LEFT JOIN users u ON u.id = t.requestedByUserId
-WHERE t.id = ?`;
+LEFT JOIN users u ON u.id = t."requestedByUserId"
+WHERE t.id = $1`;
 
-const LEAD_SQL = "SELECT isLead FROM agents WHERE id = ?";
+const LEAD_SQL = `SELECT "isLead" FROM agents WHERE id = $1`;
 
 /** Slack user mentions in agent text: `<@U123>` or `<@U123|name>`. */
 const MENTION_RE = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
@@ -491,11 +495,11 @@ export const mentionedSlackIds = (text: string): string[] => {
   return ids;
 };
 
-const addresseeSql = (n: number) => `SELECT x.externalId, u.id, u.name,
-       json_extract(u.metadata, '$.comms') AS comms
+const addresseeSql = (n: number) => `SELECT x."externalId", u.id, u.name,
+       u.metadata -> 'comms' AS comms
 FROM user_external_ids x
-JOIN users u ON u.id = x.userId
-WHERE x.kind = 'slack' AND x.externalId IN (${Array(n).fill("?").join(", ")})`;
+JOIN users u ON u.id = x."userId"
+WHERE x.kind = 'slack' AND x."externalId" IN (${Array.from({ length: n }, (_, i) => `$${i + 1}`).join(", ")})`;
 
 const parsePrefs = (raw: unknown): Prefs | null => {
   if (!raw) return null;
@@ -555,7 +559,9 @@ const mayWriteProgress = async (
   if (!taskAgentId || taskAgentId === callerId) return true;
   const q = (await swarm.db_query({ sql: LEAD_SQL, params: [callerId] })) as Envelope;
   const row = (q?.data?.rows ?? q?.rows ?? [])[0];
-  return Number(cell(row, 0, "isLead") ?? 0) === 1;
+  // 1 on SQLite, true on Postgres.
+  const isLead = cell(row, 0, "isLead");
+  return isLead === true || Number(isLead ?? 0) === 1;
 };
 
 /** The text a gated call would put in front of a human, and the task it belongs to. */

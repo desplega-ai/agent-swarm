@@ -65,13 +65,18 @@ Format every PR link as `<URL|repo #NUM>` so the digest is clickable.
 Use `db-query`:
 
 ```sql
-SELECT id, task, slackUserId, createdAt
+SELECT id, task, "slackUserId", "createdAt"
 FROM agent_tasks
-WHERE slackReplySent = 1
+WHERE "slackReplySent" = true
   AND status = 'completed'
-  AND requestedByUserId IS NOT NULL
-  AND datetime(createdAt) > datetime('now', '-7 days')
-ORDER BY createdAt DESC
+  AND "requestedByUserId" IS NOT NULL
+<!-- dialect:sqlite -->
+  AND datetime("createdAt") > datetime('now', '-7 days')
+<!-- /dialect -->
+<!-- dialect:postgres -->
+  AND "createdAt" > now() - interval '7 days'
+<!-- /dialect -->
+ORDER BY "createdAt" DESC
 LIMIT 20
 ```
 
