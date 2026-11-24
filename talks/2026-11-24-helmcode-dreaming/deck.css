@@ -1034,3 +1034,29 @@ body.presenter #presenter {
 .slide.has-hexy.active ~ #footer .brand {
   visibility: hidden;
 }
+
+/* Bar rows inside a table (appendix: cost, open models). */
+.bars td {
+  vertical-align: middle;
+}
+
+.bars .bar {
+  height: 26px;
+  border-radius: 6px;
+  background: var(--amber-600);
+}
+
+.bars .bar.dark {
+  background: var(--fg);
+}
+
+.bars td.num {
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.bars.tight td,
+.bars.tight th {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}

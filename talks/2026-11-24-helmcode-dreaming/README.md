@@ -11,7 +11,7 @@ bun talks/2026-11-24-helmcode-dreaming/serve.ts   # http://localhost:4747/
 
 - `→` / `←` move. `n` shows the speaker notes. `?debug=1` (or key `c`) opens review mode and saves `comments.json`.
 - `t` starts the rehearsal timer and saves `timings.json`.
-- Slides 19 to 21 are an appendix for questions.
+- Slides 19 to 23 are an appendix for questions.
 
 ## Where the numbers come from
 

@@ -218,7 +218,7 @@
         <li>How a rating moves it: cited adds 0.5 to α, ignored adds 0.25 to β. The other raters add their own weights the same way.</li>
         <li>Beta in one breath: the curve is wide when we know little, and narrow when we have evidence. A fresh memory is Beta(1,1): flat, no opinion.</li>
         <li>usefulness = clamp(2α / (α + β), floor, 2.0). Proven memories climb to 2x. New since November: a memory can fall to 0.5x, but only with evidence that it was rated wrong. "Shown and not used" does not demote.</li>
-        <li>The RL mapping is in the appendix (slide 19) if someone asks.</li>
+        <li>The RL mapping is in the appendix (slide 22) if someone asks.</li>
       </ul>
     </aside>
   </section>
@@ -537,7 +537,100 @@
     </aside>
   </section>
 
-  <!-- 19. APPENDIX: RL MAPPING (for Q&A) -->
+  <!-- 19. APPENDIX: COST OF ONE NIGHT (for Q&A) -->
+  <section class="slide top">
+    <div class="kicker">appendix · what one night costs</div>
+    <h2>Where the money of one night goes</h2>
+    <div class="cols wide-left" style="align-items:center">
+      <table class="bars" style="font-size:30px">
+        <tr><td style="white-space:nowrap">Lead synthesis</td><td style="width:44%"><div class="bar" style="width:100%"></div></td><td class="num">$3.10</td></tr>
+        <tr><td style="white-space:nowrap">Scripts lane + report</td><td style="width:44%"><div class="bar" style="width:92%"></div></td><td class="num">$2.85</td></tr>
+        <tr><td style="white-space:nowrap">7 self-reports</td><td style="width:44%"><div class="bar" style="width:57%"></div></td><td class="num">$1.78</td></tr>
+        <tr><td style="white-space:nowrap">Skills lane</td><td style="width:44%"><div class="bar" style="width:19%"></div></td><td class="num">$0.60</td></tr>
+        <tr><td style="white-space:nowrap">3 apply steps on the lead</td><td style="width:44%"><div class="bar" style="width:14%"></div></td><td class="num">$0.42</td></tr>
+        <tr><td style="white-space:nowrap">Every script and gate</td><td style="width:44%"><div class="bar" style="width:0"></div></td><td class="num">$0</td></tr>
+      </table>
+      <div class="bignums">
+        <div><b>$8.74</b><span>one full night, 7 agents<br>2026-11-23</span></div>
+        <div><b>$0.25</b><span>for each extra agent:<br>one more self-report</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say:</strong> "A night costs under 10 dollars for 7 agents. One third is the lead's synthesis: it reads every report and decides. The scripts and the gates cost nothing. Each extra agent adds one self-report, about 25 cents."</li>
+        <li>Source: the run reports of 2026-11-23 and 2026-11-24. The full cost of the 11-23 night is $8.74. Four steps are measured one by one ($5.90 in total). "Scripts lane + report" is the rest: $2.84, shown rounded. It holds the agents that write and test scripts, and the writer of the report.</li>
+        <li>The night before cost $8.83. The mean of the last 7 nights is $10.40. The budget is $25, with a soft cap at $22.</li>
+        <li>The blog post says $17.80 a night for 3 agents. That was the October estimate at Opus prices. Nights cost less now.</li>
+        <li>Cost is API-equivalent cost from our pricing table.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 20. APPENDIX: ONE REAL CHANGE (for Q&A) -->
+  <section class="slide top">
+    <div class="kicker">appendix · one real change · 2026-11-24</div>
+    <h2>One change, from evidence to write</h2>
+    <div class="cols">
+      <table style="font-size:30px">
+        <tr><td style="white-space:nowrap">Evidence</td><td>the same CI failure, 4 times in 3 weeks</td></tr>
+        <tr><td style="white-space:nowrap">Proposal</td><td>put the step into the pre-push skill</td></tr>
+        <tr><td style="white-space:nowrap">Gate</td><td>approved, 1 of 6 skill slots that night</td></tr>
+        <tr><td style="white-space:nowrap">Write</td><td>one new section, skill v28 → v29</td></tr>
+        <tr><td style="white-space:nowrap">Verify</td><td>read again, hash <span class="mono">a322492e</span></td></tr>
+      </table>
+<pre class="code" style="font-size:23px"><span class="dim">skill agent-swarm-prepush-gates  v29</span>
+
+<span class="hl">+ ## New e2e scenario: map it in the</span>
+<span class="hl">+    coverage manifest</span>
++ When a commit adds an e2e scenario,
++ add its flow mapping to
++ `coverage-manifest.json` in the same
++ commit. Before pushing, grep the
++ manifest for each new scenario name.
++ This miss is recorded 4 times
++ (Nov 1, twice on Nov 14, Nov 23).</pre>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say:</strong> "This is one of last night's 11 changes, the real text. Our repo has a rule: a new end-to-end test needs an entry in a manifest file, or CI fails. Agents forgot it four times in three weeks. Last night that became a section in the skill that every agent reads before a push. Nobody wrote it by hand."</li>
+        <li>The text on the right is the real section, shortened by two sentences. The skill and the repo are open source.</li>
+        <li>Written 2026-11-24 at 04:39 Barcelona time. It is version 29 of that skill: dreaming and the agents changed it 28 times before.</li>
+        <li>Why a skill and not a memory: a memory is recalled only if the search finds it. A skill step is read every time the agent pushes.</li>
+        <li>What will tell us if it worked: the count of that CI failure in the next weeks. That is the second-order check of slide 17.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 21. APPENDIX: OPEN MODELS (for Q&A) -->
+  <section class="slide top" style="gap:22px">
+    <div class="kicker">appendix · open models · swar.am/helmcode</div>
+    <h2>Open models on our 14 agent tasks</h2>
+    <table class="bars tight" style="font-size:26px">
+      <tr><th>model</th><th>tasks passed</th><th></th><th>cost per task</th></tr>
+      <tr><td style="white-space:nowrap">Claude Opus 5.5</td><td style="width:46%"><div class="bar dark" style="width:97%"></div></td><td class="num">97%</td><td class="num">€0.23</td></tr>
+      <tr><td style="white-space:nowrap">GPT-6 Astra</td><td style="width:46%"><div class="bar dark" style="width:89%"></div></td><td class="num">89%</td><td class="num">€0.80</td></tr>
+      <tr><td style="white-space:nowrap"><strong>DeepSeek V4.1 Flash</strong></td><td style="width:46%"><div class="bar" style="width:81%"></div></td><td class="num">81%</td><td class="num">€0.01 to €0.07</td></tr>
+      <tr><td style="white-space:nowrap">GPT-6.1 Terra</td><td style="width:46%"><div class="bar dark" style="width:79%"></div></td><td class="num">79%</td><td class="num">€0.06</td></tr>
+      <tr><td style="white-space:nowrap"><strong>Gemma 4</strong></td><td style="width:46%"><div class="bar" style="width:68%"></div></td><td class="num">68%</td><td class="num">flat plan</td></tr>
+      <tr><td style="white-space:nowrap"><strong>GLM 5.3</strong></td><td style="width:46%"><div class="bar" style="width:62%"></div></td><td class="num">62%</td><td class="num">€0.01 to €0.04</td></tr>
+      <tr><td style="white-space:nowrap"><strong>Qwen 3.6</strong></td><td style="width:46%"><div class="bar" style="width:60%"></div></td><td class="num">60%</td><td class="num">flat plan</td></tr>
+      <tr><td style="white-space:nowrap"><strong>GLM 5.3 Flash</strong></td><td style="width:46%"><div class="bar" style="width:55%"></div></td><td class="num">55%</td><td class="num">€0.01 to €0.03</td></tr>
+    </table>
+    <p class="small mono">amber: open models on Helmcode, 28 Oct 2026 · dark: closed models</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say:</strong> "With Helmcode we ran the swarm on open models. 14 real agent tasks, the same grader for all. The best open model passed 81%. That is above one closed model and 16 points under the best one. The price per task is 3 to 40 times lower than the best closed model."</li>
+        <li>Each open model: 42 attempts (14 tasks, 3 attempts), medium effort, on the pi harness. Closed models ran on their own harness (Claude Code, Codex) in our weekly benchmark.</li>
+        <li><strong>Trap:</strong> the confidence intervals are wide. DeepSeek 81% is 67 to 90%. Terra 79% is 61 to 90%. Do not say that DeepSeek beats Terra. Say "in the same range".</li>
+        <li>Cost: open models are priced from the Helmcode Starter plan, so the number is a range that depends on how much of the plan you use. Gemma 4 and Qwen 3.6 have no token cap. Closed models: public API prices, converted to euros.</li>
+        <li>Median task time: Qwen 3.6 68 s, DeepSeek 115 s, Opus 5.5 61 s.</li>
+        <li>This benchmark measures the agent tasks, not dreaming. I do not know if dreaming itself ran on an open model.</li>
+        <li>All numbers are from swar.am/helmcode, generated 2026-10-28 to 2026-10-30.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 22. APPENDIX: RL MAPPING (for Q&A) -->
   <section class="slide top">
     <div class="kicker">appendix · the same loop as RL</div>
     <h2>We cannot fine-tune the model<br>We can fine-tune <span class="grad">what it remembers</span></h2>
@@ -568,7 +661,7 @@
     </aside>
   </section>
 
-  <!-- 20. APPENDIX: PROMPTS (for Q&A) -->
+  <!-- 23. APPENDIX: PROMPTS (for Q&A) -->
   <section class="slide top">
     <div class="kicker">appendix · simplified prompts</div>
     <h2>Two prompts: read, learn</h2>
