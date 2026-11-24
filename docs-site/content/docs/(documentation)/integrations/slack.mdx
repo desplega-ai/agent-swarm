@@ -198,7 +198,7 @@ With the v2 renderer, Slack's own "working" state follows the whole life of an a
 | Nothing is running, and a `request-human-input` request from the thread is still open | `suspended`: waiting on a person |
 | Everything is finished, or the ask is deferred and waits for its wake-up | `active`: indicator cleared |
 
-The status starts when the ask is accepted, is re-asserted every 30 minutes because Slack ends a `processing` session after one hour, and is cleared when the outcome card lands. If a second ask in the thread is still running when the first card lands, the indicator stays. The swarm does not subscribe to `agent_session_stopped`, so Slack shows no Stop button. Cancelling still goes through the task itself.
+The status starts when the ask is accepted, is re-asserted every 30 minutes because Slack ends a `processing` session after one hour, and is cleared when the outcome card lands. If a second ask in the thread is still running when the first card lands, the indicator stays. Slack shows a Stop button next to the indicator only when the Slack app subscribes to `agent_session_stopped`: see [Stop button](#stop-button).
 
 Setting the status also opens the thread for the person who asked, and Slack's free-text status (`is working on your request...`) is not available with this method, so Slack shows its standard loading indicator.
 
@@ -208,6 +208,19 @@ The indicator never blocks a task. If Slack refuses the call, the swarm logs it 
 - **Slack refuses one thread** (for example the bot is not in the channel): that thread is left alone until it goes idle.
 - **Transient errors** (rate limit, timeout, `internal_error`): retried with backoff by the swarm, never by the Slack client. At most eight status writes start per render tick, counting tree creation, tree recovery, and outcome delivery; threads past the cap catch up on the next tick.
 - **A write that gets no answer** (timeout, reset): status calls use their own Slack client, separate from message delivery, with no automatic retries and an 8 second limit that aborts the request. Slack may still have applied the write, so the next reconcile sends its status even if the thread looked already clear. A write that lands after the timeout is reconciled against the thread's tasks again.
+
+### Stop button
+
+Slack can show a native **Stop** button in a thread's "Working…" line while the swarm is on an ask. It is off by default. To turn it on:
+
+1. Set `SLACK_STOP_BUTTON_ENABLED=true` on the API, or turn on **Slack Stop button** in **Settings → Configuration**. It applies without a restart.
+2. In the Slack app settings, under **Event Subscriptions → Subscribe to bot events**, add `agent_session_stopped` and save. It needs only the `chat:write` scope the app already has. Reinstall the app if Slack asks you to.
+
+The checked-in `slack-manifest.json` does not subscribe to the event, because a subscribed app with the setting off would show a Stop button that does nothing.
+
+When someone clicks Stop, the swarm checks the channel and the person as it does for any message (external channels and [user filtering](#user-filtering)). It then cancels every open task in that thread and the open tasks delegated from them (up to 500 delegated tasks outside the thread), with the reason `Stopped from Slack by @person`. Workers stop their sessions and workflow steps see a cancelled task, as with a cancel from the dashboard. The thread's status leaves `processing` right away: Slack does not do this by itself, and would keep the button up for an hour. The tree, reactions and outcome card then show the cancel as usual.
+
+With the setting off, the swarm ignores `agent_session_stopped` and logs once that the app is subscribed while the setting is off. The button exists only in the built-in Slack integration, not through the Chat SDK adapter.
 
 ### Outcome Cards and Message Provenance
 

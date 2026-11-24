@@ -1633,6 +1633,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_STOP_BUTTON_ENABLED",
+        label: "Slack Stop button",
+        description:
+          "Let people stop a running ask with Slack's native Stop button in the thread's Working… line. Stop cancels the thread's open tasks and the tasks they delegated. The button appears only once the Slack app also subscribes to the `agent_session_stopped` bot event.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack#stop-button`,
+      },
+      {
         key: "SLACK_WORKFLOW_BOT_IDS",
         label: "Bots that start Slack workflows",
         description:

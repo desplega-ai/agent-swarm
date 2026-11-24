@@ -646,7 +646,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -659,6 +659,7 @@
         "slack-relay-restart",
         "slack-task-output-citations",
         "slack-task-tree-toggle",
+        "slack-stop-button",
         "slack-task-output-ui-spec",
         "slack-pre-task-create-block",
         "slack-cancelled-task"
