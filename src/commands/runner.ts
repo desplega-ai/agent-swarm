@@ -4912,7 +4912,8 @@ export async function spawnProviderProcess(
     // runner-resolved value.
     reasoningEffort: reasoningEffortOverride,
   });
-  if (initialModelReport) {
+  // Pi updates the last-used model when a result reports which model ran.
+  if (initialModelReport && adapter.name !== "pi") {
     reportLatestModel(opts.apiUrl, opts.apiKey, opts.agentId, initialModelReport).catch((err) =>
       console.warn(`[runner] Failed to report latest model: ${err}`),
     );

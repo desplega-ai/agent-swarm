@@ -429,6 +429,8 @@ export interface AgentCredStatus {
   bedrock?: AgentBedrockStatus | null;
   /** Pi-mono only: the `opencode-go` model ids the worker resolves. */
   opencodeGo?: AgentOpencodeGoStatus | null;
+  /** Provider-qualified models reported by the Pi worker. */
+  piModelIds?: string[];
   /** ACP session options most recently advertised by the target. */
   acp?: AgentAcpStatus | null;
 }
@@ -1517,6 +1519,7 @@ export interface SessionCost {
   isError: boolean;
   // Phase 12b: surfaced on each row for the UI badge.
   costSource: SessionCostSource;
+  kind?: "harness" | "system-one";
   harnessCostUsd?: number | null;
   cacheWrite5mTokens?: number | null;
   cacheWrite1hTokens?: number | null;

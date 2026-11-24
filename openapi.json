@@ -1044,6 +1044,12 @@
           "opencodeGo": {
             "$ref": "#/components/schemas/AgentOpencodeGoStatus"
           },
+          "piModelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "acp": {
             "$ref": "#/components/schemas/AgentAcpStatus"
           }

@@ -15,6 +15,8 @@ export interface AgentModelDisplay {
   diverged: boolean;
   /** The last run's model came from the task (a pin, a tier or a profile), not from this agent's settings. */
   lastUsedFromTask?: boolean;
+  /** The cell shows the last run's model alongside the saved configuration. */
+  showingLastUsed?: boolean;
   /** Effort the next task runs at: the saved REASONING_EFFORT_OVERRIDE, else the last-reported level. Absent when unset (harness default). */
   reasoningEffort?: ReasoningEffortLevel;
 }
@@ -62,6 +64,7 @@ export function getAgentModelDisplay(
   lastUsedModel: string | null | undefined,
   reasoningEffort?: ReasoningEffortLevel,
   lastUsedSource?: AgentLatestModel["source"],
+  preferLastUsed = false,
 ): AgentModelDisplay {
   const configured = cleanModel(configuredModel);
   const lastUsed = cleanModel(lastUsedModel);
@@ -83,6 +86,17 @@ export function getAgentModelDisplay(
       primary: configured,
       diverged: false,
       reasoningEffort,
+    };
+  }
+
+  if (preferLastUsed) {
+    return {
+      configured,
+      lastUsed,
+      primary: lastUsed,
+      reasoningEffort,
+      diverged: false,
+      showingLastUsed: true,
     };
   }
 
