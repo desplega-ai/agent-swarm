@@ -732,10 +732,14 @@ describe("script connections", () => {
       markMigrationApplied(database, "342_script_run_sources.sql");
       // 354 alters session_tokens and script_runs, which this fixture does not create.
       markMigrationApplied(database, "354_durable_objects.sql");
+      // 356 alters slack_messages, which this fixture does not create.
+      markMigrationApplied(database, "356_slack_outcome_card_groups.sql");
       // 362 rebuilds user_favorites, which this fixture does not create (see 301).
       markMigrationApplied(database, "362_favorites_app.sql");
       // 367 alters workflow_runs, which this fixture does not create.
       markMigrationApplied(database, "367_workflow_run_principal.sql");
+      // The UTC backfill needs scheduled_tasks, which this fixture does not create.
+      markMigrationApplied(database, "374_schedule_next_run_at_utc.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

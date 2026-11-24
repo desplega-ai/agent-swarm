@@ -532,6 +532,7 @@ export {
   listPlaintextOAuthSecrets,
   listPlaintextSecretConfigs,
   MEMORY_ID_BATCH_SQL,
+  normalizeScheduleNextRunTimes,
   quoteSqlIdentifier,
   type RetentionSweepStatements,
   readAssetKeyAuditDataSync,

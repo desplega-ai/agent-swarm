@@ -222,6 +222,43 @@ export const workflowSchedules: Scenario = {
         "a one-time schedule is due after its delay",
       );
 
+      const future = new Date(Date.now() + 2 * HOUR_MS);
+      const atOffset = (hours: number, suffix: string) =>
+        new Date(future.getTime() + hours * HOUR_MS).toISOString().replace(/Z$/, suffix);
+      const offsetSchedule = {
+        name: name("once-offset"),
+        scheduleType: "one_time",
+        taskTemplate: `offset one shot ${marker}`,
+        targetAgentId: idleId,
+      };
+      const createdOffset = await ctx.api("POST", "/api/schedules", {
+        body: { ...offsetSchedule, runAt: atOffset(8, "+08:00") },
+      });
+      expectStatus(createdOffset, [201], "create a one-time schedule with an offset");
+      const offsetId = asString(asRecord(createdOffset.json).id, "offset schedule id");
+      schedules.push(offsetId);
+      expect(asRecord(createdOffset.json).nextRunAt === future.toISOString(), "create stores UTC");
+
+      const editedOffset = await ctx.api("PATCH", `/api/schedules/${offsetId}`, {
+        body: { nextRunAt: atOffset(-5, "-05:00") },
+      });
+      expectStatus(editedOffset, [200], "edit a one-time schedule with an offset");
+      expect(asRecord(editedOffset.json).nextRunAt === future.toISOString(), "edit stores UTC");
+      expectStatus(
+        await ctx.api("POST", "/api/schedules", {
+          body: { ...offsetSchedule, name: name("once-invalid"), runAt: "invalid date" },
+        }),
+        [400],
+        "reject invalid runAt",
+      );
+      expectStatus(
+        await ctx.api("PATCH", `/api/schedules/${offsetId}`, {
+          body: { nextRunAt: "invalid date" },
+        }),
+        [400],
+        "reject invalid nextRunAt",
+      );
+
       const disabled = await ctx.api("POST", "/api/schedules", {
         body: { name: name("off"), cronExpression: YEARLY, taskTemplate: "x", enabled: false },
       });
@@ -306,7 +343,12 @@ export const workflowSchedules: Scenario = {
         ).json,
         "schedules",
       );
-      expect(byType.map((s) => s.id).join(",") === onceId, "scheduleType filters the list");
+      expect(
+        byType.length === 2 &&
+          byType.some((s) => s.id === onceId) &&
+          byType.some((s) => s.id === offsetId),
+        "scheduleType filters the list",
+      );
       const byEnabled = asRecords(
         (await ctx.api("GET", `/api/schedules?enabled=false&name=${encodeURIComponent(ctx.nonce)}`))
           .json,
