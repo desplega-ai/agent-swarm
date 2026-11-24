@@ -1051,6 +1051,11 @@ jobs:
       - name: No new triggers
         run: bun run check:no-new-triggers
 
+      # A Postgres migration that changes rows is undone by db-copy unless the copy
+      # handles it (runbooks/postgres.md, "Rules for changes").
+      - name: Row-changing Postgres migrations and db-copy
+        run: bun run check:copy-migrations
+
       - name: Transaction callbacks
         run: bun run check:tx-callbacks
 
