@@ -695,6 +695,8 @@
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
         "slack-delegation-band-entry",
+        "slack-delegation-band-entry-knowledge",
+        "slack-delegation-band-entry-storage",
         "slack-quiet-lead-threads"
       ]
     },

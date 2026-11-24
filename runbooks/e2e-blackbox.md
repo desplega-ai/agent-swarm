@@ -54,7 +54,7 @@ model" is a failure, not a pass.
 
 ```bash
 bun run e2e --strict                               # the whole contract in one process
-bun run e2e --shard 1/4 --json shard-1.json        # one CI shard (bands fixed by order)
+bun run e2e --shard 1/6 --json shard-1.json        # one CI shard (bands fixed by order)
 bun scripts/e2e/merge.ts --strict shard-*.json     # what the "E2E Contract" job runs on the shards
 bun run e2e                                        # same scenarios, report only, no gate
 bun run e2e --only <name>,<name>                   # a subset while debugging
@@ -115,18 +115,18 @@ The job uses only `contents: read` permission.
 
 ## CI
 
-`.github/workflows/merge-gate.yml` runs the suite as three **E2E Contract (shard i/3)** jobs,
+`.github/workflows/merge-gate.yml` runs the suite as six **E2E Contract (shard i/6)** jobs,
 each on its own runner with its own API process, database, ports and mocks. Shard 1 also runs
 `check-e2e-boundary.sh` and `e2e:tsc`. A shard fails only on its own scenarios and the
 quarantine file. It does not gate coverage: alone it covers part of the surface.
 
-The **E2E Contract** job then runs `bun scripts/e2e/merge.ts --strict` on the three shard
+The **E2E Contract** job then runs `bun scripts/e2e/merge.ts --strict` on the six shard
 results. It unions their calls, tools, node types and state values and computes coverage
 once, so a surface covered in any shard counts. It applies `--strict` and the minimums,
 carries `flaky` and quarantined rows into its summary, and fails when a shard result is
 missing, duplicated or red. It needs no `bun install`. The Merge Gate needs both jobs.
 
-To reproduce a red merge locally, download the four `e2e-contract-shard-<i>` artifacts and
+To reproduce a red merge locally, download the six `e2e-contract-shard-<i>` artifacts and
 run the same `merge.ts` command on them. The nightly workflow runs unsharded, plus real
 harness legs.
 
