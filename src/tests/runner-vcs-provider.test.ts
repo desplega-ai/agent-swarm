@@ -34,6 +34,8 @@ afterAll(async () => {
 
 test.each([
   ["https://gitlab.com/acme/github-sync.git", "glab mr list --source-branch", ""],
+  ["https://gitlab-ee.acme.corp/acme/repo.git", "glab mr list --source-branch", ""],
+  ["git@acme-gitlab.com:acme/repo.git", "glab mr list --source-branch", ""],
   ["https://github.com/acme/gitlab-tools.git", "gh pr list --head", ""],
   ["https://gitlab.example.com/acme/repo.git", "gh pr list --head", "https://gitlab.example.com"],
 ] as const)(
@@ -57,6 +59,7 @@ test.each([
             PATH: `${binDir}:${process.env.PATH ?? ""}`,
             GITHUB_URL: githubUrl,
             GITHUB_API_URL: "",
+            GITLAB_URL: "",
             VCS_CALL_LOG: callLog,
           },
         },
