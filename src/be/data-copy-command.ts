@@ -107,6 +107,9 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
       scrubSecrets(`[db-copy] ATTENTION ${item.table} ${item.row}, ${item.column}: ${item.reason}`),
     );
   }
+  for (const warning of report.warnings ?? []) {
+    console.warn(scrubSecrets(`[db-copy] WARNING ${warning}`));
+  }
   for (const item of report.unchecked ?? []) {
     console.error(
       scrubSecrets(
