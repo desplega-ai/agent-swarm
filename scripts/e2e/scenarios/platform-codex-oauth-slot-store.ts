@@ -1,7 +1,21 @@
+import { randomUUID } from "node:crypto";
 import { sql } from "../db";
-import { asRecord, asString, expect, expectStatus } from "../http";
+import { type ApiResponse, asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
+import { claimTask, createAssignedTask } from "./core-helpers";
 import { Cleanup, retireAgent } from "./platformb-helpers";
+
+function tokenOf(minted: ApiResponse): string {
+  return asString(asRecord(minted.json).plaintext, "minted token");
+}
+
+function cookiePair(headers: Headers): string {
+  return headers
+    .getSetCookie()
+    .map((cookie) => cookie.split(";")[0] ?? "")
+    .filter((pair) => pair.includes("=") && !pair.endsWith("="))
+    .join("; ");
+}
 
 /** A high slot index that no other scenario seeds. */
 const SLOT = 97;
@@ -9,7 +23,9 @@ const KEY = `codex_oauth_${SLOT}`;
 const SLOT_PATH = `/api/codex-oauth/slots/${SLOT}/credentials`;
 const LOCK_PATH = `/api/oauth/refresh-locks/${KEY}`;
 
-async function registerWorkerWithToken(ctx: ScenarioContext): Promise<{ id: string; token: string }> {
+async function registerWorkerWithToken(
+  ctx: ScenarioContext,
+): Promise<{ id: string; token: string }> {
   const created = await ctx.api("POST", "/api/agents", {
     body: { name: `zz-codex-slot-${ctx.nonce}`, role: "worker", status: "online" },
   });
@@ -132,6 +148,71 @@ export const platformCodexOAuthSlotStore: Scenario = {
       const lock = await ctx.api("POST", LOCK_PATH, { ...asWorker, body: { ttlMs: 60_000 } });
       expectStatus(lock, [200], "worker takes the slot lock");
       const owner = asString(asRecord(lock.json).owner, "lock owner");
+
+      // ── only the operator and a registered agent may write, even with the real owner ──
+      const task = await createAssignedTask(ctx, worker.id, `codex slot store ${ctx.nonce}`);
+      await claimTask(ctx, worker.id, task);
+      const taskToken = await ctx.api("POST", "/api/sessions/tokens", {
+        body: { agentId: worker.id, taskId: task, ttlMs: 120_000 },
+      });
+      expectStatus(taskToken, [200], "mint a task token");
+      const user = await ctx.api("POST", "/api/users", {
+        body: { name: `codex-slot-${ctx.nonce}`, status: "active" },
+      });
+      expectStatus(user, [200], "create a user");
+      const userId = asString(asRecord(asRecord(user.json).user).id, "user id");
+      const userToken = await ctx.api("POST", `/api/users/${userId}/mcp-tokens`, {
+        body: { label: `codex-slot-${ctx.nonce}` },
+      });
+      expectStatus(userToken, [200], "mint a user token");
+      // A runtime token for an agent id that is not in `agents`.
+      const ghostToken = await ctx.api("POST", "/api/sessions/tokens", {
+        body: { agentId: randomUUID(), runtimeId: randomUUID(), ttlMs: 120_000 },
+      });
+      expectStatus(ghostToken, [200], "mint a token for an unregistered agent");
+      const page = await ctx.api("POST", "/api/pages", {
+        agentId: worker.id,
+        body: {
+          slug: `codex-slot-page-${ctx.nonce}`,
+          title: "Codex slot page",
+          body: "<p>hi</p>",
+          contentType: "text/html",
+          authMode: "authed",
+        },
+      });
+      expectStatus(page, [201], "worker creates a page");
+      const pageId = asString(asRecord(page.json).id, "page id");
+      cleanup.add("delete the page", async () => {
+        await ctx.api("DELETE", `/api/pages/${pageId}`, { agentId: worker?.id });
+      });
+      // An operator-launched session: the page gate must refuse it, not the operator check.
+      const launch = await ctx.api("POST", `/api/pages/${pageId}/launch`, { agentId: worker.id });
+      expectStatus(launch, [204], "operator launches a page session");
+      const refusedCallers = [
+        { label: "task token", path: SLOT_PATH, apiKey: tokenOf(taskToken) },
+        { label: "user token", path: SLOT_PATH, apiKey: tokenOf(userToken) },
+        { label: "unregistered agent token", path: SLOT_PATH, apiKey: tokenOf(ghostToken) },
+        {
+          label: "page session",
+          path: `/@swarm${SLOT_PATH}`,
+          apiKey: null,
+          headers: { Cookie: cookiePair(launch.headers), "X-Swarm-Page-Id": pageId },
+        },
+      ];
+      for (const { label, path, ...as } of refusedCallers) {
+        expectStatus(
+          await ctx.api("PUT", path, { ...as, body: body(owner) }),
+          [403],
+          `${label} stores the slot`,
+        );
+        expectStatus(
+          await ctx.api("DELETE", path, { ...as, body: { lockOwner: owner } }),
+          [403],
+          `${label} quarantines the slot`,
+        );
+        expect((await stored())?.access === original.access, `a refused ${label} changed the slot`);
+      }
+
       expectStatus(
         await ctx.api("PUT", SLOT_PATH, { ...asWorker, body: body("someone-else") }),
         [409],
@@ -151,7 +232,10 @@ export const platformCodexOAuthSlotStore: Scenario = {
       const row = ctx.db.get<{ encrypted: number; isSecret: number }>(
         sql`SELECT encrypted, "isSecret" FROM swarm_config WHERE key = ${KEY} AND scope = 'global'`,
       );
-      expect(Number(row?.isSecret) === 1 && Number(row?.encrypted) === 1, "slot row is not a secret");
+      expect(
+        Number(row?.isSecret) === 1 && Number(row?.encrypted) === 1,
+        "slot row is not a secret",
+      );
 
       // ── quarantine follows the same lock rule ──────────────────────────────
       expectStatus(
