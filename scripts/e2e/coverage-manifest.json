@@ -134,18 +134,22 @@
       "excluded": [
         {
           "value": "draft",
+          "transient": true,
           "reason": "transient: a draft is promoted to pending or unassigned when its attachment batch settles, before the suite reads the table"
         },
         {
           "value": "reviewing",
+          "transient": true,
           "reason": "transient: an offered task is reviewing only between claim-for-review and accept or decline inside one poll"
         },
         {
           "value": "resume",
+          "transient": true,
           "reason": "transient: set by crash recovery for the duration of one resume dispatch, which the heartbeat sweep (disabled here) drives"
         },
         {
           "value": "unassigned",
+          "transient": true,
           "reason": "transient once a lead exists: a pool task is assigned to the lead at creation, and mcp-surface asserts the unassigned listing before claiming it"
         }
       ]
