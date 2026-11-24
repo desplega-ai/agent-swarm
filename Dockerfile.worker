@@ -579,9 +579,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795492832-gd47416
-ARG AMP_SHA512_AMD64=077bde043823bab32ee898122bfea955e16363ebf94bc503641503db16bb7ad02cf2ae2eaf73b7c9bc623eec84f9a52e28902e3d1155ee929ee33af4ba8293d0
-ARG AMP_SHA512_ARM64=bafb7b004b6c46f64b2f195512e9f408fe4832a75ce05e5f4797259250b3c90c53f64f86ee2cd4263e7b72b2dac645343f1c533d5d571d22c7c1d7d28dd24a15
+ARG AMP_VERSION=0.0.1795507243-g81a840
+ARG AMP_SHA512_AMD64=6c1c45b0408748e4fc039135993e84ec172fd426eabc239a8d91a980a815cd19cf00d7cbb151b061923663cca526a6bbee2d6e656ef3c1cf120c1fbb17da18cd
+ARG AMP_SHA512_ARM64=c5931ef57616af80d1fac0578a88e94c805073cbd6f0605d777c6bb4a1fbad0d17023838b26ee72a723e41d548cc1433f91e5ffc4a28d53e75f7062e296c3cfd
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -629,7 +629,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.114
+ARG COPILOT_CLI_VERSION=1.0.115
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
