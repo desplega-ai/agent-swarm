@@ -71,7 +71,7 @@ These are operator responsibilities, and the workflow inherits whatever the oper
 
 **Retention.** Decide how long run outputs, the packet and the run logs are kept, who owns deleting them, and where they live. A band review packet ages into a record of what people were paid, so the retention period should be the shortest one that still supports an audit.
 
-**Gate timeout and fallback.** The [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends a timeout with a named fallback owner: a reminder before the timeout, then a named backup, then an explicit hold. The workflow never proceeds on silence.
+**Gate timeout and fallback.** The [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends a timeout and a fallback path so a forgotten gate never wedges the workflow. This workflow needs a reminder before the timeout, then a named backup owner, then an explicit hold so the review stays on an open list. It never proceeds on silence.
 
 ## Limits
 
