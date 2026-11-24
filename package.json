@@ -131,6 +131,7 @@
     "check:tx-callbacks": "bun scripts/storage-checks/check-tx-callbacks.ts",
     "check:schema-parity": "bun scripts/storage-checks/check-schema-parity.ts",
     "check:no-new-triggers": "bun scripts/storage-checks/check-no-new-triggers.ts",
+    "check:copy-migrations": "bun scripts/storage-checks/check-copy-migrations.ts",
     "storage:baseline": "bun scripts/storage/generate-postgres-baseline.ts",
     "check:dep-graph": "depcruise src packages/model-routing packages/agent-swarm-sdk packages/storage packages/storage-sqlite packages/storage-postgres --config .dependency-cruiser.cjs && bun scripts/storage-checks/check-driver-imports.ts",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",

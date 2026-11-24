@@ -7,6 +7,7 @@ import {
   type StatementObserver,
   type TransactionOptions,
 } from "@desplega/storage";
+import { POSTGRES_CONNECT_TIMEOUT_S, POSTGRES_KEEPALIVE_PARAMS } from "./boot";
 import { decodeRows, type ResultColumn, type TimestampFormats } from "./codec";
 import { type CheckMessages, mapPostgresError, SQLSTATE } from "./errors";
 import { checkOwnerFence, mayWrite, type OwnerFence } from "./owner-fence";
@@ -259,11 +260,16 @@ export class PostgresClient implements DbClient {
     if (outer && !outer.closed) return this.savepoint(outer, fn);
 
     let replayPending = this.options.txReplay === true;
-    const stats = this.options.onTransactionEnd
-      ? { stack: new Error().stack ?? "", retries: [] as string[] }
-      : null;
+    // The caller stack is captured only for the bench sink: it is not free.
+    const stack = this.options.onTransactionEnd ? (new Error().stack ?? "") : "";
+    const retries: string[] = [];
     const end = (attempts: number, outcome: TransactionEndInfo["outcome"]) => {
-      if (stats) this.options.onTransactionEnd?.({ ...stats, attempts, outcome });
+      this.options.onTransactionEnd?.({ stack, retries, attempts, outcome });
+      this.options.observer?.onTransaction?.({
+        attempts,
+        retries,
+        outcome: outcome === "error" ? "rollback" : outcome,
+      });
     };
     for (let attempt = 1; ; attempt++) {
       if (opts.deadlineAt !== undefined && Date.now() > opts.deadlineAt) {
@@ -330,7 +336,7 @@ export class PostgresClient implements DbClient {
         if (retryState !== null && attempt < this.retry.maxAttempts) {
           this.retriedAttempts += 1;
           this.options.onRetry?.(retryState, attempt);
-          stats?.retries.push(retryState);
+          retries.push(retryState);
           await Bun.sleep(this.backoffMs(attempt));
           continue;
         }
@@ -452,12 +458,26 @@ export type PostgresConnectionOptions = {
   max?: number;
 };
 
+/**
+ * Seconds a pooled connection may stay idle before the pool closes it. Shorter
+ * than the idle timeouts of common NAT gateways and load balancers (4 minutes
+ * and more), which drop an idle connection without a FIN: a request on such a
+ * connection would hang until the kernel gives up on it.
+ */
+export const POSTGRES_POOL_IDLE_TIMEOUT_S = 60;
+
 /** Open the pool with the session defaults of decision D6 (SERIALIZABLE, UTC). */
 export function openPostgresPool(options: PostgresConnectionOptions): PoolHandle {
   return new Bun.SQL({
     url: options.url,
     max: options.max ?? 10,
-    connection: { default_transaction_isolation: "serializable", TimeZone: "UTC" },
+    idleTimeout: POSTGRES_POOL_IDLE_TIMEOUT_S,
+    connectionTimeout: POSTGRES_CONNECT_TIMEOUT_S,
+    connection: {
+      default_transaction_isolation: "serializable",
+      TimeZone: "UTC",
+      ...POSTGRES_KEEPALIVE_PARAMS,
+    },
   }) as unknown as PoolHandle;
 }
 

@@ -106,6 +106,8 @@ Use the MCP tool `get-oauth-access-token` when an agent needs a bearer token for
    - `jira:issue_updated` → `handleIssueEvent` (only assignee transitions **to** the bot account create/follow-up tasks; transitions away are ignored).
    - `comment_created` / `comment_updated` → `handleCommentEvent` (only when the bot is @-mentioned).
    - `jira:issue_deleted` → `handleIssueDeleteEvent` (cancels any active swarm task linked to the issue).
+
+   Each accepted delivery also publishes `jira.issue.assigned`, `jira.issue.transitioned` (`jira:issue_updated`) and `jira.issue.commented` (`comment_created`) for any assignee, status or author, which workflow [event triggers](/docs/concepts/workflows#event-triggers) start on.
 3. The `tracker_sync` row is inserted FIRST via `createTrackerSyncIfAbsent` (UNIQUE-gated). Only when the insert is fresh does the swarm task get created — making concurrent webhook deliveries idempotent.
 4. ADF (Atlassian Document Format) issue descriptions and comment bodies are walked to plaintext via `src/jira/adf.ts` before being injected into the prompt template.
 5. Two short-circuits prevent loops:

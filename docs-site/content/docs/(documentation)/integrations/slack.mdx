@@ -383,6 +383,23 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321
 
 If both are set, a user must match **either** an allowed domain **or** be in the user ID whitelist.
 
+## Bot messages and workflows
+
+The swarm drops every message posted by a bot. To let an alerting tool (Sentry, Datadog, PagerDuty) start [`slack.message` workflows](/docs/concepts/workflows), list its bot in `SLACK_WORKFLOW_BOT_IDS` per channel:
+
+```bash
+# Comma-separated CHANNEL_ID:BOT_ID pairs
+SLACK_WORKFLOW_BOT_IDS=C0123ABCD:B0SENTRY1,C0123ABCD:B0DDOG001
+```
+
+- A listed bot's post in its listed channel emits `slack.message` with `botId` set. The same bot in another channel is dropped.
+- It only starts workflows. It never creates an agent task or reaches agent routing, even when it @mentions the bot.
+- The swarm's own bot is always dropped, even when listed, so its replies cannot loop.
+- User filtering does not apply to bot posts. External channel blocking and left threads still do.
+- The value is read on each message, so a change applies without a restart. A malformed entry is rejected when saved.
+
+Find a bot's `bot_id` in the message JSON (`bot_id` field) or with `bots.info`. Unset keeps the default: every bot message is dropped.
+
 ## Attachment Handling
 
 Files a user shares with the bot (images, voice memos, documents) become task attachments, in channel mentions and in assistant threads alike, and with or without accompanying text:

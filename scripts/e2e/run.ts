@@ -116,9 +116,10 @@ export type ScenarioContext = {
    * The data copy of decision D11 (check 20), whatever engine the run uses: boot a new
    * source API on a SQLite file. `copy()` stops it, runs `agent-swarm db-copy` into a new
    * Postgres database (needs E2E_POSTGRES_URL) and boots a target API on the copy with
-   * the source's encryption key. The runner stops both otherwise.
+   * the source's encryption key. The runner stops both otherwise. `env` adds variables to
+   * both APIs (for example `ctx.llm.env`, so memories get embeddings).
    */
-  startDataCopy: () => Promise<DataCopyPair>;
+  startDataCopy: (options?: { env?: Record<string, string> }) => Promise<DataCopyPair>;
   nonce: string;
 };
 export type DataCopyPair = {
@@ -131,6 +132,16 @@ export type DataCopyPair = {
     /** The source SQLite file (its API is stopped) and the target database URL. */
     sourcePath: string;
     targetUrl: string;
+    /** Read-only handles on the source file and on the copy. */
+    sourceDb: ReadOnlyDb;
+    targetDb: ReadOnlyDb;
+    /**
+     * Stop the target API and start it again on the copy, as a later start or a later
+     * release does. `env` applies to that process only.
+     */
+    restartTarget: (env?: Record<string, string>) => Promise<void>;
+    /** The output of the target API process that runs now (each start has its own). */
+    targetLog: () => Promise<string>;
   }>;
   stop: () => Promise<void>;
 };
@@ -364,17 +375,12 @@ async function bootStack(
           stop: () => stopStack(fixtureStack, options.keep),
         };
       },
-      async startDataCopy() {
+      async startDataCopy(copyOptions = {}) {
         const sourceStack: Stack = {};
         const targetStack: Stack = {};
         stacks.add(sourceStack);
-        const source = await startSut(
-          options.keep,
-          { SLACK_DISABLE: "true" },
-          options.sutEnv,
-          undefined,
-          "sqlite",
-        );
+        const pairEnv = { SLACK_DISABLE: "true", ...copyOptions.env };
+        const source = await startSut(options.keep, pairEnv, options.sutEnv, undefined, "sqlite");
         sourceStack.sut = source;
         const copyCli = (databaseUrl: string) =>
           runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl], {
@@ -389,7 +395,7 @@ async function bootStack(
             let cli: CliResult | undefined;
             const target = await startSut(
               options.keep,
-              { SLACK_DISABLE: "true" },
+              pairEnv,
               options.sutEnv,
               undefined,
               "postgres",
@@ -400,12 +406,22 @@ async function bootStack(
             );
             targetStack.sut = target;
             if (!cli) throw new Error("db-copy did not run");
+            // stopStack closes both handles before it deletes the databases.
+            sourceStack.db = openReadOnlyDb(sutDbTarget(source));
+            targetStack.db = openReadOnlyDb(sutDbTarget(target));
             return {
               cli,
               target: createApiClient(target.baseUrl, target.apiKey),
               recopy: () => copyCli(target.databaseUrl ?? ""),
               sourcePath: source.dbPath,
               targetUrl: target.databaseUrl ?? "",
+              sourceDb: sourceStack.db,
+              targetDb: targetStack.db,
+              restartTarget: (env) => restartSut(target, env),
+              async targetLog() {
+                target.flushLog();
+                return Bun.file(target.logPath).text();
+              },
             };
           },
           async stop() {

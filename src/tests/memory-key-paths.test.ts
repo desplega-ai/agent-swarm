@@ -601,11 +601,13 @@ describe("/longterm is the curated tier", () => {
     const realSetImmediate = globalThis.setImmediate;
     let curated: Promise<unknown> | undefined;
     globalThis.setImmediate = ((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
-      // db-client also yields through setImmediate while it holds the FIFO lock
-      // (a spent 25ms slice, likely on a loaded runner). Waiting on the edit there
-      // deadlocks: the edit needs that lock. Leave that yield alone; only the
-      // purge's own batch yield runs lock-free.
-      if (new Error().stack?.includes("db-client")) return realSetImmediate(callback, ...args);
+      // The SQLite client also yields through setImmediate while it holds the FIFO
+      // lock (`yieldIfSliceSpent`: a spent 25ms slice, likely on a loaded runner).
+      // Waiting on the edit there deadlocks: the edit needs that lock. Leave that
+      // yield alone; only the purge's own batch yield runs lock-free. The function
+      // name, not the file path: the client moved to packages/storage-sqlite.
+      if (new Error().stack?.includes("yieldIfSliceSpent"))
+        return realSetImmediate(callback, ...args);
       globalThis.setImmediate = realSetImmediate;
       curated = editTool(worker, { memoryId: curatedId, newKey: longKey, intent: "curate" });
       return realSetImmediate(() => {
