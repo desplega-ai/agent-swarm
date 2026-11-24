@@ -1,0 +1,33 @@
+{
+  "name": "stress-child",
+  "description": "Stress pack D (child): one step that counts itself for its parent run. Started by stress-parent. No agent nodes, no LLM.",
+  "triggerSchema": {
+    "type": "object",
+    "required": ["parentRunId", "item"],
+    "properties": {
+      "parentRunId": {
+        "type": "string"
+      },
+      "item": {
+        "type": "string"
+      }
+    }
+  },
+  "definition": {
+    "nodes": [
+      {
+        "id": "work",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "child-work",
+            "parentRunId": "{{trigger.parentRunId}}",
+            "item": "{{trigger.item}}"
+          }
+        }
+      }
+    ]
+  }
+}
