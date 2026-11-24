@@ -115,3 +115,6 @@ A lighter `work` (one agent per command) or a cheaper audit should remove them.
 - The simulated workers register no active session. Crash recovery therefore takes the
   "no session" path only. The "stale session" path is not covered.
 - Schedules and workflow steps are not covered.
+- Both compose files set `MULTI_RUNTIME_ENABLED` to `false`, and the default is `true`. The
+  simulated workers register without a runtime identity. The runtime pool release path is
+  therefore not covered.

@@ -6,9 +6,12 @@
 # stage flattens the layers, so the deleted files do not stay in the archive.
 FROM postgres:16-alpine AS build
 ARG PGVECTOR_VERSION=v0.8.7
+# The commit that the tag names. A tag can move, so the build stops when it does.
+ARG PGVECTOR_COMMIT=f37c13f68b57d2c3472b2214fbcff699d6d34876
 RUN apk add --no-cache --virtual .build build-base git \
   && git clone --depth 1 --branch "${PGVECTOR_VERSION}" https://github.com/pgvector/pgvector.git /tmp/pgvector \
   && cd /tmp/pgvector \
+  && test "$(git rev-parse HEAD)" = "${PGVECTOR_COMMIT}" \
   && make OPTFLAGS="" with_llvm=no \
   && make install with_llvm=no \
   && cd / \

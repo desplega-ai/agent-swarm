@@ -28,6 +28,10 @@ resource("audit", {
   bash = "client",
   command = "/k/audit",
   read = function(out)
+    -- An audit that printed nothing must not read as all zeros: zeros pass every check.
+    if not string.match(out.stdout, "api=%d+") then
+      error("the audit printed no api= field")
+    end
     local reading = {}
     for _, name in ipairs(FIELDS) do
       reading[name] = tonumber(string.match(out.stdout, name .. "=(%d+)")) or 0
