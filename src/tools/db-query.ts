@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { getStorage } from "@/be/storage";
 import { DbQueryInputShape, executeReadOnlyQueryGated, resolveDbQuerySql } from "@/http/db-query";
 import { getDbQueryMcpBudgetMs, getDbQueryMcpMaxRows } from "@/http/db-query-shared";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -20,13 +21,33 @@ const DbQueryToolInputSchema = z
     message: "Either sql or query is required",
   });
 
+const SQLITE_DESCRIPTION =
+  "Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents. Queries that read credential tables (OAuth authorizations, apps and pending flows, user and session tokens, script API bearers, Codex device-login state) are rejected, and secret-shaped values in results are redacted. Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.";
+
+const POSTGRES_DESCRIPTION =
+  'Execute a read-only SQL query against the swarm database (Postgres: write Postgres SQL, parameters are $1, $2, ..., quote identifiers that have an uppercase letter such as "taskId"). Available to all authenticated agents. Queries that read credential tables (OAuth authorizations, apps and pending flows, user and session tokens, script API bearers, Codex device-login state) are rejected, and secret-shaped values in results are redacted. Runs in a READ ONLY transaction under a restricted role with a statement timeout (fails with a timeout or a 429-style concurrency error); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter\'s description for which tables are unsafe to read whole, and the db-query-guidance skill for dialect notes and config knobs.';
+
+const UNAVAILABLE_DESCRIPTION =
+  "Read-only SQL query against the swarm database. Not available on this deployment: the Postgres engine has no restricted db-query role (DATABASE_QUERY_URL). Every call returns an error that says so.";
+
+/** The tool description follows the engine's capabilities (Postgres brief D10). */
+function dbQueryToolDescription(): string {
+  let capabilities: { dbQuery: boolean; dbQueryDialect: string };
+  try {
+    capabilities = getStorage().capabilities;
+  } catch {
+    return SQLITE_DESCRIPTION; // storage not started (tool catalog builds): the default engine
+  }
+  if (!capabilities.dbQuery) return UNAVAILABLE_DESCRIPTION;
+  return capabilities.dbQueryDialect === "postgres" ? POSTGRES_DESCRIPTION : SQLITE_DESCRIPTION;
+}
+
 export const registerDbQueryTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "db-query",
     {
       title: "Execute database query",
-      description:
-        "Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents. Queries that read credential tables (OAuth authorizations, apps and pending flows, user and session tokens, script API bearers, Codex device-login state) are rejected, and secret-shaped values in results are redacted. Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.",
+      description: dbQueryToolDescription(),
       annotations: { readOnlyHint: true },
       inputSchema: DbQueryToolInputSchema,
       outputSchema: swarmToolOutputSchema({
@@ -36,6 +57,7 @@ export const registerDbQueryTool = (server: McpServer) => {
         total: z.number().optional(),
         truncated: z.boolean().optional(),
         rowLimit: z.number().optional(),
+        dialect: z.string().optional(),
       }),
     },
     async (input, _requestInfo, _meta) => {

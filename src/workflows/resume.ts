@@ -4,7 +4,6 @@ import {
   cancelTask,
   getApprovalRequestById,
   getCompletedStepNodeIds,
-  getDbClient,
   getPendingEventWaitNames,
   getPendingWaitsByEvent,
   getRunWorkflow,
@@ -32,6 +31,7 @@ import {
   getWorkflowRunTreeIds,
   workflowRunTreeHasOpenWork,
 } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import {
   type RetryPolicy,
   RetryPolicySchema,
@@ -313,7 +313,7 @@ export async function finalizeOrWait(runId: string): Promise<void> {
   // Snapshot and status write must commit together: a concurrent branch can
   // move a step into `waiting` between the read and the write, and a run
   // finalized from a stale snapshot strands that branch.
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     // A cancel (or another finalizer) that committed after the caller's claim
     // wins: a terminal run is never re-parked or completed from here.
     const status = await getWorkflowRunStatus(runId);
@@ -560,7 +560,7 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   // (HTTP route + MCP tool) both pass the guard above, and a double reset
   // walks the same failed node twice.
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  const attempts = await getDbClient().transaction(async () => {
+  const attempts = await getStorage().transaction(async () => {
     const current = await getWorkflowRun(runId);
     if (!current || current.status !== "failed") return null;
     // A failed run inside a cancelled tree keeps its failure; the cancel
@@ -736,7 +736,7 @@ export async function cancelWorkflowRunRows(
   // gaining new work, so the answer still holds when this returns.
   // Its run ids still go back, so the caller retries Slack posts an earlier
   // cancel could not deliver.
-  const settledTree = await getDbClient().transaction(
+  const settledTree = await getStorage().transaction(
     async () => {
       if ((await getWorkflowRunStatus(runId)) !== "cancelled") return null;
       const ids = await getWorkflowRunTreeIds(runId);
@@ -750,7 +750,7 @@ export async function cancelWorkflowRunRows(
   // step that commits first is in the snapshot; one that commits after sees
   // the cancelled rows in its own guard (getRunLineageBlock and the step
   // claims) and is refused.
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const rootStatus = await getWorkflowRunStatus(runId);
     if (!rootStatus || (TERMINAL_RUN_STATUSES.has(rootStatus) && rootStatus !== "cancelled")) {
       return { cancelled: false, runIds: [] };
@@ -858,8 +858,7 @@ export async function cancelWorkflowRunStep(
   slackClient?: ApprovalSlackClient,
 ): Promise<void> {
   const now = new Date().toISOString();
-  let persistedReason = reason;
-  await getDbClient().transaction(async () => {
+  const persistedReason = await getStorage().transaction(async () => {
     const step = await getWorkflowRunStep(stepId);
     if (!step) throw new Error("Workflow run step not found");
     if (step.nodeType !== "human-in-the-loop") {
@@ -868,10 +867,7 @@ export async function cancelWorkflowRunStep(
     if (["completed", "failed", "skipped"].includes(step.status)) {
       throw new Error(`Cannot cancel step in '${step.status}' state`);
     }
-    if (step.status === "cancelled") {
-      persistedReason = step.error ?? reason;
-      return;
-    }
+    if (step.status === "cancelled") return step.error ?? reason;
 
     const task = await getTaskByWorkflowRunStepId(stepId);
     if (task) await cancelTask(task.id, reason, { statusKind: "workflow" });
@@ -880,6 +876,7 @@ export async function cancelWorkflowRunStep(
       error: reason,
       finishedAt: now,
     });
+    return reason;
   });
 
   const approvals = await listCancelledApprovalRequestsForStep(stepId);
@@ -889,7 +886,7 @@ export async function cancelWorkflowRunStep(
 /**
  * Resume a workflow after a linked approval request is resolved.
  *
- * 1. Verify run and step are in "waiting" state
+ * 1. Verify run and step are in "waiting" state and the stored request is resolved
  * 2. Checkpoint step completion with approval response data
  * 3. Route to the appropriate port (approved/rejected/timeout)
  * 4. Continue the graph walk
@@ -916,10 +913,23 @@ async function resumeFromApprovalResolutionUnguarded(
   const workflow = await getRunWorkflow(run);
   if (!workflow) return;
 
-  if (event.status === "cancelled") {
+  // Route on the stored request bound to this step, as the recovery sweep does.
+  // The event payload is a notification, not the source of the answer.
+  const approval = await getApprovalRequestById(event.requestId);
+  if (!approval || approval.workflowRunId !== run.id || approval.workflowRunStepId !== step.id) {
+    return;
+  }
+  if (approval.status === "cancelled") {
     console.warn(
-      `[workflows] approval ${event.requestId} is cancelled; step ${event.workflowRunStepId} stays waiting for the run cancel path`,
+      `[workflows] approval ${approval.id} is cancelled; step ${step.id} stays waiting for the run cancel path`,
     );
+    return;
+  }
+  if (
+    approval.status !== "approved" &&
+    approval.status !== "rejected" &&
+    approval.status !== "timeout"
+  ) {
     return;
   }
 
@@ -934,7 +944,11 @@ async function resumeFromApprovalResolutionUnguarded(
     workflow.definition,
     step.nodeId,
     step.output,
-    { requestId: event.requestId, status: event.status, responses: event.responses },
+    {
+      requestId: approval.id,
+      status: approval.status,
+      responses: (approval.responses ?? null) as Record<string, unknown> | null,
+    },
   );
 
   // Use port-based routing to determine the correct successors.
@@ -1128,7 +1142,7 @@ export async function resumeFromChildRun(
     // The step's attempt, that attempt's child and the claim share one
     // transaction: a retry that re-parks the step under a newer attempt in
     // between must not be settled by the previous attempt's child.
-    const routing = await getDbClient().transaction(async () => {
+    const routing = await getStorage().transaction(async () => {
       const current = await getWorkflowRunStep(step.id);
       if (!current || current.status !== "waiting") return null;
       // Inside a cancelled tree a child's end settles nothing and queues no retry.

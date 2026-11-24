@@ -1,0 +1,17 @@
+#!/bin/bash
+# Setup: wait until the API answers /health.
+# Usage: /k/wait-api [SECONDS] [EXIT_CODE_WHEN_NOT_UP]
+# A setup step must answer within 30 s, and the first boot (every migration) can take
+# longer. So model.lua calls this several times: each call waits at most SECONDS
+# (default 25) and returns 0, and the last one passes 1 to fail when the API is not up.
+set -u
+. /k/lib.sh
+deadline=$(($(date +%s) + ${1:-25}))
+until curl -fsS -m 2 -o /dev/null "$API/health" 2>/dev/null; do
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    echo "api not up yet"
+    exit "${2:-0}"
+  fi
+  sleep 0.5
+done
+echo "api up"

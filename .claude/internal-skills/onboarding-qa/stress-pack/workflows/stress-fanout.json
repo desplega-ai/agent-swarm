@@ -1,0 +1,146 @@
+{
+  "name": "stress-fanout",
+  "description": "Stress pack A: fan-out to 8 parallel branches that each increment a per-run counter, then a join that checks the count. No agent nodes, no LLM.",
+  "definition": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "mark",
+            "runId": "{{run.id}}"
+          }
+        },
+        "next": ["b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8"]
+      },
+      {
+        "id": "b1",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b1"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "b2",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b2"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "b3",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b3"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "b4",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b4"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "b5",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b5"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "b6",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b6"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "b7",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b7"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "b8",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "incr",
+            "runId": "{{run.id}}",
+            "branch": "b8"
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "join",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "join",
+            "runId": "{{run.id}}",
+            "expect": 8
+          }
+        }
+      }
+    ]
+  }
+}

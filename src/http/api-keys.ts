@@ -88,6 +88,7 @@ const reportUsage = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "worker credential-pool bookkeeping; no user flow calls it" },
 });
 
 /** A provider spend limit behind a key's rate limit (`SpendCap`). */
@@ -119,6 +120,7 @@ const reportRateLimit = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "worker credential-pool bookkeeping; no user flow calls it" },
 });
 
 const reportValidation = route({
@@ -652,6 +654,10 @@ const setKeyName = route({
     404: { description: "Key not found" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "credential display metadata on a pooled key; no verb covers it, so user roles need admin",
+  },
 });
 
 const clearRateLimitRoute = route({
@@ -688,6 +694,7 @@ const clearRateLimitRoute = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "worker credential-pool bookkeeping; no user flow calls it" },
 });
 
 const listPlans = route({

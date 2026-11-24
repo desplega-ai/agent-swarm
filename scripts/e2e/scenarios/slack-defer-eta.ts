@@ -1,8 +1,9 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
+import { createUser } from "./platform-helpers";
 import {
   announceLiveView,
-  ask,
   claim,
   enableSlackRenderV2Only,
   expectChannelWakeTime,
@@ -13,6 +14,7 @@ import {
   waitForOutcome,
   waitForReaction,
 } from "./slack-helpers";
+import { setGlobalConfig } from "./workflow-helpers";
 
 /** The time-based card `defer-task` stores: `Checking back tomorrow at 18:38`. */
 const STORED_TIME_CARD = /^Checking back (?:today|tomorrow|on \S+) at \d{1,2}:\d{2}/;
@@ -20,12 +22,28 @@ const STORED_TIME_CARD = /^Checking back (?:today|tomorrow|on \S+) at \d{1,2}:\d
 async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2") {
   await registerLead(ctx, `e2e-lead-defer-${renderer}`);
   await announceLiveView(ctx, "/c/general");
-  const message = await ask(ctx, "check the staging deployment when it finishes");
+  const profileZone = renderer === "legacy" ? "Asia/Kathmandu" : "";
+  const email = `defer-${renderer}-${ctx.nonce}@example.test`;
+  const requester = await createUser(ctx, "deferral requester", { email });
+  const sender = ctx.slack.addUser({ name: `defer-${renderer}`, email, tz: profileZone });
+  const message = await ctx.slack.postMessage({
+    channel: "general",
+    user: sender.id,
+    text: `<@${ctx.slack.bot.userId}> check the staging deployment when it finishes`,
+  });
   ctx.markThread(`defer-eta-${renderer}`, "C0GENERAL0", message.ts);
   await announceLiveView(ctx, `/c/C0GENERAL0/t/${message.ts}`);
   await waitForEyes(ctx, message.ts);
   await slackPace("eyes");
   const task = await findSlackTask(ctx, message.ts);
+  expect(task.requestedByUserId === requester.id, "The Slack task lost its requester");
+  const profile = ctx.db.get<{ timezone: string | null }>(
+    sql`SELECT timezone FROM users WHERE id = ${requester.id}`,
+  );
+  expect(
+    profile?.timezone === (profileZone || null),
+    `Unexpected requester timezone: ${profile?.timezone}`,
+  );
   const taskId = String(task.id);
   const leadId = String(task.agentId);
   await claim(ctx, leadId, taskId);
@@ -52,8 +70,6 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
   // This defer is time-based (delayMs, no wakeOn), so the card is the
   // "checking back" shape. A wakeOn defer instead reads "Waiting on <agent> —
   // or <when> at the latest"; both are asserted as units in defer-task.test.ts.
-  // The stored card renders its time in the requester's timezone (UTC here);
-  // Slack re-renders `deferredUntil` in Europe/Madrid.
   expect(
     typeof deferred.output === "string" && STORED_TIME_CARD.test(deferred.output),
     `Stored output must be the human-facing defer ETA, got: ${JSON.stringify(deferred.output)}`,
@@ -130,7 +146,14 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
     !thread.includes("/schedules/"),
     `${renderer} Slack thread leaked the defer schedule link`,
   );
-  expectChannelWakeTime(ctx, message.ts, renderer, String(deferred.deferredUntil));
+  expectChannelWakeTime(
+    ctx,
+    message.ts,
+    renderer,
+    String(deferred.deferredUntil),
+    profileZone || "America/New_York",
+    !profileZone,
+  );
 }
 
 // registry.ts discovers both exports. Legacy must precede the scenarios that enable v2;
@@ -147,7 +170,12 @@ export const slackDeferEtaV2: Scenario = {
   order: 135,
   groups: ["visuals-v2"],
   async run(ctx) {
-    await enableSlackRenderV2Only(ctx);
-    await deferAndCheckSlack(ctx, "v2");
+    const clearDefault = await setGlobalConfig(ctx, "SLACK_DEFAULT_TIMEZONE", "America/New_York");
+    try {
+      await enableSlackRenderV2Only(ctx);
+      await deferAndCheckSlack(ctx, "v2");
+    } finally {
+      await clearDefault();
+    }
   },
 };

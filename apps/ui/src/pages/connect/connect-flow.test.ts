@@ -11,12 +11,24 @@ import {
 } from "./connect-flow";
 
 describe("validateReturnTo", () => {
-  test("accepts the built-in connector origins", () => {
-    for (const raw of [
+  test("accepts the built-in connector pages, without their query or fragment", () => {
+    expect(validateReturnTo("https://mcp.agent-swarm.dev/connections")?.toString()).toBe(
       "https://mcp.agent-swarm.dev/connections",
-      "https://mcp-preview.agent-swarm.dev/connections?x=1",
+    );
+    expect(
+      validateReturnTo("https://mcp-preview.agent-swarm.dev/connections?x=1#y")?.toString(),
+    ).toBe("https://mcp-preview.agent-swarm.dev/connections");
+  });
+
+  test("rejects another path on an allowed origin", () => {
+    const connectUrl =
+      "https://mcp.agent-swarm.dev/connections?swarm=https%3A%2F%2Fswarm.test&code=dummy_code";
+    for (const raw of [
+      "https://mcp.agent-swarm.dev/other-path?extra=dummy#frag",
+      "https://mcp.agent-swarm.dev/",
+      "https://mcp-preview.agent-swarm.dev/connections/extra",
     ]) {
-      expect(validateReturnTo(raw)?.toString()).toBe(new URL(raw).toString());
+      expect(validateReturnTo(raw, { extraOrigins: [connectUrl] })).toBeNull();
     }
   });
 
@@ -36,12 +48,15 @@ describe("validateReturnTo", () => {
     }
   });
 
-  test("accepts an https CONNECTOR_CONNECT_URL origin reported by discovery", () => {
+  test("accepts the exact https CONNECTOR_CONNECT_URL page reported by discovery", () => {
     const raw = "https://connector.example.com/connect";
     expect(validateReturnTo(raw)).toBeNull();
     expect(
-      validateReturnTo(raw, { extraOrigins: ["https://connector.example.com/other"] }),
+      validateReturnTo(raw, { extraOrigins: ["https://connector.example.com/connect?a=1"] }),
     ).not.toBeNull();
+    expect(
+      validateReturnTo(raw, { extraOrigins: ["https://connector.example.com/other"] }),
+    ).toBeNull();
     expect(
       validateReturnTo("http://connector.example.com/connect", {
         extraOrigins: ["http://connector.example.com/connect"],
@@ -94,7 +109,7 @@ describe("buildConnectorRedirect", () => {
     );
   });
 
-  test("keeps return_to's own query and fragment and overrides a stale client", () => {
+  test("drops return_to's own query and fragment", () => {
     const target = new URL(
       buildConnectorRedirect(
         new URL("https://mcp-preview.agent-swarm.dev/connections?step=2&client=codex#done"),
@@ -102,12 +117,12 @@ describe("buildConnectorRedirect", () => {
         "claude",
       ),
     );
-    expect(target.origin).toBe("https://mcp-preview.agent-swarm.dev");
-    expect(target.searchParams.get("step")).toBe("2");
+    expect(target.origin + target.pathname).toBe("https://mcp-preview.agent-swarm.dev/connections");
+    expect([...target.searchParams.keys()]).toEqual(["swarm", "code", "client"]);
     expect(target.searchParams.get("swarm")).toBe("https://swarm.example.com");
     expect(target.searchParams.get("code")).toBe("abc_DEF-123");
-    expect(target.searchParams.getAll("client")).toEqual(["claude"]);
-    expect(target.hash).toBe("#done");
+    expect(target.searchParams.get("client")).toBe("claude");
+    expect(target.hash).toBe("");
   });
 
   test("refuses a connect URL without a code", () => {

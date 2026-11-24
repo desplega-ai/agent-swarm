@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   NativeScriptExecutor,
+  warmPoolPids,
   writeBareImportShim,
   writeBareImportShims,
 } from "../scripts-runtime/executors/native";
@@ -243,5 +244,51 @@ describe("NativeScriptExecutor startup overhead & shim reuse (#2008)", () => {
       expect(out.result).toEqual({ ok: true });
     },
     defaultResources.wallClockMs + 5_000,
+  );
+
+  spawnTest(
+    "NativeScriptExecutor keeps a pool of warm spares: a burst is served warm, the pool refills, a dead spare is skipped",
+    async () => {
+      const executor = new NativeScriptExecutor();
+      // A resource limit nobody else uses gives this test its own pool key; spares of
+      // other tests' keys are filtered out by pid.
+      const others = new Set(warmPoolPids());
+      const mine = () => warmPoolPids().filter((pid) => !others.has(pid));
+      const run = (n: number) =>
+        executor.run({
+          source: `export default async () => ({ n: ${n}, tmp: process.env.TMPDIR });`,
+          args: null,
+          configPayload: defaultConfigPayload,
+          resources: { ...defaultResources, maxFdCount: 61 },
+          fsMode: "none",
+          network: "full",
+        });
+      const waitForPool = async (min: number) => {
+        for (let i = 0; i < 100 && mine().length < min; i++) await Bun.sleep(50);
+        return mine();
+      };
+
+      await run(0);
+      expect((await waitForPool(3)).length).toBe(3);
+
+      const taken = new Set(mine());
+      const burst = await Promise.all([run(1), run(2), run(3)]);
+      for (const out of burst) expect(out.error, out.stderr).toBeUndefined();
+      // Three runs, three distinct run dirs.
+      expect(new Set(burst.map((o) => (o.result as { tmp: string }).tmp)).size).toBe(3);
+
+      // The pool refills to depth, with fresh processes only.
+      const refilled = await waitForPool(3);
+      expect(refilled.length).toBe(3);
+      for (const pid of refilled) expect(taken.has(pid)).toBe(false);
+
+      // A killed spare is skipped, not handed to a run.
+      process.kill(refilled[0] as number, "SIGKILL");
+      await Bun.sleep(100);
+      const after = await run(4);
+      expect(after.error, after.stderr).toBeUndefined();
+      expect(after.result).toMatchObject({ n: 4 });
+    },
+    defaultResources.wallClockMs * 2 + 5_000,
   );
 });

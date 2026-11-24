@@ -6,11 +6,11 @@ import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
   completeTask,
+  createTaskExtended,
   ExtensionAgentAssignmentError,
   failTask,
   getAgentById,
   getAllTasks,
-  getDbClient,
   getInProgressTasksByContextKey,
   getLeadAgent,
   getLogsByTaskId,
@@ -44,9 +44,16 @@ import {
 import {
   getModelProfileByName,
   hasUnreadableCredentialAllowlist,
+  modelGroupRefError,
   modelProfileRefError,
   taskProfileError,
 } from "../be/db/model-profiles";
+import {
+  findAcceptedTaskCreate,
+  recordAcceptedTaskCreate,
+  type TaskIdempotencyClaim,
+} from "../be/db/task-idempotency";
+import { IdempotencyKeyTakenError, requestFingerprint } from "../be/db/workflow-idempotency";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { getUserGrant } from "../be/rbac-roles";
 import { hasSessionAccess, type SessionAccess } from "../be/session-shares";
@@ -57,13 +64,14 @@ import {
   STEERING_MOVED_ERROR,
   SteeringRequestError,
 } from "../be/steering";
+import { getStorage } from "../be/storage";
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { getTaskUiSpec, TaskUiSpecSchema } from "../be/task-ui-spec";
 import { can, isRbacEnabled, type RbacPrincipal, type RbacResource } from "../rbac";
 import { mirrorSessionPrompt } from "../slack/session-mirror";
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { prepareTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import {
@@ -106,6 +114,11 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { normalizeVcsRepo, vcsRepoUrlMatches } from "../utils/vcs-repo-match";
 import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
 import { readsRepoSecrets } from "./config";
+import {
+  IDEMPOTENT_REPLAYED_HEADER,
+  idempotencyKeyHeader,
+  readIdempotencyKey,
+} from "./idempotency-key";
 import { createListTotalCache, LIST_TOTAL_TTL_MS } from "./list-total-cache";
 import {
   agentFirstPrincipal,
@@ -168,6 +181,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   resolvedEffort: true,
   profile: true,
   resolvedProfile: true,
+  modelGroup: true,
   provider: true,
   requestedByUserId: true,
   progress: true,
@@ -344,6 +358,7 @@ const createTask = route({
   rbac: { permission: "task.create.own" },
   summary: "Create a new task",
   tags: ["Tasks"],
+  headers: idempotencyKeyHeader("creates one task (a replay returns that task as it is now)"),
   body: z
     .object({
       task: z.string().min(1),
@@ -385,6 +400,8 @@ const createTask = route({
       effort: ReasoningEffortSchema.optional(),
       /** Model profile name, applied at claim. Exclusive with `model` and `modelTier`. */
       profile: z.string().trim().min(1).optional(),
+      /** Model group name, resolved per agent at claim. Exclusive with `model`, `modelTier` and `profile`. */
+      modelGroup: z.string().trim().min(1).optional(),
       /**
        * Create in `draft` status instead of the normal pending/unassigned/offered
        * status (#1240) — the task exists and is visible to its owner, but is not
@@ -407,11 +424,13 @@ const createTask = route({
     201: { description: "Task created", schema: AgentTaskSchema },
     400: {
       description:
-        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
+        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key",
     },
+    409: { description: "Idempotency-Key was already used for a different request" },
+    410: { description: "The task created under this Idempotency-Key was deleted" },
     403: {
       description:
-        "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
+        "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -474,6 +493,10 @@ const updateSession = route({
   responses: {
     200: { description: "Session ID updated", schema: AgentTaskSchema },
     404: { description: "Task not found" },
+  },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
   },
 });
 
@@ -689,6 +712,7 @@ const updateTaskProgressRoute = route({
   session: { taskParam: "id" },
   summary: "Update task progress text",
   tags: ["Tasks"],
+  rbac: { permission: "task.progress.write" },
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
@@ -729,6 +753,10 @@ const finishTask = route({
       description: "Differing terminal result text was discarded",
       schema: FinishTaskConflictSchema,
     },
+  },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
   },
 });
 
@@ -857,6 +885,10 @@ const supersedeTaskRoute = route({
     403: { description: "Task belongs to another agent" },
     404: { description: "Task not found" },
   },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
+  },
 });
 
 const updateTaskVcsRoute = route({
@@ -879,6 +911,10 @@ const updateTaskVcsRoute = route({
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "worker runner endpoint for its own task; the route's session posture gates any user caller",
+  },
 });
 
 const updateTaskTitleRoute = route({
@@ -1143,8 +1179,38 @@ export async function handleTasks(
   }
 
   if (createTask.match(req.method, pathSegments)) {
+    const idempotency = readIdempotencyKey(req, res, myAgentId);
+    if (idempotency === null) return true;
     const parsed = await createTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const claim: TaskIdempotencyClaim | undefined = idempotency && {
+      ...idempotency,
+      fingerprint: requestFingerprint("task.create", parsed.body),
+    };
+    // Answer from the task this key already created, if any. Before the
+    // routing and create checks: the key is scoped to this caller, and a retry
+    // gets the original task even if the same request would no longer pass.
+    // The replay returns the task as it is now (output included), so it needs
+    // the same session read access as GET /api/tasks/{id}: a revoked share
+    // must not keep reading the task through its old key.
+    const replayCreate = async (): Promise<boolean> => {
+      const accepted = claim && (await findAcceptedTaskCreate(claim));
+      if (!accepted) return false;
+      const task =
+        accepted.fingerprint === claim.fingerprint ? await getTaskById(accepted.taskId) : null;
+      if (accepted.fingerprint !== claim.fingerprint) {
+        jsonError(res, "Idempotency-Key was already used for a different request", 409);
+      } else if (!task) {
+        jsonError(res, "The task this Idempotency-Key created was deleted", 410);
+      } else if (!(await canReadSession(req, myAgentId, task.id))) {
+        jsonError(res, SESSION_READ_DENIED, 403);
+      } else {
+        res.setHeader(IDEMPOTENT_REPLAYED_HEADER, "true");
+        createTask.respond(res, 201, task);
+      }
+      return true;
+    };
+    if (await replayCreate()) return true;
 
     // Trusted identity first, then the body hint; see resolveTaskRequester.
     const trustedUserId = await resolveHttpRequesterUserId(req, myAgentId);
@@ -1234,6 +1300,7 @@ export async function handleTasks(
     // the worker loads config from, so the profile check judges the same pool.
     const profileError = await taskProfileError({
       profile: parsed.body.profile,
+      modelGroup: parsed.body.modelGroup,
       ...splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier }),
       agentId: defaultAgentId,
       vcsRepo: vcsRepo ?? parentTask?.vcsRepo,
@@ -1258,7 +1325,7 @@ export async function handleTasks(
     }
 
     try {
-      const task = await createTaskWithSiblingAwareness(
+      const prepared = await prepareTaskWithSiblingAwareness(
         parsed.body.task,
         {
           key: assetKey,
@@ -1304,9 +1371,23 @@ export async function handleTasks(
           }),
           effort: parsed.body.effort,
           profile: parsed.body.profile,
+          modelGroup: parsed.body.modelGroup,
         },
         { origin: "rest", allowCustomModel: parsed.body.allowCustomModel },
       );
+      // Extension pre-hooks ran above, outside the transaction; the key record
+      // commits with the task, so a rollback drops both.
+      const task = claim
+        ? await getStorage().transaction(async () => {
+            // A concurrent request with this key committed while this one got ready.
+            if (await findAcceptedTaskCreate(claim)) throw new IdempotencyKeyTakenError();
+            const created = await createTaskExtended(prepared.description, prepared.options);
+            await recordAcceptedTaskCreate(claim, created.id);
+            return created;
+          })
+        : await createTaskExtended(prepared.description, prepared.options, {
+            readCommitted: true,
+          });
 
       ensure({
         id: "created",
@@ -1326,11 +1407,13 @@ export async function handleTasks(
 
       // A person's Sessions follow-up shows up in the session's Slack thread too.
       if (principal.kind === "user" || principal.kind === "operator") {
-        getDbClient().afterCommit(() => mirrorSessionPrompt(task));
+        getStorage().afterCommit(() => mirrorSessionPrompt(task));
       }
 
       createTask.respond(res, 201, task);
     } catch (error) {
+      // A concurrent request with this key committed first; nothing of this one did.
+      if (error instanceof IdempotencyKeyTakenError && (await replayCreate())) return true;
       if (error instanceof TaskRoutingAuthorizationError) {
         console.warn(
           "[HTTP] Task assignment rejected:",
@@ -1354,7 +1437,11 @@ export async function handleTasks(
         jsonError(res, error.message, 400);
         return true;
       }
-      // The profile was deleted between taskProfileError and the insert.
+      // The profile or group was deleted between taskProfileError and the insert.
+      if (modelGroupRefError(error)) {
+        jsonError(res, `Unknown model group "${parsed.body.modelGroup}"`, 400);
+        return true;
+      }
       if (modelProfileRefError(error) === "missing") {
         jsonError(res, `Unknown model profile "${parsed.body.profile}"`, 400);
         return true;
@@ -1392,7 +1479,7 @@ export async function handleTasks(
     }
     // A draft holds back its mirror until its uploads settle, like its claim.
     if (existingTask.status === "draft") {
-      getDbClient().afterCommit(() => mirrorSessionPrompt(promoted));
+      getStorage().afterCommit(() => mirrorSessionPrompt(promoted));
     }
 
     promoteDraftTaskRoute.respond(res, 200, promoted);
@@ -1408,7 +1495,7 @@ export async function handleTasks(
     // the offeree while a task is offered or in review (its review session), else
     // strictly the assignee, so a stale offer never grants a write.
     // Check and write in one transaction so a reassignment cannot slip between.
-    const task = await getDbClient().transaction(async () => {
+    const task = await getStorage().transaction(async () => {
       if (auth?.kind === "agent") {
         if (auth.taskId !== null && auth.taskId !== parsed.params.id) return "forbidden";
         const existing = await getTaskById(parsed.params.id);
@@ -1857,7 +1944,7 @@ export async function handleTasks(
     const principal = await resolveTaskWritePrincipal(req, myAgentId);
 
     // Check and write in one transaction so a reassignment cannot slip between.
-    const status = await getDbClient().transaction(async (): Promise<200 | 403 | 404> => {
+    const status = await getStorage().transaction(async (): Promise<200 | 403 | 404> => {
       const task = await getTaskById(parsed.params.id);
       if (!task) return 404;
       const decision = can({
@@ -1940,8 +2027,19 @@ export async function handleTasks(
     ): r is Extract<FinishTaskTransactionResult, { task: AgentTask; wasPaused: boolean }> =>
       !("alreadyFinished" in r && r.alreadyFinished);
 
-    const result = await getDbClient().transaction(
+    // Decision D7 opt-down: on Postgres this transaction runs at READ COMMITTED.
+    // Reason: under SERIALIZABLE, 72% of finishes retried in stress-poll-claim on
+    // a seeded database (ledger part 7), from predicate reads of agent_tasks
+    // (capacity count, dependents). Locks that keep the old invariants, taken in
+    // the poll write pass order (agent, then task): the caller's agent row (its
+    // capacity count and status write run one at a time, and never beside its
+    // own poll claim), then the task row (one finish per task; the terminal
+    // guard and every status write read the locked row). Each status write also
+    // keeps its `status NOT IN terminal` guard. Scenario: stress-task-finish.
+    const result = await getStorage().transaction(
       async (): Promise<FinishTaskTransactionResult> => {
+        await getStorage().repos.agents.lockAgent(myAgentId);
+        await getStorage().repos.tasks.lockTask(parsed.params.id);
         const task = await getTaskById(parsed.params.id);
 
         if (!task) {
@@ -2021,6 +2119,7 @@ export async function handleTasks(
 
         return { task: updatedTask, wasPaused };
       },
+      { isolation: "read committed" },
     );
 
     if (hasFinishError(result)) {
@@ -2183,7 +2282,7 @@ export async function handleTasks(
     const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const auth = getRequestAuth(req);
-    const task = await getDbClient().transaction(async () => {
+    const task = await getStorage().transaction(async () => {
       if (auth?.kind === "agent") {
         const existing = await getTaskById(parsed.params.id);
         if (!existing) return null;

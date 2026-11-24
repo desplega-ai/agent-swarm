@@ -102,6 +102,10 @@ const scriptApiRoute = route({
     },
     501: { description: "workspace-rw scripts are not supported" },
   },
+  rbac: {
+    ungated:
+      "external script endpoint: its per-endpoint bearer is the credential; script.api.* gates who exposes it",
+  },
 });
 
 function extractBearer(req: IncomingMessage): string | null {
@@ -262,8 +266,8 @@ export async function handleX(
     failedBindings: credentials.failedBindings,
     userConfig: credentials.userConfig,
     agentFs: credentials.agentFs,
-    apiConnections: getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
-    mcpConnections: getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
+    apiConnections: await getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
+    mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
   });
 
   const ok = output.exitCode === 0 && !output.error && !output.runtimeError;

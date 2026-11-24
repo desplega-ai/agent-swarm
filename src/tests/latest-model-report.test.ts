@@ -24,6 +24,7 @@ type ReportedModel = { model: string; source: string };
 async function runTask(
   claim: { resolvedModel?: string; modelSource?: string; modelTier?: "smol" },
   agentConfigModel = CONFIG,
+  actualModel?: string,
 ): Promise<ReportedModel[]> {
   const reports: ReportedModel[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -49,7 +50,7 @@ async function runTask(
         totalCostUsd: 0,
         inputTokens: 1,
         outputTokens: 1,
-        model: config.model,
+        model: actualModel ?? config.model,
         durationMs: 1,
         numTurns: 1,
         isError: false,
@@ -93,26 +94,34 @@ async function runTask(
   return reports;
 }
 
-describe("latest model source across the initial, result and final reports", () => {
+describe("Pi latest model source across the result and final reports", () => {
+  test("reports only the model the Pi session ran when it differs from the resolved model", async () => {
+    const actual = "openrouter/google/gemini-3-flash-preview";
+    const reports = await runTask(
+      { resolvedModel: RESOLVED, modelSource: "tier-default" },
+      CONFIG,
+      actual,
+    );
+    expect(reports.map((report) => report.model)).toEqual([actual, actual]);
+  });
+
   test.each([
     "tier-default",
     "tier-config",
     "worker-env",
     "profile:task",
     "profile:tier-alias",
-  ])("claim source %s stays task in all three reports", async (modelSource) => {
+  ])("claim source %s stays task in both reports", async (modelSource) => {
     const reports = await runTask({ resolvedModel: RESOLVED, modelSource });
     expect(reports.map((r) => [r.model, r.source])).toEqual([
-      [RESOLVED, "task"],
       [RESOLVED, "task"],
       [RESOLVED, "task"],
     ]);
   });
 
-  test("a tier resolved only locally (no server resolution) stays task in all three reports", async () => {
+  test("a tier resolved only locally (no server resolution) stays task in both reports", async () => {
     const reports = await runTask({ modelTier: "smol" });
-    expect(reports).toHaveLength(3);
-    expect(reports.map((r) => r.source)).toEqual(["task", "task", "task"]);
+    expect(reports.map((r) => r.source)).toEqual(["task", "task"]);
   });
 
   test("the agent default profile is never task-selected: custom when it differs from the agent config", async () => {
@@ -123,7 +132,6 @@ describe("latest model source across the initial, result and final reports", () 
     expect(reports.map((r) => [r.model, r.source])).toEqual([
       [RESOLVED, "custom"],
       [RESOLVED, "custom"],
-      [RESOLVED, "custom"],
     ]);
   });
 
@@ -132,7 +140,100 @@ describe("latest model source across the initial, result and final reports", () 
     expect(reports.map((r) => [r.model, r.source])).toEqual([
       [CONFIG, "agent_config"],
       [CONFIG, "agent_config"],
-      [CONFIG, "agent_config"],
     ]);
   });
+});
+
+test("Claude saves the latest main request settings after the session init write, then deletes the transcript", async () => {
+  const sessionId = crypto.randomUUID();
+  const taskId = crypto.randomUUID();
+  const request = {
+    type: "api-request",
+    sessionId,
+    querySource: "sdk",
+    params: {
+      model: "observed-model",
+      output_config: { effort: "high" },
+      messages: ["private prompt"],
+    },
+  };
+  await Bun.write(
+    `${directory}/projects/test/${sessionId}.jsonl`,
+    [
+      { ...request, params: { model: "earlier-model" } },
+      request,
+      { ...request, agentId: "child", params: { model: "child-model" } },
+      { ...request, querySource: "summary", params: { model: "summary-model" } },
+    ]
+      .map((row) => JSON.stringify(row))
+      .concat('{"type":"api-request"')
+      .join("\n"),
+  );
+  await Bun.write(`${directory}/projects/test/${sessionId}/subagents/agent-child.jsonl`, "{}");
+
+  const metadata: Record<string, unknown>[] = [];
+  globalThis.fetch = (async (input, init) => {
+    const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+    if (path === "/api/config/resolved") {
+      return Response.json({
+        configs: [
+          { key: "CLAUDE_CONFIG_DIR", value: directory },
+          { key: "CLAUDE_BINARY", value: process.execPath },
+        ],
+      });
+    }
+    if (path === `/api/tasks/${taskId}/session` && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      if (body.provider) await Bun.sleep(15);
+      metadata.push(body.harnessVariantMeta);
+    }
+    return Response.json({ configs: [], enabled: false });
+  }) as typeof fetch;
+  const adapter = {
+    name: "claude",
+    traits: {},
+    async createSession() {
+      return {
+        sessionId,
+        onEvent(listener: (event: ProviderEvent) => void) {
+          listener({
+            type: "session_init",
+            sessionId,
+            provider: "claude",
+            harnessVariantMeta: { version: "test" },
+          });
+        },
+        async waitForCompletion() {
+          return { sessionId, exitCode: 0, isError: false };
+        },
+        async abort() {},
+      };
+    },
+  } as unknown as Parameters<typeof spawnProviderProcess>[0];
+  const running = await spawnProviderProcess(
+    adapter,
+    {
+      prompt: "hello",
+      systemPrompt: "",
+      logFile: `${directory}/session.jsonl`,
+      role: "worker",
+      apiUrl: "http://runner.invalid",
+      apiKey: "fixture",
+      agentId: crypto.randomUUID(),
+      runnerSessionId: crypto.randomUUID(),
+      iteration: 1,
+      taskId,
+      harnessProvider: "claude",
+      cwd: directory,
+    },
+    directory,
+  );
+  await running.promise;
+  expect(metadata).toEqual([
+    { version: "test" },
+    { version: "test", observedModel: "observed-model", observedReasoningEffort: "high" },
+  ]);
+  // The prompt-bearing transcript does not outlive the session.
+  expect(await Bun.file(`${directory}/projects/test/${sessionId}.jsonl`).exists()).toBe(false);
+  expect(await Bun.$`ls ${directory}/projects/test`.text()).toBe("");
 });

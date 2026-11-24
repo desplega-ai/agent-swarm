@@ -48,7 +48,6 @@ import {
   deleteBudget,
   deleteKv,
   getAllUsers,
-  getDbClient,
   getUserById,
   listKv,
   updateUser,
@@ -63,6 +62,7 @@ import {
   OperatorGrantedTargetError,
   setUserRoles,
 } from "../be/rbac-roles";
+import { getStorage } from "../be/storage";
 import {
   type DismissedUnmapped,
   dismissedNamespace,
@@ -86,6 +86,7 @@ import {
   linkIdentity,
   listUserEvents,
   listUserTokens,
+  markUserMergedInto,
   mintToken,
   recordIdentityEvent,
   revokeAllUserCredentials,
@@ -269,6 +270,13 @@ const listUsers = route({
   auth: { apiKey: true },
 });
 
+// User and identity admin can mint a grant-all admin (every new user gets the
+// admin role) or bind a chat identity to one, so a scoped `user.manage` grant
+// must not admit it. No verb keeps admission grant-all only, like the
+// mcp-token routes.
+const USER_ADMIN_UNGATED =
+  "creates users or binds identities, which can reach a grant-all admin (operator-only admission)";
+
 const createUserRoute = route({
   method: "post",
   path: "/api/users",
@@ -301,6 +309,7 @@ const createUserRoute = route({
     409: { description: "A user with this email already exists (user_exists)" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const listUnmapped = route({
@@ -356,6 +365,7 @@ const resolveUnmapped = route({
     404: { description: "Target user not found" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const DISMISS_RBAC = {
@@ -472,6 +482,7 @@ const updateUserRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const mintUserMcpTokenRoute = route({
@@ -503,6 +514,10 @@ const mintUserMcpTokenRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "mints another user's bearer token, so no scoped grant admits it (operator-only admission)",
+  },
 });
 
 const revokeUserMcpTokenRoute = route({
@@ -521,6 +536,7 @@ const revokeUserMcpTokenRoute = route({
     404: { description: "User or token not found" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: "same posture as POST /api/users/{id}/mcp-tokens (operator-only admission)" },
 });
 
 const createConnectorCodeRoute = route({
@@ -710,6 +726,7 @@ const mergeUsersRoute = route({
     },
   },
   auth: { apiKey: true },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const listMergeJobsRoute = route({
@@ -795,6 +812,7 @@ const addIdentityRoute = route({
     409: { description: "The (kind, externalId) identity is already linked (identity_taken)" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 const deleteIdentityRoute = route({
@@ -813,6 +831,7 @@ const deleteIdentityRoute = route({
     404: { description: "User not found" },
   },
   auth: { apiKey: true },
+  rbac: { ungated: USER_ADMIN_UNGATED },
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -830,7 +849,7 @@ function writeGuarded<T>(
   targetUserId: string,
   write: () => Promise<T>,
 ): Promise<T> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     await assertMayActOnOperatorGrantedTarget(actor, targetUserId);
     return await write();
   });
@@ -1101,7 +1120,7 @@ export async function handleUsers(
       // Create and link in one write transaction: an operator grant on the new
       // user cannot land before its identities, so the grant-time review sees
       // them all.
-      const user = await getDbClient().transaction(async () => {
+      const user = await getStorage().transaction(async () => {
         const created = await createUser(userFields);
         await syncUserBudgetMirror(created.id, userFields.dailyBudgetUsd);
         for (const ident of identities ?? []) {
@@ -1214,7 +1233,7 @@ export async function handleUsers(
         // Create and link in one write transaction, so an operator grant on
         // the new user cannot land before the identity.
         const body = parsed.body;
-        targetUserId = await getDbClient().transaction(async () => {
+        targetUserId = await getStorage().transaction(async () => {
           const created = await createUser({
             name: body.name,
             email: body.email,
@@ -1384,7 +1403,7 @@ export async function handleUsers(
 
     let invited: { userId: string; code: string; expiresAt: string };
     try {
-      invited = await getDbClient().transaction(async () => {
+      invited = await getStorage().transaction(async () => {
         const existing = await findUserByEmail(email);
         if (existing && existing.status !== "invited") throw new InviteUserExistsError();
         let userId: string;
@@ -1488,7 +1507,7 @@ export async function handleUsers(
         return true;
       }
       // No transaction is open here, so afterCommit only defers the call (fire and forget).
-      getDbClient().afterCommit(async () => {
+      getStorage().afterCommit(async () => {
         try {
           await ensureUserAgentFsAccount(result.userId);
         } catch (error) {
@@ -1671,7 +1690,7 @@ export async function handleUsers(
       // The long attribution rewrite and the source row's deletion run as a
       // background job (src/be/user-merge-jobs.ts): on a large database
       // they held the event loop for minutes (incident 2026-11-09).
-      const job = await getDbClient().transaction(async () => {
+      const job = await getStorage().transaction(async () => {
         await assertMayActOnOperatorGrantedTarget(actor, targetId);
         // Move every identity from source → target.
         for (const ident of sourceBefore.identities) {
@@ -1712,10 +1731,7 @@ export async function handleUsers(
         // From here the source is the target for every lookup and can no
         // longer authenticate (auth.ts isActiveUser, users.ts lookups).
         await revokeAllUserCredentials(sourceId, actor);
-        await getDbClient().run(
-          "UPDATE users SET mergedIntoUserId = ?, lastUpdatedAt = ? WHERE id = ?",
-          [targetId, new Date().toISOString(), sourceId],
-        );
+        await markUserMergedInto(sourceId, targetId);
 
         // Single manual_merge event on target capturing the before/after rows.
         // The source row is deleted by the job, so carry a minimal snapshot of
@@ -1737,7 +1753,7 @@ export async function handleUsers(
           createdBy: authUser(getRequestAuth(req))?.id ?? null,
         });
         // Start the runner once the job row is visible to it.
-        getDbClient().afterCommit(() => {
+        getStorage().afterCommit(() => {
           void runUserMergeJobs();
         });
         return queued;
@@ -1805,7 +1821,7 @@ export async function handleUsers(
       }
       // One write transaction: the operator-granted check for identity, email
       // and alias changes, then every write, so a grant cannot land between.
-      const found = await getDbClient().transaction(async () => {
+      const found = await getStorage().transaction(async () => {
         if (bindsIdentity) await assertMayActOnOperatorGrantedTarget(actor, parsed.params.id);
         const updated = await updateUser(parsed.params.id, update);
         if (!updated) return false;

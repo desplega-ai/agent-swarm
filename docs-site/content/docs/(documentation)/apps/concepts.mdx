@@ -44,6 +44,7 @@ type AppActionCaller = {
 
 The caller identifies the authenticated user or agent. Operator and guest callers have `id: null`. A signed page session adds `pageId`.
 With the swarm key, a registered `X-Agent-ID` produces an agent caller and `agent:<id>` row provenance. Missing or unknown agent IDs remain operator callers.
+A page the dashboard opens with the swarm key acts as the user picked in its user picker (`X-Swarm-User-Id` on `POST /api/pages/{id}/launch`), so its callers are that user. That identity is self-declared on the shared key, as it is for favorites, not verified. Only a user-bound token proves who the viewer is.
 Task actions include the same caller as server-verified JSON in the task prompt. Script execution still uses the saved script owner's bindings.
 
 ## Pages and reusable elements
@@ -51,6 +52,28 @@ Task actions include the same caller as server-verified JSON in the task prompt.
 Pages are flat, validated element trees rendered by the dashboard. The component catalog includes layout, headings, text, forms, tables, filters, metrics, alerts, badges, drawers, and detail views. Bindings such as `{ "$state": "/queries/allItems/data" }` connect declared queries and actions to those elements.
 
 Reusable elements live in the versioned definition. They are private by default and can be explicitly exported for another App to reference. The server compatibility-checks breaking changes to exported elements.
+
+## Chat and files
+
+A `SessionThread` element puts a session chat on a page: the same turn timeline and composer as the dashboard's Sessions. Each viewer gets their own session per `sessionKey`, and each message runs the element's `onDispatch` chain, whose `app.action` step creates or continues the session's task.
+
+Messages are text only until you set `attachments`. Then the composer takes files from its paperclip button, by drag and drop, and by image paste, as the session composer does:
+
+```json
+{ "type": "SessionThread", "props": {
+  "id": "chat",
+  "sessionKey": "main",
+  "attachments": { "dir": "/projects/demo/attachments", "accept": [".pdf", "image/*"], "maxFiles": 5 },
+  "onDispatch": [{ "action": "app.action", "params": {
+    "name": "reply", "input": { "$form": "" }, "parentTaskId": { "$chain": "leafTaskId" } } }]
+} }
+```
+
+- `dir` is the agent-fs folder the files go to. It is an absolute path without `..`, written out or bound, for example to a route parameter.
+- `accept` takes extensions or MIME types. The default is the session composer's list.
+- `maxFiles` (default 10 per message) and `maxBytes` (default 50 MB per file) must be positive integers.
+
+On send, the files upload with the viewer's own agent-fs key, so the viewer needs agent-fs connected with write access to `dir`. Then `onDispatch` runs with `$form.attachments`, a list of `{ path, name, mimeType, size }`. With `"input": { "$form": "" }` the task input carries `message` and `attachments`, and the chat shows the files on the message. If an upload fails, nothing is sent and the text and files stay in the composer. While a turn runs, the composer steers it and takes no files, as in Sessions.
 
 ## Per-user configuration and theme
 

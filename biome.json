@@ -15,6 +15,7 @@
       "!src/extensions/catalog.generated.json",
       "!src/telemetry-contract/catalog.json",
       "!src/telemetry-contract/types.gen.ts",
+      "!packages/agent-swarm-sdk/src/openapi.gen.ts",
       "!src/telemetry-contract/ranking",
       "!src/telemetry-contract/ranking-taxonomy.gen.ts",
       "!src/utils/secret-rules.generated.ts",
@@ -23,6 +24,7 @@
       "!mockups",
       "!claude-mod/vendor/logs-parser.js",
       "!talks",
+      "!examples/video-review",
       "!templates/community/open-prompt-showreel/example/tla-races/reel.html",
       "!!docs-site/public/openapi.d.ts"
     ]

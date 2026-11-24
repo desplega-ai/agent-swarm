@@ -23,6 +23,8 @@ export function useRuntimePool(id: string | undefined) {
     queryKey: ["runtime-pool", id],
     queryFn: () => api.fetchRuntimePool(id as string),
     enabled: !!id,
+    // The editor waits for a fetch after mount, even when a restored pool is still fresh.
+    refetchOnMount: "always",
     // A missing pool stays missing: show "not found" at once instead of retrying.
     retry: (failures, error) =>
       !(error instanceof RuntimePoolApiError && error.status === 404) && failures < 3,

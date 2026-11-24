@@ -1,0 +1,79 @@
+{
+  "name": "stress-retry",
+  "description": "Stress pack B: a node that fails twice and passes on its third attempt under the retry policy, then a fan-out where one item always fails and the collect-outcomes policy handles it. No agent nodes, no LLM.",
+  "definition": {
+    "nodes": [
+      {
+        "id": "stagger",
+        "type": "wait",
+        "config": {
+          "mode": "time",
+          "durationMs": 30000
+        },
+        "next": "flaky"
+      },
+      {
+        "id": "flaky",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "flaky",
+            "runId": "{{run.id}}",
+            "failTimes": 2
+          }
+        },
+        "next": "doomed",
+        "retry": {
+          "maxRetries": 3,
+          "strategy": "static",
+          "baseDelayMs": 1000
+        }
+      },
+      {
+        "id": "doomed",
+        "type": "foreach",
+        "inputs": {
+          "f": "flaky"
+        },
+        "config": {
+          "over": "{{f.result.items}}",
+          "itemKey": "id",
+          "failurePolicy": "collect-outcomes",
+          "body": {
+            "type": "swarm-script",
+            "config": {
+              "scriptName": "stress-wf-step",
+              "scope": "global",
+              "args": {
+                "action": "fail-if",
+                "runId": "{{run.id}}",
+                "id": "{{item.id}}"
+              }
+            }
+          }
+        },
+        "next": "check"
+      },
+      {
+        "id": "check",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "retry-check",
+            "runId": "{{run.id}}",
+            "flaky": "{{f}}",
+            "doomed": "{{d}}"
+          }
+        },
+        "inputs": {
+          "f": "flaky",
+          "d": "doomed"
+        }
+      }
+    ]
+  }
+}

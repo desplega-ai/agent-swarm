@@ -102,6 +102,18 @@ describe("asset tabs", () => {
     }
   });
 
+  test("the same file opened from two sessions retains each destination across reloads", () => {
+    const file = target("/file/~/org-1/drive-1/a.md");
+    if (file?.kind !== "file") throw new Error("expected a file");
+    const tabs = ["first", "second"].map((id) => {
+      const scoped = { ...file, origin: { kind: "session" as const, id } };
+      const tab = assetTabId(file, id);
+      expect(assetTabTarget(tab, ORIGINS)).toEqual(scoped);
+      return tab;
+    });
+    expect(tabs[0]).not.toBe(tabs[1]);
+  });
+
   test("a task's tab id keeps the task id", () => {
     const tab = assetTabId({ kind: "task", taskId: "t-1" });
     expect(tab).toBe("asset:task:t-1");

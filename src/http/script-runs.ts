@@ -9,7 +9,6 @@ import {
   createTaskExtended,
   ExtensionAgentAssignmentError,
   getAgentById,
-  getDbClient,
   getLatestScriptRunStepTaskByContextKey,
   getScriptRun,
   getScriptRunByIdempotencyKey,
@@ -26,11 +25,14 @@ import {
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
+import { getStorage } from "../be/storage";
 import { can } from "../rbac";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
 import {
   abortScriptRunLimit,
+  DURABLE_RUNS_NATIVE_REFUSED,
+  durableScriptRunsAllowed,
   startScriptRunProcess,
   terminateScriptRunProcess,
 } from "../script-workflows/supervisor";
@@ -49,7 +51,7 @@ import {
   ScriptRunStatusSchema,
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
-import { getAppUrl, getMcpBaseUrl } from "../utils/constants";
+import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
@@ -82,6 +84,10 @@ const listScriptRunsQuerySchema = z.object({
   status: ScriptRunStatusSchema.optional(),
   agentId: z.string().optional(),
   scriptName: z.string().optional(),
+  /** Object calls on this durable script. */
+  objectScriptId: z.string().optional(),
+  /** One object of that script. */
+  objectId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });
@@ -217,6 +223,10 @@ const deleteScriptRunRoute = route({
     204: { description: "Script run cancelled, or already terminal" },
     404: { description: "Script run not found" },
   },
+  rbac: {
+    ungated:
+      "script workflow runs: open to agents like the script tools; no verb covers cancel, so user roles need admin",
+  },
 });
 
 const getInternalStepRoute = route({
@@ -248,6 +258,10 @@ const postInternalStepRoute = route({
     201: { description: "Journal step written", schema: z.object({ ok: z.literal(true) }) },
     404: { description: "Script run not found" },
   },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
+  },
 });
 
 const heartbeatRoute = route({
@@ -261,6 +275,10 @@ const heartbeatRoute = route({
   responses: {
     204: { description: "Heartbeat recorded" },
     404: { description: "Script run not found" },
+  },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
   },
 });
 
@@ -277,6 +295,10 @@ const statusRoute = route({
     204: { description: "Status updated" },
     404: { description: "Script run not found" },
   },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
+  },
 });
 
 const rawLlmRoute = route({
@@ -290,6 +312,10 @@ const rawLlmRoute = route({
   responses: {
     200: { description: "LLM call completed", schema: RawLlmOutputSchema },
     500: { description: "LLM call failed" },
+  },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
   },
 });
 
@@ -319,6 +345,10 @@ const agentTaskRoute = route({
     404: { description: "Script run not found" },
     409: { description: "Agent task failed, was cancelled, or was superseded" },
     422: { description: "Blocked by the follow-up re-delegation guard" },
+  },
+  rbac: {
+    ungated:
+      "script-run subprocess callback authenticated by the run credential; no user flow calls it",
   },
 });
 
@@ -447,6 +477,11 @@ export async function handleScriptRuns(
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
+    if (!durableScriptRunsAllowed()) {
+      jsonError(res, DURABLE_RUNS_NATIVE_REFUSED, 400);
+      return true;
+    }
+
     const secretRefusal = refuseSourceWithSecrets(parsed.body.source);
     if (secretRefusal) {
       json(res, secretRefusal, 400);
@@ -487,7 +522,7 @@ export async function handleScriptRuns(
     const requestedByUserId = parsed.body.requestedByUserId
       ? await resolveTaskRequester(req, agent.id, parsed.body.requestedByUserId)
       : undefined;
-    const creation = await getDbClient().transaction(async () => {
+    const creation = await getStorage().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
         id: crypto.randomUUID(),
@@ -508,7 +543,7 @@ export async function handleScriptRuns(
     const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, getMcpBaseUrl(), bearerToken(req)).catch(async (err) => {
+      startScriptRunProcess(run, getScriptApiBaseUrl(), bearerToken(req)).catch(async (err) => {
         await updateScriptRun(run.id, {
           status: "failed",
           pid: null,
@@ -537,20 +572,20 @@ export async function handleScriptRuns(
   if (listScriptRunsRoute.match(req.method, pathSegments)) {
     const parsed = await listScriptRunsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const opts = {
+    const filter = {
       status: parsed.query.status,
       agentId: parsed.query.agentId,
       scriptName: parsed.query.scriptName,
-      limit: parsed.query.limit ?? 50,
-      offset: parsed.query.offset ?? 0,
+      objectScriptId: parsed.query.objectScriptId,
+      objectId: parsed.query.objectId,
     };
     listScriptRunsRoute.respond(res, 200, {
-      runs: await listScriptRuns(opts),
-      total: await countScriptRuns({
-        status: opts.status,
-        agentId: opts.agentId,
-        scriptName: opts.scriptName,
+      runs: await listScriptRuns({
+        ...filter,
+        limit: parsed.query.limit ?? 50,
+        offset: parsed.query.offset ?? 0,
       }),
+      total: await countScriptRuns(filter),
     });
     return true;
   }
@@ -627,7 +662,7 @@ export async function handleScriptRuns(
     // ctx.step.agentTask journal posts for the same run would otherwise all
     // land before any of them counts, and every one of them would see (and be
     // refused by) the post-write total.
-    const limit = await getDbClient().transaction(async () => {
+    const limit = await getStorage().transaction(async () => {
       await upsertScriptRunJournalStep({
         runId: run.id,
         stepKey: parsed.body.stepKey,
@@ -751,7 +786,7 @@ export async function handleScriptRuns(
       // other runs and send-task dispatches into the same thread.
       let dispatched: StepDispatch;
       try {
-        dispatched = await getDbClient().transaction(async (): Promise<StepDispatch> => {
+        dispatched = await getStorage().transaction(async (): Promise<StepDispatch> => {
           const replayed = await getLatestScriptRunStepTaskByContextKey(contextKey);
           if (replayed) return { task: replayed };
 

@@ -11,7 +11,6 @@ import {
   getAgentWithTasks,
   getAllAgents,
   getAllAgentsWithTasks,
-  getDbClient,
   getResolvedConfig,
   getSwarmConfigs,
   isAgentDeleted,
@@ -53,6 +52,7 @@ import {
 } from "../be/multi-runtime";
 import { getPoolForAgent, resolvePoolDelivery } from "../be/runtime-pools/db";
 import { isAgentOnDemand } from "../be/runtime-pools/reachability";
+import { getStorage } from "../be/storage";
 import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
@@ -200,6 +200,7 @@ const registerAgent = route({
       description: "An operator deleted this agent id (`agent_deleted`); the worker must stop",
     },
   },
+  rbac: { ungated: "worker self-registration at boot; no user flow calls it" },
 });
 
 const setAgentHarnessProviderRoute = route({
@@ -219,6 +220,7 @@ const setAgentHarnessProviderRoute = route({
     400: { description: "Validation error (unknown provider)" },
     404: { description: "Agent not found" },
   },
+  rbac: { permission: "config.write.any" },
 });
 
 const LocalHarnessProviderSchema = z.enum([
@@ -316,6 +318,7 @@ const updateAgentRuntimeRoute = route({
     400: { description: "Validation error, or `{ error, check }` when the profile check fails" },
     404: { description: "Agent not found" },
   },
+  rbac: { permission: "config.write.any" },
 });
 
 class ClaudeTransportConflictError extends Error {}
@@ -460,6 +463,7 @@ const updateAgentNameRoute = route({
     404: { description: "Agent not found" },
     409: { description: "Name conflict" },
   },
+  rbac: { permission: "agent.profile.update.any" },
 });
 
 const getAgentSetupScript = route({
@@ -584,6 +588,7 @@ const updateAgentProfileRoute = route({
     },
     404: { description: "Agent not found, or changedByAgentId names no agent" },
   },
+  rbac: { permission: "agent.profile.update.any" },
 });
 
 const updateAgentActivityRoute = route({
@@ -596,6 +601,7 @@ const updateAgentActivityRoute = route({
   responses: {
     204: { description: "Activity updated" },
   },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const getAgent = route({
@@ -653,6 +659,7 @@ const updateAgentCredentialStatusRoute = route({
     400: { description: "Missing X-Runtime-Instance-ID in multi-runtime mode" },
     404: { description: "Agent not found" },
   },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const getAgentCredentialStatusRoute = route({
@@ -748,7 +755,7 @@ export async function handleAgentRegister(
       return true;
     }
 
-    const result = await getDbClient().transaction(async () => {
+    const result = await getStorage().transaction(async () => {
       const existingAgent = await getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
@@ -785,7 +792,7 @@ export async function handleAgentRegister(
             await getSwarmConfigs({ scope: "agent", scopeId: agentId, key: "MODEL_OVERRIDE" })
           )[0]?.value;
           if (override && (await harnessModelErrorFor(override, harness))) {
-            getDbClient().afterCommit(() => {
+            getStorage().afterCommit(() => {
               console.warn(
                 `[agents] MODEL_OVERRIDE ${override} of agent ${agentId} does not run on its new ${harness} harness (was ${existingAgent.harnessProvider ?? "unset"}); update or clear it`,
               );
@@ -1331,7 +1338,7 @@ export async function handleAgentsRest(
 
     let agent: Agent | null;
     try {
-      agent = await getDbClient().transaction(async () => {
+      agent = await getStorage().transaction(async () => {
         const updated = await setAgentHarnessProvider(
           parsed.params.id,
           harness_provider as ProviderName,

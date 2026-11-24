@@ -125,7 +125,9 @@ export const coreSessionFollowupTurns: Scenario = {
       });
       expectStatus(render, [200], "render the session follow-up template");
       const text = String(asRecord(render.json).text);
-      const at = [originalAsk, "21 earlier turns skipped", "### Turn 1"].map((s) => text.indexOf(s));
+      const at = [originalAsk, "21 earlier turns skipped", "### Turn 1"].map((s) =>
+        text.indexOf(s),
+      );
       expect(
         at[0]! > -1 && at[0]! < at[1]! && at[1]! < at[2]!,
         `root, elision marker and turns render in order: ${text.slice(0, 400)}`,

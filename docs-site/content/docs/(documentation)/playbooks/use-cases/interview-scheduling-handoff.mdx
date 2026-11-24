@@ -1,0 +1,93 @@
+---
+title: 'Coordinating an interview loop across recruiters and engineering managers with AI agents'
+description: "Agent Swarm can prepare a source-linked set of candidate interview slots and conflicts for a recruiter to validate, while people approve every candidate-facing message."
+agent:
+  offer: false
+  when: "Someone wants recruiters and hiring managers to coordinate complex interview loops without losing track of availability, conflicts or who approves the candidate message"
+---
+
+A configured Agent Swarm workflow can prepare a human-reviewed set of interview slots for one candidate's loop. Agents take the requirements a hiring manager and a recruiter state: the panel roles, the interview length, the interview order, the interviewers who must attend. They add the availability each person has permitted them to read, then produce a slot proposal that links every option back to the source row it came from. Conflicts arrive flagged, and one recruiter validates the proposal. A person approves and sends every candidate-facing message.
+
+The scope is one candidate's interview loop for one open role: which interviews happen, in what order, who attends each one and which windows are free for everyone at once. It is not candidate selection or evaluation. It is not the offer or the hiring decision. Nor is it a new hire's first-day readiness, covered by the [first-day readiness guide](/docs/playbooks/use-cases/employee-onboarding-readiness-review), or training completion evidence, covered by the [training completion evidence review](/docs/playbooks/use-cases/ai-training-completion-evidence-review).
+
+## When a dedicated scheduling product fits better
+
+**An interview scheduling product.** If the company already runs one, or its applicant tracking system has scheduling built in that reads interviewers' calendars and offers the candidate self-booking, that product is the answer. A workflow that reproduces it duplicates software the team already pays for.
+
+**A shared calendar link.** For a loop with one interviewer and one candidate, a booking link settles it in a single message. Nothing here beats it.
+
+Agent Swarm fits a different shape: the requirements live with the hiring manager, the permitted availability with each interviewer, the candidate's windows with the recruiter, and nobody holds the whole picture at once. The coordination is the work, and the part that goes missing is who is free, for how long, in which timezone. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in scheduling feature, not a calendar integration Agent Swarm ships, not a customer deployment and not a measured run. It needs connectors and checks the team builds.
+
+<Mermaid title="Illustrative interview scheduling flow, from stated panel requirements and permitted availability to a recruiter's decision to approve, reject or escalate the slot proposal." chart={`flowchart LR
+  A["Interview requirements<br/>(panel roles, length,<br/>order, required interviewers)"] --> B["Scoped review<br/>one candidate,<br/>one open role"]
+  B --> C["Configured sources:<br/>permitted availability<br/>per interviewer"]
+  C --> D["Deterministic checks:<br/>stale availability, missing<br/>interviewer, overlapping<br/>holds, ambiguous timezone"]
+  D --> E["Agent prepares a<br/>source-linked slot<br/>proposal"]
+  E --> F{{"human-in-the-loop<br/>recruiter review"}}
+  F -- "approve" --> G["Candidate message<br/>drafted for the<br/>recruiter to send"]
+  F -- "reject with note" --> H["Requirements or<br/>availability source<br/>corrected"]
+  H --> C
+  F -- "escalate" --> I["Owner of the gap<br/>answers as a question"]
+`} />
+
+The company in the example is fictional: a software company filling one backend engineering role, with one recruiter coordinating the loop for a hiring manager.
+
+**1. The hiring manager and the recruiter state the requirements.** Which interviews the loop contains, how long each one runs, the order they happen in, the roles that must attend and the interviewers who cannot be substituted. The candidate's windows and the person who approves the outgoing message are recorded here too, before anything is collected.
+
+**2. Configured scripts read the permitted availability.** One connector per source the team has connected, reading only the free or busy windows each interviewer has agreed to share. Each script fetches what it is allowed to fetch and emits JSON, so no model chooses whose calendar to open. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that pattern.
+
+**3. Deterministic checks flag what cannot be scheduled.** Configured rules raise four cases: availability older than a staleness threshold the team sets, a required interviewer with no availability at all, two holds that overlap in a way the rules disallow, and a window whose timezone is ambiguous or unstated. These are rules the team writes and reviews, not agent judgment.
+
+**4. An agent prepares a source-linked slot proposal.** Each slot names the interviews it covers, who attends, the window in the timezone the team records times in, and a link back to the source row behind each person's availability. It is one file, so the gate message carries the version the recruiter reads.
+
+**5. The recruiter reviews it.** A [human-in-the-loop node](/docs/playbooks/patterns/hitl-gates) pauses the run and posts to Slack, then resumes only when the recruiter responds. That person validates the proposal and either drafts or approves the candidate-facing message. They see the flagged rows, not a tidy list of options.
+
+## Review, rejection and escalation
+
+**Approve** means the recruiter accepts the proposal as the basis for the message, and the run records who accepted what and when. It books nothing. Any calendar write stays with a person.
+
+**Reject with a note** returns the proposal. The correction goes into the requirements or into the availability source, not into the proposal, and the workflow re-collects, so the next version comes from the systems of record.
+
+**Escalate** is for a gap only its owner can settle. Stale availability that nobody refreshed, a required interviewer with no window at all, a timezone the sources disagree on: each one goes to the person who owns that calendar or that requirement as an open question. The workflow never guesses a timezone, never treats a missing window as free, and never proceeds on silence. A gate needs a timeout, then a named backup, then an explicit hold so the row stays open.
+
+Nothing reaches the candidate without the recruiter. The workflow assembles options and the questions behind them; the person decides what the candidate is offered and in what words.
+
+## Privacy and data boundaries
+
+These are design considerations, not guarantees the platform makes on its own.
+
+**Read free or busy windows only, not event contents.** What the workflow needs is whether a window is open and for how long. Titles and notes stay out of the collection and out of the proposal.
+
+**Restrict the proposal to the people who act on it.** The recruiter and the hiring manager. Interviewers contribute availability; they do not need to read the candidate's loop. The [governance guide](/docs/playbooks/use-cases/ai-operations-governance) sets roles and one named owner per workflow, and its limit applies here: RBAC gates requests made with user tokens, while operator-key calls and agent calls are not affected.
+
+**Minimize candidate data and set a retention period.** A proposal needs the candidate's windows and the role, not their CV, their compensation expectations or their contact details. Write down how long a completed proposal is kept, who may open it later and when it is deleted.
+
+**Keep connectors narrow and secrets server-side.** Each connector sees only the calendars it serves, read-only where the source allows it. Scripts reach external systems through [script connections](/docs/guides/script-connections), and credentials come from the [credential broker](/docs/guides/scripts-credential-broker), so the raw secret stays out of script source and arguments.
+
+## What stays human-owned
+
+Candidate selection and evaluation, every interviewer assignment change, every candidate-facing message, and any calendar write. The workflow prepares options and surfaces the conflicts behind them. It does not choose who interviews a candidate, does not decide who advances, does not promise a slot to anyone and does not send to the candidate.
+
+## Operator checklist
+
+- Name the recruiter who validates a proposal, and a named backup able to answer the gate.
+- Write the requirements down before the first run: panel roles, lengths, order, required interviewers, timezone.
+- Set the staleness threshold for availability, and say what happens when a source exceeds it.
+- Define the overlap rules: which holds a slot may not span, and for whom.
+- Set one timezone convention and require every source to state its own.
+- Scope each connector to read only the windows it needs, and record who granted that permission.
+- Set the review timeout, the reminder and the fallback owner.
+- Set the retention period and who may read a completed proposal.
+- Dry-run on a fictional candidate before a real loop enters the workflow.
+
+## What is documented and what needs custom setup
+
+**Documented and already shipping.** `swarm-script` collection that emits JSON per source, then agent synthesis: [Reports from multiple sources](/docs/playbooks/reports-multiple-sources). A node that holds a run until a person answers, plus `request-human-input` outside a workflow: [HITL gates](/docs/playbooks/patterns/hitl-gates). Server-side credentials for outbound calls: [script connections](/docs/guides/script-connections) and the [scripts credential broker](/docs/guides/scripts-credential-broker).
+
+**Custom setup the team builds.** A connector for every calendar and applicant tracking system involved, each with its own permissions and its own named owner. Then the staleness threshold, the overlap rules, the timezone convention and the logic that scores and orders candidate slots. Agent Swarm ships no native scheduling or ATS integration, so none of this arrives switched on. The proposal is only as complete as the availability the team is allowed to read.
+
+**Not claimed here.** The workflow does not book interviews, does not choose candidates, does not improve a recruiting outcome and does not save a measured amount of time. None of that is measured here, and this is not legal or HR advice.

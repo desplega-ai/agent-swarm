@@ -232,19 +232,69 @@ describe("amp registration and model selection", () => {
 });
 
 describe("amp plugin", () => {
-  test("the plugin carries the prompt as data, so no prompt text can become code", () => {
+  test("the plugin carries the prompt as data, so no prompt text can become code", async () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal placeholder must stay text
     const hostile = 'a"; process.exit(1); //\n`${x}` */ \u2028 \\';
     const source = buildAmpPlugin({ baseMode: "low", instructions: hostile });
     expect(source.startsWith("// @amp-agent-mode key=agent-swarm label=Agent Swarm\n")).toBe(true);
     expect(pluginConfig(source)).toEqual({
-      baseMode: "low",
       instructions: hostile,
-      model: null,
-      reasoningEffort: null,
+      model: "zhipuai/glm-5.3-flash",
+      reasoningEffort: "low",
       steeringInbox: null,
     });
     expect(source.split("\n").filter((line) => line.includes("process.exit"))).toHaveLength(1);
+
+    // The mode loads as a custom agent on a concrete model. Amp rejects `extends`
+    // and built-in agents in a plugin mode; the CLI then sends the bare mode key
+    // and thread creation fails with HTTP 400 on agentMode.
+    const dir = await mkdtemp(join(tmpdir(), "amp-plugin-"));
+    try {
+      const registered: unknown[] = [];
+      const amp = {
+        on() {},
+        createAgent(config: Record<string, unknown>) {
+          if ("extends" in config || typeof config.model !== "string") {
+            throw new Error("createAgent no longer supports extends");
+          }
+          return { definition: { kind: "agent-definition", ...config } };
+        },
+        registerAgentMode(mode: unknown) {
+          registered.push(mode);
+        },
+      };
+      for (const [name, options] of [
+        ["mode", { baseMode: "medium", instructions: "be brief" }],
+        ["pin", { baseMode: "medium", instructions: "", pin: "openai/gpt-5-nano" }],
+      ] as const) {
+        const path = join(dir, `${name}.ts`);
+        await Bun.write(path, buildAmpPlugin(options));
+        (await import(path)).default(amp);
+      }
+      expect(registered).toEqual([
+        {
+          key: "agent-swarm",
+          label: "Agent Swarm",
+          agent: {
+            kind: "agent-definition",
+            model: "anthropic/claude-opus-5-5",
+            instructions: "be brief",
+            display: { label: "Agent Swarm" },
+          },
+        },
+        {
+          key: "agent-swarm",
+          label: "Agent Swarm",
+          agent: {
+            kind: "agent-definition",
+            model: "openai/gpt-5-nano",
+            display: { label: "Agent Swarm" },
+          },
+        },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -385,13 +435,12 @@ describe("amp session", () => {
         },
       },
     });
-    // The system prompt rides on the plugin mode; a mode (low) pins no model.
+    // The system prompt rides on the plugin mode; a mode (low) runs its model.
     expect(run.plugin).toContain("// @amp-agent-mode key=agent-swarm label=Agent Swarm");
     expect(pluginConfig(run.plugin)).toEqual({
-      baseMode: "low",
       instructions: config.systemPrompt,
-      model: null,
-      reasoningEffort: null,
+      model: "zhipuai/glm-5.3-flash",
+      reasoningEffort: "low",
       // Steering queues inside the per-task tree, next to the config.
       steeringInbox: join(dirname(run.env.XDG_CONFIG_HOME), "steering"),
     });
@@ -414,7 +463,6 @@ describe("amp session", () => {
     expect(result.appliedReasoningEffort).toBe("high");
     const run = await invocation(dir);
     expect(pluginConfig(run.plugin)).toMatchObject({
-      baseMode: "medium",
       model: "openai/gpt-5-nano",
       reasoningEffort: "high",
     });

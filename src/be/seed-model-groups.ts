@@ -17,7 +17,7 @@ import {
   ProviderNameSchema,
 } from "../types";
 import { createModelGroup } from "./db/model-groups";
-import { getDbClient } from "./db/runtime";
+import { getStorage } from "./storage";
 
 /** Member order of a seeded group; harnesses not listed follow in schema order. */
 const SEED_HARNESS_ORDER: ProviderName[] = [
@@ -51,23 +51,13 @@ function seedHarnessOrder(): ProviderName[] {
 export async function seedModelGroups(): Promise<number> {
   let inserted = 0;
   for (const tier of MODEL_TIERS) {
-    const existing = await getDbClient().get<{ id: string }>(
-      "SELECT id FROM model_groups WHERE name = ?",
-      [tier],
-    );
+    const existing = await getStorage().repos.models.findGroupByName(tier);
     if (existing) continue;
     const wanted = seedHarnessOrder()
       .filter((harness) => DEFAULT_MODEL_TIER_MAP[harness]?.[tier])
       .map((harness) => `${harness}-${tier}`);
     if (wanted.length === 0) continue;
-    const present = new Set(
-      (
-        await getDbClient().query<{ name: string }>(
-          `SELECT name FROM model_profiles WHERE name IN (${wanted.map(() => "?").join(", ")})`,
-          wanted,
-        )
-      ).map((row) => row.name),
-    );
+    const present = new Set(await getStorage().repos.models.listExistingProfileNames(wanted));
     const members = wanted.filter((name) => present.has(name));
     if (members.length === 0) continue;
     const result = await createModelGroup({

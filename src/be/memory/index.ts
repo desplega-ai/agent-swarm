@@ -26,9 +26,44 @@ export function resetEmbeddingProvider(): void {
 
 export function getMemoryStore(): MemoryStore {
   if (!memoryStore) {
-    const { SqliteMemoryStore } =
-      require("./providers/sqlite-store") as typeof import("./providers/sqlite-store");
-    memoryStore = new SqliteMemoryStore();
+    const { StorageMemoryStore } =
+      require("./providers/storage-store") as typeof import("./providers/storage-store");
+    memoryStore = new StorageMemoryStore();
   }
   return memoryStore;
+}
+
+/**
+ * Reads a key's deployment environment value, without stored config. Set by
+ * each server entry (HTTP and stdio) at boot (http/core owns the env injection). Unset, no URL
+ * counts as operator config, so every one gets the SSRF check.
+ */
+let readDeploymentEnv: (key: string) => string | undefined = () => undefined;
+
+export function setDeploymentEnvReader(read: (key: string) => string | undefined): void {
+  readDeploymentEnv = read;
+}
+
+/**
+ * The base URL the embedding client sends to, in the SDK's precedence order,
+ * and whether it is the deployment environment's own value. Null when neither
+ * key is set (the SDK default, OpenAI). A provider passes the
+ * EMBEDDING_API_BASE_URL value it captured (null for none), so the check covers
+ * the URL its client uses even when a config reload changed the env since.
+ */
+export function embeddingEndpoint(
+  embeddingBaseUrl: string | null = process.env.EMBEDDING_API_BASE_URL || null,
+): { baseUrl: string; fromDeployment: boolean } | null {
+  if (embeddingBaseUrl) {
+    return {
+      baseUrl: embeddingBaseUrl,
+      fromDeployment: embeddingBaseUrl === readDeploymentEnv("EMBEDDING_API_BASE_URL"),
+    };
+  }
+  const openAiBaseUrl = process.env.OPENAI_BASE_URL;
+  if (!openAiBaseUrl) return null;
+  return {
+    baseUrl: openAiBaseUrl,
+    fromDeployment: openAiBaseUrl === readDeploymentEnv("OPENAI_BASE_URL"),
+  };
 }

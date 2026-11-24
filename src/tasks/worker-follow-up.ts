@@ -16,6 +16,7 @@ import {
 } from "../be/db";
 import { getModelProfileByName, hasUnreadableCredentialAllowlist } from "../be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { firstFailingCheck, resolveGroupForAgent } from "../be/model-group-resolution";
 import { checkProfileForAgent, configPools } from "../be/model-profile-check";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
 import { carryUnhandledSteering } from "../be/steering";
@@ -25,6 +26,8 @@ import {
   DEFERRED_WAIT_WOKE_EVENT,
   reconcileDeferredTaskWaits,
 } from "../scheduler/deferred-task-waits";
+import { slackAskOf } from "../slack/ask-chain";
+import { isSlackRenderV2Enabled } from "../slack/render-v2";
 import {
   type Agent,
   type AgentTask,
@@ -32,6 +35,7 @@ import {
   CreateTaskOptionsSchema,
   type FallbackHop,
   type ProviderErrorClass,
+  parseModelTier,
   type ResumeReason,
   type RoutingAffinity,
   type TaskAttachment,
@@ -41,7 +45,12 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { modelFamilyOf, windowForModelFamily } from "../utils/model-rate-limit-windows";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { chatThreadOfContextKey } from "./context-key";
-import { scheduleFollowUpGateShadow } from "./follow-up-gate";
+import {
+  isFollowUpGateEnforced,
+  readFollowUpGateConfig,
+  scheduleFollowUpGateEnforce,
+  scheduleFollowUpGateShadow,
+} from "./follow-up-gate";
 import { taskModelPin } from "./model-pin";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -196,15 +205,17 @@ export function inheritedModelSelection(
     | "resolvedModel"
     | "claudeSessionId"
     | "profile"
+    | "modelGroup"
   >,
-): Pick<CreateTaskOptions, "model" | "modelTier" | "profile"> {
+): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "modelGroup"> {
   const model = taskModelPin(parent);
-  // The task's own profile travels like its tier; an agent-default profile
-  // (`resolvedProfile` only) is re-resolved by the child's claim.
+  // The task's own profile and group travel like its tier; an agent-default
+  // profile (`resolvedProfile` only) is re-resolved by the child's claim.
   return {
     ...(model ? { model } : {}),
     ...(parent.modelTier ? { modelTier: parent.modelTier } : {}),
     ...(parent.profile ? { profile: parent.profile } : {}),
+    ...(parent.modelGroup ? { modelGroup: parent.modelGroup } : {}),
   };
 }
 
@@ -228,6 +239,9 @@ type FallbackParent = Pick<
   | "agentId"
   | "resolvedProfile"
   | "resolvedModel"
+  | "modelGroup"
+  | "modelSource"
+  | "modelTier"
   | "fallbackHops"
   | "vcsRepo"
   | "routingAffinity"
@@ -235,6 +249,21 @@ type FallbackParent = Pick<
   | "credentialKeyType"
   | "credentialKeySuffix"
 >;
+
+/**
+ * The group whose order a provider-error hop walks: the task's own
+ * `modelGroup` (a group task, or the resume of a group hop), else the group
+ * named after the tier when claim resolved the tier through it
+ * (`modelSource = profile:group`). A worker-env, tier-config or seeded
+ * tier-alias claim records another source, so it never hops through a group.
+ */
+export function fallbackGroupOf(
+  task: Pick<AgentTask, "modelGroup" | "modelSource" | "modelTier">,
+): string | undefined {
+  if (task.modelGroup) return task.modelGroup;
+  if (task.modelSource !== "profile:group") return undefined;
+  return parseModelTier(task.modelTier) ?? undefined;
+}
 
 /**
  * The key pool the failed run drew from, as the worker's next claim will see
@@ -303,6 +332,12 @@ async function keyPoolOf(
  * profile to the visited set and the saved fallback graph is acyclic, so the
  * walk ends once every reachable profile has run.
  *
+ * On a model group task (or a tier task its group resolved,
+ * `fallbackGroupOf`) the group order is the chain instead: the members
+ * after the current one that run on this agent's harness, minus the profiles
+ * the work already ran on. Member fallbacks are ignored, so the one order the
+ * group shows decides every hop.
+ *
  * The pick is judged against this agent only, so the resume is always pinned
  * to it (`createResumeFollowUp`). Lead-only work on an agent that cannot hold
  * a lead-only pin would be rerouted to another agent, so it never hops.
@@ -327,10 +362,14 @@ export async function nextFallback(
   const judged = new Set<string>();
   let configured = profileHops.length > 0;
 
+  const group = fallbackGroupOf(parent);
+
   if (parent.routingAffinity?.leadOnly) {
     const agent = await getAgentById(parent.agentId);
     if (!agent?.isLead || !isAgentEligibleForTask(agent, parent)) {
-      const listsFallbacks = (await getModelProfileByName(current))?.fallbacks.length ?? 0;
+      const listsFallbacks = group
+        ? 1
+        : ((await getModelProfileByName(current))?.fallbacks.length ?? 0);
       if (!configured && listsFallbacks === 0) return { kind: "none", message: null };
       return {
         kind: "none",
@@ -359,7 +398,33 @@ export async function nextFallback(
     }
   }
 
-  for (let i = path.length - 1; i >= 0; i--) {
+  if (group) {
+    const resolution = await resolveGroupForAgent(group, parent.agentId, {
+      vcsRepo: parent.vcsRepo,
+      includeRepoSecrets: options.includeRepoSecrets,
+      skip: visited,
+      startAfter: current,
+      sameHarnessOnly: true,
+    });
+    if (resolution.kind === "resolved") {
+      return {
+        kind: "picked",
+        profile: resolution.member,
+        hop: {
+          from: current,
+          profile: resolution.member,
+          errorClass,
+          at: new Date().toISOString(),
+          ...(resolution.skipped.length > 0 ? { skipped: resolution.skipped } : {}),
+        },
+      };
+    }
+    if (resolution.kind === "none" && resolution.skipped.length > 0) {
+      configured = true;
+      skipped.push(...resolution.skipped);
+    }
+  }
+  for (let i = path.length - 1; !group && i >= 0; i--) {
     const profile = await getModelProfileByName(path[i]!);
     for (const name of profile?.fallbacks ?? []) {
       configured = true;
@@ -383,7 +448,7 @@ export async function nextFallback(
           },
         };
       }
-      skipped.push({ profile: name, reason: result ? firstFailingRow(result) : "not found" });
+      skipped.push({ profile: name, reason: result ? firstFailingCheck(result) : "not found" });
     }
   }
   if (!configured) {
@@ -402,13 +467,6 @@ export async function nextFallback(
     kind: "none",
     message: `${errorClass} on ${current}; ${keysExhausted}no fallback left (tried: ${path.join(" → ")})${skippedText}`,
   };
-}
-
-/** "check: detail" of the primary's first failing row. */
-function firstFailingRow(result: NonNullable<Awaited<ReturnType<typeof checkProfileForAgent>>>) {
-  const row = result.profiles[0]?.checks.find((check) => check.state === "fail");
-  if (!row) return "failed the profile check";
-  return row.detail ? `${row.check}: ${row.detail}` : row.check;
 }
 
 function attachmentPointer(a: TaskAttachment): string {
@@ -476,6 +534,10 @@ async function findDeferredWakeFor(taskId: string, agentId: string): Promise<Def
  *
  * With `FOLLOW_UP_GATE_MODE=shadow`, a gated scheduled run also records a
  * verifier's would-skip decision after commit; the follow-up is never skipped.
+ * With `enforce`, a completed run of a schedule in
+ * `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS` returns null here: its follow-up is
+ * created after commit unless the verifier says `would_skip`. Follow-up
+ * instructions or a rejected `chainedTaskId` keep the follow-up up front.
  */
 export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
@@ -563,7 +625,7 @@ export async function createWorkerTaskFollowUp(args: {
     const outputSummary = output
       ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}${attachmentsBlock}`
       : `(no output)${attachmentsBlock}`;
-    const completedResult = resolveTemplate("task.worker.completed", {
+    const completedResult = await resolveTemplate("task.worker.completed", {
       agent_name: agentName,
       task_desc: taskDesc,
       creator_agent: creatorAgent,
@@ -573,14 +635,16 @@ export async function createWorkerTaskFollowUp(args: {
     });
     followUpDescription = completedResult.text;
     if (chainRejection) {
-      followUpDescription += resolveTemplate("task.worker.chain_rejected", {
-        chained_task_id: chainRejection.chainedTaskId,
-        reason: chainRejection.reason,
-      }).text;
+      followUpDescription += (
+        await resolveTemplate("task.worker.chain_rejected", {
+          chained_task_id: chainRejection.chainedTaskId,
+          reason: chainRejection.reason,
+        })
+      ).text;
     }
   } else {
     const reason = failureReason || "(no reason given)";
-    const failedResult = resolveTemplate("task.worker.failed", {
+    const failedResult = await resolveTemplate("task.worker.failed", {
       agent_name: agentName,
       task_desc: taskDesc,
       creator_agent: creatorAgent,
@@ -600,6 +664,18 @@ export async function createWorkerTaskFollowUp(args: {
       );
       followUpDescription += `\n\n⚠️ Cascade impact: ${cascadedDeps.length} dependent task(s) were also failed because they depend on this task:\n${depLines.join("\n")}`;
     }
+  }
+
+  // Render v2 settles this follow-up's card as no_slack_ask and posts nothing, so the Lead must know now.
+  if (
+    task.slackChannelId &&
+    task.slackThreadTs &&
+    isSlackRenderV2Enabled() &&
+    !(await slackAskOf(task))
+  ) {
+    followUpDescription += (
+      await resolveTemplate("task.worker.slack_card_blocked", { reason: "no_slack_ask" })
+    ).text;
   }
 
   const preFollowUp = await dispatchPre(
@@ -655,27 +731,50 @@ export async function createWorkerTaskFollowUp(args: {
     );
     return null;
   }
-  const followUp = await createTaskWithSiblingAwareness(
-    changes.description ?? followUpDescription,
-    {
-      agentId: followUpAgentId,
-      routingReason: followUpAgentId ? "skill" : undefined,
-      routingSource: followUpAgentId ? "engine_default" : undefined,
-      source: "system",
-      taskType: "follow-up",
-      priority: changes.priority,
-      parentTaskId: task.id,
-      contextKey: await deferredWorkChatContextKey(task),
-      slackChannelId: task.slackChannelId,
-      slackThreadTs: task.slackThreadTs,
-      slackUserId: task.slackUserId,
-      followUpConfig: changes.followUpConfig,
-      // The Lead reviews the worker's result here; it is not producing the
-      // worker's structured output, so it must not inherit that contract.
-      inheritParentOutputSchema: false,
-    },
-    { origin: "followUp" },
-  );
+  const createFollowUp = async () =>
+    createTaskWithSiblingAwareness(
+      changes.description ?? followUpDescription,
+      {
+        agentId: followUpAgentId,
+        routingReason: followUpAgentId ? "skill" : undefined,
+        routingSource: followUpAgentId ? "engine_default" : undefined,
+        source: "system",
+        taskType: "follow-up",
+        priority: changes.priority,
+        parentTaskId: task.id,
+        contextKey: await deferredWorkChatContextKey(task),
+        slackChannelId: task.slackChannelId,
+        slackThreadTs: task.slackThreadTs,
+        slackUserId: task.slackUserId,
+        followUpConfig: changes.followUpConfig,
+        // The Lead reviews the worker's result here; it is not producing the
+        // worker's structured output, so it must not inherit that contract.
+        inheritParentOutputSchema: false,
+      },
+      { origin: "followUp" },
+    );
+  const gateConfig = readFollowUpGateConfig();
+  const chainRejected = chainRejection !== null;
+  if (isFollowUpGateEnforced({ task, status, config: gateConfig, chainRejected })) {
+    try {
+      // The verifier reads the committed run, so the follow-up waits for it after commit.
+      scheduleFollowUpGateEnforce({
+        task,
+        status,
+        leadAgentId: leadAgent.id,
+        config: gateConfig,
+        createFollowUp,
+      });
+      return null;
+    } catch (err) {
+      // Fail open: create the follow-up now.
+      console.warn(
+        `[worker-follow-up] Follow-up gate enforce failed for task ${task.id.slice(0, 8)}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  const followUp = await createFollowUp();
   if (followUp) {
     try {
       scheduleFollowUpGateShadow({
@@ -683,6 +782,7 @@ export async function createWorkerTaskFollowUp(args: {
         status,
         followUpTaskId: followUp.id,
         leadAgentId: leadAgent.id,
+        chainRejected,
       });
     } catch (err) {
       console.warn(
@@ -1028,9 +1128,14 @@ export async function createResumeFollowUp(args: {
 function resumeModelSelection(
   parent: AgentTask,
   fallback: { profile: string; hop: FallbackHop } | undefined,
-): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "fallbackHops"> {
+): Pick<CreateTaskOptions, "model" | "modelTier" | "profile" | "modelGroup" | "fallbackHops"> {
   const hops = [...(parent.fallbackHops ?? []), ...(fallback ? [fallback.hop] : [])];
-  const selection = fallback ? { profile: fallback.profile } : inheritedModelSelection(parent);
+  // A group task, or a tier task its group resolved, keeps the group, so its
+  // next hop or key retry walks the same order.
+  const group = fallback ? fallbackGroupOf(parent) : undefined;
+  const selection = fallback
+    ? { profile: fallback.profile, ...(group ? { modelGroup: group } : {}) }
+    : inheritedModelSelection(parent);
   return { ...selection, ...(hops.length > 0 ? { fallbackHops: hops } : {}) };
 }
 
@@ -1091,7 +1196,7 @@ export async function createRerouteDecisionTask(args: {
     : "(no identity recorded)";
   const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
-  const decision = resolveTemplate("task.reroute.decision", {
+  const decision = await resolveTemplate("task.reroute.decision", {
     original_agent_name: agentName,
     original_agent_identity: identitySlice,
     original_task_id: original.id,
@@ -1181,7 +1286,7 @@ export async function createPoolStarvationDecisionTask(args: {
       : "(none declared)";
   const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
-  const decision = resolveTemplate("task.pool.starved.decision", {
+  const decision = await resolveTemplate("task.pool.starved.decision", {
     original_task_id: original.id,
     task_desc: original.task.slice(0, 200),
     required_role: requiredRole,

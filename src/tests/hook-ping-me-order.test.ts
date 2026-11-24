@@ -51,6 +51,7 @@ async function runHookAndRecord(hookEventName: string): Promise<string[]> {
         env: {
           ...process.env,
           CLAUDE_PROJECT_DIR: tempDir,
+          HOOK_WORKSPACE_DIR: tempDir,
           PATH: tempDir,
           ANONYMIZED_TELEMETRY: "false",
         },

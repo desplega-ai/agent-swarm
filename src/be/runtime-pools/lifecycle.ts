@@ -1,5 +1,6 @@
 import { isTerminalTaskStatus, type RuntimeInstance, type RuntimePool } from "../../types";
-import { getDbClient, getTaskById } from "../db";
+import { getTaskById } from "../db";
+import { getStorage } from "../storage";
 
 export async function rotatingRuntimes(
   poolId: string,
@@ -13,14 +14,9 @@ export async function rotatingRuntimes(
     maxContinuousSec === undefined
       ? null
       : new Date(now.getTime() - Math.max(0, maxContinuousSec - beforeSec) * 1000).toISOString();
-  const rows = await getDbClient().query<{ runtimeId: string }>(
-    `SELECT DISTINCT r.id AS runtimeId FROM runtime_instances r
-     LEFT JOIN session_tokens t ON r.id = t.runtimeId
-     WHERE r.pool_id = ? AND ((t.revokedAt IS NULL AND t.expiresAt <= ?)
-       OR (? IS NOT NULL AND r.created_at <= ?))`,
-    [poolId, expiresBy, rotateAt, rotateAt],
+  return new Set(
+    await getStorage().repos.runtimePools.listRotatingRuntimeIds(poolId, expiresBy, rotateAt),
   );
-  return new Set(rows.map((row) => row.runtimeId));
 }
 
 export async function isRuntimeWanted(

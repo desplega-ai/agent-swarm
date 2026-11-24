@@ -13,7 +13,7 @@ import {
   parseTaskToolManifest,
   selectTaskTools,
 } from "@/utils/task-tool-manifest";
-import { MCP_BODY_TOO_LARGE, readMcpBody } from "./mcp-body";
+import { MCP_BODY_ANSWERED, readMcpBody } from "./mcp-body";
 
 export type McpTransportActivity = Record<string, number>;
 export type McpSessionAgents = Record<string, string>;
@@ -168,7 +168,7 @@ export async function handleMcp(
 
   if (req.method === "POST") {
     const body = await readMcpBody(req, res);
-    if (body === MCP_BODY_TOO_LARGE) return true;
+    if (body === MCP_BODY_ANSWERED) return true;
     const rpc = body as { method?: unknown; id?: unknown } | null;
 
     if (!sessionId && rpc?.method === "server/discover") {

@@ -142,9 +142,9 @@ For each candidate:
 - Audit skill bodies inside a one-off `script-run`, using `ctx.swarm.db_query`; do not load the bodies into model context with direct `db-query`, and do not use `skill-list includeContent`.
 - Inside the script, count the enabled skills, then fetch them in explicit pages smaller than the 100-row tool cap (for example, 50 rows at a time):
   ```sql
-  SELECT COUNT(*) FROM skills WHERE isEnabled = 1;
-  SELECT id, name, scope, ownerAgentId, description, content FROM skills
-  WHERE isEnabled = 1 ORDER BY name LIMIT 50 OFFSET <offset>;
+  SELECT COUNT(*) AS total FROM skills WHERE "isEnabled" = true;
+  SELECT id, name, scope, "ownerAgentId", description, content FROM skills
+  WHERE "isEnabled" = true ORDER BY name, id LIMIT 50 OFFSET <offset>;
   ```
 - Inspect each page inside the script, continue until the final short page, and return only aggregate counts plus a compact list of findings (skill ID, name, scope/owner, issue, and proposed action) — never the skill bodies. `skill-update` requires the ID, and names are only unique within scope/owner. Require the processed-row count to equal the initial count before treating the audit as complete. Script-internal `ctx.swarm.*` calls bypass the model-context response ceiling and instead fail loudly at the separate 64 MiB guard; pagination also prevents silent row truncation.
 - Before accepting any zero-hit content audit as clean, carry a positive control through the same search path: choose a distinctive token visibly present in one returned skill body and verify that the audit finds it. If the positive control returns zero, treat the audit as invalid rather than clean.

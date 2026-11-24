@@ -57,8 +57,13 @@ On success, `ctx.step.agentTask` resolves to the worker's output string (JSON te
 
 ```sql
 SELECT id, status, output FROM agent_tasks
-WHERE contextKey = 'script-run:<runId>:<label>' AND taskType = 'script-run-step'
-ORDER BY createdAt DESC, rowid DESC LIMIT 1
+WHERE "contextKey" = 'script-run:<runId>:<label>' AND "taskType" = 'script-run-step'
+<!-- dialect:sqlite -->
+ORDER BY "createdAt" DESC, rowid DESC LIMIT 1
+<!-- /dialect -->
+<!-- dialect:postgres -->
+ORDER BY "createdAt" DESC, "_rowid" DESC LIMIT 1
+<!-- /dialect -->
 ```
 
 Inside the run, `<runId>` is `ctx.run.id`.

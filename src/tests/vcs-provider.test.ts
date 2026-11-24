@@ -1,5 +1,21 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { detectVcsForTask } from "../commands/runner";
 import { detectVcsProvider } from "../vcs";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
+
+const originalGitLabUrl = process.env.GITLAB_URL;
+
+beforeEach(() => {
+  delete process.env.GITLAB_URL;
+});
+
+afterEach(() => {
+  if (originalGitLabUrl === undefined) delete process.env.GITLAB_URL;
+  else process.env.GITLAB_URL = originalGitLabUrl;
+});
 
 describe("detectVcsProvider", () => {
   test("detects github.com URLs", () => {
@@ -44,6 +60,28 @@ describe("detectVcsProvider", () => {
     expect(detectVcsProvider(url)).toBe("gitlab");
   });
 
+  test.each([
+    ["https://code.acme.io/group/project", "gitlab"],
+    ["ssh://git@CODE.acme.io:2222/group/project.git", "gitlab"],
+    ["git@Code.Acme.io:group/project.git", "gitlab"],
+    ["https://code.acme.io.example.com/group/project", null],
+    ["https://gitlab.acme.io/group/project", "gitlab"],
+  ] as const)("compares the configured GitLab hostname against %s", (url, expected) => {
+    process.env.GITLAB_URL = "https://CODE.acme.io:8443/gitlab/";
+    expect(detectVcsProvider(url)).toBe(expected);
+  });
+
+  test("keeps github.com recognized with the default GitLab URL configured", () => {
+    process.env.GITLAB_URL = "https://gitlab.com";
+    expect(detectVcsProvider("https://github.com/org/repo")).toBe("github");
+  });
+
+  test("ignores a malformed GitLab URL", () => {
+    process.env.GITLAB_URL = "https://[";
+    expect(detectVcsProvider("https://gitlab.acme.io/group/project")).toBe("gitlab");
+    expect(detectVcsProvider("https://code.acme.io/group/project")).toBeNull();
+  });
+
   test("detects bitbucket.org URLs in https, ssh and .git forms", () => {
     for (const url of [
       "https://bitbucket.org/org/repo",
@@ -67,4 +105,76 @@ describe("detectVcsProvider", () => {
     expect(detectVcsProvider("https://notgithub.com/acme/repo")).toBeNull();
     expect(detectVcsProvider("https://code.example.com/acme/repo")).toBeNull();
   });
+});
+
+/**
+ * A throwaway repo whose `origin` is remoteUrl and whose current branch is `feat`,
+ * plus `gh` and `glab` stubs that append the command they were handed to a log and
+ * print an empty list. The stubs are shell scripts on PATH, as in
+ * src/tests/acp-adapter.test.ts; this file's CLI cases skip on Windows, where bun
+ * resolves an installed gh.exe ahead of a .cmd stub whatever the PATH order.
+ */
+async function repoWithVcsStubs(remoteUrl: string) {
+  const dir = mkdtempSync(join(tmpdir(), "vcs-provider-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  const log = join(dir, "calls.log");
+  writeFileSync(log, "");
+  for (const tool of ["gh", "glab"]) {
+    const path = join(bin, tool);
+    writeFileSync(path, `#!/bin/sh\necho "${tool} $*" >> "${log}"\necho "[]"\n`);
+    chmodSync(path, 0o755);
+  }
+  const git = async (...args: string[]) => {
+    const result = await runChild(["git", "-C", dir, ...args], { timeoutMs: 15_000 });
+    if (result.exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+    }
+  };
+  await git("init", "-q");
+  await git("remote", "add", "origin", remoteUrl);
+  await git(
+    "-c",
+    "user.name=x",
+    "-c",
+    "user.email=x@x",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "init",
+  );
+  await git("checkout", "-q", "-b", "feat");
+  return { dir, bin, log };
+}
+
+// A remote's path can name the other host: a GitLab mirror called github-sync, or a
+// GitHub repo called gitlab-tools. Routing has to follow the host, not the substring.
+describe.skipIf(process.platform === "win32")("detectVcsForTask", () => {
+  const originalPath = process.env.PATH;
+
+  afterEach(() => {
+    process.env.PATH = originalPath;
+  });
+
+  test.each([
+    ["gitlab.com/acme/github-sync", "https://gitlab.com/acme/github-sync.git", "glab mr list"],
+    ["github.com/acme/gitlab-tools", "https://github.com/acme/gitlab-tools.git", "gh pr list"],
+  ])(
+    "routes %s to the CLI of its host",
+    async (_name, remoteUrl, expectedCall) => {
+      const otherCall = expectedCall.startsWith("glab") ? "gh pr list" : "glab mr list";
+      const { dir, bin, log } = await repoWithVcsStubs(remoteUrl);
+      try {
+        process.env.PATH = `${bin}${delimiter}${originalPath ?? ""}`;
+        await detectVcsForTask("http://127.0.0.1:1", "", "task-1", dir);
+        const calls = readFileSync(log, "utf8");
+        expect(calls).toContain(expectedCall);
+        expect(calls).not.toContain(otherCall);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });

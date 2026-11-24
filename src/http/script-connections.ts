@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
-import { getDbClient } from "@/be/db";
 import {
   createOAuthApp,
   deleteAuthorizationById,
@@ -43,6 +42,7 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
+import { getStorage } from "@/be/storage";
 import { listVendoredOpenapiEntries } from "@/be/vendored-openapi";
 import { assertOAuthAppUrlsSafe, assertOAuthEgressUrlSafe } from "@/oauth/app-validation";
 import { forceRefreshAuthorizationOrThrow, forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
@@ -1322,14 +1322,16 @@ async function decorateConnections(
   );
 }
 
-function listConnections(
+async function listConnections(
   query: z.infer<typeof listConnectionsQuerySchema>,
 ): Promise<DecoratedConnection[]> {
-  const connections = listScriptConnections({
-    includeDisabled: true,
-    allScopes: true,
-    kind: query.kind as ScriptConnectionKind | undefined,
-  }).filter((connection) => {
+  const connections = (
+    await listScriptConnections({
+      includeDisabled: true,
+      allScopes: true,
+      kind: query.kind as ScriptConnectionKind | undefined,
+    })
+  ).filter((connection) => {
     if (query.scope && connection.scope !== query.scope) return false;
     if (query.scopeId && connection.scopeId !== query.scopeId) return false;
     return true;
@@ -1439,16 +1441,7 @@ async function sanitizeOAuthApp(row: OAuthAppRow) {
 }
 
 async function listOAuthApps() {
-  const rows = await getDbClient().query<OAuthAppRow>(
-    `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
-            a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat, a.source,
-            z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
-            z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
-     FROM oauth_apps a
-     LEFT JOIN oauth_authorizations z ON z.appId = a.id AND z.label = 'default'
-     WHERE a.mcpServerId IS NULL
-     ORDER BY a.provider ASC`,
-  );
+  const rows: OAuthAppRow[] = await getStorage().repos.oauth.listProviderAppsWithDefaultToken();
   return Promise.all(rows.map(sanitizeOAuthApp));
 }
 
@@ -1874,13 +1867,13 @@ async function deleteOAuthApp(
   const existing = (await getOAuthAppById(idOrProvider)) ?? (await getOAuthApp(idOrProvider));
   if (!existing || existing.mcpServerId !== null) return { deleted: false, warnings: [] };
   const warnings = collectOAuthAppDeletionWarnings(existing);
-  await getDbClient().transaction(async (tx) => {
+  await getStorage().transaction(async () => {
     // Revoke by THIS app's id — not the provider-keyed `deleteOAuthTokens`,
     // which targets the oldest same-provider app and would disconnect a
     // surviving sibling. The app DELETE also CASCADEs its authorizations; this
     // explicit delete keeps the scoping correct regardless of FK enforcement.
     await deleteAuthorizationsForApp(existing.id);
-    await tx.run("DELETE FROM oauth_apps WHERE id = ?", [existing.id]);
+    await getStorage().repos.oauth.deleteAppById(existing.id);
   });
   return { deleted: true, warnings };
 }
@@ -1911,7 +1904,7 @@ export async function handleScriptConnections(
     const parsed = await getConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const connection =
-      listScriptConnections({ includeDisabled: true, allScopes: true }).find(
+      (await listScriptConnections({ includeDisabled: true, allScopes: true })).find(
         (candidate) => candidate.id === parsed.params.id,
       ) ?? null;
     if (!connection) {

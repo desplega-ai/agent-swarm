@@ -8,10 +8,15 @@
  * Precedence (first hit wins):
  *   1. task `model`                         → modelSource "model"
  *   2. task `profile`                       → "profile:task"
+ *   2b. task `modelGroup`                   → "profile:group": the group's first member that
+ *      runs on the claiming agent (`resolveGroupForAgent`); none is a hard stop
  *   3. the claiming worker's MODEL_TIER_*   → "worker-env"  (agents.modelTierOverrides)
  *   4. swarm_config MODEL_TIER_<PROV>_<TIER> → "tier-config"
- *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default", or "profile:tier-alias" when the
- *      seeded `<harness>-<tier>` profile exists (its model, same as the map unless edited).
+ *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default", or "profile:group" when the
+ *      model group named after the tier has a member that runs on the agent (an untouched
+ *      seed, which lists only `<harness>-<tier>` there, stays "profile:tier-alias"), else
+ *      "profile:tier-alias" when the seeded `<harness>-<tier>` profile exists (its model,
+ *      same as the map unless edited).
  *      A worker-env or tier-config win logs a deprecation line: edit the profile instead.
  *   6. the agent's default profile          → "profile:agent-default" (no model, no tier,
  *      no repo-scoped MODEL_OVERRIDE on the task's repo)
@@ -53,7 +58,7 @@ import {
   parseModelTier,
   type ReasoningEffort,
 } from "../types";
-import { getDbClient } from "./db";
+import { createLogEntry } from "./db";
 import {
   getAgentDefaultProfileName,
   getModelProfileByName,
@@ -76,8 +81,15 @@ import {
   type ModelCatalogEntry,
   type ModelCatalogFacts,
 } from "./model-catalog-store";
+import {
+  formatGroupSkips,
+  type GroupMemberSkip,
+  groupUnavailableMessage,
+  resolveGroupForAgent,
+} from "./model-group-resolution";
 import { tierConfigKey } from "./model-tier-keys";
 import { loadModelsDevCache } from "./modelsdev-cache";
+import { getStorage } from "./storage";
 
 export { isTierConfigKey, tierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -90,7 +102,8 @@ export type ModelSource =
   | "fallback:cli-unsupported:model"
   | "profile:task"
   | "profile:agent-default"
-  | "profile:tier-alias";
+  | "profile:tier-alias"
+  | "profile:group";
 
 export interface TaskModelResolution {
   resolvedModel: string;
@@ -135,13 +148,10 @@ export function parseModelTierOverridesHeader(
 }
 
 export async function getAgentModelTierOverrides(agentId: string): Promise<ModelTierOverrides> {
-  const row = await getDbClient().get<{ modelTierOverrides: string | null }>(
-    "SELECT modelTierOverrides FROM agents WHERE id = ?",
-    [agentId],
-  );
-  if (!row?.modelTierOverrides) return {};
+  const stored = await getStorage().repos.agents.getModelTierOverrides(agentId);
+  if (!stored) return {};
   try {
-    return sanitizeModelTierOverrides(JSON.parse(row.modelTierOverrides));
+    return sanitizeModelTierOverrides(JSON.parse(stored));
   } catch {
     return {};
   }
@@ -157,11 +167,7 @@ export async function modelTierOverridesDiffer(
   overrides: ModelTierOverrides,
 ): Promise<boolean> {
   const next = storedModelTierOverrides(overrides);
-  const row = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM agents WHERE id = ? AND modelTierOverrides IS NOT ?",
-    [agentId, next],
-  );
-  return row !== null;
+  return getStorage().repos.agents.modelTierOverridesDiffer(agentId, next);
 }
 
 /** Store the worker's overrides; no write when unchanged. Empty object clears. */
@@ -170,10 +176,7 @@ export async function setAgentModelTierOverrides(
   overrides: ModelTierOverrides,
 ): Promise<void> {
   const next = storedModelTierOverrides(overrides);
-  await getDbClient().run(
-    "UPDATE agents SET modelTierOverrides = ? WHERE id = ? AND modelTierOverrides IS NOT ?",
-    [next, agentId, next],
-  );
+  await getStorage().repos.agents.setModelTierOverrides(agentId, next);
 }
 
 // ─── Catalog for alias resolution ────────────────────────────────────────────
@@ -277,11 +280,7 @@ function autoUpgradeEnabled(): boolean {
 }
 
 async function lastAliasResolution(alias: string): Promise<string | null> {
-  const row = await getDbClient().get<{ newModel: string }>(
-    "SELECT newModel FROM model_alias_resolutions WHERE alias = ? ORDER BY id DESC LIMIT 1",
-    [alias],
-  );
-  return row?.newModel ?? null;
+  return await getStorage().repos.models.lastAliasResolution(alias);
 }
 
 /**
@@ -309,11 +308,13 @@ export async function resolveLatestAlias(
   if (!resolved) return null;
 
   if (resolved !== previous && opts.record !== false) {
-    await getDbClient().run(
-      "INSERT INTO model_alias_resolutions (alias, previousModel, newModel, changedAt) VALUES (?, ?, ?, ?)",
-      [key, previous, resolved, now.getTime()],
-    );
-    getDbClient().afterCommit(() => {
+    await getStorage().repos.models.insertAliasResolution({
+      alias: key,
+      previousModel: previous,
+      newModel: resolved,
+      changedAt: now.getTime(),
+    });
+    getStorage().afterCommit(() => {
       console.info(
         `[model-tiers] alias ${key} now resolves to ${resolved}${previous ? ` (was ${previous})` : ""}`,
       );
@@ -563,15 +564,16 @@ type ClaimProfile = {
 /**
  * Resolve a model profile for a claim. Null when the profile does not apply:
  * an agent default or tier alias that is missing, on another harness, or
- * unresolved falls through to the tier chain. For a task's own `profile` each
- * is a hard stop. An unreadable credential allowlist is a hard stop for all.
+ * unresolved falls through to the tier chain. For a task's own `profile` or
+ * group member each is a hard stop. An unreadable credential allowlist is a
+ * hard stop for all.
  */
 async function resolveClaimProfile(
   name: string,
-  source: "profile:task" | "profile:agent-default" | "profile:tier-alias",
+  source: "profile:task" | "profile:agent-default" | "profile:tier-alias" | "profile:group",
   harness: ProviderName | null,
 ): Promise<ClaimProfile | { modelUnsupported: string } | null> {
-  const isTask = source === "profile:task";
+  const isTask = source === "profile:task" || source === "profile:group";
   const profile = await getModelProfileByName(name);
   if (!profile) {
     return isTask
@@ -625,20 +627,51 @@ async function resolveClaimProfile(
  */
 async function resolveTierAlias(
   resolved: TaskModelResolution | TaskModelHarnessMismatch | null,
-  task: { modelTier?: string | null },
+  task: { id: string; modelTier?: string | null; vcsRepo?: string | null },
+  agentId: string,
   harness: ProviderName | null,
+  includeRepoSecrets: boolean,
 ): Promise<ClaimProfile | { modelUnsupported: string } | null> {
   const tier = parseModelTier(task.modelTier);
   if (!resolved || "harnessMismatch" in resolved || !tier || !harness) return null;
-  const name = `${harness}-${tier}`;
+  const seeded = `${harness}-${tier}`;
   if (resolved.modelSource === "worker-env" || resolved.modelSource === "tier-config") {
     console.log(
-      `[model-tier] deprecated: ${resolved.modelSource} override for ${name}; edit profile ${name} instead`,
+      `[model-tier] deprecated: ${resolved.modelSource} override for ${seeded}; edit profile ${seeded} instead`,
     );
     return null;
   }
   if (resolved.modelSource !== "tier-default") return null;
-  const picked = await resolveClaimProfile(name, "profile:tier-alias", harness);
+  // The group named after the tier decides first. No member that runs here
+  // falls back to the seeded profile, so a tier task never hard-fails where it
+  // ran before the group existed.
+  const group = await resolveGroupForAgent(tier, agentId, {
+    vcsRepo: task.vcsRepo,
+    includeRepoSecrets,
+  });
+  let name = seeded;
+  let picked: ClaimProfile | { modelUnsupported: string } | null = null;
+  if (group.kind === "resolved") {
+    picked = await resolveClaimProfile(group.member, "profile:tier-alias", harness);
+    if (picked && "profile" in picked) {
+      name = group.member;
+      // An untouched seed lists only the seeded profile on this harness: it
+      // stays a tier alias, so its hops keep walking the profile's fallbacks.
+      // Anything else is a group resolution, recorded as `profile:group` so a
+      // provider-error hop walks the group order (`fallbackGroupOf`).
+      const untouched = group.onHarness.length === 1 && group.onHarness[0] === seeded;
+      if (!untouched) {
+        picked = { ...picked, resolution: { ...picked.resolution, modelSource: "profile:group" } };
+      }
+      if (group.member !== seeded) {
+        await logGroupResolution(task.id, agentId, tier, group.member, group.skipped);
+      }
+    }
+  }
+  if (!picked || !("profile" in picked)) {
+    picked = await resolveClaimProfile(seeded, "profile:tier-alias", harness);
+    name = seeded;
+  }
   if (!picked || !("profile" in picked)) return picked;
   // A seed copied from a stale MODEL_TIER_* row can name another harness's model.
   // The tier chain skipped that value, so the alias skips it too.
@@ -658,6 +691,53 @@ async function resolveTierAlias(
   return picked;
 }
 
+async function logGroupResolution(
+  taskId: string,
+  agentId: string,
+  group: string,
+  member: string,
+  skipped: GroupMemberSkip[],
+): Promise<void> {
+  await createLogEntry({
+    eventType: "task_model_group_resolved",
+    taskId,
+    agentId,
+    newValue: member,
+    metadata: { group, member, skipped },
+  });
+}
+
+/**
+ * A task's own `modelGroup` at claim: the first member that runs on the agent,
+ * then that member as a profile. A missing group or no passing member is a
+ * hard stop, as for a task's own profile.
+ */
+async function resolveClaimGroup(
+  group: string,
+  task: { id: string; vcsRepo?: string | null },
+  agentId: string,
+  harness: ProviderName | null,
+  includeRepoSecrets: boolean,
+): Promise<ClaimProfile | { modelUnsupported: string } | null> {
+  const resolution = await resolveGroupForAgent(group, agentId, {
+    vcsRepo: task.vcsRepo,
+    includeRepoSecrets,
+  });
+  if (resolution.kind === "missing") {
+    return { modelUnsupported: `[model-group-missing] Model group "${group}" no longer exists.` };
+  }
+  if (resolution.kind === "none") {
+    return { modelUnsupported: groupUnavailableMessage(group, harness, resolution.skipped) };
+  }
+  if (resolution.skipped.length > 0) {
+    console.log(
+      `[model-group] task ${task.id}: ${group} → ${resolution.member} (skipped: ${formatGroupSkips(resolution.skipped)})`,
+    );
+  }
+  await logGroupResolution(task.id, agentId, group, resolution.member, resolution.skipped);
+  return await resolveClaimProfile(resolution.member, "profile:group", harness);
+}
+
 /**
  * Resolve and record the model for a task the given agent is claiming. Runs
  * inside the claim transaction. Returns the fields to merge into the trigger.
@@ -670,6 +750,7 @@ export async function recordClaimModelResolution(
     model?: string | null;
     modelTier?: string | null;
     profile?: string | null;
+    modelGroup?: string | null;
     effort?: string | null;
     vcsRepo?: string | null;
   },
@@ -684,9 +765,12 @@ export async function recordClaimModelResolution(
   const harnessProvider = agent.harnessProvider ?? agent.provider ?? null;
 
   if (!task.model?.trim()) {
+    // A fallback hop's resume sets `profile` to the member it picked and keeps
+    // `modelGroup`; the profile wins (create-time exclusivity binds creators only).
     const taskProfile = task.profile?.trim();
+    const taskGroup = taskProfile ? undefined : task.modelGroup?.trim();
     const agentDefault =
-      taskProfile || parseModelTier(task.modelTier)
+      taskProfile || taskGroup || parseModelTier(task.modelTier)
         ? null
         : await getAgentDefaultProfileName(agent.id);
     // The agent default is agent-scoped config: a repo-scoped MODEL_OVERRIDE or
@@ -699,9 +783,11 @@ export async function recordClaimModelResolution(
     const defaultProfile = repoKeys.has("MODEL_OVERRIDE") ? null : agentDefault;
     const picked = taskProfile
       ? await resolveClaimProfile(taskProfile, "profile:task", harnessProvider)
-      : defaultProfile
-        ? await resolveClaimProfile(defaultProfile, "profile:agent-default", harnessProvider)
-        : null;
+      : taskGroup
+        ? await resolveClaimGroup(taskGroup, task, agent.id, harnessProvider, includeRepoSecrets)
+        : defaultProfile
+          ? await resolveClaimProfile(defaultProfile, "profile:agent-default", harnessProvider)
+          : null;
     if (picked && "modelUnsupported" in picked)
       return { modelUnsupported: picked.modelUnsupported };
     if (picked) {
@@ -712,16 +798,12 @@ export async function recordClaimModelResolution(
       );
       // Profiles never fail fast on the CLI check (only a raw task pin does), so this is a resolution.
       const resolution = "unsupported" in checked ? picked.resolution : checked;
-      await getDbClient().run(
-        "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
-        [
-          resolution.resolvedModel,
-          resolution.modelSource,
-          resolution.modelAlias,
-          picked.profile.name,
-          task.id,
-        ],
-      );
+      await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+        resolvedModel: resolution.resolvedModel,
+        modelSource: resolution.modelSource,
+        modelAlias: resolution.modelAlias,
+        resolvedProfile: picked.profile.name,
+      });
       return {
         resolvedModel: resolution.resolvedModel,
         modelSource: resolution.modelSource,
@@ -743,7 +825,13 @@ export async function recordClaimModelResolution(
     harnessProvider,
     workerOverrides: await getAgentModelTierOverrides(agent.id),
   });
-  const alias = await resolveTierAlias(resolvedTier, task, harnessProvider);
+  const alias = await resolveTierAlias(
+    resolvedTier,
+    task,
+    agent.id,
+    harnessProvider,
+    includeRepoSecrets,
+  );
   if (alias && "modelUnsupported" in alias) return { modelUnsupported: alias.modelUnsupported };
   if (alias) {
     const checked = await applyCliSupport(
@@ -753,16 +841,12 @@ export async function recordClaimModelResolution(
     );
     // A profile source never fails fast on the CLI check, as for a task's own profile.
     const resolution = "unsupported" in checked ? alias.resolution : checked;
-    await getDbClient().run(
-      "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = ? WHERE id = ?",
-      [
-        resolution.resolvedModel,
-        resolution.modelSource,
-        resolution.modelAlias,
-        alias.profile.name,
-        task.id,
-      ],
-    );
+    await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+      resolvedModel: resolution.resolvedModel,
+      modelSource: resolution.modelSource,
+      modelAlias: resolution.modelAlias,
+      resolvedProfile: alias.profile.name,
+    });
     return {
       resolvedModel: resolution.resolvedModel,
       modelSource: resolution.modelSource,
@@ -776,12 +860,7 @@ export async function recordClaimModelResolution(
   if (!resolved) {
     // A re-claimed row keeps the claim record of its previous run; drop it so
     // the trigger and the row do not replay that run's model.
-    await getDbClient().run(
-      `UPDATE agent_tasks SET resolvedModel = NULL, modelSource = NULL, modelAlias = NULL, resolvedProfile = NULL
-         WHERE id = ? AND (resolvedModel IS NOT NULL OR modelSource IS NOT NULL OR modelAlias IS NOT NULL
-           OR resolvedProfile IS NOT NULL)`,
-      [task.id],
-    );
+    await getStorage().repos.tasks.clearTaskModelResolution(task.id);
     return {};
   }
   if ("harnessMismatch" in resolved) return { modelUnsupported: resolved.harnessMismatch };
@@ -794,10 +873,12 @@ export async function recordClaimModelResolution(
     return { modelUnsupported: checked.unsupported };
   }
   const resolution = checked;
-  await getDbClient().run(
-    "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ?, resolvedProfile = NULL WHERE id = ?",
-    [resolution.resolvedModel, resolution.modelSource, resolution.modelAlias, task.id],
-  );
+  await getStorage().repos.tasks.setTaskModelResolution(task.id, {
+    resolvedModel: resolution.resolvedModel,
+    modelSource: resolution.modelSource,
+    modelAlias: resolution.modelAlias,
+    resolvedProfile: null,
+  });
   return resolution.modelAlias
     ? resolution
     : { resolvedModel: resolution.resolvedModel, modelSource: resolution.modelSource };

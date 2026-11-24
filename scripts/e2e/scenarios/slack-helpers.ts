@@ -1,4 +1,5 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { ScenarioContext } from "../run";
 
@@ -49,7 +50,7 @@ export async function enableSlackDelegation(ctx: ScenarioContext): Promise<void>
   // before any scenario creates the tasks that depend on it.
   const activated = await pollUntil(() => {
     const row = ctx.db.get<{ delegation_activated_at: string | null }>(
-      "SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1",
+      sql`SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1`,
     );
     return row?.delegation_activated_at != null;
   }, 15_000);
@@ -96,14 +97,14 @@ export async function enableSlackRenderV2Only(ctx: ScenarioContext): Promise<voi
   await ctx.slack.waitForConnection(60_000);
   const activated = await pollUntil(() => {
     const row = ctx.db.get<{ activated_at: string | null }>(
-      "SELECT activated_at FROM slack_render_v2_state WHERE id = 1",
+      sql`SELECT activated_at FROM slack_render_v2_state WHERE id = 1`,
     );
     return row?.activated_at != null;
   }, 15_000);
   expect(activated, "Slack render v2 never activated within 15 seconds");
 
   const state = ctx.db.get<{ delegation_activated_at: string | null }>(
-    "SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1",
+    sql`SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1`,
   );
   expect(
     state?.delegation_activated_at == null,
@@ -375,28 +376,13 @@ export async function waitForOutcome(
   }
 }
 
-/** A wake-up time as Slack shows it: HH:MM in Europe/Madrid. */
-export function madridClock(iso: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Madrid",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date(iso));
-}
-
-/**
- * Slack shows a deferral's wake-up as `resumes by 04:00` / `Checking back at
- * 04:00` in Europe/Madrid, never the stored card's wording: no `at the latest`
- * ceiling, no `today at` / `tomorrow at` / `on 09-24 at` day, no UTC. Checks
- * the visible text and blocks of every message in the thread (not the raw
- * payload, whose ids and links are not read by a human).
- */
 export function expectChannelWakeTime(
   ctx: ScenarioContext,
   threadTs: string,
   label: string,
   deferredUntil: string,
+  timeZone = "UTC",
+  fallback = true,
 ): void {
   const visible = JSON.stringify(
     ctx.slack
@@ -407,12 +393,25 @@ export function expectChannelWakeTime(
   for (const [what, pattern] of [
     ["an `at the latest` ceiling", /at the latest/],
     ["a stored-card wake-up day", /\b(?:today|tomorrow|on \d{2}-\d{2}) at\b/],
-    ["a UTC time", /\bUTC\b/],
   ] as const) {
     const match = visible.match(pattern);
     expect(!match, `${label} Slack thread showed ${what}: ${JSON.stringify(match?.[0])}`);
   }
-  const clock = madridClock(deferredUntil);
+  const target = new Date(deferredUntil);
+  const clock = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(target);
+  const abbreviation = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" })
+    .formatToParts(target)
+    .find((part) => part.type === "timeZoneName")!.value;
+  const labelled = `${clock} ${abbreviation}`;
+  expect(
+    visible.includes(labelled) === fallback,
+    `${label} expected fallback label: ${fallback}, got ${visible}`,
+  );
   expect(visible.includes(clock), `${label} Slack thread did not show the wake-up time ${clock}`);
 }
 
@@ -472,8 +471,7 @@ export async function runSlackMentionFlow(
   expect(task.status === "pending", `Slack task ${taskId} is ${String(task.status)}, not pending`);
 
   const row = ctx.db.get<{ source: string; key: string }>(
-    'SELECT source, "key" FROM agent_tasks WHERE id = ?',
-    [taskId],
+    sql`SELECT source, "key" FROM agent_tasks WHERE id = ${taskId}`,
   );
   expect(
     row?.source === "slack",

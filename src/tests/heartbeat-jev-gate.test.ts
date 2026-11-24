@@ -112,7 +112,7 @@ function fakeCtx(f: Fixture) {
             [[3, 1, 0, 40, 2]],
           );
         }
-        if (sql.includes("status = 'failed' AND finishedAt")) {
+        if (sql.includes(`status = 'failed' AND "finishedAt"`)) {
           const rows = (f.failed ?? [])
             .filter((r) => String(r.finishedAt) > params[0])
             .sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))

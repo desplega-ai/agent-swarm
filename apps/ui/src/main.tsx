@@ -6,6 +6,10 @@ import "@/styles/json-render.css";
 import "@/styles/markdown.css";
 import App from "@/app/App";
 import { loadModelsSnapshot } from "@/lib/models-snapshot";
+import { applyUiFont, readStoredUiFont } from "@/lib/ui-font";
+
+// Before the first render, so the first paint already uses the chosen font.
+applyUiFont(readStoredUiFont());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -9,6 +9,7 @@ import {
   registerSensitiveKeyName,
   registerVolatileSecret,
   SCRUBBER_RULES_VERSION,
+  scrubJson,
   scrubObject,
   scrubSecrets,
   unregisterVolatileSecret,
@@ -1064,5 +1065,75 @@ describe("createValueScrubber (per-run exact values)", () => {
     expect(scrub.text("unchanged")).toBe("unchanged");
     const obj = { a: 1 };
     expect(scrub.object(obj)).toBe(obj);
+  });
+});
+
+// A string value with an unclosed `KEY='` makes the key pass run past the
+// JSON string, so `JSON.parse(scrubSecrets(JSON.stringify(event)))` threw
+// "Unterminated string" in the adapters' emit and ended the session.
+describe("scrubJson", () => {
+  const line = "check FOO_TOKEN='x in the output";
+
+  test("the serialized scrub breaks on an unclosed KEY=' inside a string", () => {
+    expect(() => JSON.parse(scrubSecrets(JSON.stringify({ result: line })))).toThrow();
+  });
+
+  test("keeps the shape of an event whose string holds an unclosed KEY='", () => {
+    const event = { type: "tool_end", toolCallId: "exec-1", result: line };
+    const out = scrubJson(event);
+    expect(out.type).toBe("tool_end");
+    expect(out.toolCallId).toBe("exec-1");
+    expect(typeof out.result).toBe("string");
+    expect(out.result.startsWith("check FOO_TOKEN='")).toBe(true);
+  });
+
+  test("keeps the shape when the line arrives double-encoded in a raw_log", () => {
+    const inner = {
+      type: "item.completed",
+      item: { type: "command_execution", aggregated_output: `a\n${line}\nb` },
+    };
+    const out = scrubJson({ type: "raw_log", content: JSON.stringify(inner) });
+    expect(out.type).toBe("raw_log");
+    expect(typeof out.content).toBe("string");
+  });
+
+  test("still redacts a known value in the fallback path", () => {
+    const value = `example-${randomToken(32)}`;
+    process.env.SCRUB_JSON_TOKEN = value;
+    refreshSecretScrubberCache();
+    const out = scrubJson({ result: line, other: `value ${value} here` });
+    expect(out.other).toBe("value [REDACTED:SCRUB_JSON_TOKEN] here");
+    expect(JSON.stringify(out)).not.toContain(value);
+  });
+
+  test("still redacts a value under a sensitive key in the fallback path", () => {
+    const token = randomToken(40);
+    const password = randomToken(24);
+    const event = {
+      token,
+      nested: { "db.password": password, note: "<db-password>" },
+      result: line,
+    };
+    expect(() => JSON.parse(scrubSecrets(JSON.stringify(event)))).toThrow();
+    const out = scrubJson(event);
+    expect(out.token).toBe("[REDACTED:token]");
+    expect(out.nested["db.password"]).toBe("[REDACTED:db.password]");
+    expect(out.nested.note).toBe("<db-password>");
+    const text = JSON.stringify(out);
+    expect(text).not.toContain(token);
+    expect(text).not.toContain(password);
+  });
+
+  test("matches the serialized scrub when that one parses", () => {
+    const github = ["ghp", randomToken(36)].join("_");
+    const event = { type: "raw_stderr", content: `Authorization: Bearer ${github}\n` };
+    expect(scrubJson(event)).toEqual(JSON.parse(scrubSecrets(JSON.stringify(event))));
+    expect(JSON.stringify(scrubJson(event))).not.toContain(github);
+  });
+
+  test("passes undefined and primitives through", () => {
+    expect(scrubJson(undefined)).toBeUndefined();
+    expect(scrubJson(null)).toBeNull();
+    expect(scrubJson(3)).toBe(3);
   });
 });

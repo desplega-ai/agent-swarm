@@ -3,12 +3,12 @@
  * in task or session content (see `link-preview-state.tsx`), or a task opened
  * from a card's Open toast. The page places
  * it inline in its own body (`link-preview-dock.tsx`), or it opens as a sheet
- * over the page. Preview only: no editing, comments, or folder navigation.
+ * over the page. Files support review in place.
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, ChevronLeft, ExternalLink, Globe, ListTodo, X } from "lucide-react";
-import { lazy, type ReactNode, Suspense } from "react";
+import { lazy, type ReactNode, type RefObject, Suspense, useRef } from "react";
 import { api } from "@/api/client";
 import { useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { usePage } from "@/api/hooks/use-pages";
@@ -29,6 +29,8 @@ import { formatRelative } from "@/lib/relative-time";
 import { statusLabel } from "@/lib/status-labels";
 import { taskListTitle } from "@/lib/task-title";
 import { cn } from "@/lib/utils";
+
+const FileReviewControls = lazy(() => import("./file-review-controls"));
 
 const PAGE_ID_RE = /^[a-f0-9]{32}$/i;
 
@@ -99,6 +101,8 @@ function PreviewFrame({
   title,
   detail,
   meta,
+  actions,
+  bodyRef,
   openHref,
   onClose,
   onBack,
@@ -109,6 +113,8 @@ function PreviewFrame({
   title: string;
   detail?: string;
   meta?: string;
+  actions?: ReactNode;
+  bodyRef?: RefObject<HTMLDivElement | null>;
   openHref: string;
   children: ReactNode;
 } & PreviewExit) {
@@ -151,6 +157,7 @@ function PreviewFrame({
             </p>
           ) : null}
         </div>
+        {actions}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button asChild variant="ghost" size="icon" className="size-8">
@@ -178,7 +185,9 @@ function PreviewFrame({
           </Button>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      <div ref={bodyRef} className="min-h-0 flex-1 overflow-auto">
+        {children}
+      </div>
     </div>
   );
 }
@@ -209,6 +218,7 @@ function FilePreview({
 }: {
   target: Extract<LinkPreviewTarget, { kind: "file" }>;
 } & PreviewExit) {
+  const viewerRef = useRef<HTMLDivElement>(null);
   const agentFs = useOptionalAgentFs();
   const connected = agentFs?.state === "ready";
   const stat = useAgentFsStat(target.file);
@@ -248,6 +258,14 @@ function FilePreview({
       title={target.name}
       detail={target.file.path}
       meta={meta}
+      bodyRef={viewerRef}
+      actions={
+        connected && stat.data && !notFound && !stat.error ? (
+          <Suspense fallback={null}>
+            <FileReviewControls target={target} stat={stat.data} viewerRef={viewerRef} />
+          </Suspense>
+        ) : null
+      }
       openHref={linkPreviewOpenHref(target, { connected })}
       {...exit}
     >

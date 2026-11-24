@@ -3,6 +3,7 @@
 import type {
   Announcements,
   DndContextProps,
+  DragCancelEvent,
   DragEndEvent,
   DragOverEvent,
   DragStartEvent,
@@ -20,9 +21,11 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { createContext, type HTMLAttributes, type ReactNode, useContext, useState } from "react";
 import { createPortal } from "react-dom";
 import tunnel from "tunnel-rat";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -83,6 +86,7 @@ export const KanbanBoard = ({ id, children, className }: KanbanBoardProps) => {
 };
 
 export type KanbanCardProps<T extends KanbanItemProps = KanbanItemProps> = T & {
+  dragEnabled?: boolean;
   children?: ReactNode;
   className?: string;
 };
@@ -92,11 +96,26 @@ export const KanbanCard = <T extends KanbanItemProps = KanbanItemProps>({
   name,
   children,
   className,
+  dragEnabled = true,
 }: KanbanCardProps<T>) => {
-  const { attributes, listeners, setNodeRef, transition, transform, isDragging } = useSortable({
-    id,
-  });
+  const {
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transition,
+    transform,
+    isDragging,
+  } = useSortable({ id, disabled: !dragEnabled });
+  // Keep pointer dragging on the whole card and keyboard dragging on the handle.
+  const { onKeyDown, ...pointerListeners } = listeners ?? {};
   const { activeCardId } = useContext(KanbanContext) as KanbanContextProps;
+  const cardClassName = cn(
+    "cursor-grab gap-4 rounded-md p-3 shadow-sm",
+    dragEnabled && "relative pr-10",
+    className,
+  );
+  const content = children ?? <p className="m-0 font-medium text-sm">{name}</p>;
 
   const style = {
     transition,
@@ -105,27 +124,37 @@ export const KanbanCard = <T extends KanbanItemProps = KanbanItemProps>({
 
   return (
     <>
-      <div style={style} {...listeners} {...attributes} ref={setNodeRef}>
+      <div style={style} {...pointerListeners} ref={setNodeRef}>
         <Card
           className={cn(
-            "cursor-grab gap-4 rounded-md p-3 shadow-sm",
+            cardClassName,
             isDragging && "pointer-events-none cursor-grabbing opacity-30",
-            className,
           )}
         >
-          {children ?? <p className="m-0 font-medium text-sm">{name}</p>}
+          {content}
+          {dragEnabled && (
+            <Button
+              {...attributes}
+              ref={setActivatorNodeRef}
+              onKeyDown={(event) => onKeyDown?.(event)}
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`Drag ${name || "Untitled"}`}
+              className="absolute top-2.5 right-2.5 cursor-grab text-muted-foreground active:cursor-grabbing"
+            >
+              <GripVertical aria-hidden className="size-4" />
+            </Button>
+          )}
         </Card>
       </div>
       {activeCardId === id && (
         <t.In>
           <Card
-            className={cn(
-              "cursor-grab gap-4 rounded-md p-3 shadow-sm ring-2 ring-primary",
-              isDragging && "cursor-grabbing",
-              className,
-            )}
+            inert
+            className={cn(cardClassName, "ring-2 ring-primary", isDragging && "cursor-grabbing")}
           >
-            {children ?? <p className="m-0 font-medium text-sm">{name}</p>}
+            {content}
           </Card>
         </t.In>
       )}
@@ -187,6 +216,7 @@ export const KanbanProvider = <
   C extends KanbanColumnProps = KanbanColumnProps,
 >({
   children,
+  onDragCancel,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -210,6 +240,11 @@ export const KanbanProvider = <
       setActiveCardId(event.active.id as string);
     }
     onDragStart?.(event);
+  };
+
+  const handleDragCancel = (event: DragCancelEvent) => {
+    setActiveCardId(null);
+    onDragCancel?.(event);
   };
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -295,6 +330,7 @@ export const KanbanProvider = <
       <DndContext
         accessibility={{ announcements }}
         collisionDetection={closestCenter}
+        onDragCancel={handleDragCancel}
         onDragEnd={handleDragEnd}
         onDragOver={handleDragOver}
         onDragStart={handleDragStart}

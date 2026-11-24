@@ -53,36 +53,36 @@ afterAll(async () => {
 
 describe("ensurePricingSeeded", () => {
   test("seeds once per database handle, and again for a new handle", async () => {
-    ensurePricingSeeded();
+    await ensurePricingSeeded();
     const seeded = await countPricingSeedRows();
     expect(seeded).toBeGreaterThan(0);
 
     // A second call must not touch the table: wipe it and confirm it stays empty.
     await getDbClient().run("DELETE FROM pricing WHERE effective_from = 0");
-    ensurePricingSeeded();
+    await ensurePricingSeeded();
     expect(await countPricingSeedRows()).toBe(0);
 
     // Reopening the same file gives a new handle, which is seeded again.
     closeDb();
     initDb(TEST_DB_PATH);
-    ensurePricingSeeded();
+    await ensurePricingSeeded();
     expect(await countPricingSeedRows()).toBe(seeded);
   });
 });
 
 describe("ensureRbacSeeded", () => {
   test("syncs once per database handle, and again for a new handle", async () => {
-    ensureRbacSeeded();
+    await ensureRbacSeeded();
     const seeded = await countBuiltinPermissions();
     expect(seeded).toBeGreaterThan(0);
 
     await getDbClient().run("DELETE FROM role_permissions WHERE roleId = ?", [BUILTIN_ROLE_ID]);
-    ensureRbacSeeded();
+    await ensureRbacSeeded();
     expect(await countBuiltinPermissions()).toBe(0);
 
     closeDb();
     initDb(TEST_DB_PATH);
-    ensureRbacSeeded();
+    await ensureRbacSeeded();
     expect(await countBuiltinPermissions()).toBe(seeded);
   });
 
@@ -99,12 +99,12 @@ describe("ensureRbacSeeded", () => {
       [builtin.name],
     );
 
-    expect(() => ensureRbacSeeded()).toThrow(/already uses that name/);
+    await expect(ensureRbacSeeded()).rejects.toThrow(/already uses that name/);
     // Not cached as done: the next caller retries and sees the same error.
-    expect(() => ensureRbacSeeded()).toThrow(/already uses that name/);
+    await expect(ensureRbacSeeded()).rejects.toThrow(/already uses that name/);
 
     await client.run("DELETE FROM roles WHERE id = 'rbac-role-collision'");
-    ensureRbacSeeded();
+    await ensureRbacSeeded();
     expect(await countBuiltinPermissions()).toBeGreaterThan(0);
   });
 });

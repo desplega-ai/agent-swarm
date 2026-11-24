@@ -135,7 +135,12 @@ export const nativeToolHooks: Scenario = {
           permission_mode: "bypassPermissions",
           ...event,
         }),
-        env: { CLAUDE_PROJECT_DIR: cwd, TMPDIR: tmp ?? (await freshTmp()) },
+        // HOOK_WORKSPACE_DIR keeps a worker host's /workspace/.mcp.json from winning over cwd.
+        env: {
+          CLAUDE_PROJECT_DIR: cwd,
+          HOOK_WORKSPACE_DIR: cwd,
+          TMPDIR: tmp ?? (await freshTmp()),
+        },
       });
     }
 
@@ -274,7 +279,10 @@ export const nativeToolHooks: Scenario = {
       const cacheFiles = (await readdir(cacheTmp)).filter((name) =>
         name.startsWith("agent-swarm-native-hooks-"),
       );
-      expect(cacheFiles.length === 1, `Expected one status cache file, saw ${cacheFiles.join(", ")}`);
+      expect(
+        cacheFiles.length === 1,
+        `Expected one status cache file, saw ${cacheFiles.join(", ")}`,
+      );
       const cacheFile = `${cacheTmp}/${cacheFiles[0]}`;
       expect(
         ((await stat(cacheFile)).mode & 0o777) === 0o600,
@@ -304,7 +312,8 @@ export const nativeToolHooks: Scenario = {
         `codex rewrite output was ${codexRewrite.stdout}`,
       );
       // An apply_patch rewrite reaches codex as updatedInput too (codex-cli 0.169.0 applies it).
-      const patchText = (file: string) => `*** Begin Patch\n*** Add File: ${file}\n+x\n*** End Patch\n`;
+      const patchText = (file: string) =>
+        `*** Begin Patch\n*** Add File: ${file}\n+x\n*** End Patch\n`;
       const codexPatch = await codexHook(ctx.baseUrl, {
         hook_event_name: "PreToolUse",
         tool_name: "apply_patch",

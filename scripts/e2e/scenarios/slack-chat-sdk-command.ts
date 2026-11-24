@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { expect } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -14,7 +15,7 @@ export const slackChatSdkCommand: Scenario = {
     try {
       const slack = flip.mock;
       const chatTasksBefore = ctx.db.query<{ id: string }>(
-        "SELECT id FROM agent_tasks WHERE source = 'chat'",
+        sql`SELECT id FROM agent_tasks WHERE source = 'chat'`,
       ).length;
       for (const [command, needle] of [
         ["/agent-swarm-help", "/status: Show the latest task of this chat"],
@@ -46,7 +47,7 @@ export const slackChatSdkCommand: Scenario = {
         "A Chat SDK command answered ephemerally; it posts to the channel",
       );
       const chatTasksAfter = ctx.db.query<{ id: string }>(
-        "SELECT id FROM agent_tasks WHERE source = 'chat'",
+        sql`SELECT id FROM agent_tasks WHERE source = 'chat'`,
       ).length;
       expect(
         chatTasksAfter === chatTasksBefore,

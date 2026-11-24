@@ -1,3 +1,4 @@
+import { sql } from "../db";
 // Workflow engine, async executors: wait (time, run-scoped event, global event, timeout),
 // agent-task, foreach over agent-tasks, sub-workflow and human-in-the-loop, all parked
 // at once in one run that fans out, then released one by one from outside.
@@ -273,6 +274,17 @@ export const workflowEngineAsyncNodes: Scenario = {
       "run-scoped signal for an unknown run",
     );
 
+    // Names the extension post-bridge forwards are server-emitted only: extension handlers
+    // trust those payloads, so neither signal route may emit them.
+    for (const name of ["approval.resolved", "task.completed", "gitlab.merge_request.opened"]) {
+      for (const path of ["/api/workflow-events", `/api/workflow-runs/${runId}/events`]) {
+        const forged = await ctx.api("POST", path, {
+          body: { name, payload: { requestId: crypto.randomUUID(), status: "approved" } },
+        });
+        expectStatus(forged, [403], `server-only event ${name} via ${path}`);
+      }
+    }
+
     // Run-scoped wait: a global broadcast of the same name carries no run id, so it
     // does not wake the wait. The run-scoped signal does, only with a matching filter.
     const runEvent = `e2e.run.${ctx.nonce}`;
@@ -385,8 +397,7 @@ export const workflowEngineAsyncNodes: Scenario = {
       workflowRunStepId: string;
       tags: string;
     }>(
-      "SELECT source, agentId, status, priority, workflowRunStepId, tags FROM agent_tasks WHERE id = ?",
-      [String(agent.taskId)],
+      sql`SELECT source, "agentId", status, priority, "workflowRunStepId", tags FROM agent_tasks WHERE id = ${String(agent.taskId)}`,
     );
     expect(
       agentTask?.source === "workflow" &&
@@ -416,8 +427,7 @@ export const workflowEngineAsyncNodes: Scenario = {
     const note = outputOf(detail, "n-after-foreach");
     expect(note.message === "foreach ok=3 failed=0", "foreach aggregate reached the next node");
     const workflowTasks = ctx.db.query<{ id: string }>(
-      "SELECT id FROM agent_tasks WHERE workflowRunId = ? AND source = 'workflow'",
-      [runId],
+      sql`SELECT id FROM agent_tasks WHERE "workflowRunId" = ${runId} AND source = 'workflow'`,
     );
     expect(workflowTasks.length === 4, `expected 4 workflow tasks, got ${workflowTasks.length}`);
 
@@ -477,8 +487,7 @@ export const workflowEngineAsyncNodes: Scenario = {
     const types = new Set(
       ctx.db
         .query<{ nodeType: string }>(
-          "SELECT DISTINCT nodeType FROM workflow_run_steps WHERE runId = ?",
-          [runId],
+          sql`SELECT DISTINCT "nodeType" FROM workflow_run_steps WHERE "runId" = ${runId}`,
         )
         .map((row) => row.nodeType),
     );

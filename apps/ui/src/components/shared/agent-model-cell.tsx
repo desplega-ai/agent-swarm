@@ -35,6 +35,9 @@ export function AgentModelCell({ display, liveCatalog }: AgentModelCellProps) {
               next task
             </span>
           ) : null}
+          {display.showingLastUsed ? (
+            <span className="shrink-0 text-[11px] text-muted-foreground">last used</span>
+          ) : null}
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" align="start" sideOffset={6} className="max-w-sm p-3 text-left">
@@ -68,6 +71,13 @@ export function AgentModelCell({ display, liveCatalog }: AgentModelCellProps) {
 
                 <dt className="opacity-60">Why</dt>
                 <dd>that task set its own model, tier or profile</dd>
+              </>
+            ) : null}
+
+            {display.showingLastUsed ? (
+              <>
+                <dt className="opacity-60">Configured</dt>
+                <dd className="break-all font-mono">{configured?.raw}</dd>
               </>
             ) : null}
 

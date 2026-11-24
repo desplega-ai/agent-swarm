@@ -16,7 +16,6 @@ import {
   getActiveSessions,
   getActiveTaskCount,
   getAgentById,
-  getDbClient,
   getTaskById,
   hasCapacity,
   isAgentEligibleForTask,
@@ -28,9 +27,10 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
-import { modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
+import { modelGroupRefError, modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
+import { getStorage } from "@/be/storage";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
@@ -102,7 +102,7 @@ export const taskActionInputSchema = z.object({
       "Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
     ),
   modelTier: ModelTierSchema.optional().describe(
-    "Deprecated: pass profile \"<harness>-<tier>\" instead (same model). Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims the task, through the seeded <harness>-<tier> profile of its harness. Only used with 'create' action.",
+    "Deprecated: pass modelGroup \"<tier>\" (the tier's group) or profile \"<harness>-<tier>\" (same model) instead. Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims the task, through the model group named after the tier, else the seeded <harness>-<tier> profile of its harness. Only used with 'create' action.",
   ),
   allowCustomModel: z
     .boolean()
@@ -120,6 +120,14 @@ export const taskActionInputSchema = z.object({
     .optional()
     .describe(
       "Model profile name for the created pool task (see list-model-profiles); only workers on its harness claim it. Exclusive with model and modelTier. Only used with 'create' action.",
+    ),
+  modelGroup: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "Model group name for the created pool task (GET /api/model-groups); only workers where a member runs claim it, and each runs its first passing member. Exclusive with model, modelTier and profile. Only used with 'create' action.",
     ),
   requiredCapabilities: z
     .array(z.string())
@@ -238,7 +246,7 @@ export async function taskActionHandler(
       return agentOnlyActionResult();
     }
 
-    const result = await getDbClient().transaction(
+    const result = await getStorage().transaction(
       async (): Promise<TaskActionResult | SwarmToolResult> => {
         if (!taskId) {
           return { success: false, message: `Task ID is required for '${action}' action.` };
@@ -314,6 +322,7 @@ export async function taskActionHandler(
       profile: input.profile,
       model: normalizedModel.model,
       modelTier: normalizedModel.modelTier,
+      modelGroup: input.modelGroup,
     });
     if (profileError) return taskActionResult({ success: false, message: profileError }, agentId);
     try {
@@ -345,6 +354,7 @@ export async function taskActionHandler(
         modelTier: normalizedModel.modelTier,
         effort: input.effort,
         profile: input.profile,
+        modelGroup: input.modelGroup,
         routingAffinity:
           leadOnly || requiredCapabilities?.length
             ? { leadOnly, capabilities: requiredCapabilities ?? [] }
@@ -363,7 +373,7 @@ export async function taskActionHandler(
     };
   }
 
-  const transacted = getDbClient().transaction(async (): Promise<TaskActionResult> => {
+  const transacted = getStorage().transaction(async (): Promise<TaskActionResult> => {
     switch (action) {
       case "create": {
         const newTask = await createTaskExtended(
@@ -669,7 +679,10 @@ export async function taskActionHandler(
     }
   });
   const result = await transacted.catch((error: unknown): TaskActionResult => {
-    // A create whose profile was deleted between taskProfileError and the insert.
+    // A create whose profile or group was deleted between taskProfileError and the insert.
+    if (modelGroupRefError(error)) {
+      return { success: false, message: `Unknown model group "${input.modelGroup}".` };
+    }
     if (modelProfileRefError(error) !== "missing") throw error;
     return { success: false, message: `Unknown model profile "${input.profile}".` };
   });

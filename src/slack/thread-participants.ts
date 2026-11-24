@@ -201,22 +201,29 @@ async function renderThreadContext(
   // Author identity comes from the identity primitive (resolved name or the
   // UNKNOWN sentinel), never a raw Slack display name.
   let otherBot = false;
-  const lines = window.map((m) => {
+  const lines: string[] = [];
+  for (const m of window) {
     const text = extractSlackMessageText(m);
     if (isBot(m)) {
       const short = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-      if (isOwnBot(m)) return formatAuthoredMessage("[Agent]", short);
+      if (isOwnBot(m)) {
+        lines.push(formatAuthoredMessage("[Agent]", short));
+        continue;
+      }
       otherBot = true;
-      const label = resolveTemplate("slack.message.thread_context_other_bot", {
-        bot_id: m.bot_id ?? m.user ?? "unknown",
-      }).text;
-      return formatAuthoredMessage(label, short);
+      const label = (
+        await resolveTemplate("slack.message.thread_context_other_bot", {
+          bot_id: m.bot_id ?? m.user ?? "unknown",
+        })
+      ).text;
+      lines.push(formatAuthoredMessage(label, short));
+      continue;
     }
-    return formatAuthoredMessage(m.user ? `<@${m.user}>` : "Unknown", text);
-  });
+    lines.push(formatAuthoredMessage(m.user ? `<@${m.user}>` : "Unknown", text));
+  }
   let body = await rewriteSlackMentions(lines.join("\n"), botUserId, trust);
   if (otherBot || [...trust.values()].some(isUntrusted)) {
-    body = `${resolveTemplate("slack.message.thread_context_untrusted", {}).text}\n${body}`;
+    body = `${(await resolveTemplate("slack.message.thread_context_untrusted", {})).text}\n${body}`;
   }
-  return resolveTemplate("slack.message.thread_context", { thread_messages: body }).text;
+  return (await resolveTemplate("slack.message.thread_context", { thread_messages: body })).text;
 }

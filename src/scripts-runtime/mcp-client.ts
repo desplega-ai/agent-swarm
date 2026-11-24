@@ -60,7 +60,7 @@ export async function postSwarmJson(
   body: unknown,
   label: string,
 ): Promise<Record<string, unknown>> {
-  const baseUrl = Redacted.value(config.mcpBaseUrl).replace(/\/$/, "");
+  const baseUrl = Redacted.value(config.sdkBaseUrl).replace(/\/$/, "");
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: headers(config),

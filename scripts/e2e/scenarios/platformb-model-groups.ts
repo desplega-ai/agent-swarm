@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { Cleanup, registerLead, registerWorker, retireAgent } from "./platformb-helpers";
@@ -133,7 +134,13 @@ export const platformbModelGroups: Scenario = {
 
       // ===== members =====
       response = await ctx.api("POST", "/api/model-profiles", {
-        body: { name: profileName, harness: "codex", model: "gpt-5", allowCustomModel: true },
+        // A custom id no catalog lists, so a models.dev deprecation cannot reject it.
+        body: {
+          name: profileName,
+          harness: "codex",
+          model: "e2e-custom-codex-model",
+          allowCustomModel: true,
+        },
       });
       expectStatus(response, [201], "create a member profile");
       response = await ctx.api("PUT", `/api/model-groups/${groupName}/members`, {
@@ -141,9 +148,8 @@ export const platformbModelGroups: Scenario = {
       });
       expectStatus(response, [200], "reorder group members");
       const rows = ctx.db.query<{ position: number; profileName: string }>(
-        `SELECT m.position, m.profileName FROM model_group_members m
-           JOIN model_groups g ON g.id = m.groupId WHERE g.name = ? ORDER BY m.position`,
-        [groupName],
+        sql`SELECT m.position, m."profileName" FROM model_group_members m
+           JOIN model_groups g ON g.id = m."groupId" WHERE g.name = ${groupName} ORDER BY m.position`,
       );
       expect(
         JSON.stringify(rows.map((r) => [r.position, r.profileName])) ===

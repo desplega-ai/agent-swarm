@@ -33,6 +33,7 @@ mock.module("@/lib/config", () => require("../../lib/config"));
 const {
   AttemptHistory,
   HitlOutput,
+  RawJsonToggle,
   StepCard,
   SubWorkflowOutput,
   SystemOneExtractionOutput,
@@ -357,5 +358,91 @@ describe("jsonByteSize", () => {
   test("counts UTF-8 bytes, not UTF-16 code units, for non-ASCII output", () => {
     expect(jsonByteSize("😀")).toBe(4);
     expect(jsonByteSize("hello")).toBe(5);
+  });
+});
+
+test("Tab reaches step selection and Enter, Space and click select it independently of Expand", async () => {
+  const { GlobalRegistrator } = await import("@happy-dom/global-registrator");
+  GlobalRegistrator.register();
+  const { createRoot } = await import("react-dom/client");
+  const { act } = await import("react");
+  const { default: userEvent } = await import("@testing-library/user-event");
+  const user = userEvent.setup({ document });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const select = mock();
+  const expand = mock();
+  try {
+    await act(() =>
+      root.render(
+        <StepCard
+          step={step("approved")}
+          isSelected={false}
+          isExpanded={false}
+          onClick={select}
+          onToggleExpand={expand}
+        />,
+      ),
+    );
+    const { getByRole } = await import("@testing-library/dom");
+    const title = getByRole(host, "button", { name: "review" });
+
+    await user.tab();
+    expect(document.activeElement).toBe(title);
+    await user.keyboard("{Enter}");
+    expect(select).toHaveBeenCalledTimes(1);
+    await user.keyboard(" ");
+    expect(select).toHaveBeenCalledTimes(2);
+    await user.click(title);
+    expect(select).toHaveBeenCalledTimes(3);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(expand).toHaveBeenCalledTimes(1);
+    expect(select).toHaveBeenCalledTimes(3);
+  } finally {
+    await act(() => root.unmount());
+    host.remove();
+    await GlobalRegistrator.unregister();
+  }
+});
+
+describe("RawJsonToggle", () => {
+  async function openRawJson(data: unknown): Promise<string> {
+    const { GlobalRegistrator } = await import("@happy-dom/global-registrator");
+    GlobalRegistrator.register();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const { getByRole } = await import("@testing-library/dom");
+    const user = userEvent.setup({ document });
+    const host = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(host);
+    try {
+      await act(() => root.render(<RawJsonToggle data={data} />));
+      const toggle = getByRole(host, "button", { name: "Show raw JSON" });
+      await act(() => user.click(toggle));
+      return host.querySelector("pre")?.textContent ?? "";
+    } finally {
+      await act(() => root.unmount());
+      host.remove();
+      await GlobalRegistrator.unregister();
+    }
+  }
+
+  test("absent output reads No output instead of an empty panel", async () => {
+    expect(await openRawJson(undefined)).toBe("No output");
+  });
+
+  test("string output renders as is", async () => {
+    expect(await openRawJson("done")).toBe("done");
+  });
+
+  test("object output renders as indented JSON", async () => {
+    expect(await openRawJson({ ok: true })).toBe(JSON.stringify({ ok: true }, null, 2));
+  });
+
+  test("null output renders as null, not as absent", async () => {
+    expect(await openRawJson(null)).toBe("null");
   });
 });

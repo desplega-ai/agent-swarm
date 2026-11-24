@@ -175,6 +175,11 @@ export const PERMISSIONS = {
       "Change a repo's merge policy (the allowMerge guideline or the mergePolicy record), which tells agents whether they may merge a PR themselves and which PRs the swarm may auto-merge.",
     namespace: "repo",
   },
+  "repo.exec-config.write": {
+    description:
+      "Change a repo's url, clonePath or hooks, or create a repo with hooks enabled. Workers clone the url into clonePath and run the hook install there.",
+    namespace: "repo",
+  },
   "repo.delete": {
     description: "Delete a repo record and the guidelines and merge policy it holds.",
     namespace: "repo",
@@ -381,6 +386,11 @@ export const PERMISSIONS = {
   "page.launch": {
     description: "Open a public or authed page: mint its page-session cookie.",
     namespace: "page",
+  },
+  "prompt-template.write": {
+    description:
+      "Create, change, reset or delete a prompt template override: any as lead, operator, or user; an agent-scope override only for the caller's own agent.",
+    namespace: "prompt-template",
   },
   "objects.read": {
     description:

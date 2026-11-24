@@ -34,6 +34,10 @@ import { type RelevantMemory, renderMemoriesPrompt } from "../prompts/memories.t
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import {
+  readClaudeRequestSettings,
+  removeClaudeSessionTranscript,
+} from "../providers/claude-request-settings";
+import {
   authJsonToCredentialSelection,
   credentialsToAuthJson,
 } from "../providers/codex-oauth/auth-json.js";
@@ -102,10 +106,14 @@ import {
   type RateLimitWindowTelemetry,
   resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
-import { isGitHubUrl, scopeGitHubTokenToEnterprise } from "../utils/github-host";
+import { scopeGitHubTokenToEnterprise } from "../utils/github-host";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
-import { isEffectiveOutputSchema } from "../utils/output-schema.ts";
+import {
+  isEffectiveOutputSchema,
+  matchOutputSchema,
+  normalizeOutputSchema,
+} from "../utils/output-schema.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -120,14 +128,9 @@ import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
 import { vcsRepoName, vcsRepoUrlMatches } from "../utils/vcs-repo-match.ts";
-import {
-  canonicalAzureDevOpsRepoUrl,
-  isAzureDevOpsUrl,
-  parseAzureDevOpsRepoUrl,
-} from "../vcs/azure-devops.ts";
-import { bitbucketFullName, isBitbucketUrl, parseBitbucketRepoUrl } from "../vcs/bitbucket.ts";
-import { detectVcsProvider, type VcsProvider } from "../vcs/index.ts";
-import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
+import { canonicalAzureDevOpsRepoUrl, parseAzureDevOpsRepoUrl } from "../vcs/azure-devops.ts";
+import { bitbucketFullName, parseBitbucketRepoUrl } from "../vcs/bitbucket.ts";
+import { detectVcsProvider } from "../vcs/index.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
   buildContextPreamble,
@@ -547,6 +550,14 @@ export async function ensureRepoForTask(
 
     let warning: string | null = null;
 
+    // git, gh and glab would read a leading "-" as an option (clone, and the fetch of an
+    // existing clone), not as the repo, the target or the branch.
+    if (url.startsWith("-") || clonePath.startsWith("-") || defaultBranch.startsWith("-")) {
+      throw new Error(
+        `Refusing to use repo ${name}: its url, clonePath and defaultBranch must not start with "-"`,
+      );
+    }
+
     if (!gitHeadExists) {
       console.log(`[${role}] Cloning ${name} to ${clonePath}...`);
       const provider = detectVcsProvider(url);
@@ -555,7 +566,7 @@ export async function ensureRepoForTask(
       } else if (provider === "gitlab") {
         await Bun.$`glab repo clone ${url} ${clonePath} -- --branch ${defaultBranch} --single-branch`.quiet();
       } else {
-        await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
+        await Bun.$`git clone --branch ${defaultBranch} --single-branch -- ${url} ${clonePath}`.quiet();
       }
       // Validate the clone actually created the directory
       if (!existsSync(clonePath)) {
@@ -1806,27 +1817,13 @@ async function validateProviderOutputIfNeeded(
     }
 
     // The first candidate is the raw text, so a final message that is already
-    // bare JSON keeps its exact bytes. Later candidates recover JSON that the
-    // model wrapped in a ```json fence or a line of prose.
-    let firstValidationErrors: string[] | undefined;
-    for (const [index, candidate] of jsonOutputCandidates(providerOutput).entries()) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(candidate);
-      } catch {
-        continue;
-      }
-      const validationErrors = validateJsonSchema(taskData.outputSchema, parsed);
-      if (validationErrors.length === 0) {
-        return index === 0 ? { ok: true } : { ok: true, output: candidate };
-      }
-      firstValidationErrors ??= validationErrors;
-    }
-
-    if (firstValidationErrors) {
+    // bare JSON keeps its exact bytes.
+    const match = matchOutputSchema(taskData.outputSchema, providerOutput);
+    if (match.ok) return match;
+    if (match.errors) {
       return {
         ok: false,
-        failReason: `Structured output did not match outputSchema: ${firstValidationErrors.join("; ")}`,
+        failReason: `Structured output did not match outputSchema: ${match.errors.join("; ")}`,
       };
     }
     return {
@@ -1837,33 +1834,6 @@ async function validateProviderOutputIfNeeded(
   } catch {
     return { ok: true };
   }
-}
-
-/**
- * Texts that may hold the JSON in an agent's final message, in the order to
- * try them: the whole message, each fenced code block from last to first, then
- * the span from the first `{` (or `[`) to the last `}` (or `]`). Agents often
- * answer a schema-bound task with "Here is the result:" plus a ```json block
- * instead of calling store-progress, and `JSON.parse` on the whole message
- * fails on that. Fences run last to first because an earlier fence is often an
- * example or a draft that also matches the schema, and the answer comes last.
- */
-function jsonOutputCandidates(text: string): string[] {
-  const candidates = [text];
-  const fenced: string[] = [];
-  for (const match of text.matchAll(/```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g)) {
-    if (match[1]?.trim()) fenced.push(match[1].trim());
-  }
-  candidates.push(...fenced.reverse());
-  for (const [open, close] of [
-    ["{", "}"],
-    ["[", "]"],
-  ] as const) {
-    const start = text.indexOf(open);
-    const end = text.lastIndexOf(close);
-    if (start >= 0 && end > start) candidates.push(text.slice(start, end + 1));
-  }
-  return [...new Set(candidates)];
 }
 
 function finalUpdateDeadline(): number {
@@ -3089,11 +3059,13 @@ async function saveProviderSessionId(
   if (model !== undefined && model !== "") body.model = model;
   if (harnessVariant !== undefined) body.harnessVariant = harnessVariant;
   if (harnessVariantMeta !== undefined) body.harnessVariantMeta = harnessVariantMeta;
-  await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
+  const response = await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
     method: "PUT",
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
   });
+  if (!response.ok) throw new Error(`Session update returned HTTP ${response.status}`);
 }
 
 async function findBridgeFailureArtifact(cwd: string): Promise<string | undefined> {
@@ -3145,11 +3117,13 @@ async function updateHarnessVariantMeta(
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
+  const response = await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
     method: "PUT",
     headers,
     body: JSON.stringify({ claudeSessionId, harnessVariantMeta: meta }),
+    signal: AbortSignal.timeout(5000),
   });
+  if (!response.ok) throw new Error(`Session update returned HTTP ${response.status}`);
 }
 
 /** Cache of tasks that already have VCS linked — prevents repeated gh pr list calls */
@@ -3224,15 +3198,14 @@ export async function detectVcsForTask(
     ).trim();
 
     // 4. Detect provider and check for PR/MR
-    let vcsProvider: VcsProvider;
+    const vcsProvider = detectVcsProvider(remoteUrl);
     let prJson: string;
     let azureRepo: string | null = null;
     let bitbucketRepo: string | null = null;
 
-    if (isAzureDevOpsUrl(remoteUrl)) {
+    if (vcsProvider === "azure-devops") {
       const parsed = parseAzureDevOpsRepoUrl(remoteUrl);
       if (!parsed) return;
-      vcsProvider = "azure-devops";
       azureRepo = canonicalAzureDevOpsRepoUrl(remoteUrl);
       const prs = JSON.parse(
         await Bun.$`az repos pr list --organization ${parsed.orgUrl} --project ${parsed.project} --repository ${parsed.repository} --source-branch ${branch} --status active --top 1 --output json`
@@ -3245,25 +3218,16 @@ export async function detectVcsForTask(
           url: `${azureRepo}/pullrequest/${pr.pullRequestId}`,
         })),
       );
-    } else if (isBitbucketUrl(remoteUrl)) {
-      // Checked before the loose "github" substring match below, so a
-      // Bitbucket repo with "github" in its slug is not sent to `gh`.
+    } else if (vcsProvider === "bitbucket") {
       bitbucketRepo = bitbucketFullName(remoteUrl);
       if (!bitbucketRepo) return;
-      vcsProvider = "bitbucket";
       const pr = await findBitbucketOpenPullRequest(remoteUrl, branch);
       prJson = JSON.stringify(pr ? [pr] : []);
-    } else if (
-      remoteUrl.includes("github.com") ||
-      remoteUrl.includes("github") ||
-      isGitHubUrl(remoteUrl)
-    ) {
-      vcsProvider = "github";
+    } else if (vcsProvider === "github") {
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
       ).trim();
-    } else if (remoteUrl.includes("gitlab")) {
-      vcsProvider = "gitlab";
+    } else if (vcsProvider === "gitlab") {
       prJson = (
         await Bun.$`glab mr list --source-branch ${branch} --json iid,web_url --per-page 1`
           .quiet()
@@ -4636,6 +4600,8 @@ export async function spawnProviderProcess(
     /** Claim-time profile (task.resolvedProfile) and its pooled-key allowlist. */
     resolvedProfile?: string;
     credentialAllowlist?: Record<string, string[]>;
+    /** The task's effective outputSchema; codex enforces it natively. */
+    outputSchema?: Record<string, unknown>;
   },
   logDir: string,
 ): Promise<RunningTask> {
@@ -4863,6 +4829,7 @@ export async function spawnProviderProcess(
     contextKey: opts.contextKey,
     reasoningEffort: reasoningEffortOverride,
     onPromptSkill: skillInvokes.promptSkill,
+    outputSchema: opts.outputSchema,
   };
 
   // Both new and resumed tasks reach this boundary with the current harness
@@ -4937,7 +4904,8 @@ export async function spawnProviderProcess(
     // runner-resolved value.
     reasoningEffort: reasoningEffortOverride,
   });
-  if (initialModelReport) {
+  // Pi updates the last-used model when a result reports which model ran.
+  if (initialModelReport && adapter.name !== "pi") {
     reportLatestModel(opts.apiUrl, opts.apiKey, opts.agentId, initialModelReport).catch((err) =>
       console.warn(`[runner] Failed to report latest model: ${err}`),
     );
@@ -5030,6 +4998,7 @@ export async function spawnProviderProcess(
   let providerSessionId = session.sessionId;
   let pendingHarnessVariant: string | undefined;
   let pendingHarnessVariantMeta: Record<string, unknown> | undefined;
+  let sessionIdReport = Promise.resolve();
   let acpStatusReport: Promise<void> | undefined;
   let runningTaskForSessionInit: RunningTask | undefined;
   const activeToolSpans = new Map<
@@ -5135,18 +5104,22 @@ export async function spawnProviderProcess(
             }).catch((err) => console.warn(`[runner] Failed to report ACP options: ${err}`));
           }
           if (realTaskId) {
-            saveProviderSessionId(
-              opts.apiUrl,
-              opts.apiKey,
-              realTaskId,
-              event.sessionId,
-              event.provider,
-              event.providerMeta,
-              model,
-              event.harnessVariant,
-              event.harnessVariantMeta,
-              sessionEffort,
-            ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+            sessionIdReport = sessionIdReport
+              .then(() =>
+                saveProviderSessionId(
+                  opts.apiUrl,
+                  opts.apiKey,
+                  realTaskId,
+                  event.sessionId,
+                  event.provider,
+                  event.providerMeta,
+                  model,
+                  event.harnessVariant,
+                  event.harnessVariantMeta,
+                  sessionEffort,
+                ),
+              )
+              .catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
           } else {
             // Pool task: save provider session ID on active session so it can be
             // propagated to the real task when the agent claims one
@@ -5469,6 +5442,32 @@ export async function spawnProviderProcess(
         // Keep the agent-level ACP option snapshot ordered before the poll
         // loop can publish a post-task credential snapshot for a harness swap.
         await acpStatusReport;
+
+        if (adapter.name === "claude" && realTaskId && result.sessionId) {
+          const settings = await readClaudeRequestSettings(
+            result.sessionId,
+            config.env ?? process.env,
+          );
+          if (settings) {
+            await sessionIdReport;
+            pendingHarnessVariantMeta = { ...pendingHarnessVariantMeta, ...settings };
+            if (runningTaskForSessionInit)
+              runningTaskForSessionInit.harnessVariantMeta = pendingHarnessVariantMeta;
+            await updateHarnessVariantMeta(
+              opts.apiUrl,
+              opts.apiKey,
+              realTaskId,
+              result.sessionId,
+              pendingHarnessVariantMeta,
+            ).catch((err) =>
+              console.warn(`[runner] Failed to save Claude request settings: ${err}`),
+            );
+          }
+        }
+        // shortcut: a crashed runner leaves the transcript to Claude Code's own
+        // cleanupPeriodDays pruning; add a boot sweep if worker disks fill up.
+        if (adapter.name === "claude" && result.sessionId)
+          await removeClaudeSessionTranscript(result.sessionId, config.env ?? process.env);
 
         // Final log flush
         if (shouldStream && logBuffer.lines.length > 0) {
@@ -6077,6 +6076,7 @@ export async function checkCompletedProcesses(
                   taskId,
                   result.sessionId,
                   {
+                    ...harnessVariantMeta,
                     failureArtifact: bridgeDiagnostics.artifactPath,
                   },
                 ).catch((err) =>
@@ -7585,6 +7585,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: (task as { contextKey?: string }).contextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: resumeSession.parts,
+              outputSchema: normalizeOutputSchema(task.outputSchema),
               resolvedProfile: task.resolvedProfile,
               credentialAllowlist: task.credentialAllowlist,
             },
@@ -8240,6 +8241,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               contextKey: taskContextKey,
               localBlocks: state.modelWindowBlocks,
               compositionParts: taskSession.parts,
+              outputSchema: normalizeOutputSchema(
+                (trigger.task as { outputSchema?: unknown } | undefined)?.outputSchema,
+              ),
               resolvedProfile: (trigger.task as { resolvedProfile?: string } | undefined)
                 ?.resolvedProfile,
               credentialAllowlist: (

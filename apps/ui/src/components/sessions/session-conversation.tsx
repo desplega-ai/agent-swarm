@@ -7,7 +7,15 @@
  */
 
 import { ChevronDown, Lock } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { sessionErrorStatus, useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
@@ -31,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CiteOutcomeSelection } from "./cite-outcome-selection";
 import { ComposerReadOnlyNotice } from "./composer-dock";
+import { PendingFollowUps, usePendingFollowUps } from "./pending-follow-ups";
 import { useSessionPresenceContext } from "./session-presence";
 import { SessionTimeline } from "./session-timeline";
 
@@ -59,8 +68,12 @@ export interface SessionConversationProps {
   steerSource?: TaskComposerProps["steerSource"];
   /** Hands follow-ups to the caller; see `TaskComposerProps.onFollowUp`. */
   onFollowUp?: TaskComposerProps["onFollowUp"];
+  /** Files the caller's follow-up takes; see `TaskComposerProps.followUpAttachments`. */
+  followUpAttachments?: TaskComposerProps["followUpAttachments"];
   /** The person's words in a wrapped task prompt; see `TurnTimeline`. Turns timeline only. */
   requestText?: (task: AgentTask) => string | null;
+  /** The files sent with a wrapped task prompt; see `TurnTimeline`. Turns timeline only. */
+  requestFiles?: (task: AgentTask) => ReactNode;
   /** Controlled composer draft. Omit both to keep the draft in the composer. */
   value?: string;
   onValueChange?: (next: string) => void;
@@ -84,7 +97,9 @@ export function SessionConversation({
   steerTarget = "lead",
   steerSource,
   onFollowUp,
+  followUpAttachments,
   requestText,
+  requestFiles,
   value,
   onValueChange,
   placeholder,
@@ -146,14 +161,19 @@ export function SessionConversation({
     steeringEnabled &&
     (anyAgent ? canSteerAnyAgentTask(latestLeafTask) : canSteerSessionTask(latestLeafTask));
 
+  // Optimistic follow-ups (text only, never with `onFollowUp`): sending or failed.
+  const pendingFollowUps = usePendingFollowUps(rootTaskId, detail?.chain);
+  const pendingSignature = pendingFollowUps
+    .map((item) => `${item.mutationId}:${item.status}`)
+    .join(",");
   const canCite = canType && !onFollowUp;
   const composerRef = useRef<HTMLDivElement>(null);
   const citations = useComposerCitations(canCite ? rootTaskId : undefined);
 
   // The turn timeline also grows with a typing bubble and an approval line.
   const flowSignature = turns
-    ? `${typingViewers.map((viewer) => viewer.id).join(",")}|${(detail?.approvals ?? []).map((approval) => approval.id).join(",")}`
-    : "";
+    ? `${typingViewers.map((viewer) => viewer.id).join(",")}|${(detail?.approvals ?? []).map((approval) => approval.id).join(",")}|${pendingSignature}`
+    : pendingSignature;
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isFollowing, scrollToBottom, recheck } = useAutoScroll(scrollEl, [
@@ -230,6 +250,7 @@ export function SessionConversation({
                 typing={typingViewers}
                 onLayoutChange={recheck}
                 requestText={requestText}
+                requestFiles={requestFiles}
               />
             ) : (
               <SessionTimeline
@@ -242,6 +263,13 @@ export function SessionConversation({
             <p className="text-xs text-muted-foreground">
               Couldn't load this session. It may have been deleted, or the API server is offline.
             </p>
+          )}
+          {noAccess ? null : (
+            <PendingFollowUps
+              rootTaskId={rootTaskId}
+              items={pendingFollowUps}
+              draftKey={`session:${rootTaskId}`}
+            />
           )}
         </div>
         {canCite && scrollEl ? (
@@ -321,11 +349,13 @@ export function SessionConversation({
             className={composerLayout?.className}
             steerSource={steerSource}
             onFollowUp={onFollowUp}
+            followUpAttachments={followUpAttachments}
             placeholder={placeholder}
             routeLabel={routeLabel}
             value={value}
             citations={canCite ? citations : undefined}
             // Uncontrolled: the draft persists per session (`lib/composer-drafts.ts`).
+            // `PendingFollowUps` writes Edit's text back under the same key.
             draftKey={`session:${rootTaskId}`}
             onValueChange={(next) => {
               composer.current.hasText = next.trim().length > 0;

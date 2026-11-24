@@ -4,7 +4,7 @@ import { type AppValidationIssue, collectScriptReferences } from "../apps/defini
 import { getScriptAppTypes } from "../apps/script-types";
 import { listAppRecords } from "../apps/store";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById, getDbClient, recordInlineScriptRun, upsertKv } from "../be/db";
+import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import {
   getScriptApiConnectionDescriptors,
@@ -41,6 +41,7 @@ import {
   typecheckScript,
 } from "../be/scripts/typecheck";
 import { toScriptSearchResults } from "../be/scripts/user-code-mode";
+import { getStorage } from "../be/storage";
 import { isScriptRunToken } from "../be/users";
 import { can } from "../rbac";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
@@ -153,12 +154,26 @@ const rowAuditColumnsShape = {
   updated_by: z.string().nullable().optional(),
 };
 
+/** `durable` when the stored signature marks a DurableObject class script. */
+function scriptKind(signatureJson: string): "function" | "durable" {
+  try {
+    return (JSON.parse(signatureJson) as { kind?: unknown } | null)?.kind === "durable"
+      ? "durable"
+      : "function";
+  } catch {
+    return "function";
+  }
+}
+
 /** Lean projection served by `GET /api/scripts` — mirrors `ScriptListItem`. */
 const scriptListItemSchema = ScriptRecordSchema.omit({
   source: true,
   signatureJson: true,
   argsJsonSchema: true,
   contentHash: true,
+}).extend({
+  /** `durable` for a DurableObject class script, else `function`. */
+  kind: z.enum(["function", "durable"]),
 });
 
 /**
@@ -302,6 +317,7 @@ const runRoute = route({
     409: { description: "Object busy, re-entry, or lease lost" },
     501: { description: "workspace-rw scripts are not supported in v1" },
   },
+  rbac: { permission: "script.run" },
 });
 
 const searchRoute = route({
@@ -621,6 +637,17 @@ async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   return agent;
 }
 
+// Route params arrive percent-encoded, and clients (the script-delete and
+// script-query-types tools) encode the name: decode it, or a spaced name never matches its row.
+function decodeScriptName(res: ServerResponse, raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    jsonError(res, "Validation error: name: malformed percent-encoding", 400);
+    return null;
+  }
+}
+
 function signatureJsonFor(source: string): string {
   return JSON.stringify(extractScriptSignature(source));
 }
@@ -888,8 +915,8 @@ export async function handleScripts(
       failedBindings: credentials.failedBindings,
       userConfig: credentials.userConfig,
       agentFs: credentials.agentFs,
-      apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
-      mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+      apiConnections: await getScriptApiConnectionDescriptors({ agentId: agent.id }),
+      mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     };
     let output: RunScriptOutput;
     let object: { id: string; stateVersion: number; destroyed: boolean } | undefined;
@@ -1108,6 +1135,7 @@ export async function handleScripts(
       updatedBy: script.updatedBy,
       createdAt: script.createdAt,
       updatedAt: script.updatedAt,
+      kind: scriptKind(script.signatureJson),
     }));
     listScriptsRoute.respond(res, 200, { scripts });
     return true;
@@ -1116,8 +1144,8 @@ export async function handleScripts(
   // Must be matched before getScriptByIdRoute — its ["api", "scripts", null]
   // pattern would otherwise swallow the literal "type-defs" segment.
   if (typeDefsRoute.match(req.method, pathSegments)) {
-    const apiTypes = getScriptApiTypes();
-    const mcpTypes = getScriptMcpTypes();
+    const apiTypes = await getScriptApiTypes();
+    const mcpTypes = await getScriptMcpTypes();
     const appTypes = await getScriptAppTypes();
     typeDefsRoute.respond(res, 200, {
       sdkTypes: await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
@@ -1164,7 +1192,9 @@ export async function handleScripts(
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
-    const script = await resolveScript(parsed.params.name, agent.id, parsed.query.scope);
+    const name = decodeScriptName(res, parsed.params.name);
+    if (name === null) return true;
+    const script = await resolveScript(name, agent.id, parsed.query.scope);
     if (!script) {
       jsonError(res, "Script not found", 404);
       return true;
@@ -1175,13 +1205,13 @@ export async function handleScripts(
         ? (JSON.parse(script.argsJsonSchema) as Record<string, unknown>)
         : null,
       sdkTypes: await scriptSdkTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypes({ agentId: agent.id }),
+        await getScriptMcpTypes({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
       stdlibTypes: await scriptStdlibTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypes({ agentId: agent.id }),
+        await getScriptMcpTypes({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
     });
@@ -1209,8 +1239,10 @@ export async function handleScripts(
       }
     }
 
+    const name = decodeScriptName(res, parsed.params.name);
+    if (name === null) return true;
     const identity = {
-      name: parsed.params.name,
+      name,
       scope: parsed.query.scope,
       scopeId: parsed.query.scope === "agent" ? agent.id : null,
     };
@@ -1219,7 +1251,7 @@ export async function handleScripts(
     // definition referencing it would otherwise slip between a check outside
     // the transaction and the DELETE, leaving the app with a dangling
     // scriptId that only an operator can edit out.
-    const outcome = await getDbClient().transaction(async () => {
+    const outcome = await getStorage().transaction(async () => {
       const existing = await getScript(identity);
       if (existing) {
         // An app that wires this script as a source or a script action would be

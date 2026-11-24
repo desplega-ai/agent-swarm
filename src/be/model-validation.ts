@@ -37,6 +37,7 @@ import { ampModelError, ampPinCatalogError, ampPinProviderError } from "../utils
 import { getAgentById, getAllAgents } from "./db";
 import { getModelProfileByName } from "./db/model-profiles";
 import { loadModelsCatalog } from "./model-catalog-store";
+import { groupHasMemberOnHarness } from "./model-group-resolution";
 import { resolveLatestAlias } from "./model-tier-resolution";
 
 /** Harnesses whose model ids the catalog does not describe. */
@@ -118,7 +119,10 @@ export async function harnessModelErrorFor(
  * stays sync and catalog-free; this runs next to it.
  */
 export async function poolTaskRunsOnHarness(
-  task: (TaskModelPinFields & { profile?: string | null }) | null | undefined,
+  task:
+    | (TaskModelPinFields & { profile?: string | null; modelGroup?: string | null })
+    | null
+    | undefined,
   harness: string | null | undefined,
 ): Promise<boolean> {
   // A task's model profile runs on one harness only; other workers leave it in the pool.
@@ -127,6 +131,10 @@ export async function poolTaskRunsOnHarness(
     const profile = await getModelProfileByName(profileName);
     return !profile || !harness || profile.harness === harness;
   }
+  // A model group runs on the harnesses its members run on. A tier task keeps
+  // running anywhere: its tier chain covers harnesses its group does not.
+  const groupName = task?.modelGroup?.trim();
+  if (groupName) return await groupHasMemberOnHarness(groupName, harness);
   // Only the task's own pin restricts harnesses; a model a previous run
   // reported into `model` does not.
   const model = taskModelPin(task ?? {})?.trim();

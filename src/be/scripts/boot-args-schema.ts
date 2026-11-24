@@ -11,7 +11,7 @@
  * Mirrors the script embedding backfill (src/be/scripts/boot-reembed.ts).
  */
 
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
 import { listScripts } from "./db";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -84,9 +84,11 @@ export async function runBootArgsSchemaBackfill(): Promise<void> {
     }
     if (!optionalDefaults(schema)) continue;
     // A concurrent upsert must retain its own source and schema.
-    const { changes } = await getDbClient().run(
-      "UPDATE scripts SET argsJsonSchema = ? WHERE id = ? AND contentHash = ? AND argsJsonSchema = ?",
-      [JSON.stringify(schema), script.id, script.contentHash, script.argsJsonSchema],
+    const changes = await getStorage().repos.scripts.replaceArgsJsonSchema(
+      script.id,
+      script.contentHash,
+      script.argsJsonSchema as string,
+      JSON.stringify(schema),
     );
     rewrote += changes;
   }

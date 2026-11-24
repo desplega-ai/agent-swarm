@@ -1,10 +1,7 @@
 import {
-  CREDENTIAL_SUFFIX_SQL,
-  CREDENTIAL_TYPE_SQL,
   type CreateSessionCostInput,
   insertSessionCost,
   rowToSessionCost,
-  type SessionCostRow,
 } from "./db/session-costs";
 
 export {
@@ -14,6 +11,48 @@ export {
 } from "./db/session-costs";
 
 import type { Database } from "bun:sqlite";
+import type {
+  ApiKeyRef,
+  ApiKeyStatusRow,
+  AppVersionRow,
+  AssetKeyMappingRow,
+  BudgetRefusalNotificationRow as BudgetRefusalNotificationRowDb,
+  BudgetRow as BudgetRowDb,
+  ChannelActivityCursorRow,
+  ContextSnapshotRow,
+  InboxItemStateRow,
+  KvJsonFieldFilter,
+  KvKeyRange,
+  McpServerRow,
+  McpServerWithInstallRow,
+  MetricColumnUpdate,
+  MetricRow,
+  MetricVersionRow,
+  PageColumnUpdate,
+  PageRow,
+  PageVersionRow,
+  PricingRowDb,
+  RoutingCandidateMatch,
+  ScheduledTaskColumnUpdate,
+  ScheduledTaskRow,
+  ScriptRunColumnUpdate,
+  ScriptRunJournalRow,
+  ScriptRunListRow,
+  ScriptRunRow,
+  SessionCostSummaryFilter,
+  SessionLogRow,
+  SkillFileRow,
+  SkillRow,
+  SkillWithInstallRow,
+  SlackMessageRow,
+  SwarmConfigRow,
+  SwarmRepoColumnUpdate,
+  SwarmRepoRow,
+  TaskAttachmentRow,
+  TaskSteeringMessageRow,
+  TaskTemplateRow,
+} from "@desplega/storage";
+import { type AttributionWindow, SKILL_SLIM_COLUMNS } from "@desplega/storage";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { sessionSourceKey, sessionThreadGroupKey } from "../assets/source-key";
@@ -194,11 +233,10 @@ import {
   planAllowsModelFamily,
   SUBSCRIPTION_KEY_TYPES,
 } from "../utils/subscription-plans";
-import { auditAssetKeys } from "./asset-key-audit";
+import { auditAssetKeys, auditAssetKeysAsync } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
-import { normalizeDate, normalizeDateRequired } from "./date-utils";
+import { normalizeDate, normalizeDateRequired, serializeNextRunAt } from "./date-utils";
 import {
-  type AgentRow,
   configureAgentDependencies,
   ExtensionAgentAssignmentError,
   getActiveTaskCount,
@@ -206,7 +244,6 @@ import {
   getAllAgents,
   isAgentEligibleForTask,
   isExtensionAgent,
-  NOT_EXTENSION_AGENT_SQL,
   ReservedAgentRoleError,
   reservedRoleViolation,
   rowToAgent,
@@ -214,7 +251,7 @@ import {
 import {
   type ApprovalRequestListFilters,
   type ApprovalVote,
-  approvalRequestListClause,
+  approvalListFilter,
   scheduleApprovalCardUpdates,
   scrubApprovalVotesJson,
 } from "./db/approvals";
@@ -224,10 +261,16 @@ import {
   getLatestContextVersion,
 } from "./db/context-versions";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
-import { pageSearchSql } from "./db/page-search";
+import { pageFilter } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
-import { getDb, getDbClient } from "./db/runtime";
-import { SCRIPT_RUN_SELECT, storeScriptRunSource } from "./db/script-run-sources";
+import {
+  newPromptTemplateRows,
+  type PromptTemplateUpsert,
+  resetPromptTemplateRows,
+  rowToPromptTemplate,
+} from "./db/prompt-templates";
+import { isPostgresEngine } from "./db/runtime";
+import { storeScriptRunSource } from "./db/script-run-sources";
 import { classifyClaudeUpdate } from "./db/session-log-reasoning";
 import {
   assertAssetKeyMovesAllowed,
@@ -235,16 +278,15 @@ import {
   moveTaskChainKeyInTx,
 } from "./db/session-moves";
 import {
+  countSessionRoots,
+  listSessionPageRows,
   type SessionFilters,
   type SessionReadState,
   type SessionRowFields,
-  sessionCountQuery,
   sessionPageFields,
-  sessionSummaryQuery,
-  threadRootsSql,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
-import { SLACK_TREE_NEEDS_RENDER_SQL } from "./db/slack-trees";
+import { taskAttachmentWrite } from "./db/tasks/attachment-write";
 import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
@@ -254,19 +296,11 @@ import {
   findExistingLinearTrackerContextWork,
   getTaskById,
   getTasksByAgentId,
-  readableSessionCondition,
+  isLinearTrackerContextKey,
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
-import {
-  USER_REFERENCE_COLUMNS_SQL,
-  type UserReferenceRow,
-  userReferenceRewriteSql,
-  WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL,
-  WORKFLOW_CONTEXT_SET_REQUESTER_SQL,
-  WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
-} from "./db/user-references";
 import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
 import { deleteOrphanedRunDefinitions } from "./db/workflow-run-definitions";
@@ -278,9 +312,6 @@ import {
   isTerminalWorkflowRunStatus,
   rowToWorkflowRun,
   rowToWorkflowRunStep,
-  WORKFLOW_RUN_SUMMARY_COLUMNS,
-  type WorkflowRunRow,
-  type WorkflowRunStepRow,
   WorkflowStepNotExecutableError,
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
@@ -289,13 +320,19 @@ import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
+import { getStorage } from "./storage";
+import {
+  currentEngineHandle,
+  listPlaintextSecretConfigs,
+  storeEncryptedSecretConfigs,
+} from "./storage-root";
 import {
   invalidConfigKeyError,
   isApiProcessControlEnvKey,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
-  teamsSdkEnvKeysSql,
+  TEAMS_SDK_ENV_KEYS,
 } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 import { publishWorkerConfigNudge, publishWorkerNudge } from "./worker-nudges";
@@ -365,6 +402,9 @@ export {
   getScriptRunFollowUpGuard,
   setScriptRunFollowUpGuard,
 } from "./db/script-runs";
+
+import type { ScriptRunFilter } from "./db/script-runs";
+
 export {
   AssetKeyMovesBlockedError,
   assertAssetKeyMovesAllowed,
@@ -390,12 +430,16 @@ configureAgentDependencies({
 
 export {
   __resetSqliteVecExtensionPathCacheForTests,
+  closeDatabase,
   closeDb,
   getDb,
   getDbClient,
   initDb,
+  isPostgresEngine,
   isSqliteVecAvailable,
+  isVectorSearchAvailable,
   resolveSqliteVecExtensionPath,
+  startPostgres,
 } from "./db/runtime";
 
 export {
@@ -499,7 +543,10 @@ configureTaskWriteDependencies({
 });
 
 configureSessionMoveDependencies({
-  auditAssetKeys: () => auditAssetKeys(getDb()),
+  auditAssetKeys: () =>
+    isPostgresEngine()
+      ? auditAssetKeysAsync()
+      : auditAssetKeys(currentEngineHandle() as Parameters<typeof auditAssetKeys>[0]),
   insertAssetKeyHistory: (...args) => insertAssetKeyHistory(...args),
 });
 
@@ -533,7 +580,7 @@ function emitTaskLifecycleTelemetryAfterCommit<S extends TaskTelemetryEvent>(
   // afterCommit (not queueMicrotask): under an async client transaction,
   // microtasks drain before COMMIT, so the verify read could observe
   // uncommitted state. afterCommit runs strictly post-COMMIT/ROLLBACK.
-  getDbClient().afterCommit(() => {
+  getStorage().afterCommit(() => {
     // `trigger_surface` is resolved (one read up the parent chain) and
     // `source` renamed to `task_source` inside emitTaskTelemetry, so every
     // lifecycle event of a task reports the same root surface.
@@ -591,41 +638,26 @@ const BUDGETED_IDENTITY_FIELDS: BudgetedIdentityField[] = [
 // ============================================================================
 
 export async function getSlackRenderV2ActivatedAt(): Promise<string | null> {
-  const row = await getDbClient().get<{ activated_at: string }>(
-    `SELECT activated_at FROM slack_render_v2_state WHERE id = 1`,
-  );
+  const row = await getStorage().repos.slack.getRenderV2State();
   return row?.activated_at ?? null;
 }
 
 export async function ensureSlackRenderV2Activation(): Promise<string> {
   const activatedAt = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO slack_render_v2_state (id, activated_at)
-     VALUES (1, ?)
-     ON CONFLICT(id) DO NOTHING`,
-    [activatedAt],
-  );
+  await getStorage().repos.slack.ensureRenderV2Activation(activatedAt);
   const persisted = await getSlackRenderV2ActivatedAt();
   if (!persisted) throw new Error("Failed to persist Slack render v2 activation");
   return persisted;
 }
 
 export async function getSlackDelegationActivatedAt(): Promise<string | null> {
-  const row = await getDbClient().get<{ delegation_activated_at: string | null }>(
-    `SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1`,
-  );
+  const row = await getStorage().repos.slack.getRenderV2State();
   return row?.delegation_activated_at ?? null;
 }
 
 export async function ensureSlackDelegationActivation(): Promise<string> {
   const activatedAt = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO slack_render_v2_state (id, activated_at, delegation_activated_at)
-     VALUES (1, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       delegation_activated_at = COALESCE(slack_render_v2_state.delegation_activated_at, excluded.delegation_activated_at)`,
-    [activatedAt, activatedAt],
-  );
+  await getStorage().repos.slack.ensureDelegationActivation(activatedAt);
   const persisted = await getSlackDelegationActivatedAt();
   if (!persisted) throw new Error("Failed to persist Slack render v2 delegation activation");
   return persisted;
@@ -673,28 +705,6 @@ export function isSettledSlackMessage(record: SlackMessageRecord): boolean {
   return !!record.finalizedAt || !!record.deliveryAbandonedAt;
 }
 
-type SlackMessageRow = {
-  id: string;
-  context_key: string;
-  channel_id: string;
-  thread_ts: string;
-  ts: string;
-  kind: SlackMessageKind;
-  task_id: string | null;
-  permalink: string | null;
-  finalized_at: string | null;
-  stream_chunks_appended: number;
-  conclusion_kind: SlackConclusionKind | null;
-  deferral_resolved_at: string | null;
-  deferral_abandoned_at: string | null;
-  delivery_attempts: number;
-  delivery_abandoned_at: string | null;
-  delivery_last_error: string | null;
-  closed_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
 function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
   return {
     id: row.id,
@@ -702,12 +712,12 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     channelId: row.channel_id,
     threadTs: row.thread_ts,
     ts: row.ts,
-    kind: row.kind,
+    kind: row.kind as SlackMessageKind,
     taskId: row.task_id ?? undefined,
     permalink: row.permalink ?? undefined,
     finalizedAt: row.finalized_at ?? undefined,
     streamChunksAppended: row.stream_chunks_appended,
-    conclusionKind: row.conclusion_kind ?? undefined,
+    conclusionKind: (row.conclusion_kind as SlackConclusionKind | null) ?? undefined,
     deferralResolvedAt: row.deferral_resolved_at ?? undefined,
     deferralAbandonedAt: row.deferral_abandoned_at ?? undefined,
     deliveryAttempts: row.delivery_attempts,
@@ -734,43 +744,21 @@ export async function recordSlackMessage(input: {
 }): Promise<SlackMessageRecord> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `INSERT INTO slack_messages (
-         id, context_key, channel_id, thread_ts, ts, kind, task_id, permalink,
-         finalized_at, stream_chunks_appended, conclusion_kind, created_at, updated_at, created_by, updated_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(channel_id, ts) DO UPDATE SET
-         context_key = excluded.context_key,
-         kind = excluded.kind,
-         task_id = COALESCE(excluded.task_id, slack_messages.task_id),
-         permalink = COALESCE(excluded.permalink, slack_messages.permalink),
-         finalized_at = COALESCE(excluded.finalized_at, slack_messages.finalized_at),
-         stream_chunks_appended = MAX(
-           excluded.stream_chunks_appended,
-           slack_messages.stream_chunks_appended
-         ),
-         conclusion_kind = COALESCE(excluded.conclusion_kind, slack_messages.conclusion_kind),
-         updated_at = excluded.updated_at,
-         updated_by = excluded.updated_by
-       RETURNING *`,
-    [
-      id,
-      input.contextKey,
-      input.channelId,
-      input.threadTs,
-      input.ts,
-      input.kind,
-      input.taskId ?? null,
-      input.permalink ?? null,
-      input.finalized ? now : null,
-      input.streamChunksAppended ?? 0,
-      input.conclusionKind ?? null,
-      now,
-      now,
-      input.actorId ?? null,
-      input.actorId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.slack.recordSlackMessage({
+    id,
+    context_key: input.contextKey,
+    channel_id: input.channelId,
+    thread_ts: input.threadTs,
+    ts: input.ts,
+    kind: input.kind,
+    task_id: input.taskId ?? null,
+    permalink: input.permalink ?? null,
+    finalized_at: input.finalized ? now : null,
+    stream_chunks_appended: input.streamChunksAppended ?? 0,
+    conclusion_kind: input.conclusionKind ?? null,
+    now,
+    actor: input.actorId ?? null,
+  });
   if (!row) throw new Error("Failed to record Slack message");
   return rowToSlackMessage(row);
 }
@@ -790,27 +778,17 @@ export async function reserveSlackMessage(input: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const pendingTs = `${PENDING_SLACK_MESSAGE_TS_PREFIX}${id}`;
-  const inserted = await getDbClient().get<SlackMessageRow>(
-    `INSERT INTO slack_messages (
-         id, context_key, channel_id, thread_ts, ts, kind, task_id,
-         stream_chunks_appended, created_at, updated_at, created_by, updated_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-       ON CONFLICT DO NOTHING
-       RETURNING *`,
-    [
-      id,
-      input.contextKey,
-      input.channelId,
-      input.threadTs,
-      pendingTs,
-      input.kind,
-      input.taskId ?? null,
-      now,
-      now,
-      input.actorId ?? null,
-      input.actorId ?? null,
-    ],
-  );
+  const inserted = await getStorage().repos.slack.reserveSlackMessage({
+    id,
+    context_key: input.contextKey,
+    channel_id: input.channelId,
+    thread_ts: input.threadTs,
+    ts: pendingTs,
+    kind: input.kind,
+    task_id: input.taskId ?? null,
+    now,
+    actor: input.actorId ?? null,
+  });
   if (inserted) return { record: rowToSlackMessage(inserted), created: true };
 
   const existing =
@@ -827,14 +805,11 @@ export async function bindSlackMessageTimestamp(
   options: { streamChunksAppended?: number; renderedThrough?: string } = {},
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         ts = ?,
-         stream_chunks_appended = MAX(stream_chunks_appended, ?),
-         updated_at = COALESCE(?, ?)
-       WHERE id = ? AND ts LIKE 'pending:%'
-       RETURNING *`,
-    [ts, options.streamChunksAppended ?? 0, options.renderedThrough ?? null, now, id],
+  const row = await getStorage().repos.slack.bindSlackMessageTimestamp(
+    id,
+    ts,
+    options.streamChunksAppended ?? 0,
+    options.renderedThrough ?? now,
   );
   return row ? rowToSlackMessage(row) : null;
 }
@@ -851,28 +826,15 @@ export async function updateSlackMessageRecord(
   },
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         permalink = COALESCE(?, permalink),
-         finalized_at = CASE WHEN ? = 1 THEN COALESCE(finalized_at, ?) ELSE finalized_at END,
-         stream_chunks_appended = COALESCE(?, stream_chunks_appended),
-         conclusion_kind = COALESCE(?, conclusion_kind),
-         updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END,
-         updated_by = COALESCE(?, updated_by)
-       WHERE id = ?
-       RETURNING *`,
-    [
-      updates.permalink ?? null,
-      updates.finalized ? 1 : 0,
-      now,
-      updates.streamChunksAppended ?? null,
-      updates.conclusionKind ?? null,
-      updates.touchUpdatedAt === false ? 0 : 1,
-      now,
-      updates.actorId ?? null,
-      id,
-    ],
-  );
+  const row = await getStorage().repos.slack.updateSlackMessageRecord(id, {
+    permalink: updates.permalink ?? null,
+    finalize: !!updates.finalized,
+    streamChunksAppended: updates.streamChunksAppended ?? null,
+    conclusionKind: updates.conclusionKind ?? null,
+    touch: updates.touchUpdatedAt !== false,
+    actor: updates.actorId ?? null,
+    now,
+  });
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -880,25 +842,16 @@ export async function markSlackTreeRendered(
   id: string,
   renderedThrough: string,
 ): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET updated_at = ?
-       WHERE id = ? AND kind = 'tree'
-       RETURNING *`,
-    [renderedThrough, id],
-  );
+  const row = await getStorage().repos.slack.markSlackTreeRendered(id, renderedThrough);
   return row ? rowToSlackMessage(row) : null;
 }
 
 export async function deleteSlackMessageRecord(id: string): Promise<boolean> {
-  const result = await getDbClient().run(`DELETE FROM slack_messages WHERE id = ?`, [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.slack.deleteSlackMessage(id)) > 0;
 }
 
 export async function getSlackTreeMessage(contextKey: string): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages WHERE context_key = ? AND kind = 'tree' LIMIT 1`,
-    [contextKey],
-  );
+  const row = await getStorage().repos.slack.findSlackTreeByContextKey(contextKey);
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -906,20 +859,12 @@ export async function getSlackTreeMessageByThread(
   channelId: string,
   threadTs: string,
 ): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages
-       WHERE channel_id = ? AND thread_ts = ? AND kind = 'tree'
-       LIMIT 1`,
-    [channelId, threadTs],
-  );
+  const row = await getStorage().repos.slack.findSlackTreeByThread(channelId, threadTs);
   return row ? rowToSlackMessage(row) : null;
 }
 
 export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages WHERE task_id = ? AND kind = 'outcome' LIMIT 1`,
-    [taskId],
-  );
+  const row = await getStorage().repos.slack.findSlackOutcomeByTask(taskId);
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -945,36 +890,7 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
 export async function getResolvableDeferralOutcomes(
   limit = 50,
 ): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
-  const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
-    `WITH RECURSIVE chain(card_id, task_id) AS (
-         SELECT card.id, deferred.id FROM agent_tasks deferred
-         CROSS JOIN slack_messages card ON card.task_id = deferred.id AND card.kind = 'outcome'
-         WHERE deferred.deferredAt IS NOT NULL
-           AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
-           AND card.ts NOT LIKE 'pending:%'
-         UNION
-         SELECT chain.card_id, wake.id FROM chain
-         CROSS JOIN agent_tasks parent ON parent.id = chain.task_id AND parent.deferredAt IS NOT NULL
-         CROSS JOIN agent_tasks wake ON wake.parentTaskId = parent.id AND +wake.taskType = 'deferred'
-       )
-       SELECT card.*, wake.id AS wake_task_id
-       FROM chain
-       CROSS JOIN slack_messages card ON card.id = chain.card_id
-       CROSS JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
-       WHERE card.kind = 'outcome'
-         AND card.finalized_at IS NOT NULL
-         AND card.deferral_resolved_at IS NULL
-         AND card.ts NOT LIKE 'pending:%'
-         AND NOT EXISTS (
-           SELECT 1 FROM agent_tasks child
-           WHERE child.parentTaskId = wake.id AND +child.taskType = 'deferred'
-         )
-         AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
-         AND wake.status IN ('completed', 'failed', 'cancelled', 'skipped')
-       ORDER BY wake.finishedAt ASC
-       LIMIT ?`,
-    [limit],
-  );
+  const rows = await getStorage().repos.slack.listResolvableDeferralOutcomes(limit);
   return rows.map((row) => ({
     card: rowToSlackMessage(row),
     deferredTaskId: row.task_id!,
@@ -992,10 +908,7 @@ export async function markSlackDeferralResolved(
   options: { abandoned?: boolean } = {},
 ): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    "UPDATE slack_messages SET deferral_resolved_at = ?, deferral_abandoned_at = ? WHERE id = ?",
-    [now, options.abandoned ? now : null, id],
-  );
+  await getStorage().repos.slack.markSlackDeferralResolved(id, now, !!options.abandoned);
 }
 
 export async function noteSlackOutcomeDeliveryFailure(
@@ -1003,14 +916,10 @@ export async function noteSlackOutcomeDeliveryFailure(
   lastError: string,
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         delivery_attempts = delivery_attempts + 1,
-         delivery_last_error = ?,
-         updated_at = ?
-       WHERE task_id = ? AND kind = 'outcome' AND delivery_abandoned_at IS NULL
-       RETURNING *`,
-    [lastError.slice(0, 500), now, taskId],
+  const row = await getStorage().repos.slack.noteSlackOutcomeDeliveryFailure(
+    taskId,
+    lastError.slice(0, 500),
+    now,
   );
   return row ? rowToSlackMessage(row) : null;
 }
@@ -1025,14 +934,10 @@ export async function abandonSlackOutcomeDelivery(
   lastError: string,
 ): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<SlackMessageRow>(
-    `UPDATE slack_messages SET
-         delivery_abandoned_at = ?,
-         delivery_last_error = ?,
-         updated_at = ?
-       WHERE task_id = ? AND kind = 'outcome' AND delivery_abandoned_at IS NULL
-       RETURNING *`,
-    [now, lastError.slice(0, 500), now, taskId],
+  const row = await getStorage().repos.slack.abandonSlackOutcomeDelivery(
+    taskId,
+    lastError.slice(0, 500),
+    now,
   );
   return row ? rowToSlackMessage(row) : null;
 }
@@ -1046,18 +951,7 @@ export async function abandonSlackOutcomeDelivery(
 export async function getSlackTreeMessages(
   options: { thread?: { channelId: string; threadTs: string } } = {},
 ): Promise<SlackMessageRecord[]> {
-  const thread = options.thread;
-  const rows = await getDbClient().query<SlackMessageRow>(
-    `SELECT tree.*
-       FROM slack_messages tree
-       JOIN slack_render_v2_state state ON state.id = 1
-       WHERE tree.kind = 'tree'
-       AND tree.closed_at IS NULL
-       ${thread ? "AND tree.channel_id = ? AND tree.thread_ts = ?" : ""}
-       AND ${SLACK_TREE_NEEDS_RENDER_SQL}
-       ORDER BY tree.created_at ASC`,
-    thread ? [thread.channelId, thread.threadTs] : [],
-  );
+  const rows = await getStorage().repos.slack.listTreesNeedingRender(options.thread);
   return rows.map(rowToSlackMessage);
 }
 
@@ -1065,10 +959,7 @@ export async function getSlackMessageByChannelTs(
   channelId: string,
   ts: string,
 ): Promise<SlackMessageRecord | null> {
-  const row = await getDbClient().get<SlackMessageRow>(
-    `SELECT * FROM slack_messages WHERE channel_id = ? AND ts = ? LIMIT 1`,
-    [channelId, ts],
-  );
+  const row = await getStorage().repos.slack.findSlackMessageByChannelTs(channelId, ts);
   return row ? rowToSlackMessage(row) : null;
 }
 
@@ -1076,13 +967,8 @@ export async function getSlackTasksInThread(
   channelId: string,
   threadTs: string,
 ): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE slackChannelId = ? AND slackThreadTs = ?
-       ORDER BY createdAt ASC, rowid ASC`,
-    [channelId, threadTs],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listTasksInSlackThread(channelId, threadTs);
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -1094,37 +980,18 @@ export async function getSlackTasksInThread(
 export async function listSlackThreadsAwaitingHuman(): Promise<
   Array<{ channelId: string; threadTs: string }>
 > {
-  return getDbClient().query<{ channelId: string; threadTs: string }>(
-    `SELECT DISTINCT task.slackChannelId AS channelId, task.slackThreadTs AS threadTs
-       FROM approval_requests request
-       JOIN agent_tasks task ON task.id = request.sourceTaskId
-       WHERE request.status = 'pending'
-       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       AND task.slackChannelId IS NOT NULL
-       AND task.slackThreadTs IS NOT NULL`,
-  );
+  return getStorage().repos.workflows.listSlackThreadsAwaitingHuman();
 }
 
 export async function isSlackThreadAwaitingHuman(
   channelId: string,
   threadTs: string,
 ): Promise<boolean> {
-  const row = await getDbClient().get<{ waiting: number }>(
-    `SELECT 1 AS waiting
-       FROM approval_requests request
-       JOIN agent_tasks task ON task.id = request.sourceTaskId
-       WHERE request.status = 'pending'
-       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       AND task.slackChannelId = ?
-       AND task.slackThreadTs = ?
-       LIMIT 1`,
-    [channelId, threadTs],
-  );
-  return !!row;
+  return await getStorage().repos.workflows.isSlackThreadAwaitingHuman(channelId, threadTs);
 }
 
 export async function markTaskSlackReplySent(taskId: string): Promise<void> {
-  await getDbClient().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
+  await getStorage().repos.tasks.markTaskSlackReplySent(taskId);
 }
 
 export async function setSlackMessageTracking(
@@ -1134,21 +1001,7 @@ export async function setSlackMessageTracking(
     slackTreeRootMessageTs?: string | null;
   },
 ): Promise<void> {
-  const sets: string[] = [];
-  const args: (string | null)[] = [];
-
-  if (Object.hasOwn(fields, "slackProgressMessageTs")) {
-    sets.push("slackProgressMessageTs = ?");
-    args.push(fields.slackProgressMessageTs ?? null);
-  }
-  if (Object.hasOwn(fields, "slackTreeRootMessageTs")) {
-    sets.push("slackTreeRootMessageTs = ?");
-    args.push(fields.slackTreeRootMessageTs ?? null);
-  }
-  if (sets.length === 0) return;
-
-  args.push(taskId);
-  await getDbClient().run(`UPDATE agent_tasks SET ${sets.join(", ")} WHERE id = ?`, args);
+  await getStorage().repos.tasks.setTaskSlackTracking(taskId, fields);
 }
 
 export async function updateTaskVcs(
@@ -1160,12 +1013,11 @@ export async function updateTaskVcs(
     vcsUrl: string;
   },
 ): Promise<AgentTask | null> {
-  const row = await getDbClient().transaction(async () => {
-    const updated = await getDbClient().get<AgentTaskRow>(
-      `UPDATE agent_tasks
-       SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
-       WHERE id = ? RETURNING *`,
-      [vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId],
+  const row = await getStorage().transaction(async () => {
+    const updated = await getStorage().repos.tasks.setTaskVcs(
+      taskId,
+      vcs,
+      new Date().toISOString(),
     );
     if (updated) {
       await reconcileTaskPullRequestAttachments(taskId, updated.agentId, [
@@ -1188,31 +1040,6 @@ export async function updateTaskVcs(
 // idempotent re-calls don't fan out duplicate rows. The `kind` enum here
 // MUST stay in sync with the SQL CHECK constraint (migration 072) and the
 // `TaskAttachmentKindSchema` zod enum.
-
-type TaskAttachmentRow = {
-  id: string;
-  task_id: string;
-  agent_id: string | null;
-  name: string;
-  kind: string;
-  url: string | null;
-  path: string | null;
-  page_id: string | null;
-  provider_id: string | null;
-  provider_key: string | null;
-  capabilities: string | null;
-  agent_fs_org_id: string | null;
-  agent_fs_drive_id: string | null;
-  mime_type: string | null;
-  size_bytes: number | null;
-  sha256: string | null;
-  intent: string | null;
-  description: string | null;
-  is_primary: number;
-  created_at: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 function rowToTaskAttachment(row: TaskAttachmentRow): TaskAttachment {
   return {
@@ -1253,12 +1080,6 @@ function parseAttachmentCapabilities(value: string | null): Record<string, unkno
   }
 }
 
-function stringifyAttachmentCapabilities(
-  value: Record<string, unknown> | undefined,
-): string | null {
-  return value ? JSON.stringify(value) : null;
-}
-
 export interface InsertTaskAttachmentInput {
   taskId: string;
   agentId: string | null;
@@ -1295,7 +1116,7 @@ export interface InsertTaskAttachmentInput {
 export async function insertTaskAttachment(
   input: InsertTaskAttachmentInput,
 ): Promise<TaskAttachment> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const attachment = await insertTaskAttachmentRow(input);
     if (attachment.kind === "agent-fs" && attachment.providerId && attachment.providerKey) {
       const task = await getTaskById(input.taskId);
@@ -1340,12 +1161,9 @@ export async function recordTaskPullRequestAttachments(
   const pullRequests = extractGitHubPullRequestUrls(text);
   if (pullRequests.length === 0) return [];
 
-  const existingRows = await getDbClient().query<{ url: string }>(
-    "SELECT url FROM task_attachments WHERE task_id = ? AND kind = 'url' AND url IS NOT NULL",
-    [taskId],
-  );
+  const existingUrls = await getStorage().repos.tasks.listUrlAttachmentUrls(taskId);
   const existingPullRequests = new Set(
-    existingRows.flatMap((row) => extractGitHubPullRequestUrls(row.url)).map(pullRequestKey),
+    existingUrls.flatMap((url) => extractGitHubPullRequestUrls(url)).map(pullRequestKey),
   );
   const stored: TaskAttachment[] = [];
   for (const pullRequest of pullRequests) {
@@ -1379,14 +1197,10 @@ async function reconcileTaskPullRequestAttachments(
 ): Promise<TaskAttachment[]> {
   const desiredPullRequests = sourceTexts.flatMap(extractGitHubPullRequestUrls);
   const desiredKeys = new Set(desiredPullRequests.map(pullRequestKey));
-  const generatedRows = await getDbClient().query<{ id: string; name: string; url: string }>(
-    `SELECT id, name, url
-     FROM task_attachments
-     WHERE task_id = ?
-       AND kind = 'url'
-       AND url IS NOT NULL
-       AND json_extract(capabilities, '$.${SERVER_GENERATED_ATTACHMENT_CAPABILITY}') = ?`,
-    [taskId, GENERATED_PULL_REQUEST_SOURCE],
+  const generatedRows = await getStorage().repos.tasks.listGeneratedUrlAttachments(
+    taskId,
+    SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+    GENERATED_PULL_REQUEST_SOURCE,
   );
 
   for (const row of generatedRows) {
@@ -1397,7 +1211,7 @@ async function reconcileTaskPullRequestAttachments(
       row.name !== expectedName ||
       !desiredKeys.has(pullRequestKey(pullRequest))
     ) {
-      await getDbClient().run("DELETE FROM task_attachments WHERE id = ?", [row.id]);
+      await getStorage().repos.tasks.deleteTaskAttachment(row.id);
     }
   }
 
@@ -1409,62 +1223,29 @@ async function reconcileTaskPullRequestAttachments(
 }
 
 async function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): Promise<TaskAttachment> {
+  const tasks = getStorage().repos.tasks;
   if (input.sha256) {
-    const existing = await getDbClient().get<TaskAttachmentRow>(
-      "SELECT * FROM task_attachments WHERE task_id = ? AND sha256 = ? LIMIT 1",
-      [input.taskId, input.sha256],
-    );
+    const existing = await tasks.findTaskAttachmentBySha256(input.taskId, input.sha256);
     if (existing) return rowToTaskAttachment(existing);
   }
 
-  const tupleExisting = await getDbClient().get<TaskAttachmentRow>(
-    `SELECT * FROM task_attachments
-       WHERE task_id = ?
-         AND kind = ?
-         AND IFNULL(path, '')    = ?
-         AND IFNULL(url, '')     = ?
-         AND IFNULL(page_id, '') = ?
-         AND name = ?
-       ORDER BY created_at ASC
-       LIMIT 1`,
-    [input.taskId, input.kind, input.path ?? "", input.url ?? "", input.pageId ?? "", input.name],
-  );
+  const tupleExisting = await tasks.findTaskAttachmentByTuple({
+    taskId: input.taskId,
+    kind: input.kind,
+    path: input.path ?? "",
+    url: input.url ?? "",
+    pageId: input.pageId ?? "",
+    name: input.name,
+  });
   if (tupleExisting) return rowToTaskAttachment(tupleExisting);
 
-  const id = crypto.randomUUID();
-  const row = await getDbClient().get<TaskAttachmentRow>(
-    `INSERT INTO task_attachments
-         (id, task_id, agent_id, name, kind, url, path, page_id,
-          provider_id, provider_key, capabilities,
-          agent_fs_org_id, agent_fs_drive_id,
-          mime_type, size_bytes, sha256, intent, description, is_primary,
-          created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      id,
-      input.taskId,
-      input.agentId ?? null,
-      input.name,
-      input.kind,
-      input.url ?? null,
-      input.path ?? null,
-      input.pageId ?? null,
-      input.providerId ?? defaultProviderId(input.kind),
-      input.providerKey ?? defaultProviderKey(input),
-      stringifyAttachmentCapabilities(input.capabilities),
-      input.orgId ?? null,
-      input.driveId ?? null,
-      input.mimeType ?? null,
-      input.sizeBytes ?? null,
-      input.sha256 ?? null,
-      input.intent ?? null,
-      input.description ?? null,
-      input.isPrimary ? 1 : 0,
-      input.createdBy ?? null,
-      input.updatedBy ?? input.createdBy ?? null,
-    ],
-  );
+  const row = await tasks.insertTaskAttachment({
+    id: crypto.randomUUID(),
+    task_id: input.taskId,
+    ...taskAttachmentWrite(input),
+    created_by: input.createdBy ?? null,
+    updated_by: input.updatedBy ?? input.createdBy ?? null,
+  });
 
   if (!row) {
     throw new Error("Failed to insert task attachment");
@@ -1472,38 +1253,9 @@ async function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): Promis
   return rowToTaskAttachment(row);
 }
 
-function defaultProviderId(kind: TaskAttachment["kind"]): string {
-  if (kind === "agent-fs" || kind === "shared-fs") return "agent-fs";
-  return kind;
-}
-
-function defaultProviderKey(
-  input: Pick<InsertTaskAttachmentInput, "kind" | "path" | "url" | "pageId">,
-): string | null {
-  if (input.kind === "agent-fs" || input.kind === "shared-fs") return input.path ?? null;
-  if (input.kind === "url") return input.url ?? null;
-  if (input.kind === "page") return input.pageId ?? null;
-  return null;
-}
-
 // ============================================================================
 // Cross-entity asset namespaces + logical provider mappings
 // ============================================================================
-
-type AssetKeyMappingRow = {
-  id: string;
-  provider_id: string;
-  provider_org_id: string;
-  provider_drive_id: string;
-  provider_key: string;
-  key: string;
-  source_entity_type: string | null;
-  source_entity_id: string | null;
-  created_at: string;
-  updated_at: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 function rowToAssetKeyMapping(row: AssetKeyMappingRow): AssetKeyMapping {
   return {
@@ -1542,19 +1294,14 @@ async function insertAssetKeyHistory(input: {
   newKey: string;
   changedBy?: string;
 }): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO asset_key_history
-       (id, entity_type, entity_id, previous_key, new_key, changed_by)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      crypto.randomUUID(),
-      input.entityType,
-      input.entityId,
-      input.previousKey ?? null,
-      input.newKey,
-      input.changedBy ?? null,
-    ],
-  );
+  await getStorage().repos.assets.insertAssetKeyHistory({
+    id: crypto.randomUUID(),
+    entity_type: input.entityType,
+    entity_id: input.entityId,
+    previous_key: input.previousKey ?? null,
+    new_key: input.newKey,
+    changed_by: input.changedBy ?? null,
+  });
 }
 
 export async function getAssetKeyMappingByProvider(input: {
@@ -1563,12 +1310,12 @@ export async function getAssetKeyMappingByProvider(input: {
   providerDriveId?: string;
   providerKey: string;
 }): Promise<AssetKeyMapping | null> {
-  const row = await getDbClient().get<AssetKeyMappingRow>(
-    `SELECT * FROM asset_key_mappings
-       WHERE provider_id = ? AND provider_org_id = ?
-         AND provider_drive_id = ? AND provider_key = ?`,
-    [input.providerId, input.providerOrgId ?? "", input.providerDriveId ?? "", input.providerKey],
-  );
+  const row = await getStorage().repos.assets.findAssetKeyMappingByProvider({
+    providerId: input.providerId,
+    providerOrgId: input.providerOrgId ?? "",
+    providerDriveId: input.providerDriveId ?? "",
+    providerKey: input.providerKey,
+  });
   return row ? rowToAssetKeyMapping(row) : null;
 }
 
@@ -1583,24 +1330,18 @@ export async function upsertAssetKeyMapping(
   if (!input.providerKey.trim()) throw new Error("providerKey is required");
   const now = new Date().toISOString();
 
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  return await storage.transaction(async () => {
     const existing = await getAssetKeyMappingByProvider(input);
     if (existing) {
       const key = normalizeAssetKey(input.key ?? existing.key);
-      const row = await tx.get<AssetKeyMappingRow>(
-        `UPDATE asset_key_mappings
-           SET "key" = ?, source_entity_type = ?, source_entity_id = ?,
-               updated_at = ?, updated_by = ?
-           WHERE id = ? RETURNING *`,
-        [
-          key,
-          input.sourceEntityType ?? existing.sourceEntityType ?? null,
-          input.sourceEntityId ?? existing.sourceEntityId ?? null,
-          now,
-          input.updatedBy ?? input.createdBy ?? existing.updatedBy ?? null,
-          existing.id,
-        ],
-      );
+      const row = await storage.repos.assets.updateAssetKeyMapping(existing.id, {
+        key,
+        source_entity_type: input.sourceEntityType ?? existing.sourceEntityType ?? null,
+        source_entity_id: input.sourceEntityId ?? existing.sourceEntityId ?? null,
+        updated_at: now,
+        updated_by: input.updatedBy ?? input.createdBy ?? existing.updatedBy ?? null,
+      });
       if (!row) throw new Error("Failed to update asset key mapping");
       if (existing.key !== key) {
         await insertAssetKeyHistory({
@@ -1618,27 +1359,20 @@ export async function upsertAssetKeyMapping(
     const key = normalizeAssetKey(
       input.key ?? defaultAssetKey(`fs:${input.providerId.trim()}`, id),
     );
-    const row = await tx.get<AssetKeyMappingRow>(
-      `INSERT INTO asset_key_mappings (
-           id, provider_id, provider_org_id, provider_drive_id, provider_key,
-           "key", source_entity_type, source_entity_id,
-           created_at, updated_at, created_by, updated_by
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      [
-        id,
-        input.providerId.trim(),
-        input.providerOrgId ?? "",
-        input.providerDriveId ?? "",
-        input.providerKey,
-        key,
-        input.sourceEntityType ?? "external",
-        input.sourceEntityId ?? null,
-        now,
-        now,
-        input.createdBy ?? null,
-        input.updatedBy ?? input.createdBy ?? null,
-      ],
-    );
+    const row = await storage.repos.assets.insertAssetKeyMapping({
+      id,
+      provider_id: input.providerId.trim(),
+      provider_org_id: input.providerOrgId ?? "",
+      provider_drive_id: input.providerDriveId ?? "",
+      provider_key: input.providerKey,
+      key,
+      source_entity_type: input.sourceEntityType ?? "external",
+      source_entity_id: input.sourceEntityId ?? null,
+      created_at: now,
+      updated_at: now,
+      created_by: input.createdBy ?? null,
+      updated_by: input.updatedBy ?? input.createdBy ?? null,
+    });
     if (!row) throw new Error("Failed to create asset key mapping");
     await insertAssetKeyHistory({
       entityType: "file",
@@ -1651,10 +1385,7 @@ export async function upsertAssetKeyMapping(
 }
 
 export async function getAssetKeyMapping(id: string): Promise<AssetKeyMapping | null> {
-  const row = await getDbClient().get<AssetKeyMappingRow>(
-    "SELECT * FROM asset_key_mappings WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.assets.findAssetKeyMapping(id);
   return row ? rowToAssetKeyMapping(row) : null;
 }
 
@@ -1664,102 +1395,30 @@ export interface AssetSummaryFilters {
   limit?: number;
 }
 
-type AssetSummaryRow = {
-  entityType: AssetEntityType;
-  id: string;
-  key: string;
-  label: string;
-  updatedAt: string;
-  providerId: string | null;
-  providerOrgId: string | null;
-  providerDriveId: string | null;
-  providerKey: string | null;
-};
-
-function assetSummaryQueries(types: Set<AssetEntityType>): string[] {
-  const queries: string[] = [];
-  if (types.has("task")) {
-    queries.push(
-      `SELECT 'task' AS entityType, id, "key", 'Task ' || substr(id, 1, 8) AS label,
-              lastUpdatedAt AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM agent_tasks`,
-    );
-  }
-  if (types.has("workflow")) {
-    queries.push(
-      `SELECT 'workflow' AS entityType, id, "key", name AS label,
-              lastUpdatedAt AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM workflows`,
-    );
-  }
-  if (types.has("schedule")) {
-    queries.push(
-      `SELECT 'schedule' AS entityType, id, "key", name AS label,
-              lastUpdatedAt AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM scheduled_tasks`,
-    );
-  }
-  if (types.has("page")) {
-    queries.push(
-      `SELECT 'page' AS entityType, id, "key", title AS label,
-              updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM pages`,
-    );
-  }
-  if (types.has("app")) {
-    queries.push(
-      `SELECT 'app' AS entityType, id, "key", name AS label,
-              updated_at AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM apps`,
-    );
-  }
-  if (types.has("script")) {
-    queries.push(
-      `SELECT 'script' AS entityType, id, "key", name AS label,
-              updatedAt, NULL AS providerId, NULL AS providerOrgId,
-              NULL AS providerDriveId, NULL AS providerKey
-       FROM scripts`,
-    );
-  }
-  if (types.has("file")) {
-    queries.push(
-      `SELECT 'file' AS entityType, id, "key", provider_key AS label,
-              updated_at AS updatedAt, provider_id AS providerId,
-              NULLIF(provider_org_id, '') AS providerOrgId,
-              NULLIF(provider_drive_id, '') AS providerDriveId,
-              provider_key AS providerKey
-       FROM asset_key_mappings`,
-    );
-  }
-  return queries;
-}
-
 export async function listAssetSummaries(filters?: AssetSummaryFilters): Promise<AssetSummary[]> {
   const requestedTypes = new Set<AssetEntityType>(
     filters?.types?.length
       ? filters.types
       : ["task", "workflow", "schedule", "page", "app", "script", "file"],
   );
-  const queries = assetSummaryQueries(requestedTypes);
-  if (queries.length === 0) return [];
   const limit = Math.min(Math.max(filters?.limit ?? 500, 1), 1000);
-  const params: (string | number)[] = [];
-  let query = `SELECT * FROM (${queries.join(" UNION ALL ")})`;
-  if (filters?.keyPrefix) {
-    query += ` WHERE "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  query += ' ORDER BY "key" ASC, updatedAt DESC LIMIT ?';
-  params.push(limit);
-  const rows = await getDbClient().query<AssetSummaryRow>(query, params);
+  const order: AssetEntityType[] = [
+    "task",
+    "workflow",
+    "schedule",
+    "page",
+    "app",
+    "script",
+    "file",
+  ];
+  const rows = await getStorage().repos.assets.listAssetSummaries(
+    order.filter((type) => requestedTypes.has(type)),
+    filters?.keyPrefix ? assetKeyPrefixPattern(filters.keyPrefix) : null,
+    limit,
+  );
 
   return rows.map((row) => ({
-    entityType: row.entityType,
+    entityType: row.entityType as AssetEntityType,
     id: row.id,
     key: row.key,
     label: row.label,
@@ -1777,54 +1436,11 @@ export async function listAssetSummaries(filters?: AssetSummaryFilters): Promise
 }
 
 async function currentAssetKey(entityType: AssetEntityType, id: string): Promise<string | null> {
-  switch (entityType) {
-    case "task": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM agent_tasks WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "workflow": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM workflows WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "schedule": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM scheduled_tasks WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "page": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM pages WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "app": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM apps WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "script": {
-      const row = await getDbClient().get<{ key: string }>(
-        'SELECT "key" AS key FROM scripts WHERE id = ?',
-        [id],
-      );
-      return row?.key ?? null;
-    }
-    case "file": {
-      const mapping = await getAssetKeyMapping(id);
-      return mapping?.key ?? null;
-    }
+  if (entityType === "file") {
+    const mapping = await getAssetKeyMapping(id);
+    return mapping?.key ?? null;
   }
+  return await getStorage().repos.assets.findAssetKey(entityType, id);
 }
 
 export async function moveAssetKey(input: {
@@ -1852,58 +1468,25 @@ export async function moveAssetKey(input: {
   }
   const now = new Date().toISOString();
 
-  return getDbClient().transaction(async (tx) => {
-    switch (input.entityType) {
-      case "task": {
-        const movedTaskIds = await moveTaskChainKeyInTx(
-          input.id,
-          input.descendantTaskIds ?? [],
-          key,
-          input.changedBy,
-        );
-        if (movedTaskIds === false) return false;
-        return { movedTaskIds };
-      }
-      case "workflow":
-        await tx.run(
-          'UPDATE workflows SET "key" = ?, lastUpdatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
-        );
-        break;
-      case "schedule":
-        await tx.run(
-          'UPDATE scheduled_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
-        );
-        break;
-      case "page":
-        await tx.run('UPDATE pages SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
-          key,
-          now,
-          input.changedBy ?? null,
-          input.id,
-        ]);
-        break;
-      case "app":
-        await tx.run('UPDATE apps SET "key" = ?, updated_at = ? WHERE id = ?', [
-          key,
-          now,
-          input.id,
-        ]);
-        break;
-      case "script":
-        await tx.run(
-          'UPDATE scripts SET "key" = ?, updatedAt = ?, updated_by = ?, updatedByAgentId = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.changedByAgentId ?? null, input.id],
-        );
-        break;
-      case "file":
-        await tx.run(
-          'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
-          [key, now, input.changedBy ?? null, input.id],
-        );
-        break;
+  const storage = getStorage();
+  return storage.transaction(async () => {
+    if (input.entityType === "task") {
+      const movedTaskIds = await moveTaskChainKeyInTx(
+        input.id,
+        input.descendantTaskIds ?? [],
+        key,
+        input.changedBy,
+      );
+      if (movedTaskIds === false) return false;
+      return { movedTaskIds };
     }
+    // Workflows, schedules and scripts also record the moving agent.
+    await storage.repos.assets.setAssetKey(input.entityType, input.id, {
+      key,
+      now,
+      changedBy: input.changedBy ?? null,
+      changedByAgentId: input.changedByAgentId ?? null,
+    });
     await insertAssetKeyHistory({
       entityType: input.entityType,
       entityId: input.id,
@@ -1916,99 +1499,26 @@ export async function moveAssetKey(input: {
 }
 
 export async function deleteTaskAttachment(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM task_attachments WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.tasks.deleteTaskAttachment(id)) > 0;
 }
 
 export async function replaceTaskAttachment(
   id: string,
   input: Omit<InsertTaskAttachmentInput, "taskId">,
 ): Promise<TaskAttachment | null> {
-  const row = await getDbClient().get<TaskAttachmentRow>(
-    `UPDATE task_attachments
-       SET agent_id = ?,
-           name = ?,
-           kind = ?,
-           url = ?,
-           path = ?,
-           page_id = ?,
-           provider_id = ?,
-           provider_key = ?,
-           capabilities = ?,
-           agent_fs_org_id = ?,
-           agent_fs_drive_id = ?,
-           mime_type = ?,
-           size_bytes = ?,
-           sha256 = ?,
-           intent = ?,
-           description = ?,
-           is_primary = ?,
-           updated_by = ?
-       WHERE id = ?
-       RETURNING *`,
-    [
-      input.agentId ?? null,
-      input.name,
-      input.kind,
-      input.url ?? null,
-      input.path ?? null,
-      input.pageId ?? null,
-      input.providerId ?? defaultProviderId(input.kind),
-      input.providerKey ?? defaultProviderKey(input),
-      stringifyAttachmentCapabilities(input.capabilities),
-      input.orgId ?? null,
-      input.driveId ?? null,
-      input.mimeType ?? null,
-      input.sizeBytes ?? null,
-      input.sha256 ?? null,
-      input.intent ?? null,
-      input.description ?? null,
-      input.isPrimary ? 1 : 0,
-      input.updatedBy ?? null,
-      id,
-    ],
-  );
+  const row = await getStorage().repos.tasks.replaceTaskAttachment(id, taskAttachmentWrite(input));
 
   return row ? rowToTaskAttachment(row) : null;
 }
 
 export async function getTaskAttachments(taskId: string): Promise<TaskAttachment[]> {
-  const rows = await getDbClient().query<TaskAttachmentRow>(
-    "SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC, rowid ASC",
-    [taskId],
-  );
+  const rows = await getStorage().repos.tasks.listTaskAttachments(taskId);
   return rows.map(rowToTaskAttachment);
 }
 
 // ============================================================================
 // Task Steering Messages
 // ============================================================================
-
-type TaskSteeringMessageRow = {
-  id: string;
-  task_id: string;
-  body: string;
-  mode: string;
-  status: string;
-  delivered_mode: string | null;
-  source: string;
-  sender_name?: string | null;
-  created_by_kind: string;
-  created_by_user_id: string | null;
-  created_by_agent_id: string | null;
-  promoted_task_id: string | null;
-  created_at: string;
-  delivered_at: string | null;
-  handled_at: string | null;
-  handled_note: string | null;
-};
-
-// Resolve names in the API so workers need no database access or identity lookups.
-const STEERING_MESSAGE_SELECT = `SELECT m.*,
-  CASE m.created_by_kind WHEN 'user' THEN u.name WHEN 'agent' THEN a.name END AS sender_name
-  FROM task_steering_messages m
-  LEFT JOIN users u ON m.created_by_kind = 'user' AND u.id = m.created_by_user_id
-  LEFT JOIN agents a ON m.created_by_kind = 'agent' AND a.id = m.created_by_agent_id`;
 
 function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
   const senderId =
@@ -2051,26 +1561,19 @@ export async function createSteeringMessage(
   args: CreateSteeringMessageArgs,
 ): Promise<SteeringMessage> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `INSERT INTO task_steering_messages
-         (id, task_id, body, mode, source, created_by_kind,
-          created_by_user_id, created_by_agent_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      id,
-      args.taskId,
-      args.body,
-      args.mode,
-      args.source,
-      args.createdByKind,
-      args.createdByUserId ?? null,
-      args.createdByAgentId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.tasks.insertSteeringMessage({
+    id,
+    task_id: args.taskId,
+    body: args.body,
+    mode: args.mode,
+    source: args.source,
+    created_by_kind: args.createdByKind,
+    created_by_user_id: args.createdByUserId ?? null,
+    created_by_agent_id: args.createdByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create steering message");
 
-  getDbClient().afterCommit(async () => {
+  getStorage().afterCommit(async () => {
     const task = await getTaskById(args.taskId);
     if (task?.agentId) publishWorkerNudge(task.agentId, { kind: "steer", taskId: args.taskId });
   });
@@ -2096,28 +1599,12 @@ export async function getSteeringMessagesForTask(
   taskId: string,
   opts?: { status?: SteeringStatus },
 ): Promise<SteeringMessage[]> {
-  const rows = opts?.status
-    ? await getDbClient().query<TaskSteeringMessageRow>(
-        `${STEERING_MESSAGE_SELECT}
-           WHERE m.task_id = ? AND m.status = ?
-           ORDER BY m.created_at ASC, m.rowid ASC`,
-        [taskId, opts.status],
-      )
-    : await getDbClient().query<TaskSteeringMessageRow>(
-        `${STEERING_MESSAGE_SELECT}
-           WHERE m.task_id = ?
-           ORDER BY m.created_at ASC, m.rowid ASC`,
-        [taskId],
-      );
+  const rows = await getStorage().repos.tasks.listSteeringMessages(taskId, opts?.status);
   return rows.map(rowToSteeringMessage);
 }
 
 export async function getSteeringMessageById(id: string): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `${STEERING_MESSAGE_SELECT}
-       WHERE m.id = ?`,
-    [id],
-  );
+  const row = await getStorage().repos.tasks.findSteeringMessage(id);
   return row ? rowToSteeringMessage(row) : null;
 }
 
@@ -2129,14 +1616,7 @@ export async function getPendingSteeringForAgent(
   agentId: string,
   readableBy?: { userId: string | null },
 ): Promise<SteeringMessage[]> {
-  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
-  const rows = await getDbClient().query<TaskSteeringMessageRow>(
-    `${STEERING_MESSAGE_SELECT}
-       JOIN agent_tasks t ON t.id = m.task_id
-       WHERE t.agentId = ? AND m.status = 'pending'${readable ? ` AND ${readable.sql}` : ""}
-       ORDER BY m.created_at ASC, m.rowid ASC`,
-    [agentId, ...(readable?.params ?? [])],
-  );
+  const rows = await getStorage().repos.tasks.listPendingSteeringForAgent(agentId, readableBy);
   return rows.map(rowToSteeringMessage);
 }
 
@@ -2149,14 +1629,10 @@ export async function markSteeringDelivered(
   deliveredMode: SteerMode,
   expectedTaskId?: string,
 ): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `UPDATE task_steering_messages
-       SET status = 'delivered',
-           delivered_mode = ?,
-           delivered_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status = 'pending' AND task_id = COALESCE(?, task_id)
-       RETURNING *`,
-    [deliveredMode, id, expectedTaskId ?? null],
+  const row = await getStorage().repos.tasks.markSteeringDelivered(
+    id,
+    deliveredMode,
+    expectedTaskId ?? null,
   );
 
   if (row) {
@@ -2181,15 +1657,7 @@ export async function markSteeringHandled(
   id: string,
   note?: string,
 ): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `UPDATE task_steering_messages
-       SET status = 'handled',
-           handled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-           handled_note = ?
-       WHERE id = ? AND status = 'delivered'
-       RETURNING *`,
-    [note ?? null, id],
-  );
+  const row = await getStorage().repos.tasks.markSteeringHandled(id, note ?? null);
   return row ? await getSteeringMessageById(id) : null;
 }
 
@@ -2197,36 +1665,16 @@ export async function markSteeringPromoted(
   id: string,
   promotedTaskId: string,
 ): Promise<SteeringMessage | null> {
-  const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `UPDATE task_steering_messages
-       SET status = 'promoted',
-           promoted_task_id = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING *`,
-    [promotedTaskId, id],
-  );
+  const row = await getStorage().repos.tasks.markSteeringPromoted(id, promotedTaskId);
   return row ? await getSteeringMessageById(id) : null;
 }
 
 export async function cancelPendingSteeringForTask(taskId: string): Promise<number> {
-  const result = await getDbClient().run(
-    `UPDATE task_steering_messages
-       SET status = 'cancelled'
-       WHERE task_id = ? AND status = 'pending'`,
-    [taskId],
-  );
-  return result.changes;
+  return await getStorage().repos.tasks.cancelPendingSteering(taskId);
 }
 
 export async function hasPendingSteering(taskId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ present: number }>(
-    `SELECT 1 AS present
-         FROM task_steering_messages
-         WHERE task_id = ? AND status = 'pending'
-         LIMIT 1`,
-    [taskId],
-  );
-  return row !== null;
+  return await getStorage().repos.tasks.hasPendingSteering(taskId);
 }
 
 // ============================================================================
@@ -2237,7 +1685,7 @@ export async function getAgentWithTasks(
   id: string,
   readableBy?: { userId: string | null },
 ): Promise<AgentWithTasks | null> {
-  return await getDbClient().transaction(
+  return await getStorage().transaction(
     async () => {
       const agent = await getAgentById(id);
       if (!agent) return null;
@@ -2253,7 +1701,7 @@ export async function getAllAgentsWithTasks(opts?: {
   slim?: boolean;
   readableBy?: { userId: string | null };
 }): Promise<AgentWithTasks[]> {
-  return await getDbClient().transaction(
+  return await getStorage().transaction(
     async () => {
       const agents = await getAllAgents({ slim: opts?.slim ?? false });
       return await Promise.all(
@@ -2305,19 +1753,20 @@ export async function createLogEntry(entry: {
 }): Promise<AgentLog> {
   const id = crypto.randomUUID();
   const metaJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
-  const row = await getDbClient().get<AgentLogRow>(
-    `INSERT INTO agent_log (id, eventType, agentId, taskId, oldValue, newValue, metadata, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
-    [
+  // A nested transaction (a SAVEPOINT) inside a caller's transaction: most
+  // callers swallow a failed log write, and on Postgres a failed statement
+  // aborts the whole transaction unless it ran inside a savepoint.
+  const row = (await getStorage().transaction(() =>
+    getStorage().repos.agents.insertLog({
       id,
-      entry.eventType,
-      entry.agentId ?? null,
-      entry.taskId ?? null,
-      entry.oldValue ? scrubSecrets(entry.oldValue) : null,
-      entry.newValue ? scrubSecrets(entry.newValue) : null,
-      metaJson ? scrubSecrets(metaJson) : null,
-    ],
-  );
+      eventType: entry.eventType,
+      agentId: entry.agentId ?? null,
+      taskId: entry.taskId ?? null,
+      oldValue: entry.oldValue ? scrubSecrets(entry.oldValue) : null,
+      newValue: entry.newValue ? scrubSecrets(entry.newValue) : null,
+      metadata: metaJson ? scrubSecrets(metaJson) : null,
+    }),
+  )) as AgentLogRow | null;
   if (!row) throw new Error("Failed to create log entry");
   return rowToAgentLog(row);
 }
@@ -2326,21 +1775,15 @@ export async function getLogsByAgentId(
   agentId: string,
   readableBy?: { userId: string | null },
 ): Promise<AgentLog[]> {
-  const readable = readableBy
-    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
-    : undefined;
-  const rows = await getDbClient().query<AgentLogRow>(
-    `SELECT * FROM agent_log WHERE agentId = ?${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC`,
-    [agentId, ...(readable?.params ?? [])],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByAgent(
+    agentId,
+    readableBy,
+  )) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
 export async function getLogsByTaskId(taskId: string, limit = 200): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
-    [taskId, limit],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByTask(taskId, limit)) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -2348,18 +1791,17 @@ export async function getLogsByTaskIdAndEventType(
   taskId: string,
   eventType: AgentLogEventType,
 ): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE taskId = ? AND eventType = ? ORDER BY createdAt ASC",
-    [taskId, eventType],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByTaskChronological(
+    taskId,
+    eventType,
+  )) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
 export async function getLogsByTaskIdChronological(taskId: string): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt ASC",
-    [taskId],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByTaskChronological(
+    taskId,
+  )) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -2368,10 +1810,7 @@ export async function getLogsByTaskIdChronological(taskId: string): Promise<Agen
  * REST audit-log tests to assert mutation rows landed.
  */
 export async function getLogsByEventType(eventType: AgentLogEventType): Promise<AgentLog[]> {
-  const rows = await getDbClient().query<AgentLogRow>(
-    "SELECT * FROM agent_log WHERE eventType = ? ORDER BY createdAt DESC",
-    [eventType],
-  );
+  const rows = (await getStorage().repos.agents.listLogsByEventType(eventType)) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -2379,21 +1818,8 @@ export async function getAllLogs(
   limit?: number,
   readableBy?: { userId: string | null },
 ): Promise<AgentLog[]> {
-  const readable = readableBy
-    ? readableSessionCondition(readableBy.userId, "agent_log.taskId", { nullable: true })
-    : undefined;
-  const readableParams = readable?.params ?? [];
-  if (limit) {
-    const rows = await getDbClient().query<AgentLogRow>(
-      `SELECT * FROM agent_log WHERE eventType != 'agent_status_change'${readable ? ` AND ${readable.sql}` : ""} ORDER BY createdAt DESC LIMIT ?`,
-      [...readableParams, limit],
-    );
-    return rows.map(rowToAgentLog);
-  }
-  const rows = await getDbClient().query<AgentLogRow>(
-    `SELECT * FROM agent_log${readable ? ` WHERE ${readable.sql}` : ""} ORDER BY createdAt DESC`,
-    readableParams,
-  );
+  // With a limit, agent status changes are left out.
+  const rows = (await getStorage().repos.agents.listAllLogs(limit, readableBy)) as AgentLogRow[];
   return rows.map(rowToAgentLog);
 }
 
@@ -2418,27 +1844,14 @@ export async function findRecentSimilarTasks(opts: {
   limit?: number;
 }): Promise<AgentTask[]> {
   const since = new Date(Date.now() - (opts.windowMinutes ?? 10) * 60 * 1000).toISOString();
-  const conditions: string[] = ["createdAt > ?"];
-  const params: (string | number)[] = [since];
-
-  // Exclude all terminal statuses — only active or recently created.
-  // Keep in lock-step with `TERMINAL_TASK_STATUSES` in src/types.ts.
-  conditions.push("status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')");
-
-  if (opts.creatorAgentId) {
-    conditions.push("creatorAgentId = ?");
-    params.push(opts.creatorAgentId);
-  }
-  if (opts.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-
-  const limit = opts.limit ?? 50;
-  const query = `SELECT * FROM agent_tasks WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC LIMIT ${limit}`;
-
-  const rows = await getDbClient().query<AgentTaskRow>(query, params);
-  return rows.map(rowToAgentTask);
+  // Excludes every terminal status (`TERMINAL_TASK_STATUSES` in src/types.ts).
+  const rows = await getStorage().repos.tasks.listRecentSimilarTasks({
+    since,
+    creatorAgentId: opts.creatorAgentId,
+    agentId: opts.agentId,
+    limit: opts.limit ?? 50,
+  });
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 type RoutingDecisionWorkerStatus = {
@@ -2463,71 +1876,41 @@ type RoutingDecisionSnapshot = {
   };
 };
 
-const ROUTING_HOLDER_SQL = `CASE
-  WHEN status IN ('draft', 'offered', 'reviewing') AND offeredTo IS NOT NULL THEN offeredTo
-  ELSE COALESCE(agentId, offeredTo)
-END`;
-
 async function findLatestRoutingCandidate(
-  where: string,
-  params: Array<string | number>,
+  match: RoutingCandidateMatch,
 ): Promise<RoutingDecisionCandidate | null> {
-  const row = await getDbClient().get<RoutingDecisionCandidate>(
-    `SELECT id AS taskId, ${ROUTING_HOLDER_SQL} AS agentId
-       FROM agent_tasks
-       WHERE ${where}
-         AND ${ROUTING_HOLDER_SQL} IN (SELECT id FROM agents WHERE isLead = 0)
-       ORDER BY createdAt DESC, rowid DESC
-       LIMIT 1`,
-    params,
-  );
-  return row ?? null;
+  return await getStorage().repos.tasks.findLatestRoutingCandidate(match);
 }
 
 async function captureRoutingDecisionSnapshot(
   options: CreateTaskOptions,
 ): Promise<RoutingDecisionSnapshot> {
-  // MATERIALIZED pins the plan: a status seek over the few open tasks. Without
-  // it (and with no sqlite_stat1) the planner flattens the CTE back into an OR
-  // over agentId/offeredTo that reads each agent's whole task history.
-  const workerStatuses = await getDbClient().query<RoutingDecisionWorkerStatus>(
-    `WITH open_task AS MATERIALIZED (
-         SELECT id, agentId, offeredTo, status FROM agent_tasks
-          WHERE status IN (${OPEN_TASK_STATUSES.map(() => "?").join(", ")})
-       )
-       SELECT agent.id AS agentId, agent.status,
-         COUNT(task.id) AS openTaskCount,
-         SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS activeTaskCount
-       FROM agents agent
-       LEFT JOIN open_task task ON task.agentId = agent.id OR task.offeredTo = agent.id
-       WHERE agent.isLead = 0
-       GROUP BY agent.id, agent.status
-       ORDER BY agent.id`,
-    [...OPEN_TASK_STATUSES],
-  );
+  const workerStatuses = (await getStorage().repos.tasks.listRoutingWorkerStatuses(
+    OPEN_TASK_STATUSES,
+  )) as RoutingDecisionWorkerStatus[];
 
   const samePr =
     options.vcsRepo && options.vcsNumber != null
-      ? await findLatestRoutingCandidate("vcsRepo = ? AND vcsNumber = ?", [
-          options.vcsRepo,
-          options.vcsNumber,
-        ])
+      ? await findLatestRoutingCandidate({
+          vcsRepo: options.vcsRepo,
+          vcsNumber: options.vcsNumber,
+        })
       : null;
 
   let sameThread: RoutingDecisionCandidate | null = null;
   if (options.slackChannelId && options.slackThreadTs) {
-    sameThread = await findLatestRoutingCandidate("slackChannelId = ? AND slackThreadTs = ?", [
-      options.slackChannelId,
-      options.slackThreadTs,
-    ]);
+    sameThread = await findLatestRoutingCandidate({
+      slackChannelId: options.slackChannelId,
+      slackThreadTs: options.slackThreadTs,
+    });
   } else if (options.agentmailThreadId) {
-    sameThread = await findLatestRoutingCandidate("agentmailThreadId = ?", [
-      options.agentmailThreadId,
-    ]);
+    sameThread = await findLatestRoutingCandidate({
+      agentmailThreadId: options.agentmailThreadId,
+    });
   }
 
   const sameRepo = options.vcsRepo
-    ? await findLatestRoutingCandidate("vcsRepo = ?", [options.vcsRepo])
+    ? await findLatestRoutingCandidate({ vcsRepo: options.vcsRepo })
     : null;
 
   return {
@@ -2547,6 +1930,12 @@ function logRoutingDecisionFailure(taskId: string, stage: "capture" | "write", e
 export async function createTaskExtended(
   task: string,
   options?: CreateTaskOptions,
+  /**
+   * `readCommitted`: run the INSERT transaction at READ COMMITTED on Postgres
+   * when it is the outermost transaction (decision D7 opt-down). Only the
+   * unkeyed REST create sets it; see the comment at the transaction.
+   */
+  txMode?: { readCommitted?: boolean },
 ): Promise<AgentTask> {
   if (typeof task !== "string" || task.trim().length === 0) {
     throw new Error("createTaskExtended: 'task' must be a non-empty string");
@@ -2967,156 +2356,161 @@ export async function createTaskExtended(
   // issue. The FIFO lock serializes whole transactions, so the loser's re-read
   // observes the winner's committed row. Pre-checks at the call sites
   // (src/tools/send-task.ts, src/linear/sync.ts) stay a fast path only.
-  const claim = await getDbClient().transaction<
+  const tasks = getStorage().repos.tasks;
+  // Decision D7 opt-down, for the caller that asks (the unkeyed REST create):
+  // on Postgres this transaction runs at READ COMMITTED. Reason: under
+  // SERIALIZABLE, 58% of unkeyed creates retried in the seeded bench (ledger
+  // part 9), from predicate reads of agent_tasks and agents (routing snapshot,
+  // human-free class). What SERIALIZABLE guarded, and how each holds here:
+  // the Linear tracker dedup and the workflow step check have no row to lock,
+  // so a create that needs either stays SERIALIZABLE; the parent key re-read
+  // locks the parent row first (`FOR UPDATE`), so an in-flight chain move
+  // commits before the read. Scenario: stress-task-create.
+  const readCommitted =
+    txMode?.readCommitted === true &&
+    !options?.workflowRunStepId &&
+    (options?.bypassTrackerContextDedup || !isLinearTrackerContextKey(options?.contextKey));
+  const claim = await getStorage().transaction<
     { existing: ExistingTrackerContextWork } | { row: AgentTaskRow }
-  >(async () => {
-    // A workflow step's task commits only while the step may still start
-    // work. Checked in the INSERT's transaction: a cascade cancel of the
-    // step's run tree either commits first and is seen here, or sees and
-    // cancels this task.
-    if (options?.workflowRunStepId) {
-      const blocked = await getStepExecutionBlock(options.workflowRunStepId);
-      if (blocked) throw new WorkflowStepNotExecutableError(options.workflowRunStepId, blocked);
-    }
-    const existingTrackerWork = options?.bypassTrackerContextDedup
-      ? null
-      : await findExistingLinearTrackerContextWork(options?.contextKey);
-    if (existingTrackerWork) return { existing: existingTrackerWork };
+  >(
+    async () => {
+      // A workflow step's task commits only while the step may still start
+      // work. Checked in the INSERT's transaction: a cascade cancel of the
+      // step's run tree either commits first and is seen here, or sees and
+      // cancels this task.
+      if (options?.workflowRunStepId) {
+        const blocked = await getStepExecutionBlock(options.workflowRunStepId);
+        if (blocked) throw new WorkflowStepNotExecutableError(options.workflowRunStepId, blocked);
+      }
+      const existingTrackerWork = options?.bypassTrackerContextDedup
+        ? null
+        : await findExistingLinearTrackerContextWork(options?.contextKey);
+      if (existingTrackerWork) return { existing: existingTrackerWork };
 
-    // A chain move (a user move, the source key backfill) can commit between
-    // the parent read above and this write lock. Its chain query did not see
-    // this child, so take the parent's key as it is now.
-    const parentKey =
-      keyInherited && options?.parentTaskId
-        ? (
-            await getDbClient().get<{ key: string }>('SELECT "key" FROM agent_tasks WHERE id = ?', [
-              options.parentTaskId,
-            ])
-          )?.key
-        : undefined;
-    const insertKey = parentKey ? normalizeAssetKey(parentKey) : assetKey;
+      // A chain move (a user move, the source key backfill) can commit between
+      // the parent read above and this write lock. Its chain query did not see
+      // this child, so take the parent's key as it is now.
+      if (readCommitted && keyInherited && options?.parentTaskId) {
+        await tasks.lockTask(options.parentTaskId);
+      }
+      const parentKey =
+        keyInherited && options?.parentTaskId
+          ? ((await tasks.findTaskKey(options.parentTaskId)) ?? undefined)
+          : undefined;
+      const insertKey = parentKey ? normalizeAssetKey(parentKey) : assetKey;
 
-    let routingDecisionSnapshot: RoutingDecisionSnapshot | null = null;
-    try {
-      routingDecisionSnapshot = await captureRoutingDecisionSnapshot(options);
-    } catch (error) {
-      logRoutingDecisionFailure(id, "capture", error);
-    }
+      let routingDecisionSnapshot: RoutingDecisionSnapshot | null = null;
+      try {
+        routingDecisionSnapshot = await captureRoutingDecisionSnapshot(options);
+      } catch (error) {
+        logRoutingDecisionFailure(id, "capture", error);
+      }
 
-    const isHumanFree = await classifyTaskHumanFree({
-      taskType: options?.taskType,
-      tags: JSON.stringify(options?.tags ?? []),
-      source: options?.source ?? "mcp",
-      requestedByUserId: options?.requestedByUserId,
-      requestedByUserIdInherited,
-      parentTaskId: options?.parentTaskId,
-      workflowRunId: options?.workflowRunId,
-    });
+      const isHumanFree = await classifyTaskHumanFree({
+        taskType: options?.taskType,
+        tags: JSON.stringify(options?.tags ?? []),
+        source: options?.source ?? "mcp",
+        requestedByUserId: options?.requestedByUserId,
+        requestedByUserIdInherited,
+        parentTaskId: options?.parentTaskId,
+        workflowRunId: options?.workflowRunId,
+      });
 
-    const provenance = getCurrentRunProvenance();
-    const inserted = await getDbClient().get<AgentTaskRow>(
-      `INSERT INTO agent_tasks (
-        id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_source, routing_note,
-        taskType, tags, priority, dependsOn, offeredTo, offeredAt,
-        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId, slackParticipants,
-        vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
-        vcsInstallationId, vcsNodeId,
-        agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, dispatchedByTaskId, model, modelTier, effort, profile, fallbackHops, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree,
-        sourceStepId, sourceScriptRunId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      [
+      const provenance = getCurrentRunProvenance();
+      const inserted = await tasks.insertTask({
         id,
-        insertKey,
-        options?.agentId ?? null,
-        options?.creatorAgentId ?? null,
+        key: insertKey,
+        agentId: options?.agentId ?? null,
+        creatorAgentId: options?.creatorAgentId ?? null,
         // Free text from every task source; scrub at the single INSERT.
-        scrubSecrets(task),
+        task: scrubSecrets(task),
         status,
-        options?.source ?? "mcp",
-        options?.routingReason ?? null,
-        options?.routingSource ?? null,
-        options?.routingNote ?? null,
-        options?.taskType ?? null,
-        JSON.stringify(options?.tags ?? []),
-        options?.priority ?? 50,
-        JSON.stringify(options?.dependsOn ?? []),
-        options?.offeredTo ?? null,
-        options?.offeredTo ? now : null,
-        options?.slackChannelId ?? null,
-        options?.slackThreadTs ?? null,
-        options?.slackTriggerMessageTs ?? null,
-        options?.slackUserId ?? null,
-        options?.slackParticipants ? JSON.stringify(options.slackParticipants) : null,
-        options?.vcsProvider ?? null,
-        options?.vcsRepo ?? null,
-        options?.vcsEventType ?? null,
-        options?.vcsNumber ?? null,
-        options?.vcsCommentId ?? null,
-        options?.vcsAuthor ?? null,
-        options?.vcsUrl ?? null,
-        options?.vcsInstallationId ?? null,
-        options?.vcsNodeId ?? null,
-        options?.agentmailInboxId ?? null,
-        options?.agentmailMessageId ?? null,
-        options?.agentmailThreadId ?? null,
-        options?.mentionMessageId ?? null,
-        options?.mentionChannelId ?? null,
-        options?.dir ?? null,
-        options?.parentTaskId ?? null,
-        options?.dispatchedByTaskId ?? null,
-        options?.model ?? null,
-        options?.modelTier ?? null,
-        options?.effort ?? null,
-        options?.profile?.trim() || null,
-        options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
-        options?.scheduleId ?? null,
-        options?.workflowRunId ?? null,
-        options?.workflowRunStepId ?? null,
-        options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
-        options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
-        options?.requestedByUserId ?? null,
-        requestedByUserIdInherited ? 1 : 0,
-        options?.contextKey ?? null,
-        options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
-        pkg.version,
-        now,
-        now,
-        auditUserId,
-        auditUserId,
-        isHumanFree ? 1 : 0,
+        source: options?.source ?? "mcp",
+        routing_reason: options?.routingReason ?? null,
+        routing_source: options?.routingSource ?? null,
+        routing_note: options?.routingNote ?? null,
+        taskType: options?.taskType ?? null,
+        tags: JSON.stringify(options?.tags ?? []),
+        priority: options?.priority ?? 50,
+        dependsOn: JSON.stringify(options?.dependsOn ?? []),
+        offeredTo: options?.offeredTo ?? null,
+        offeredAt: options?.offeredTo ? now : null,
+        slackChannelId: options?.slackChannelId ?? null,
+        slackThreadTs: options?.slackThreadTs ?? null,
+        slackTriggerMessageTs: options?.slackTriggerMessageTs ?? null,
+        slackUserId: options?.slackUserId ?? null,
+        slackParticipants: options?.slackParticipants
+          ? JSON.stringify(options.slackParticipants)
+          : null,
+        vcsProvider: options?.vcsProvider ?? null,
+        vcsRepo: options?.vcsRepo ?? null,
+        vcsEventType: options?.vcsEventType ?? null,
+        vcsNumber: options?.vcsNumber ?? null,
+        vcsCommentId: options?.vcsCommentId ?? null,
+        vcsAuthor: options?.vcsAuthor ?? null,
+        vcsUrl: options?.vcsUrl ?? null,
+        vcsInstallationId: options?.vcsInstallationId ?? null,
+        vcsNodeId: options?.vcsNodeId ?? null,
+        agentmailInboxId: options?.agentmailInboxId ?? null,
+        agentmailMessageId: options?.agentmailMessageId ?? null,
+        agentmailThreadId: options?.agentmailThreadId ?? null,
+        mentionMessageId: options?.mentionMessageId ?? null,
+        mentionChannelId: options?.mentionChannelId ?? null,
+        dir: options?.dir ?? null,
+        parentTaskId: options?.parentTaskId ?? null,
+        dispatchedByTaskId: options?.dispatchedByTaskId ?? null,
+        model: options?.model ?? null,
+        modelTier: options?.modelTier ?? null,
+        effort: options?.effort ?? null,
+        profile: options?.profile?.trim() || null,
+        modelGroup: options?.modelGroup?.trim() || null,
+        fallbackHops: options?.fallbackHops?.length ? JSON.stringify(options.fallbackHops) : null,
+        scheduleId: options?.scheduleId ?? null,
+        workflowRunId: options?.workflowRunId ?? null,
+        workflowRunStepId: options?.workflowRunStepId ?? null,
+        outputSchema: options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
+        followUpConfig: options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
+        requestedByUserId: options?.requestedByUserId ?? null,
+        requestedByUserIdInherited,
+        contextKey: options?.contextKey ?? null,
+        routingAffinity: options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
+        swarmVersion: pkg.version,
+        createdAt: now,
+        lastUpdatedAt: now,
+        created_by: auditUserId,
+        updated_by: auditUserId,
+        isHumanFree,
         // A task a workflow node owns keeps only its workflowRunId: the engine
         // can run that node inside the request of the script that triggered it.
-        options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
-        options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
-      ],
-    );
-    if (!inserted) throw new Error("Failed to create task");
+        sourceStepId: options?.workflowRunId ? null : (provenance?.sourceStepId ?? null),
+        sourceScriptRunId: options?.workflowRunId ? null : (provenance?.sourceScriptRunId ?? null),
+      });
+      if (!inserted) throw new Error("Failed to create task");
 
-    if (routingDecisionSnapshot) {
-      try {
-        await getDbClient().run(
-          `INSERT INTO routing_decisions (
-             task_id, selected_agent_id, captured_at, worker_statuses,
-             continuity_candidates, created_by, updated_by
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            options.offeredTo ?? options.agentId ?? null,
-            routingDecisionSnapshot.capturedAt,
-            JSON.stringify(routingDecisionSnapshot.workerStatuses),
-            JSON.stringify(routingDecisionSnapshot.continuityCandidates),
-            auditUserId,
-            auditUserId,
-          ],
-        );
-      } catch (error) {
-        logRoutingDecisionFailure(id, "write", error);
+      if (routingDecisionSnapshot) {
+        try {
+          // A nested transaction (a SAVEPOINT): this write may fail without
+          // failing the task, and on Postgres a failed statement aborts the
+          // whole transaction unless it ran inside a savepoint.
+          await getStorage().transaction(() =>
+            tasks.insertRoutingDecision({
+              task_id: id,
+              selected_agent_id: options.offeredTo ?? options.agentId ?? null,
+              captured_at: routingDecisionSnapshot.capturedAt,
+              worker_statuses: JSON.stringify(routingDecisionSnapshot.workerStatuses),
+              continuity_candidates: JSON.stringify(routingDecisionSnapshot.continuityCandidates),
+              created_by: auditUserId,
+              updated_by: auditUserId,
+            }),
+          );
+        } catch (error) {
+          logRoutingDecisionFailure(id, "write", error);
+        }
       }
-    }
-    return { row: inserted };
-  });
+      return { row: inserted };
+    },
+    readCommitted ? { isolation: "read committed" } : {},
+  );
 
   if ("existing" in claim) {
     console.log(
@@ -3157,7 +2551,7 @@ export async function createTaskExtended(
     row.requestedByUserId,
   );
 
-  getDbClient().afterCommit(() => {
+  getStorage().afterCommit(() => {
     import("../workflows/event-bus")
       .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.created", {
@@ -3210,11 +2604,7 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   // Status goes directly to 'in_progress' because the claiming session is
   // already working on the task (prevents duplicate task_assigned triggers).
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [agentId, now, taskId],
-  );
+  const row = await getStorage().repos.tasks.claimUnassignedTask(taskId, agentId, now);
 
   if (row) {
     try {
@@ -3229,9 +2619,10 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   }
 
   const result = row ? rowToAgentTask(row) : null;
-  // Fire-and-forget: notify lifecycle subscribers (e.g. GitHub eyes reaction)
+  // Notify lifecycle subscribers only after the claim commits: a replayed
+  // or retried transaction runs this callback more than once.
   if (result) {
-    emitTaskStarted(result);
+    getStorage().afterCommit(() => emitTaskStarted(result));
   }
   return result;
 }
@@ -3246,16 +2637,12 @@ export async function releaseTask(
   if (task.status !== "pending" && task.status !== "in_progress") return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?, pool_wake_at = NULL
-       WHERE id = ? AND status IN ('pending', 'in_progress')
-       ${wakeSnapshot ? "AND status = 'pending' AND agentId = ? AND pool_wake_at = ? AND COALESCE(routing_reason, '') != 'human_pinned'" : ""}
-       RETURNING *`,
-    [
-      now,
-      taskId,
-      ...(wakeSnapshot ? [wakeSnapshot.agentId ?? null, wakeSnapshot.poolWakeAt ?? null] : []),
-    ],
+  const row = await getStorage().repos.tasks.releaseTaskToPool(
+    taskId,
+    now,
+    wakeSnapshot
+      ? { agentId: wakeSnapshot.agentId ?? null, poolWakeAt: wakeSnapshot.poolWakeAt ?? null }
+      : undefined,
   );
 
   if (row) {
@@ -3270,7 +2657,7 @@ export async function releaseTask(
     } catch {}
     // The sweep routes released wakes itself, preserving its exclusion of the old agent.
     if (isRuntimePoolsEnabled() && !wakeSnapshot)
-      getDbClient().afterCommit(() => {
+      getStorage().afterCommit(() => {
         void import("../workflows/event-bus")
           .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
           .catch((error) =>
@@ -3312,11 +2699,7 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
     return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'pending', acceptedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
-    [agentId, now, now, taskId],
-  );
+  const row = await getStorage().repos.tasks.acceptOfferedTask(taskId, agentId, now);
 
   if (row) {
     try {
@@ -3328,7 +2711,7 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
         newValue: "pending",
       });
     } catch {}
-    getDbClient().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
+    getStorage().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -3346,13 +2729,7 @@ export async function rejectTask(
     return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET
-        status = 'unassigned', offeredTo = NULL, offeredAt = NULL,
-        rejectionReason = ?, lastUpdatedAt = ?, pool_wake_at = NULL
-       WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
-    [reason ?? null, now, taskId],
-  );
+  const row = await getStorage().repos.tasks.rejectOfferedTask(taskId, reason ?? null, now);
 
   if (row) {
     try {
@@ -3366,7 +2743,7 @@ export async function rejectTask(
       });
     } catch {}
     if (isRuntimePoolsEnabled())
-      getDbClient().afterCommit(() => {
+      getStorage().afterCommit(() => {
         void import("../workflows/event-bus")
           .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
           .catch((error) =>
@@ -3388,11 +2765,7 @@ export async function moveTaskToBacklog(taskId: string): Promise<AgentTask | nul
   if (task.status !== "unassigned") return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'backlog', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.moveTaskStatus(taskId, "unassigned", "backlog", now);
 
   if (row) {
     try {
@@ -3417,11 +2790,7 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
   if (task.status !== "backlog") return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'backlog' RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.moveTaskStatus(taskId, "backlog", "unassigned", now);
 
   if (row) {
     try {
@@ -3450,18 +2819,7 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
  */
 export async function promoteDraftTask(taskId: string): Promise<AgentTask | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks
-       SET status = CASE
-           WHEN offeredTo IS NOT NULL THEN 'offered'
-           WHEN agentId IS NOT NULL THEN 'pending'
-           ELSE 'unassigned'
-         END,
-         lastUpdatedAt = ?
-       WHERE id = ? AND status = 'draft'
-       RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.promoteDraftTask(taskId, now);
 
   if (row) {
     try {
@@ -3484,10 +2842,7 @@ export async function promoteDraftTask(taskId: string): Promise<AgentTask | null
  * that outlasts the sweep window is still running. No-op once promoted.
  */
 export async function refreshDraftTaskLease(taskId: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ? AND status = 'draft'",
-    [new Date().toISOString(), taskId],
-  );
+  await getStorage().repos.tasks.refreshDraftTaskLease(taskId, new Date().toISOString());
 }
 
 /**
@@ -3503,19 +2858,7 @@ export async function promoteAbandonedDraftTasks(timeoutMinutes: number = 5): Pr
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE agent_tasks
-       SET status = CASE
-           WHEN offeredTo IS NOT NULL THEN 'offered'
-           WHEN agentId IS NOT NULL THEN 'pending'
-           ELSE 'unassigned'
-         END,
-         lastUpdatedAt = ?
-       WHERE status = 'draft' AND lastUpdatedAt < ?`,
-    [now, cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.tasks.promoteDraftsIdleSince(cutoffTime, now);
 }
 
 /**
@@ -3526,13 +2869,7 @@ export async function releaseStaleReviewingTasks(timeoutMinutes: number = 30): P
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE agent_tasks SET status = 'offered', lastUpdatedAt = ?
-     WHERE status = 'reviewing' AND lastUpdatedAt < ?`,
-    [now, cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.tasks.releaseReviewingIdleSince(cutoffTime, now);
 }
 
 /**
@@ -3566,27 +2903,12 @@ export async function releaseStaleOfferedTasksForOfflineAgents(
     }
   }
 
-  const result = await getDbClient().run(
-    `UPDATE agent_tasks
-     SET status = 'unassigned', offeredTo = NULL, offeredAt = NULL, lastUpdatedAt = ?
-     WHERE status = 'offered'
-       AND offeredTo IS NOT NULL
-       ${reachable.length ? `AND offeredTo NOT IN (${reachable.map(() => "?").join(",")})` : ""}
-       AND NOT EXISTS (
-         SELECT 1 FROM agents WHERE agents.id = agent_tasks.offeredTo AND agents.status != 'offline'
-       )`,
-    [now, ...reachable],
-  );
-
-  return result.changes;
+  return await getStorage().repos.tasks.releaseOffersOfOfflineAgents(now, reachable);
 }
 
 export async function getOfferedTasksForAgent(agentId: string): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE offeredTo = ? AND status = 'offered' ORDER BY createdAt ASC, rowid ASC",
-    [agentId],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listOfferedTasksForAgent(agentId);
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -3620,11 +2942,7 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
   }
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'reviewing', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'offered' RETURNING *`,
-    [now, taskId],
-  );
+  const row = await getStorage().repos.tasks.moveTaskStatus(taskId, "offered", "reviewing", now);
 
   if (row) {
     try {
@@ -3643,19 +2961,12 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
 }
 
 export async function getUnassignedTasksCount(): Promise<number> {
-  const result = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
-  );
-  return result?.count ?? 0;
+  return await getStorage().repos.tasks.countUnassignedTasks();
 }
 
 /** Get unassigned task IDs, ordered by priority (highest first) then creation time */
 export async function getUnassignedTaskIds(limit = 10): Promise<string[]> {
-  const rows = await getDbClient().query<{ id: string }>(
-    "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
-    [limit],
-  );
-  return rows.map((r) => r.id);
+  return await getStorage().repos.tasks.listUnassignedTaskIds(limit);
 }
 
 /**
@@ -3698,10 +3009,7 @@ export async function getUnassignedTaskIdsForAgent(
   let offset = 0;
 
   while (eligible.length < limit && offset < scanCap) {
-    const rows = await getDbClient().query<AgentTaskRow>(
-      "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
-      [batchSize, offset],
-    );
+    const rows = await getStorage().repos.tasks.listUnassignedTasks(batchSize, offset);
     if (rows.length === 0) break;
 
     for (const row of rows) {
@@ -3755,14 +3063,9 @@ export async function getDependentTasks(
   parentId: string,
   opts?: { includeTerminal?: boolean },
 ): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT t.*
-       FROM agent_tasks t, json_each(t.dependsOn) AS dep
-       WHERE dep.value = ?`,
-    [parentId],
-  );
+  const rows = await getStorage().repos.tasks.listDependentTasks(parentId);
 
-  const tasks = rows.map(rowToAgentTask);
+  const tasks = rows.map((row) => rowToAgentTask(row));
   if (opts?.includeTerminal) return tasks;
   return tasks.filter((t) => !isTerminalTaskStatus(t.status));
 }
@@ -3827,7 +3130,7 @@ export {
 
 export async function updateAgentProfile(
   id: string,
-  updates: {
+  requested: {
     name?: string;
     description?: string;
     role?: string;
@@ -3852,184 +3155,173 @@ export async function updateAgentProfile(
     allowExtensionRole?: boolean;
   },
 ): Promise<Agent | null> {
-  return await getDbClient().transaction(async (tx) => {
-    // Get current agent state for version comparison
-    const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
-    if (!current) return null;
+  const storage = getStorage();
+  const agents = storage.repos.agents;
+  // Conflicts are reported after commit: a replayed attempt (decision D6) finds
+  // them again, and the caller must hear each dropped field once.
+  const outcome = await storage.transaction(async () => {
+    const conflicts: ProfileSyncConflict[] = [];
+    const agent = await (async (): Promise<Agent | null> => {
+      // A local copy: a replayed attempt (decision D6) must start from the request.
+      let updates = requested;
+      // Get current agent state for version comparison
+      const current = await agents.findAgentById(id);
+      if (!current) return null;
 
-    const roleViolation = reservedRoleViolation(current.role, updates.role, {
-      allowExtensionRole: guard?.allowExtensionRole,
-    });
-    if (roleViolation) throw new ReservedAgentRoleError(roleViolation);
-
-    // Compare with the old metadata before replacing it. Persist refreshed defaults
-    // atomically so both running workers and restarted workers see matching blobs.
-    const previous = rowToAgent(current);
-    const next = {
-      name: updates.name ?? previous.name,
-      description: updates.description ?? previous.description,
-      role: updates.role ?? previous.role,
-      capabilities: updates.capabilities ?? previous.capabilities,
-    };
-    const metadataChanged =
-      next.name !== previous.name ||
-      next.description !== previous.description ||
-      next.role !== previous.role ||
-      JSON.stringify(next.capabilities) !== JSON.stringify(previous.capabilities);
-    if (metadataChanged) {
-      updates = { ...updates };
-      if (
-        updates.identityMd === undefined &&
-        previous.identityMd &&
-        matchesDefaultIdentityMd(previous.identityMd, previous)
-      ) {
-        updates.identityMd = generateDefaultIdentityMd(next);
-      }
-      if (
-        updates.claudeMd === undefined &&
-        previous.claudeMd &&
-        matchesDefaultClaudeMd(previous.claudeMd, previous)
-      ) {
-        updates.claudeMd = generateDefaultClaudeMd(next);
-      }
-    }
-
-    // Compare-and-set. A writer that edits a copy of a field (a session's
-    // materialized CLAUDE.md) sends the hash that copy was based on. If the DB
-    // moved since — a sibling session's sync, an `update-profile` — the copy is
-    // stale and writing it would revert the newer value, so the field is dropped
-    // (no version, no column write). An edit on top of the current value applies,
-    // including a deliberate revert to an earlier version. Without a token the
-    // write is unconditional, as before.
-    //
-    // Runs BEFORE the budget check: a stale copy of an older, longer value must be
-    // dropped, not rejected — a budget rejection throws and would also roll back
-    // the other fields of the same update.
-    const writable = { ...updates };
-    for (const field of VERSIONABLE_FIELDS) {
-      const expectedHash = guard?.expectedHashes?.[field];
-      if (expectedHash === undefined) continue;
-      if (writable[field] === undefined || writable[field] === null) continue;
-
-      const currentHash = computeContentHash(current[field] ?? "");
-      if (currentHash === expectedHash) continue;
-
-      console.warn(
-        `[profile-sync] agent ${id}: ${field} dropped — based on ${expectedHash.slice(0, 12)}, DB is at ${currentHash.slice(0, 12)}`,
-      );
-      delete writable[field];
-      guard?.onConflict?.({ field, expectedHash, currentHash });
-    }
-
-    if (writable.heartbeatMd !== undefined) {
-      validateHeartbeatExpiry(current.heartbeatMd ?? "", writable.heartbeatMd);
-    }
-
-    for (const field of BUDGETED_IDENTITY_FIELDS) {
-      const nextValue = writable[field];
-      if (nextValue === undefined) continue;
-
-      const result = checkIdentityFieldBudget({
-        field,
-        currentValue: current[field] ?? "",
-        nextValue,
+      const roleViolation = reservedRoleViolation(current.role, updates.role, {
+        allowExtensionRole: guard?.allowExtensionRole,
       });
-      if (!result.ok) {
-        throw new IdentityFieldBudgetError(
-          result,
-          computeContentHash(current[field] ?? ""),
-          computeContentHash(nextValue),
+      if (roleViolation) throw new ReservedAgentRoleError(roleViolation);
+
+      // Compare with the old metadata before replacing it. Persist refreshed defaults
+      // atomically so both running workers and restarted workers see matching blobs.
+      const previous = rowToAgent(current);
+      const next = {
+        name: updates.name ?? previous.name,
+        description: updates.description ?? previous.description,
+        role: updates.role ?? previous.role,
+        capabilities: updates.capabilities ?? previous.capabilities,
+      };
+      const metadataChanged =
+        next.name !== previous.name ||
+        next.description !== previous.description ||
+        next.role !== previous.role ||
+        JSON.stringify(next.capabilities) !== JSON.stringify(previous.capabilities);
+      if (metadataChanged) {
+        updates = { ...updates };
+        if (
+          updates.identityMd === undefined &&
+          previous.identityMd &&
+          matchesDefaultIdentityMd(previous.identityMd, previous)
+        ) {
+          updates.identityMd = generateDefaultIdentityMd(next);
+        }
+        if (
+          updates.claudeMd === undefined &&
+          previous.claudeMd &&
+          matchesDefaultClaudeMd(previous.claudeMd, previous)
+        ) {
+          updates.claudeMd = generateDefaultClaudeMd(next);
+        }
+      }
+
+      // Compare-and-set. A writer that edits a copy of a field (a session's
+      // materialized CLAUDE.md) sends the hash that copy was based on. If the DB
+      // moved since — a sibling session's sync, an `update-profile` — the copy is
+      // stale and writing it would revert the newer value, so the field is dropped
+      // (no version, no column write). An edit on top of the current value applies,
+      // including a deliberate revert to an earlier version. Without a token the
+      // write is unconditional, as before.
+      //
+      // Runs BEFORE the budget check: a stale copy of an older, longer value must be
+      // dropped, not rejected — a budget rejection throws and would also roll back
+      // the other fields of the same update.
+      const writable = { ...updates };
+      for (const field of VERSIONABLE_FIELDS) {
+        const expectedHash = guard?.expectedHashes?.[field];
+        if (expectedHash === undefined) continue;
+        if (writable[field] === undefined || writable[field] === null) continue;
+
+        const currentHash = computeContentHash(current[field] ?? "");
+        if (currentHash === expectedHash) continue;
+
+        console.warn(
+          `[profile-sync] agent ${id}: ${field} dropped — based on ${expectedHash.slice(0, 12)}, DB is at ${currentHash.slice(0, 12)}`,
         );
+        delete writable[field];
+        conflicts.push({ field, expectedHash, currentHash });
       }
-    }
 
-    if (updates.name !== undefined) {
-      const existingAgent = await tx.get<AgentRow>(
-        "SELECT * FROM agents WHERE name = ? AND id != ?",
-        [updates.name, id],
-      );
-      if (existingAgent) throw new Error("Agent name already exists");
-    }
+      if (writable.heartbeatMd !== undefined) {
+        validateHeartbeatExpiry(current.heartbeatMd ?? "", writable.heartbeatMd);
+      }
 
-    // Create context versions for changed fields (stale copies already dropped)
-    for (const field of VERSIONABLE_FIELDS) {
-      const newValue = writable[field];
-      if (newValue === undefined || newValue === null) continue;
+      for (const field of BUDGETED_IDENTITY_FIELDS) {
+        const nextValue = writable[field];
+        if (nextValue === undefined) continue;
 
-      const currentValue = current[field] ?? "";
-      const newHash = computeContentHash(newValue);
-      const currentHash = computeContentHash(currentValue);
+        const result = checkIdentityFieldBudget({
+          field,
+          currentValue: current[field] ?? "",
+          nextValue,
+        });
+        if (!result.ok) {
+          throw new IdentityFieldBudgetError(
+            result,
+            computeContentHash(current[field] ?? ""),
+            computeContentHash(nextValue),
+          );
+        }
+      }
 
-      if (newHash === currentHash) continue; // No actual change
+      if (updates.name !== undefined) {
+        const existingAgent = await agents.findAgentByNameExcept(updates.name, id);
+        if (existingAgent) throw new Error("Agent name already exists");
+      }
 
-      const latestVersion = await getLatestContextVersion(id, field);
-      const version = (latestVersion?.version ?? 0) + 1;
+      // Create context versions for changed fields (stale copies already dropped)
+      for (const field of VERSIONABLE_FIELDS) {
+        const newValue = writable[field];
+        if (newValue === undefined || newValue === null) continue;
 
-      await createContextVersion({
-        agentId: id,
-        field,
-        content: newValue,
-        version,
-        changeSource: meta?.changeSource ?? "api",
-        changedByAgentId: meta?.changedByAgentId ?? null,
-        changeReason: meta?.changeReason ?? null,
-        contentHash: newHash,
-        previousVersionId: latestVersion?.id ?? null,
-      });
-    }
+        const currentValue = current[field] ?? "";
+        const newHash = computeContentHash(newValue);
+        const currentHash = computeContentHash(currentValue);
 
-    // Proceed with existing UPDATE logic.
-    //
-    // `avatar` can't use the COALESCE(?, col) pattern the other fields use:
-    // COALESCE can never write NULL back (a bound NULL just falls through to
-    // the existing value), which would make "reset to default avatar"
-    // unimplementable. So it gets its own explicit-set CASE, gated by an
-    // `avatarProvided` flag distinguishing "key absent from updates" (leave
-    // untouched) from "key present with value null" (reset).
-    const avatarProvided = Object.hasOwn(updates, "avatar");
-    const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
-    const slackIconProvided = Object.hasOwn(updates, "slackIcon");
-    const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
+        if (newHash === currentHash) continue; // No actual change
 
-    const now = new Date().toISOString();
-    const row = await tx.get<AgentRow>(
-      `UPDATE agents SET
-          name = COALESCE(?, name),
-          description = COALESCE(?, description),
-          role = COALESCE(?, role),
-          capabilities = COALESCE(?, capabilities),
-          claudeMd = COALESCE(?, claudeMd),
-          soulMd = COALESCE(?, soulMd),
-          identityMd = COALESCE(?, identityMd),
-          setupScript = COALESCE(?, setupScript),
-          toolsMd = COALESCE(?, toolsMd),
-          heartbeatMd = COALESCE(?, heartbeatMd),
-          avatar = CASE WHEN ? = 1 THEN ? ELSE avatar END,
-          slack_icon = CASE WHEN ? = 1 THEN ? ELSE slack_icon END,
-          lastUpdatedAt = ?
-         WHERE id = ? RETURNING *`,
-      [
-        updates.name ?? null,
-        updates.description ?? null,
-        updates.role ?? null,
-        updates.capabilities ? JSON.stringify(updates.capabilities) : null,
-        writable.claudeMd ?? null,
-        writable.soulMd ?? null,
-        writable.identityMd ?? null,
-        writable.setupScript ?? null,
-        writable.toolsMd ?? null,
-        writable.heartbeatMd ?? null,
-        avatarProvided ? 1 : 0,
-        avatarJson,
-        slackIconProvided ? 1 : 0,
-        slackIconJson,
+        const latestVersion = await getLatestContextVersion(id, field);
+        const version = (latestVersion?.version ?? 0) + 1;
+
+        await createContextVersion({
+          agentId: id,
+          field,
+          content: newValue,
+          version,
+          changeSource: meta?.changeSource ?? "api",
+          changedByAgentId: meta?.changedByAgentId ?? null,
+          changeReason: meta?.changeReason ?? null,
+          contentHash: newHash,
+          previousVersionId: latestVersion?.id ?? null,
+        });
+      }
+
+      // Proceed with existing UPDATE logic.
+      //
+      // `avatar` can't use the COALESCE(?, col) pattern the other fields use:
+      // COALESCE can never write NULL back (a bound NULL just falls through to
+      // the existing value), which would make "reset to default avatar"
+      // unimplementable. So it gets its own explicit-set CASE, gated by an
+      // `avatarProvided` flag distinguishing "key absent from updates" (leave
+      // untouched) from "key present with value null" (reset).
+      const avatarProvided = Object.hasOwn(updates, "avatar");
+      const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
+      const slackIconProvided = Object.hasOwn(updates, "slackIcon");
+      const slackIconJson = updates.slackIcon ? JSON.stringify(updates.slackIcon) : null;
+
+      const now = new Date().toISOString();
+      const row = await agents.updateAgentProfile(id, {
+        name: updates.name ?? null,
+        description: updates.description ?? null,
+        role: updates.role ?? null,
+        capabilities: updates.capabilities ? JSON.stringify(updates.capabilities) : null,
+        claudeMd: writable.claudeMd ?? null,
+        soulMd: writable.soulMd ?? null,
+        identityMd: writable.identityMd ?? null,
+        setupScript: writable.setupScript ?? null,
+        toolsMd: writable.toolsMd ?? null,
+        heartbeatMd: writable.heartbeatMd ?? null,
+        avatar: { set: avatarProvided, value: avatarJson },
+        slackIcon: { set: slackIconProvided, value: slackIconJson },
         now,
-        id,
-      ],
-    );
+      });
 
-    return row ? rowToAgent(row) : null;
+      return row ? rowToAgent(row) : null;
+    })();
+    return { agent, conflicts };
   });
+  for (const conflict of outcome.conflicts) guard?.onConflict?.(conflict);
+  return outcome.agent;
 }
 
 export async function updateAgentName(id: string, newName: string): Promise<Agent | null> {
@@ -4097,52 +3389,44 @@ export async function createChannel(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ChannelRow>(
-    `INSERT INTO channels (id, name, description, type, createdBy, participants, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      name,
-      options?.description ?? null,
-      options?.type ?? "public",
-      options?.createdBy ?? null,
-      JSON.stringify(options?.participants ?? []),
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.messaging.insertChannel({
+    id,
+    name,
+    description: options?.description ?? null,
+    type: options?.type ?? "public",
+    createdBy: options?.createdBy ?? null,
+    participants: JSON.stringify(options?.participants ?? []),
+    createdAt: now,
+  })) as ChannelRow | null;
 
   if (!row) throw new Error("Failed to create channel");
   return rowToChannel(row);
 }
 
 export async function getMessageById(id: string): Promise<ChannelMessage | null> {
-  const row = await getDbClient().get<ChannelMessageRow>(
-    "SELECT * FROM channel_messages WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.messaging.findChannelMessage(id);
   if (!row) return null;
   const agent = row.agentId ? await getAgentById(row.agentId) : null;
   return rowToChannelMessage(row, agent?.name);
 }
 
 export async function getChannelById(id: string): Promise<Channel | null> {
-  const row = await getDbClient().get<ChannelRow>("SELECT * FROM channels WHERE id = ?", [id]);
+  const row = (await getStorage().repos.messaging.findChannelById(id)) as ChannelRow | null;
   return row ? rowToChannel(row) : null;
 }
 
 export async function getChannelByName(name: string): Promise<Channel | null> {
-  const row = await getDbClient().get<ChannelRow>("SELECT * FROM channels WHERE name = ?", [name]);
+  const row = (await getStorage().repos.messaging.findChannelByName(name)) as ChannelRow | null;
   return row ? rowToChannel(row) : null;
 }
 
 export async function getAllChannels(): Promise<Channel[]> {
-  const rows = await getDbClient().query<ChannelRow>("SELECT * FROM channels ORDER BY name");
+  const rows = (await getStorage().repos.messaging.listChannels()) as ChannelRow[];
   return rows.map(rowToChannel);
 }
 
 export async function deleteChannel(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM channels WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.deleteChannel(id)) > 0;
 }
 
 export async function postMessage(
@@ -4165,19 +3449,15 @@ export async function postMessage(
     isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content,
   );
 
-  const row = await getDbClient().get<ChannelMessageRow>(
-    `INSERT INTO channel_messages (id, channelId, agentId, content, replyToId, mentions, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      channelId,
-      agentId,
-      messageContent,
-      options?.replyToId ?? null,
-      JSON.stringify(options?.mentions ?? []),
-      now,
-    ],
-  );
+  const row = await getStorage().repos.messaging.insertChannelMessage({
+    id,
+    channelId,
+    agentId,
+    content: messageContent,
+    replyToId: options?.replyToId ?? null,
+    mentions: JSON.stringify(options?.mentions ?? []),
+    createdAt: now,
+  });
 
   if (!row) throw new Error("Failed to post message");
 
@@ -4201,7 +3481,7 @@ export async function postMessage(
     }
   }
 
-  getDbClient().afterCommit(() => {
+  getStorage().afterCommit(() => {
     for (const mentionedAgentId of new Set(targetMentions)) {
       publishWorkerNudge(mentionedAgentId, { kind: "work" });
     }
@@ -4247,20 +3527,13 @@ export async function postMessage(
         .map((taskId) => `[#${taskId.slice(0, 8)}](task:${taskId})`)
         .join(" ");
       const updatedContent = `${messageContent}\n\n→ Created: ${taskLinks}`;
-      await getDbClient().run(`UPDATE channel_messages SET content = ? WHERE id = ?`, [
-        updatedContent,
-        id,
-      ]);
+      await getStorage().repos.messaging.setChannelMessageContent(id, updatedContent);
     }
   }
 
   // Get agent name for the response - re-fetch to get updated content
   const agent = agentId ? await getAgentById(agentId) : null;
-  const updatedRow = await getDbClient().get<ChannelMessageRow>(
-    `SELECT m.*, a.name as agentName FROM channel_messages m
-       LEFT JOIN agents a ON m.agentId = a.id WHERE m.id = ?`,
-    [id],
-  );
+  const updatedRow = await getStorage().repos.messaging.findChannelMessageWithAgent(id);
   return rowToChannelMessage(updatedRow ?? row, agent?.name);
 }
 
@@ -4272,48 +3545,21 @@ export async function getChannelMessages(
     before?: string;
   },
 ): Promise<ChannelMessage[]> {
-  let query =
-    "SELECT m.*, a.name as agentName FROM channel_messages m LEFT JOIN agents a ON m.agentId = a.id WHERE m.channelId = ?";
-  const params: (string | number)[] = [channelId];
-
-  if (options?.since) {
-    query += " AND m.createdAt > ?";
-    params.push(options.since);
-  }
-
-  if (options?.before) {
-    query += " AND m.createdAt < ?";
-    params.push(options.before);
-  }
-
-  query += " ORDER BY m.createdAt DESC";
-
-  if (options?.limit) {
-    query += " LIMIT ?";
-    params.push(options.limit);
-  }
-
-  type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
-
-  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  const rows = await getStorage().repos.messaging.listChannelMessages(channelId, {
+    since: options?.since,
+    before: options?.before,
+    limit: options?.limit,
+  });
   return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined)).reverse(); // Return in chronological order
 }
 
 export async function updateReadState(agentId: string, channelId: string): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `INSERT INTO channel_read_state (agentId, channelId, lastReadAt)
-     VALUES (?, ?, ?)
-     ON CONFLICT(agentId, channelId) DO UPDATE SET lastReadAt = ?`,
-    [agentId, channelId, now, now],
-  );
+  await getStorage().repos.messaging.setChannelLastRead(agentId, channelId, now);
 }
 
 export async function getLastReadAt(agentId: string, channelId: string): Promise<string | null> {
-  const result = await getDbClient().get<{ lastReadAt: string }>(
-    "SELECT lastReadAt FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-    [agentId, channelId],
-  );
+  const result = await getStorage().repos.messaging.findChannelReadState(agentId, channelId);
   return result?.lastReadAt ?? null;
 }
 
@@ -4323,21 +3569,7 @@ export async function getUnreadMessages(
 ): Promise<ChannelMessage[]> {
   const lastReadAt = await getLastReadAt(agentId, channelId);
 
-  let query = `SELECT m.*, a.name as agentName FROM channel_messages m
-               LEFT JOIN agents a ON m.agentId = a.id
-               WHERE m.channelId = ?`;
-  const params: string[] = [channelId];
-
-  if (lastReadAt) {
-    query += " AND m.createdAt > ?";
-    params.push(lastReadAt);
-  }
-
-  query += " ORDER BY m.createdAt ASC";
-
-  type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
-
-  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  const rows = await getStorage().repos.messaging.listChannelMessagesSince(channelId, lastReadAt);
   return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
@@ -4345,29 +3577,14 @@ export async function getMentionsForAgent(
   agentId: string,
   options?: { unreadOnly?: boolean; channelId?: string },
 ): Promise<ChannelMessage[]> {
-  let query = `SELECT m.*, a.name as agentName FROM channel_messages m
-               LEFT JOIN agents a ON m.agentId = a.id
-               WHERE m.mentions LIKE ?`;
-  const params: string[] = [`%"${agentId}"%`];
-
-  if (options?.channelId) {
-    query += " AND m.channelId = ?";
-    params.push(options.channelId);
-
-    if (options?.unreadOnly) {
-      const lastReadAt = await getLastReadAt(agentId, options.channelId);
-      if (lastReadAt) {
-        query += " AND m.createdAt > ?";
-        params.push(lastReadAt);
-      }
-    }
-  }
-
-  query += " ORDER BY m.createdAt DESC LIMIT 50";
-
-  type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
-
-  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  const since =
+    options?.channelId && options.unreadOnly
+      ? await getLastReadAt(agentId, options.channelId)
+      : null;
+  const rows = await getStorage().repos.messaging.listMentionMessages(agentId, {
+    channelId: options?.channelId,
+    since,
+  });
   return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
@@ -4392,17 +3609,14 @@ export interface InboxSummary {
 }
 
 export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
-  const client = getDbClient();
+  const messaging = getStorage().repos.messaging;
   const channels = await getAllChannels();
   let unreadCount = 0;
   let mentionsCount = 0;
 
   for (const channel of channels) {
     // Check if this channel is already being processed
-    const readState = await client.get<{ lastReadAt: string; processing_since: string | null }>(
-      "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-      [agentId, channel.id],
-    );
+    const readState = await messaging.findChannelReadState(agentId, channel.id);
 
     const lastReadAt = readState?.lastReadAt ?? null;
     const isProcessing =
@@ -4411,41 +3625,22 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
     // Skip channels that are already being processed
     if (isProcessing) continue;
 
-    const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
-
     // Count unread (excluding own messages)
-    const channelUnread = await client.get<{ count: number }>(
-      `SELECT COUNT(*) as count FROM channel_messages m
-         WHERE m.channelId = ? AND (m.agentId != '${agentId}' OR m.agentId IS NULL) ${baseCondition}`,
-      [channel.id],
-    );
-    unreadCount += channelUnread?.count ?? 0;
+    unreadCount += await messaging.countUnreadChannelMessages(channel.id, agentId, lastReadAt);
 
     // Count mentions in unread
-    const channelMentions = await client.get<{ count: number }>(
-      `SELECT COUNT(*) as count FROM channel_messages m
-         WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
-      [channel.id, `%"${agentId}"%`],
-    );
-    mentionsCount += channelMentions?.count ?? 0;
+    mentionsCount += await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
   }
 
+  const tasks = getStorage().repos.tasks;
   // Count offered tasks for this agent
-  const offeredResult = await client.get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE offeredTo = ? AND status = 'offered'",
-    [agentId],
-  );
+  const offeredCount = await tasks.countTasksWithStatus("offered", { offeredTo: agentId });
 
   // Count unassigned tasks in pool
-  const poolResult = await client.get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
-  );
+  const poolCount = await tasks.countUnassignedTasks();
 
   // Count my in-progress tasks
-  const inProgressResult = await client.get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
-    [agentId],
-  );
+  const inProgressCount = await tasks.countTasksWithStatus("in_progress", { agentId });
 
   // Get recent unread @mentions (up to 3)
   const recentMentions: MentionPreview[] = [];
@@ -4475,9 +3670,9 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
   return {
     unreadCount,
     mentionsCount,
-    offeredTasksCount: offeredResult?.count ?? 0,
-    poolTasksCount: poolResult?.count ?? 0,
-    inProgressCount: inProgressResult?.count ?? 0,
+    offeredTasksCount: offeredCount,
+    poolTasksCount: poolCount,
+    inProgressCount,
     recentMentions,
   };
 }
@@ -4492,20 +3687,14 @@ export async function claimMentions(
   opts?: { dryRun?: boolean },
 ): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
-  const client = getDbClient();
+  const messaging = getStorage().repos.messaging;
   const channels = await getAllChannels();
   const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
     [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
-    const readState = await client.get<{
-      lastReadAt: string | null;
-      processing_since: string | null;
-    }>(
-      "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-      [agentId, channel.id],
-    );
+    const readState = await messaging.findChannelReadState(agentId, channel.id);
 
     const lastReadAt = readState?.lastReadAt ?? null;
     const isProcessing =
@@ -4514,44 +3703,33 @@ export async function claimMentions(
     // Skip channels that are already being processed
     if (isProcessing) continue;
 
-    const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
-
     // Check if there are unread mentions
-    const mentionCountRow = await client.get<{ count: number }>(
-      `SELECT COUNT(*) as count FROM channel_messages m
-         WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
-      [channel.id, `%"${agentId}"%`],
-    );
+    const mentionCount = await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
 
-    if (mentionCountRow && mentionCountRow.count > 0) {
+    if (mentionCount > 0) {
       // dryRun: report what a claim would take, without the write (idle-poll probe).
       if (opts?.dryRun) {
         claimedChannels.push({
           channelId: channel.id,
           lastReadAt,
-          mentionsCount: mentionCountRow.count,
+          mentionsCount: mentionCount,
         });
         continue;
       }
       // Atomically claim mentions for this channel
-      const result = await client.run(
-        `INSERT INTO channel_read_state (agentId, channelId, lastReadAt, processing_since)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(agentId, channelId) DO UPDATE SET
-           processing_since = CASE
-             WHEN processing_since IS NULL THEN ?
-             ELSE processing_since
-           END
-         WHERE processing_since IS NULL`,
-        [agentId, channel.id, lastReadAt || new Date(0).toISOString(), now, now],
+      const changes = await messaging.claimChannelMentions(
+        agentId,
+        channel.id,
+        lastReadAt || new Date(0).toISOString(),
+        now,
       );
 
       // Only add to claimed list if we actually claimed it (not already processing)
-      if (result.changes > 0) {
+      if (changes > 0) {
         claimedChannels.push({
           channelId: channel.id,
           lastReadAt,
-          mentionsCount: mentionCountRow.count,
+          mentionsCount: mentionCount,
         });
       }
     }
@@ -4570,12 +3748,7 @@ export async function releaseMentionProcessing(
 ): Promise<void> {
   if (channelIds.length === 0) return;
 
-  const placeholders = channelIds.map(() => "?").join(",");
-  await getDbClient().run(
-    `UPDATE channel_read_state SET processing_since = NULL
-     WHERE agentId = ? AND channelId IN (${placeholders})`,
-    [agentId, ...channelIds],
-  );
+  await getStorage().repos.messaging.releaseChannelProcessing(agentId, channelIds);
 }
 
 /**
@@ -4584,13 +3757,7 @@ export async function releaseMentionProcessing(
 export async function releaseStaleMentionProcessing(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE channel_read_state SET processing_since = NULL
-     WHERE processing_since IS NOT NULL AND processing_since < ?`,
-    [cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.messaging.releaseChannelProcessingBefore(cutoffTime);
 }
 
 // ============================================================================
@@ -4662,27 +3829,22 @@ export async function createService(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ServiceRow>(
-    `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, script, cwd, interpreter, args, env, metadata, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      agentId,
-      name,
-      options.port ?? 3000,
-      options.description ?? null,
-      options.url ?? null,
-      options.healthCheckPath ?? "/health",
-      options.script,
-      options.cwd ?? null,
-      options.interpreter ?? null,
-      options.args ? JSON.stringify(options.args) : null,
-      options.env ? JSON.stringify(options.env) : null,
-      JSON.stringify(options.metadata ?? {}),
-      now,
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.agents.insertService({
+    id,
+    agentId,
+    name,
+    port: options.port ?? 3000,
+    description: options.description ?? null,
+    url: options.url ?? null,
+    healthCheckPath: options.healthCheckPath ?? "/health",
+    script: options.script,
+    cwd: options.cwd ?? null,
+    interpreter: options.interpreter ?? null,
+    args: options.args ? JSON.stringify(options.args) : null,
+    env: options.env ? JSON.stringify(options.env) : null,
+    metadata: JSON.stringify(options.metadata ?? {}),
+    now,
+  })) as ServiceRow | null;
 
   if (!row) throw new Error("Failed to create service");
 
@@ -4699,7 +3861,7 @@ export async function createService(
 }
 
 export async function getServiceById(id: string): Promise<Service | null> {
-  const row = await getDbClient().get<ServiceRow>("SELECT * FROM services WHERE id = ?", [id]);
+  const row = (await getStorage().repos.agents.findServiceById(id)) as ServiceRow | null;
   return row ? rowToService(row) : null;
 }
 
@@ -4707,18 +3869,15 @@ export async function getServiceByAgentAndName(
   agentId: string,
   name: string,
 ): Promise<Service | null> {
-  const row = await getDbClient().get<ServiceRow>(
-    "SELECT * FROM services WHERE agentId = ? AND name = ?",
-    [agentId, name],
-  );
+  const row = (await getStorage().repos.agents.findServiceByAgentAndName(
+    agentId,
+    name,
+  )) as ServiceRow | null;
   return row ? rowToService(row) : null;
 }
 
 export async function getServicesByAgentId(agentId: string): Promise<Service[]> {
-  const rows = await getDbClient().query<ServiceRow>(
-    "SELECT * FROM services WHERE agentId = ? ORDER BY name",
-    [agentId],
-  );
+  const rows = (await getStorage().repos.agents.listServicesByAgent(agentId)) as ServiceRow[];
   return rows.map(rowToService);
 }
 
@@ -4729,34 +3888,11 @@ export interface ServiceFilters {
 }
 
 export async function getAllServices(filters?: ServiceFilters): Promise<Service[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (filters?.agentId) {
-    conditions.push("agentId = ?");
-    params.push(filters.agentId);
-  }
-
-  if (filters?.name) {
-    conditions.push("name LIKE ?");
-    params.push(`%${filters.name}%`);
-  }
-
-  if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM services ${whereClause} ORDER BY
-    CASE status
-      WHEN 'healthy' THEN 1
-      WHEN 'starting' THEN 2
-      WHEN 'unhealthy' THEN 3
-      WHEN 'stopped' THEN 4
-    END, name`;
-
-  const rows = await getDbClient().query<ServiceRow>(query, params);
+  const rows = (await getStorage().repos.agents.listServices({
+    agentId: filters?.agentId,
+    nameLike: filters?.name,
+    status: filters?.status,
+  })) as ServiceRow[];
   return rows.map(rowToService);
 }
 
@@ -4768,10 +3904,11 @@ export async function updateServiceStatus(
   if (!oldService) return null;
 
   const now = new Date().toISOString();
-  const row = await getDbClient().get<ServiceRow>(
-    `UPDATE services SET status = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
-    [status, now, id],
-  );
+  const row = (await getStorage().repos.agents.setServiceStatus(
+    id,
+    status,
+    now,
+  )) as ServiceRow | null;
 
   if (row && oldService.status !== status) {
     try {
@@ -4801,8 +3938,7 @@ export async function deleteService(id: string): Promise<boolean> {
     } catch {}
   }
 
-  const result = await getDbClient().run("DELETE FROM services WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteService(id)) > 0;
 }
 
 /** Upsert a service - update if exists (by agentId + name), create if not */
@@ -4816,27 +3952,22 @@ export async function upsertService(
   if (existing) {
     // Update existing service
     const now = new Date().toISOString();
-    const row = await getDbClient().get<ServiceRow>(
-      `UPDATE services SET
-          port = ?, description = ?, url = ?, healthCheckPath = ?,
-          script = ?, cwd = ?, interpreter = ?, args = ?, env = ?,
-          metadata = ?, lastUpdatedAt = ?
-        WHERE id = ? RETURNING *`,
-      [
-        options.port ?? existing.port,
-        options.description ?? existing.description ?? null,
-        options.url ?? existing.url ?? null,
-        options.healthCheckPath ?? existing.healthCheckPath ?? "/health",
-        options.script,
-        options.cwd ?? null,
-        options.interpreter ?? null,
-        options.args ? JSON.stringify(options.args) : null,
-        options.env ? JSON.stringify(options.env) : null,
-        JSON.stringify(options.metadata ?? existing.metadata ?? {}),
-        now,
-        existing.id,
-      ],
-    );
+    const row = (await getStorage().repos.agents.updateServiceDefinition(
+      existing.id,
+      {
+        port: options.port ?? existing.port,
+        description: options.description ?? existing.description ?? null,
+        url: options.url ?? existing.url ?? null,
+        healthCheckPath: options.healthCheckPath ?? existing.healthCheckPath ?? "/health",
+        script: options.script,
+        cwd: options.cwd ?? null,
+        interpreter: options.interpreter ?? null,
+        args: options.args ? JSON.stringify(options.args) : null,
+        env: options.env ? JSON.stringify(options.env) : null,
+        metadata: JSON.stringify(options.metadata ?? existing.metadata ?? {}),
+      },
+      now,
+    )) as ServiceRow | null;
 
     if (!row) throw new Error("Failed to update service");
     return rowToService(row);
@@ -4859,24 +3990,12 @@ export async function deleteServicesByAgentId(agentId: string): Promise<number> 
     } catch {}
   }
 
-  const result = await getDbClient().run("DELETE FROM services WHERE agentId = ?", [agentId]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteServicesByAgent(agentId);
 }
 
 // ============================================================================
 // Session Log Operations (raw CLI output)
 // ============================================================================
-
-type SessionLogRow = {
-  id: string;
-  taskId: string | null;
-  sessionId: string;
-  iteration: number;
-  cli: string;
-  content: string;
-  lineNumber: number;
-  createdAt: string;
-};
 
 function rowToSessionLog(row: SessionLogRow): SessionLog {
   return {
@@ -4921,45 +4040,38 @@ export async function createSessionLogs(logs: {
       // Parsed here, next to the scrub, so the write lock covers inserts only.
       batch.push({ content, reasoning: extractReasoning(logs.cli, content) });
     }
-    await getDbClient().transaction(async (tx) => {
+    await getStorage().transaction(async () => {
       // The worker flushes one (sessionId, iteration) in many POSTs, so the
       // lineNumber continues from the newest stored row instead of restarting
-      // at the POST's index. Reading the newest row by rowid walks the
-      // sessionId index backwards and stops at the first hit, where MAX()
-      // would scan the whole session. Rows written here are monotonic in
-      // rowid, so this equals MAX + 1 for them.
-      const last = await tx.get<{ lineNumber: number }>(
-        `SELECT lineNumber FROM session_logs WHERE sessionId = ? AND iteration = ?
-         ORDER BY rowid DESC LIMIT 1`,
-        [logs.sessionId, logs.iteration],
+      // at the POST's index. Rows written here are monotonic in insert order,
+      // so this equals MAX + 1 for them.
+      const last = await getStorage().repos.sessions.lastLogLineNumber(
+        logs.sessionId,
+        logs.iteration,
       );
-      let lineNumber = last ? last.lineNumber + 1 : 0;
+      let lineNumber = last !== null ? last + 1 : 0;
       // Consecutive Claude thinking lines of one message just before the current line.
       let run = 0;
       let runMessageId: string | undefined;
       for (const [index, { content, reasoning }] of batch.entries()) {
-        await tx.run(
-          `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt, reasoningChars, reasoningKind)
-           VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)`,
-          [
-            crypto.randomUUID(),
-            logs.taskId ?? null,
-            logs.sessionId,
-            logs.iteration,
-            logs.cli,
-            content,
-            lineNumber,
-            reasoning.reasoning?.chars ?? null,
-            reasoning.reasoning ? "reasoning" : null,
-          ],
-        );
+        await getStorage().repos.sessions.insertLog({
+          id: crypto.randomUUID(),
+          taskId: logs.taskId ?? null,
+          sessionId: logs.sessionId,
+          iteration: logs.iteration,
+          cli: logs.cli,
+          content,
+          lineNumber,
+          reasoningChars: reasoning.reasoning?.chars ?? null,
+          reasoningKind: reasoning.reasoning ? "reasoning" : null,
+        });
         const toolMessageId = reasoning.toolUseMessageId;
         if (toolMessageId) {
           const before = runMessageId === toolMessageId ? run : 0;
           // Only a run of 2+ can hold an update. A run that reaches the batch
           // start may continue in an earlier POST, so the DB decides that case.
           if (before >= 2 || before === index) {
-            await classifyClaudeUpdate(tx, logs.sessionId, toolMessageId, lineNumber);
+            await classifyClaudeUpdate(logs.sessionId, toolMessageId, lineNumber);
           }
         }
         const messageId = reasoning.reasoning?.messageId;
@@ -4976,29 +4088,16 @@ export async function createSessionLogs(logs: {
   }
 }
 
-// Session log reads order by rowid, which is insert order. Rows written before
+// Session log reads are in insert order (rowid on SQLite). Rows written before
 // lineNumber was assigned server-side restart at 0 on every worker flush, so
-// only rowid orders them. The API never runs VACUUM (runbooks/db-retention.md);
-// a manual VACUUM may renumber rowids but copies rows in rowid order.
+// only the insert order orders them. The API never runs VACUUM
+// (runbooks/db-retention.md); a manual VACUUM may renumber rowids but copies
+// rows in rowid order.
 export async function getSessionLogsByTaskId(
   taskId: string,
   limit?: number,
 ): Promise<SessionLog[]> {
-  if (typeof limit === "number" && limit > 0) {
-    const rows = await getDbClient().query<SessionLogRow>(
-      `SELECT * FROM (
-         SELECT rowid AS seq, * FROM session_logs WHERE taskId = ?
-         ORDER BY rowid DESC
-         LIMIT ?
-       ) ORDER BY seq ASC`,
-      [taskId, limit],
-    );
-    return rows.map(rowToSessionLog);
-  }
-  const rows = await getDbClient().query<SessionLogRow>(
-    "SELECT * FROM session_logs WHERE taskId = ? ORDER BY rowid ASC",
-    [taskId],
-  );
+  const rows = await getStorage().repos.sessions.listLogsByTask(taskId, limit);
   return rows.map(rowToSessionLog);
 }
 
@@ -5006,10 +4105,7 @@ export async function getSessionLogsBySession(
   sessionId: string,
   iteration: number,
 ): Promise<SessionLog[]> {
-  const rows = await getDbClient().query<SessionLogRow>(
-    "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY rowid ASC",
-    [sessionId, iteration],
-  );
+  const rows = await getStorage().repos.sessions.listLogsBySession(sessionId, iteration);
   return rows.map(rowToSessionLog);
 }
 
@@ -5022,10 +4118,7 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
 }
 
 export async function getSessionCostsByTaskId(taskId: string, limit = 500): Promise<SessionCost[]> {
-  const rows = await getDbClient().query<SessionCostRow>(
-    "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
-    [taskId, limit],
-  );
+  const rows = await getStorage().repos.sessions.listSessionCostsByTask(taskId, limit);
   return rows.map(rowToSessionCost);
 }
 
@@ -5033,18 +4126,12 @@ export async function getSessionCostsByAgentId(
   agentId: string,
   limit = 100,
 ): Promise<SessionCost[]> {
-  const rows = await getDbClient().query<SessionCostRow>(
-    "SELECT * FROM session_costs WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
-    [agentId, limit],
-  );
+  const rows = await getStorage().repos.sessions.listSessionCostsByAgent(agentId, limit);
   return rows.map(rowToSessionCost);
 }
 
 export async function getAllSessionCosts(limit = 100): Promise<SessionCost[]> {
-  const rows = await getDbClient().query<SessionCostRow>(
-    "SELECT * FROM session_costs ORDER BY createdAt DESC LIMIT ?",
-    [limit],
-  );
+  const rows = await getStorage().repos.sessions.listSessionCosts({ limit });
   return rows.map(rowToSessionCost);
 }
 
@@ -5056,30 +4143,12 @@ export async function getSessionCostsFiltered(opts: {
   endDate?: string;
   limit?: number;
 }): Promise<SessionCost[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (opts.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts.startDate) {
-    conditions.push("createdAt >= ?");
-    params.push(opts.startDate);
-  }
-  if (opts.endDate) {
-    conditions.push("createdAt <= ?");
-    params.push(opts.endDate);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = opts.limit ?? 100;
-  params.push(limit);
-
-  const rows = await getDbClient().query<SessionCostRow>(
-    `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ?`,
-    params,
-  );
+  const rows = await getStorage().repos.sessions.listSessionCosts({
+    agentId: opts.agentId,
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    limit: opts.limit ?? 100,
+  });
   return rows.map(rowToSessionCost);
 }
 
@@ -5186,13 +4255,6 @@ export interface SessionCostByUserRow {
 /** `opts.userId` sentinel selecting spend with no human requester. */
 export const UNATTRIBUTED_USER_ID = "unattributed";
 
-/**
- * True for a session whose task is structurally human-free (`isHumanFree`, set
- * when the task is created; rule in `src/be/db/tasks/human-free.ts`). A session
- * with no task row is not human-free.
- */
-const HUMAN_FREE_SQL = "(COALESCE(t.isHumanFree, 0) = 1)";
-
 export async function getSessionCostSummary(opts: {
   startDate?: string;
   endDate?: string;
@@ -5209,84 +4271,20 @@ export async function getSessionCostSummary(opts: {
 }> {
   // `session_costs` deliberately carries no `userId` column — a task can be
   // re-attributed after the fact, so the human requester is resolved by joining
-  // through the task (same shape as `getDailySpendForUser`). Every column is
-  // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
-  // INDEXED BY: without ANALYZE statistics (production has none) the planner
-  // probes tasks through the primary key and reads each full row, which follows
-  // the task's overflow pages. The covering index answers the same probe from
-  // the index alone (migration 182).
-  const from =
-    "FROM session_costs sc LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc.taskId";
-  // Only a user filter reads the task, and the join adds no rows (task id is unique).
-  const agentFrom = opts.userId === undefined ? "FROM session_costs sc" : from;
-
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (opts.startDate) {
-    conditions.push("sc.createdAt >= ?");
-    params.push(opts.startDate);
-  }
-  if (opts.endDate) {
-    conditions.push("sc.createdAt <= ?");
-    params.push(opts.endDate);
-  }
-  if (opts.agentId) {
-    conditions.push("sc.agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts.userId === UNATTRIBUTED_USER_ID) {
-    conditions.push(`(t.requestedByUserId IS NULL OR ${HUMAN_FREE_SQL})`);
-  } else if (opts.userId) {
-    conditions.push(`(t.requestedByUserId = ? AND NOT ${HUMAN_FREE_SQL})`);
-    params.push(opts.userId);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const subscriptionSql = `${CREDENTIAL_TYPE_SQL} IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
-
-  // Totals
-  type TotalsRow = {
-    totalCostUsd: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalCacheReadTokens: number;
-    totalCacheWriteTokens: number;
-    totalDurationMs: number;
-    totalSessions: number;
-    attributedCostUsd: number;
-    attributableCostUsd: number;
-    excludedCostUsd: number;
-    excludedTaskCount: number;
-    subscriptionCostUsd: number;
-    credentialUnattributedCostUsd: number;
-    credentialUnattributedSessions: number;
+  // through the task (same shape as `getDailySpendForUser`).
+  const filter: SessionCostSummaryFilter = {
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    agentId: opts.agentId,
+    user:
+      opts.userId === UNATTRIBUTED_USER_ID
+        ? { kind: "unattributed" }
+        : opts.userId
+          ? { kind: "user", userId: opts.userId }
+          : undefined,
+    subscriptionKeyTypes: SUBSCRIPTION_KEY_TYPES,
   };
-
-  const totalsRow = await getDbClient().get<TotalsRow>(
-    `SELECT
-        COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
-        COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
-        COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
-        COALESCE(SUM(sc.cacheReadTokens), 0) as totalCacheReadTokens,
-        COALESCE(SUM(sc.cacheWriteTokens), 0) as totalCacheWriteTokens,
-        COALESCE(SUM(sc.durationMs), 0) as totalDurationMs,
-        COUNT(*) as totalSessions,
-        COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL AND NOT ${HUMAN_FREE_SQL}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as attributedCostUsd,
-        COALESCE(SUM(CASE WHEN NOT ${HUMAN_FREE_SQL}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as attributableCostUsd,
-        COALESCE(SUM(CASE WHEN ${HUMAN_FREE_SQL}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as excludedCostUsd,
-        COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount,
-        COALESCE(SUM(CASE WHEN ${subscriptionSql}
-          THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd,
-        COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL
-          THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
-        COUNT(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL THEN 1 END) as credentialUnattributedSessions
-      ${from} ${where}`,
-    params,
-  );
+  const totalsRow = await getStorage().repos.sessions.costSummaryTotals(filter);
 
   const totals: SessionCostSummaryTotals = totalsRow
     ? {
@@ -5316,99 +4314,25 @@ export async function getSessionCostSummary(opts: {
   const groupBy = opts.groupBy ?? "both";
   let daily: SessionCostDailyRow[] = [];
   if (groupBy === "day" || groupBy === "both") {
-    daily = await getDbClient().query<{
-      date: string;
-      costUsd: number;
-      inputTokens: number;
-      outputTokens: number;
-      sessions: number;
-      subscriptionCostUsd: number;
-      credentialUnattributedCostUsd: number;
-      credentialUnattributedSessions: number;
-    }>(
-      `SELECT
-          DATE(sc.createdAt) as date,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(*) as sessions,
-          COALESCE(SUM(CASE WHEN ${subscriptionSql} THEN sc.totalCostUsd ELSE 0 END), 0)
-            as subscriptionCostUsd,
-          COALESCE(SUM(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL
-            THEN sc.totalCostUsd ELSE 0 END), 0) as credentialUnattributedCostUsd,
-          COUNT(CASE WHEN ${CREDENTIAL_TYPE_SQL} IS NULL THEN 1 END) as credentialUnattributedSessions
-        ${from} ${where}
-        GROUP BY DATE(sc.createdAt)
-        ORDER BY date ASC`,
-      params,
-    );
+    daily = await getStorage().repos.sessions.costSummaryDaily(filter);
   }
 
   // Per-agent breakdown
   let byAgent: SessionCostByAgentRow[] = [];
   if (groupBy === "agent" || groupBy === "both") {
-    byAgent = await getDbClient().query<{
-      agentId: string;
-      costUsd: number;
-      inputTokens: number;
-      outputTokens: number;
-      sessions: number;
-      durationMs: number;
-    }>(
-      `SELECT
-          sc.agentId as agentId,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(*) as sessions,
-          COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${agentFrom} ${where}
-        GROUP BY sc.agentId
-        ORDER BY costUsd DESC`,
-      params,
-    );
+    byAgent = await getStorage().repos.sessions.costSummaryByAgent(filter);
   }
 
   // Per-requester breakdown. Structurally-human-free work is assigned to the
   // autonomous bucket even if a stale requester id survives on the task.
   let byUser: SessionCostByUserRow[] = [];
   if (groupBy === "user" || groupBy === "both") {
-    byUser = await getDbClient().query<SessionCostByUserRow>(
-      `SELECT
-          CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END as userId,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(DISTINCT sc.taskId) as tasks,
-          COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${from} ${where}
-        GROUP BY CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END
-        ORDER BY costUsd DESC`,
-      params,
-    );
+    byUser = await getStorage().repos.sessions.costSummaryByUser(filter);
   }
 
   let byCredential: SessionCostByCredentialRow[] = [];
   if (groupBy === "both") {
-    type CredentialRow = Omit<
-      SessionCostByCredentialRow,
-      "name" | "subscription" | "plan" | "planSource"
-    >;
-    const rows = await getDbClient().query<CredentialRow>(
-      `SELECT
-          ${CREDENTIAL_TYPE_SQL} as keyType,
-          ${CREDENTIAL_SUFFIX_SQL} as keySuffix,
-          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
-          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(*) as sessions,
-          MIN(sc.createdAt) as firstSessionAt,
-          MAX(sc.createdAt) as lastSessionAt
-        ${from} ${where}
-        GROUP BY ${CREDENTIAL_TYPE_SQL}, ${CREDENTIAL_SUFFIX_SQL}
-        ORDER BY costUsd DESC`,
-      params,
-    );
+    const rows = await getStorage().repos.sessions.costSummaryByCredential(filter);
     const labels = await getCredentialLabels();
     byCredential = rows.map((row) => {
       const label =
@@ -5439,17 +4363,13 @@ function credentialKey(keyType: string, keySuffix: string): string {
 async function getCredentialLabels(): Promise<
   Map<string, { name: string | null; plan: string | null; planSource: PlanSource | null }>
 > {
-  const rows = await getDbClient().query<{
+  const rows = (await getStorage().repos.config.listKeyLabels()) as {
     keyType: string;
     keySuffix: string;
     name: string | null;
     plan: string | null;
     planSource: PlanSource | null;
-  }>(
-    `SELECT keyType, keySuffix, name, plan, planSource FROM api_key_status
-      ORDER BY CASE planSource WHEN 'manual' THEN 0 WHEN 'detected' THEN 1 WHEN 'estimated' THEN 2 ELSE 3 END,
-        updatedAt DESC`,
-  );
+  }[];
   const labels = new Map<
     string,
     { name: string | null; plan: string | null; planSource: PlanSource | null }
@@ -5515,12 +4435,8 @@ export async function getAttributionByPerson(opts: {
   startDate?: string;
   endDate?: string;
 }): Promise<AttributionByPersonRow[]> {
-  const conditions: string[] = ["t.requestedByUserId IS NOT NULL"];
-  const params: string[] = [];
-  if (opts.startDate) {
-    conditions.push("t.createdAt >= ?");
-    params.push(opts.startDate);
-  }
+  const window: AttributionWindow = {};
+  if (opts.startDate) window.startDate = opts.startDate;
   if (opts.endDate) {
     // A date-only value represents the whole UTC day. Preserve inclusive
     // timestamp semantics for callers that provide an exact instant.
@@ -5533,97 +4449,15 @@ export async function getAttributionByPerson(opts: {
       dateOnlyEnd.toISOString().slice(0, 10) === opts.endDate
     ) {
       dateOnlyEnd.setUTCDate(dateOnlyEnd.getUTCDate() + 1);
-      conditions.push("t.createdAt < ?");
-      params.push(dateOnlyEnd.toISOString());
+      window.endBefore = dateOnlyEnd.toISOString();
     } else {
-      conditions.push("t.createdAt <= ?");
-      params.push(opts.endDate);
+      window.endAtOrBefore = opts.endDate;
     }
   }
-  const where = `WHERE ${conditions.join(" AND ")}`;
   const githubHost = getGitHubHostForSql();
 
-  type RootRow = { userId: string; initiated: number; shipped: number };
-  const rootRows = await getDbClient().query<RootRow>(
-    `WITH RECURSIVE selected_roots(id, requestedByUserId, status) AS (
-        SELECT t.id, t.requestedByUserId, t.status
-        FROM agent_tasks t
-        ${where} AND t.parentTaskId IS NULL AND t.isHumanFree = 0
-      ),
-      -- Ids only: carrying each descendant's \`output\` through the recursion copied
-      -- every task's text into the queue. The output fallback below reads it by id.
-      task_tree(rootId, taskId) AS (
-        SELECT id, id
-        FROM selected_roots
-
-        UNION ALL
-
-        SELECT tree.rootId, child.id
-        FROM agent_tasks child
-        JOIN task_tree tree ON child.parentTaskId = tree.taskId
-      ),
-      -- Every root with shippable evidence anywhere in its tree, computed ONCE for
-      -- the whole window. The old form asked the same question with 3 CORRELATED
-      -- EXISTS subqueries, which SQLite re-entered once per root: 2 of them scanned
-      -- task_attachments whole and the third scanned the whole tree with two
-      -- leading-wildcard LIKEs. That is the O(R x T) shape that took 60 s.
-      --
-      -- Two rules keep this fast and correct, and both are load-bearing:
-      --   1. UNION, never UNION ALL. It makes rootId unique, so the LEFT JOIN below
-      --      cannot duplicate a root and COUNT(*) stays exact.
-      --   2. LEFT JOIN, never a correlated EXISTS against this CTE. The EXISTS form
-      --      returns the same answer but SQLite re-enters the CTE per root:
-      --      measured 4,189 ms for a 2-day window against 460 ms for 30 days.
-      shipped_roots(rootId) AS (
-        SELECT tree.rootId
-        FROM task_tree tree
-        JOIN task_attachments ta ON ta.task_id = tree.taskId
-        WHERE ta.kind = 'page'
-           OR (
-             ta.kind = 'url'
-             AND (
-               ta.url LIKE '%${githubHost}/%/pull/%'
-               OR ta.url LIKE '%/-/merge_requests/%'
-             )
-           )
-
-        UNION
-
-        SELECT tree.rootId
-        FROM task_tree tree
-        -- CROSS JOIN pins the order (tree outer, task by id). Left to itself the
-        -- planner scans every task's output and probes the tree instead.
-        CROSS JOIN agent_tasks described ON described.id = tree.taskId
-        WHERE described.output LIKE '%${githubHost}/%/pull/%'
-           OR described.output LIKE '%/-/merge_requests/%'
-      )
-      SELECT
-        t.requestedByUserId as userId,
-        COUNT(*) as initiated,
-        SUM(CASE WHEN t.status = 'completed' AND s.rootId IS NOT NULL THEN 1 ELSE 0 END) as shipped
-      FROM selected_roots t
-      LEFT JOIN shipped_roots s ON s.rootId = t.id
-      GROUP BY t.requestedByUserId`,
-    params,
-  );
-
-  type ReachRow = {
-    userId: string;
-    agentsReached: number;
-    reposReached: number;
-    surfacesReached: number;
-  };
-  const reachRows = await getDbClient().query<ReachRow>(
-    `SELECT
-        t.requestedByUserId as userId,
-        COUNT(DISTINCT t.agentId) as agentsReached,
-        COUNT(DISTINCT t.vcsRepo) as reposReached,
-        COUNT(DISTINCT t.source) as surfacesReached
-      FROM agent_tasks t
-      ${where} AND t.isHumanFree = 0
-      GROUP BY t.requestedByUserId`,
-    params,
-  );
+  const rootRows = await getStorage().repos.tasks.listAttributionRoots(window, githubHost);
+  const reachRows = await getStorage().repos.tasks.listAttributionReach(window);
 
   const byUser = new Map<string, AttributionByPersonRow>();
   for (const r of rootRows) {
@@ -5686,15 +4520,7 @@ export async function getDashboardCostSummary(): Promise<DashboardCostSummary> {
   const startOfMonthUtc = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
   ).toISOString();
-  type CostRow = { costToday: number; costMtd: number };
-  const row = await getDbClient().get<CostRow>(
-    `SELECT
-        COALESCE(SUM(CASE WHEN createdAt >= ? THEN totalCostUsd ELSE 0 END), 0) as costToday,
-        COALESCE(SUM(totalCostUsd), 0) as costMtd
-      FROM session_costs
-      WHERE createdAt >= ?`,
-    [startOfDayUtc, startOfMonthUtc],
-  );
+  const row = await getStorage().repos.sessions.dashboardCost(startOfDayUtc, startOfMonthUtc);
 
   return row ?? { costToday: 0, costMtd: 0 };
 }
@@ -5753,40 +4579,35 @@ export async function createInboxMessage(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<InboxMessageRow>(
-    `INSERT INTO inbox_messages (id, agentId, content, source, status, slackChannelId, slackThreadTs, slackUserId, matchedText, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      agentId,
-      scrubSecrets(content),
-      options?.source ?? "slack",
-      options?.slackChannelId ?? null,
-      options?.slackThreadTs ?? null,
-      options?.slackUserId ?? null,
-      options?.matchedText == null ? null : scrubSecrets(options.matchedText),
-      now,
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.messaging.insertInboxMessage({
+    id,
+    agentId,
+    content: scrubSecrets(content),
+    source: options?.source ?? "slack",
+    status: "unread",
+    slackChannelId: options?.slackChannelId ?? null,
+    slackThreadTs: options?.slackThreadTs ?? null,
+    slackUserId: options?.slackUserId ?? null,
+    matchedText: options?.matchedText == null ? null : scrubSecrets(options.matchedText),
+    delegatedToTaskId: null,
+    responseText: null,
+    createdAt: now,
+    lastUpdatedAt: now,
+  })) as InboxMessageRow | null;
 
   if (!row) throw new Error("Failed to create inbox message");
   return rowToInboxMessage(row);
 }
 
 export async function getInboxMessageById(id: string): Promise<InboxMessage | null> {
-  const row = await getDbClient().get<InboxMessageRow>(
-    "SELECT * FROM inbox_messages WHERE id = ?",
-    [id],
-  );
+  const row = (await getStorage().repos.messaging.findInboxMessage(id)) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
 export async function getUnreadInboxMessages(agentId: string): Promise<InboxMessage[]> {
-  const rows = await getDbClient().query<InboxMessageRow>(
-    "SELECT * FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC",
-    [agentId],
-  );
+  const rows = (await getStorage().repos.messaging.listUnreadInboxMessages(
+    agentId,
+  )) as InboxMessageRow[];
   return rows.map(rowToInboxMessage);
 }
 
@@ -5800,13 +4621,10 @@ export async function claimInboxMessages(
   limit: number = 5,
 ): Promise<InboxMessage[]> {
   const now = new Date().toISOString();
-  const client = getDbClient();
+  const messaging = getStorage().repos.messaging;
 
   // Get IDs of unread messages to claim
-  const unreadRows = await client.query<{ id: string }>(
-    "SELECT id FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC LIMIT ?",
-    [agentId, limit],
-  );
+  const unreadRows = await messaging.listUnreadInboxMessages(agentId, limit);
   const unreadIds = unreadRows.map((row) => row.id);
 
   if (unreadIds.length === 0) {
@@ -5814,22 +4632,17 @@ export async function claimInboxMessages(
   }
 
   // Atomically update status to 'processing' for these specific IDs
-  const placeholders = unreadIds.map(() => "?").join(",");
-  const rows = await client.query<InboxMessageRow>(
-    `UPDATE inbox_messages SET status = 'processing', lastUpdatedAt = ?
-       WHERE id IN (${placeholders}) AND status = 'unread' RETURNING *`,
-    [now, ...unreadIds],
-  );
+  const rows = (await messaging.markInboxMessagesProcessing(unreadIds, now)) as InboxMessageRow[];
 
   return rows.map(rowToInboxMessage);
 }
 
 export async function markInboxMessageRead(id: string): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<InboxMessageRow>(
-    "UPDATE inbox_messages SET status = 'read', lastUpdatedAt = ? WHERE id = ? RETURNING *",
-    [now, id],
-  );
+  const row = (await getStorage().repos.messaging.markInboxMessageRead(
+    id,
+    now,
+  )) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
@@ -5838,10 +4651,11 @@ export async function markInboxMessageResponded(
   responseText: string,
 ): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<InboxMessageRow>(
-    "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    [scrubSecrets(responseText), now, id],
-  );
+  const row = (await getStorage().repos.messaging.markInboxMessageResponded(
+    id,
+    scrubSecrets(responseText),
+    now,
+  )) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
@@ -5850,10 +4664,11 @@ export async function markInboxMessageDelegated(
   taskId: string,
 ): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<InboxMessageRow>(
-    "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    [taskId, now, id],
-  );
+  const row = (await getStorage().repos.messaging.markInboxMessageDelegated(
+    id,
+    taskId,
+    now,
+  )) as InboxMessageRow | null;
   return row ? rowToInboxMessage(row) : null;
 }
 
@@ -5866,13 +4681,7 @@ export async function releaseStaleProcessingInbox(timeoutMinutes: number = 30): 
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = await getDbClient().run(
-    `UPDATE inbox_messages SET status = 'unread', lastUpdatedAt = ?
-     WHERE status = 'processing' AND lastUpdatedAt < ?`,
-    [now, cutoffTime],
-  );
-
-  return result.changes;
+  return await getStorage().repos.messaging.releaseInboxProcessingBefore(cutoffTime, now);
 }
 
 // ============================================================================
@@ -5916,60 +4725,20 @@ export interface ConcurrentContext {
 export async function getConcurrentContext(readableBy?: {
   userId: string | null;
 }): Promise<ConcurrentContext> {
-  const client = getDbClient();
-  const readable = readableBy ? readableSessionCondition(readableBy.userId, "t.id") : undefined;
-  const readableSql = readable ? ` AND ${readable.sql}` : "";
-  const readableParams = readable?.params ?? [];
-
   // 1. Inbox messages currently being processed (status = 'processing')
-  const processingInboxMessages = await client.query<{
-    id: string;
-    content: string;
-    source: string;
-    slackChannelId: string | null;
-    slackThreadTs: string | null;
-    createdAt: string;
-  }>(
-    "SELECT id, content, source, slackChannelId, slackThreadTs, createdAt FROM inbox_messages WHERE status = 'processing' ORDER BY createdAt DESC",
-  );
+  const processingInboxMessages = await getStorage().repos.messaging.listProcessingInboxMessages();
 
   // 2. Tasks created in the last 5 minutes by lead agents
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const recentTaskDelegations = await client.query<{
-    id: string;
-    task: string;
-    agentId: string | null;
-    agentName: string | null;
-    creatorAgentId: string | null;
-    status: string;
-    createdAt: string;
-  }>(
-    `SELECT t.id, t.task, t.agentId, a.name as agentName, t.creatorAgentId, t.status, t.createdAt
-       FROM agent_tasks t
-       LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.createdAt > ?
-         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)${readableSql}
-       ORDER BY t.createdAt DESC`,
-    [fiveMinutesAgo, ...readableParams],
-  );
+  const recentTaskDelegations = (await getStorage().repos.tasks.listRecentLeadDelegations(
+    fiveMinutesAgo,
+    readableBy,
+  )) as ConcurrentContext["recentTaskDelegations"];
 
   // 3. Currently in-progress tasks across the swarm
-  const activeSwarmTasks = await client.query<{
-    id: string;
-    task: string;
-    agentId: string | null;
-    agentName: string | null;
-    status: string;
-    createdAt: string;
-    progress: string | null;
-  }>(
-    `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
-       FROM agent_tasks t
-       LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.status = 'in_progress'${readableSql}
-       ORDER BY t.createdAt DESC`,
-    readableParams,
-  );
+  const activeSwarmTasks = (await getStorage().repos.tasks.listActiveSwarmTasks(
+    readableBy,
+  )) as ConcurrentContext["activeSwarmTasks"];
 
   return {
     processingInboxMessages,
@@ -5981,47 +4750,6 @@ export async function getConcurrentContext(readableBy?: {
 // ============================================================================
 // Scheduled Task Queries
 // ============================================================================
-
-type ScheduledTaskRow = {
-  id: string;
-  key: string;
-  name: string;
-  description: string | null;
-  cronExpression: string | null;
-  intervalMs: number | null;
-  taskTemplate: string | null;
-  taskType: string | null;
-  tags: string | null;
-  priority: number;
-  targetAgentId: string | null;
-  enabled: number;
-  lastRunAt: string | null;
-  nextRunAt: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  parentTaskId: string | null;
-  requestedDelayMs: number | null;
-  requestedRunAt: string | null;
-  timezone: string;
-  consecutiveErrors: number | null;
-  lastErrorAt: string | null;
-  lastErrorMessage: string | null;
-  model: string | null;
-  modelTier: string | null;
-  profile: string | null;
-  scheduleType: string;
-  targetType: string;
-  workflowId: string | null;
-  scriptName: string | null;
-  scriptArgs: string | null;
-  params: string;
-  requiredParams: string;
-  requires: string;
-  createdAt: string;
-  lastUpdatedAt: string;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 // ── List-endpoint slimming helpers ──────────────────────────────────────────
 // List endpoints ship slim rows by default; heavy text fields are replaced
@@ -6063,6 +4791,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
     profile: row.profile ?? undefined,
+    modelGroup: row.modelGroup ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
     targetType: row.targetType as "agent-task" | "workflow" | "script",
     workflowId: row.workflowId ?? undefined,
@@ -6116,85 +4845,30 @@ export async function getScheduledTasks(
   filters?: ScheduledTaskFilters,
   opts?: { slim?: boolean },
 ): Promise<ScheduledTask[] | ScheduledTaskSummary[]> {
-  let query = "SELECT * FROM scheduled_tasks WHERE 1=1";
-  const params: (string | number)[] = [];
-
-  if (filters?.enabled !== undefined) {
-    query += " AND enabled = ?";
-    params.push(filters.enabled ? 1 : 0);
-  }
-
-  if (filters?.name) {
-    query += " AND name LIKE ?";
-    params.push(`%${filters.name}%`);
-  }
-
-  if (filters?.scheduleType) {
-    query += " AND scheduleType = ?";
-    params.push(filters.scheduleType);
-  }
-
-  if (filters?.targetType) {
-    query += " AND targetType = ?";
-    params.push(filters.targetType);
-  }
-
-  if (filters?.workflowId) {
-    query += " AND workflowId = ?";
-    params.push(filters.workflowId);
-  }
-
-  if (filters?.scriptName) {
-    query += " AND scriptName = ?";
-    params.push(filters.scriptName);
-  }
-
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-
-  if (filters?.consecutiveErrorsMin !== undefined) {
-    query += " AND consecutiveErrors >= ?";
-    params.push(filters.consecutiveErrorsMin);
-  }
-
-  if (filters?.lastRunStatus === "failed") {
-    query += " AND consecutiveErrors > 0";
-  } else if (filters?.lastRunStatus === "succeeded") {
-    query += " AND lastRunAt IS NOT NULL AND consecutiveErrors = 0";
-  }
-
-  if (filters?.hideCompleted !== false) {
-    query += " AND NOT (scheduleType = 'one_time' AND enabled = 0)";
-  }
-
-  query += " ORDER BY lastRunAt IS NULL ASC, lastRunAt DESC, lastUpdatedAt DESC";
-  if (filters?.limit !== undefined) {
-    query += " LIMIT ?";
-    params.push(filters.limit);
-  }
-
-  const rows = await getDbClient().query<ScheduledTaskRow>(query, params);
+  const rows = await getStorage().repos.schedules.listScheduledTasks({
+    enabled: filters?.enabled,
+    name: filters?.name,
+    scheduleType: filters?.scheduleType,
+    targetType: filters?.targetType,
+    workflowId: filters?.workflowId,
+    scriptName: filters?.scriptName,
+    key: filters?.key ? normalizeAssetKey(filters.key) : undefined,
+    keyPattern: filters?.keyPrefix ? assetKeyPrefixPattern(filters.keyPrefix) : undefined,
+    consecutiveErrorsMin: filters?.consecutiveErrorsMin,
+    lastRunStatus: filters?.lastRunStatus,
+    hideCompleted: filters?.hideCompleted !== false,
+    limit: filters?.limit,
+  });
   return opts?.slim ? rows.map(rowToScheduledTaskSummary) : rows.map(rowToScheduledTask);
 }
 
 export async function getScheduledTaskById(id: string): Promise<ScheduledTask | null> {
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    "SELECT * FROM scheduled_tasks WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.schedules.findScheduledTaskById(id);
   return row ? rowToScheduledTask(row) : null;
 }
 
 export async function getScheduledTaskByName(name: string): Promise<ScheduledTask | null> {
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    "SELECT * FROM scheduled_tasks WHERE name = ?",
-    [name],
-  );
+  const row = await getStorage().repos.schedules.findScheduledTaskByName(name);
   return row ? rowToScheduledTask(row) : null;
 }
 
@@ -6225,6 +4899,7 @@ export interface CreateScheduledTaskData {
   model?: string;
   modelTier?: ModelTier;
   profile?: string;
+  modelGroup?: string;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string;
@@ -6240,53 +4915,43 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    `INSERT INTO scheduled_tasks (
-        id, "key", name, description, cronExpression, intervalMs, taskTemplate,
-        taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, parentTaskId, requestedDelayMs, requestedRunAt,
-        timezone, model, modelTier, profile, scheduleType,
-        targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
-        createdAt, lastUpdatedAt,
-        created_by, updated_by, updatedByAgentId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
-      data.name,
-      data.description == null ? null : scrubSecrets(data.description),
-      data.cronExpression ?? null,
-      data.intervalMs ?? null,
-      data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate),
-      data.taskType ?? null,
-      JSON.stringify(data.tags ?? []),
-      data.priority ?? 50,
-      data.targetAgentId ?? null,
-      data.enabled !== false ? 1 : 0,
-      data.nextRunAt ?? null,
-      data.createdByAgentId ?? null,
-      data.parentTaskId ?? null,
-      data.requestedDelayMs ?? null,
-      data.requestedRunAt ?? null,
-      data.timezone ?? "UTC",
-      data.model ?? null,
-      data.modelTier ?? null,
-      data.profile ?? null,
-      data.scheduleType ?? "recurring",
-      data.targetType ?? "agent-task",
-      data.workflowId ?? null,
-      data.scriptName ?? null,
-      data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
-      JSON.stringify(data.params ?? {}),
-      JSON.stringify(data.requiredParams ?? []),
-      JSON.stringify(data.requires ?? []),
-      now,
-      now,
-      data.createdBy ?? null,
-      data.createdBy ?? null,
-      data.createdByAgentId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.schedules.insertScheduledTask({
+    id,
+    key: normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
+    name: data.name,
+    description: data.description == null ? null : scrubSecrets(data.description),
+    cronExpression: data.cronExpression ?? null,
+    intervalMs: data.intervalMs ?? null,
+    taskTemplate: data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate),
+    taskType: data.taskType ?? null,
+    tags: JSON.stringify(data.tags ?? []),
+    priority: data.priority ?? 50,
+    targetAgentId: data.targetAgentId ?? null,
+    enabled: data.enabled !== false,
+    nextRunAt: serializeNextRunAt(data.nextRunAt),
+    createdByAgentId: data.createdByAgentId ?? null,
+    parentTaskId: data.parentTaskId ?? null,
+    requestedDelayMs: data.requestedDelayMs ?? null,
+    requestedRunAt: data.requestedRunAt ?? null,
+    timezone: data.timezone ?? "UTC",
+    model: data.model ?? null,
+    modelTier: data.modelTier ?? null,
+    profile: data.profile ?? null,
+    modelGroup: data.modelGroup ?? null,
+    scheduleType: data.scheduleType ?? "recurring",
+    targetType: data.targetType ?? "agent-task",
+    workflowId: data.workflowId ?? null,
+    scriptName: data.scriptName ?? null,
+    scriptArgs: data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
+    params: JSON.stringify(data.params ?? {}),
+    requiredParams: JSON.stringify(data.requiredParams ?? []),
+    requires: JSON.stringify(data.requires ?? []),
+    createdAt: now,
+    lastUpdatedAt: now,
+    created_by: data.createdBy ?? null,
+    updated_by: data.createdBy ?? null,
+    updatedByAgentId: data.createdByAgentId ?? null,
+  });
 
   if (!row) throw new Error("Failed to create scheduled task");
   return rowToScheduledTask(row);
@@ -6313,6 +4978,7 @@ export interface UpdateScheduledTaskData {
   model?: string | null;
   modelTier?: ModelTier | null;
   profile?: string | null;
+  modelGroup?: string | null;
   scheduleType?: "recurring" | "one_time";
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string | null;
@@ -6334,165 +5000,69 @@ export async function updateScheduledTask(
   id: string,
   data: UpdateScheduledTaskData,
 ): Promise<ScheduledTask | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
+  const opt = <T, R>(value: T | undefined, map: (v: T) => R): R | undefined =>
+    value === undefined ? undefined : map(value);
+  const scrub = (value: string | null) => (value == null ? null : scrubSecrets(value));
+  const update: ScheduledTaskColumnUpdate = {
+    key: opt(data.key, normalizeAssetKey),
+    name: data.name,
+    description: opt(data.description, scrub),
+    cronExpression: data.cronExpression,
+    intervalMs: data.intervalMs,
+    taskTemplate: opt(data.taskTemplate, scrub),
+    taskType: data.taskType,
+    tags: opt(data.tags, (tags) => JSON.stringify(tags)),
+    priority: data.priority,
+    targetAgentId: data.targetAgentId,
+    enabled: data.enabled,
+    lastRunAt: data.lastRunAt,
+    nextRunAt: opt(data.nextRunAt, serializeNextRunAt),
+    timezone: data.timezone,
+    consecutiveErrors: data.consecutiveErrors,
+    lastErrorAt: data.lastErrorAt,
+    lastErrorMessage: opt(data.lastErrorMessage, scrub),
+    model: data.model,
+    modelTier: data.modelTier,
+    profile: data.profile,
+    modelGroup: data.modelGroup,
+    scheduleType: data.scheduleType,
+    targetType: data.targetType,
+    workflowId: data.workflowId,
+    scriptName: data.scriptName,
+    scriptArgs: opt(data.scriptArgs, (args) => (args === null ? null : JSON.stringify(args))),
+    params: opt(data.params, (p) => JSON.stringify(p)),
+    requiredParams: opt(data.requiredParams, (p) => JSON.stringify(p)),
+    requires: opt(data.requires, (r) => JSON.stringify(r)),
+    updated_by: data.updatedBy,
+    updatedByAgentId: data.updatedByAgentId,
+  };
 
-  if (data.key !== undefined) {
-    updates.push('"key" = ?');
-    params.push(normalizeAssetKey(data.key));
-  }
-
-  if (data.name !== undefined) {
-    updates.push("name = ?");
-    params.push(data.name);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description == null ? null : scrubSecrets(data.description));
-  }
-  if (data.cronExpression !== undefined) {
-    updates.push("cronExpression = ?");
-    params.push(data.cronExpression);
-  }
-  if (data.intervalMs !== undefined) {
-    updates.push("intervalMs = ?");
-    params.push(data.intervalMs);
-  }
-  if (data.taskTemplate !== undefined) {
-    updates.push("taskTemplate = ?");
-    params.push(data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate));
-  }
-  if (data.taskType !== undefined) {
-    updates.push("taskType = ?");
-    params.push(data.taskType);
-  }
-  if (data.tags !== undefined) {
-    updates.push("tags = ?");
-    params.push(JSON.stringify(data.tags));
-  }
-  if (data.priority !== undefined) {
-    updates.push("priority = ?");
-    params.push(data.priority);
-  }
-  if (data.targetAgentId !== undefined) {
-    updates.push("targetAgentId = ?");
-    params.push(data.targetAgentId);
-  }
-  if (data.enabled !== undefined) {
-    updates.push("enabled = ?");
-    params.push(data.enabled ? 1 : 0);
-  }
-  if (data.lastRunAt !== undefined) {
-    updates.push("lastRunAt = ?");
-    params.push(data.lastRunAt);
-  }
-  if (data.nextRunAt !== undefined) {
-    updates.push("nextRunAt = ?");
-    params.push(data.nextRunAt);
-  }
-  if (data.timezone !== undefined) {
-    updates.push("timezone = ?");
-    params.push(data.timezone);
-  }
-  if (data.consecutiveErrors !== undefined) {
-    updates.push("consecutiveErrors = ?");
-    params.push(data.consecutiveErrors);
-  }
-  if (data.lastErrorAt !== undefined) {
-    updates.push("lastErrorAt = ?");
-    params.push(data.lastErrorAt);
-  }
-  if (data.lastErrorMessage !== undefined) {
-    updates.push("lastErrorMessage = ?");
-    params.push(data.lastErrorMessage == null ? null : scrubSecrets(data.lastErrorMessage));
-  }
-  if (data.model !== undefined) {
-    updates.push("model = ?");
-    params.push(data.model);
-  }
-  if (data.modelTier !== undefined) {
-    updates.push("modelTier = ?");
-    params.push(data.modelTier);
-  }
-  if (data.profile !== undefined) {
-    updates.push("profile = ?");
-    params.push(data.profile);
-  }
-  if (data.scheduleType !== undefined) {
-    updates.push("scheduleType = ?");
-    params.push(data.scheduleType);
-  }
-  if (data.targetType !== undefined) {
-    updates.push("targetType = ?");
-    params.push(data.targetType);
-  }
-  if (data.workflowId !== undefined) {
-    updates.push("workflowId = ?");
-    params.push(data.workflowId);
-  }
-  if (data.scriptName !== undefined) {
-    updates.push("scriptName = ?");
-    params.push(data.scriptName);
-  }
-  if (data.scriptArgs !== undefined) {
-    updates.push("scriptArgs = ?");
-    params.push(data.scriptArgs === null ? null : JSON.stringify(data.scriptArgs));
-  }
-  if (data.params !== undefined) {
-    updates.push("params = ?");
-    params.push(JSON.stringify(data.params));
-  }
-  if (data.requiredParams !== undefined) {
-    updates.push("requiredParams = ?");
-    params.push(JSON.stringify(data.requiredParams));
-  }
-  if (data.requires !== undefined) {
-    updates.push("requires = ?");
-    params.push(JSON.stringify(data.requires));
-  }
-  if (data.updatedBy !== undefined) {
-    updates.push("updated_by = ?");
-    params.push(data.updatedBy);
-  }
-  if (data.updatedByAgentId !== undefined) {
-    updates.push("updatedByAgentId = ?");
-    params.push(data.updatedByAgentId);
-  }
-
-  if (updates.length === 0) {
+  if (Object.values(update).every((value) => value === undefined)) {
     return getScheduledTaskById(id);
   }
 
-  updates.push("lastUpdatedAt = ?");
-  params.push(data.lastUpdatedAt ?? new Date().toISOString());
-
-  params.push(id);
-
-  const row = await getDbClient().get<ScheduledTaskRow>(
-    `UPDATE scheduled_tasks SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  const row = await getStorage().repos.schedules.updateScheduledTask(
+    id,
+    update,
+    data.lastUpdatedAt ?? new Date().toISOString(),
   );
 
   return row ? rowToScheduledTask(row) : null;
 }
 
 export async function deleteScheduledTask(id: string): Promise<boolean> {
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  return await storage.transaction(async () => {
     // An unfired deferral is the only continuation of a suppressed completion.
     // Read under the delete's write lock so a concurrent wake cannot be missed.
-    const deferred = await tx.get<{ parentTaskId: string }>(
-      `SELECT parentTaskId FROM scheduled_tasks
-       WHERE id = ? AND taskType = 'deferred' AND parentTaskId IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM agent_tasks WHERE scheduleId = scheduled_tasks.id)`,
-      [id],
-    );
+    const deferredParentId = await storage.repos.schedules.findUnfiredDeferralParent(id);
     // Favorites carry no FK to the entity; drop every user's star with it.
-    await tx.run("DELETE FROM user_favorites WHERE itemType = 'schedule' AND itemId = ?", [id]);
-    const result = await tx.run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
-    if (result.changes > 0 && deferred) {
-      getDbClient().afterCommit(async () => {
+    await storage.repos.users.deleteFavoritesOfItem("schedule", id);
+    const deleted = await storage.repos.schedules.deleteScheduledTask(id);
+    if (deleted > 0 && deferredParentId) {
+      storage.afterCommit(async () => {
         try {
-          const parent = await getTaskById(deferred.parentTaskId);
+          const parent = await getTaskById(deferredParentId);
           if (!parent?.deferredAt) return;
           const { createWorkerTaskFollowUp } = await import("../tasks/worker-follow-up");
           await createWorkerTaskFollowUp({
@@ -6508,7 +5078,7 @@ export async function deleteScheduledTask(id: string): Promise<boolean> {
         }
       });
     }
-    return result.changes > 0;
+    return deleted > 0;
   });
 }
 
@@ -6518,42 +5088,13 @@ export async function deleteScheduledTask(id: string): Promise<boolean> {
  */
 export async function getDueScheduledTasks(): Promise<ScheduledTask[]> {
   const now = new Date().toISOString();
-  const rows = await getDbClient().query<ScheduledTaskRow>(
-    `SELECT * FROM scheduled_tasks
-       WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?
-       ORDER BY nextRunAt ASC`,
-    [now],
-  );
+  const rows = await getStorage().repos.schedules.listDueScheduledTasks(now);
   return rows.map(rowToScheduledTask);
 }
 
 // ============================================================================
 // Swarm Config Operations (Centralized Environment/Config Management)
 // ============================================================================
-
-type SwarmConfigRow = {
-  id: string;
-  scope: string;
-  scopeId: string | null;
-  key: string;
-  value: string;
-  isSecret: number; // SQLite boolean
-  envPath: string | null;
-  description: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  encrypted: number; // SQLite boolean: 0 = plaintext, 1 = AES-256-GCM ciphertext
-  exportToEnv?: number; // SQLite boolean; absent only on pre-215 test schemas
-};
-
-type SwarmConfigLookupRow = {
-  id: string;
-  scope: string;
-  scopeId: string | null;
-  key: string;
-  isSecret: number;
-  encrypted: number;
-};
 
 const RESERVED_CONFIG_PLACEHOLDER = "[reserved key stored in swarm_config; delete this row]";
 
@@ -6617,11 +5158,7 @@ export function autoEncryptLegacyPlaintextSecrets(
   dbPath: string,
   options: { createBackup?: boolean } = {},
 ): void {
-  const rows = database
-    .prepare<{ id: string; key: string; value: string }, []>(
-      "SELECT id, key, value FROM swarm_config WHERE isSecret = 1 AND encrypted = 0",
-    )
-    .all();
+  const rows = listPlaintextSecretConfigs(database);
   if (rows.length === 0) return;
 
   const key = getEncryptionKey();
@@ -6629,7 +5166,13 @@ export function autoEncryptLegacyPlaintextSecrets(
   // Create plaintext backup if key was auto-generated (not user-provided)
   if (options.createBackup) {
     const { writeFileSync } = require("node:fs");
-    const backupPath = `${dbPath}.backup.secrets-${new Date().toISOString().split("T")[0]}.env`;
+    // The backup sits beside the encryption key, in the data directory (D2).
+    const { basename, join } = require("node:path");
+    const { swarmDataDir } = require("../utils/data-dir");
+    const backupPath = join(
+      swarmDataDir(dbPath),
+      `${basename(dbPath)}.backup.secrets-${new Date().toISOString().split("T")[0]}.env`,
+    );
     const backupLines = [
       "# PLAINTEXT SECRET BACKUP - CREATED DURING AUTO-ENCRYPTION MIGRATION",
       "# This file was created because you did not provide SECRETS_ENCRYPTION_KEY",
@@ -6655,15 +5198,10 @@ export function autoEncryptLegacyPlaintextSecrets(
 
   console.log(`[secrets] Encrypting ${rows.length} legacy plaintext secret(s)...`);
 
-  const txn = database.transaction((items: { id: string; value: string }[]) => {
-    const stmt = database.prepare<unknown, [string, string]>(
-      "UPDATE swarm_config SET value = ?, encrypted = 1 WHERE id = ?",
-    );
-    for (const r of items) {
-      stmt.run(encryptSecret(r.value, key), r.id);
-    }
-  });
-  txn(rows);
+  storeEncryptedSecretConfigs(
+    database,
+    rows.map((r) => ({ id: r.id, value: encryptSecret(r.value, key) })),
+  );
   console.log(`[secrets] Auto-migrated ${rows.length} secret(s) to encrypted storage.`);
 }
 
@@ -6682,26 +5220,7 @@ export async function getSwarmConfigs(filters?: {
   scopeId?: string;
   key?: string;
 }): Promise<SwarmConfig[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (filters?.scope) {
-    conditions.push("scope = ?");
-    params.push(filters.scope);
-  }
-  if (filters?.scopeId) {
-    conditions.push("scopeId = ?");
-    params.push(filters.scopeId);
-  }
-  if (filters?.key) {
-    conditions.push("key = ?");
-    params.push(filters.key);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM swarm_config ${whereClause} ORDER BY key ASC`;
-
-  const rows = await getDbClient().query<SwarmConfigRow>(query, params);
+  const rows = await getStorage().repos.config.listConfigs(filters ?? {});
   return rows.map(rowToSwarmConfig);
 }
 
@@ -6712,12 +5231,14 @@ export async function getSwarmConfigs(filters?: {
  * (`isApiProcessControlEnvKey`) and keys that cannot be env names stay out too.
  */
 export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
-  const rows = await getDbClient().query<SwarmConfigRow>(
-    `SELECT * FROM swarm_config
-       WHERE scope = 'global'
-         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${teamsSdkEnvKeysSql()})
-       ORDER BY key ASC`,
-  );
+  const rows = await getStorage().repos.config.listGlobalConfigsExcept([
+    "API_KEY",
+    "SECRETS_ENCRYPTION_KEY",
+    "CORS_ALLOW_ANY_ORIGIN",
+    "EXTENSION_ALLOW_LEAD_ACTIVATION",
+    "CHAT_SDK_API_URL_OVERRIDES",
+    ...TEAMS_SDK_ENV_KEYS,
+  ]);
   return rows
     .filter(
       (row) =>
@@ -6732,9 +5253,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
  * Get a single config entry by ID.
  */
 export async function getSwarmConfigById(id: string): Promise<SwarmConfig | null> {
-  const row = await getDbClient().get<SwarmConfigRow>("SELECT * FROM swarm_config WHERE id = ?", [
-    id,
-  ]);
+  const row = await getStorage().repos.config.findConfigById(id);
   return row ? rowToSwarmConfig(row) : null;
 }
 
@@ -6750,10 +5269,7 @@ export async function getSwarmConfigLookupById(id: string): Promise<{
   isSecret: boolean;
   encrypted: boolean;
 } | null> {
-  const row = await getDbClient().get<SwarmConfigLookupRow>(
-    "SELECT id, scope, scopeId, key, isSecret, encrypted FROM swarm_config WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.config.findConfigById(id);
   if (!row) return null;
   return {
     id: row.id,
@@ -6791,14 +5307,14 @@ export async function upsertSwarmConfig(data: {
 
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
-  const isSecret = data.isSecret ? 1 : 0;
+  const isSecret = data.isSecret === true;
   const envPath = data.envPath ?? null;
   const description = data.description ?? null;
 
   // Encrypt secret values at rest. Non-secret values are stored verbatim so
   // they remain queryable and diffable. rowToSwarmConfig reverses this on read.
   const storedValue = data.isSecret ? encryptSecret(data.value, getEncryptionKey()) : data.value;
-  const encryptedFlag: number = data.isSecret ? 1 : 0;
+  const encryptedFlag = data.isSecret === true;
 
   // Manual check for existing entry because SQLite's UNIQUE constraint
   // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
@@ -6808,54 +5324,36 @@ export async function upsertSwarmConfig(data: {
   // UNIQUE constraint cannot arbitrate a NULL scopeId), leaving a duplicate
   // pair where env injection reads the last row and every later save updates
   // the first one, i.e. a permanent silent no-op.
-  const row = await getDbClient().transaction(async () => {
-    const existing =
-      scopeId === null
-        ? await getDbClient().get<SwarmConfigRow>(
-            "SELECT * FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-            [data.scope, data.key],
-          )
-        : await getDbClient().get<SwarmConfigRow>(
-            "SELECT * FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-            [data.scope, scopeId, data.key],
-          );
+  const storage = getStorage();
+  const configs = storage.repos.config;
+  const row = await storage.transaction(async () => {
+    const existing = await configs.findConfigByScopeKey(data.scope, scopeId, data.key);
 
     // COALESCE keeps the stored flag when the caller did not send one.
     const written = existing
-      ? await getDbClient().get<SwarmConfigRow>(
-          `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?,
-             exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END
-           WHERE id = ? RETURNING *`,
-          [
-            storedValue,
-            isSecret,
-            envPath,
-            description,
-            encryptedFlag,
-            now,
-            restricted ? 1 : 0,
-            data.exportToEnv === undefined ? null : data.exportToEnv ? 1 : 0,
-            existing.id,
-          ],
-        )
-      : await getDbClient().get<SwarmConfigRow>(
-          `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-          [
-            crypto.randomUUID(),
-            data.scope,
-            scopeId,
-            data.key,
-            storedValue,
-            isSecret,
-            envPath,
-            description,
-            now,
-            now,
-            encryptedFlag,
-            restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0,
-          ],
-        );
+      ? await configs.updateConfigValue(existing.id, {
+          value: storedValue,
+          isSecret,
+          envPath,
+          description,
+          encrypted: encryptedFlag,
+          now,
+          forceNoExport: restricted,
+          exportToEnv: data.exportToEnv === undefined ? null : data.exportToEnv,
+        })
+      : await configs.insertConfig({
+          id: crypto.randomUUID(),
+          scope: data.scope,
+          scopeId,
+          key: data.key,
+          value: storedValue,
+          isSecret,
+          envPath,
+          description,
+          encrypted: encryptedFlag,
+          exportToEnv: restricted ? false : (data.exportToEnv ?? defaultExportToEnv(data.key)),
+          now,
+        });
     if (data.scope === "agent" && scopeId) {
       await clearAgentModelProfileOnOverrideChange(scopeId, data.key, existing, written);
     }
@@ -6873,7 +5371,7 @@ export async function upsertSwarmConfig(data: {
     registerSensitiveKeyName(config.key);
   }
 
-  getDbClient().afterCommit(() => publishWorkerConfigNudge(config.scope, config.scopeId));
+  storage.afterCommit(() => publishWorkerConfigNudge(config.scope, config.scopeId));
 
   return config;
 }
@@ -6899,14 +5397,11 @@ export async function emitBuiltInIntegrationConnectedOnce(
  * predate hardening must remain removable through remediation paths.
  */
 export async function deleteSwarmConfig(id: string): Promise<boolean> {
-  const row = await getDbClient().get<SwarmConfigRow>(
-    "DELETE FROM swarm_config WHERE id = ? RETURNING *",
-    [id],
-  );
+  const row = await getStorage().repos.config.deleteConfig(id);
   if (row?.scope === "agent" && row.scopeId) {
     await clearAgentModelProfileOnOverrideChange(row.scopeId, row.key, row, null);
   }
-  if (row) getDbClient().afterCommit(() => publishWorkerConfigNudge(row.scope, row.scopeId));
+  if (row) getStorage().afterCommit(() => publishWorkerConfigNudge(row.scope, row.scopeId));
   return row !== null;
 }
 
@@ -6925,16 +5420,11 @@ export async function deleteSwarmConfigByKey(
   key: string,
 ): Promise<boolean> {
   const resolvedScopeId = scope === "global" ? null : scopeId;
-  const existing =
-    resolvedScopeId === null
-      ? await getDbClient().get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-          [scope, key],
-        )
-      : await getDbClient().get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-          [scope, resolvedScopeId, key],
-        );
+  const existing = await getStorage().repos.config.findConfigByScopeKey(
+    scope,
+    resolvedScopeId,
+    key,
+  );
   if (!existing) return false;
   return await deleteSwarmConfig(existing.id);
 }
@@ -6981,19 +5471,6 @@ export async function getResolvedConfig(
 // Swarm Repos Functions (Centralized Repository Management)
 // ============================================================================
 
-type SwarmRepoRow = {
-  id: string;
-  url: string;
-  name: string;
-  clonePath: string;
-  defaultBranch: string;
-  autoClone: number; // SQLite boolean
-  hooks: string | null;
-  guidelines: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
-
 function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
   return {
     id: row.id,
@@ -7013,41 +5490,22 @@ export async function getSwarmRepos(filters?: {
   autoClone?: boolean;
   name?: string;
 }): Promise<SwarmRepo[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.autoClone !== undefined) {
-    conditions.push("autoClone = ?");
-    params.push(filters.autoClone ? 1 : 0);
-  }
-  if (filters?.name) {
-    conditions.push("name = ?");
-    params.push(filters.name);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM swarm_repos ${whereClause} ORDER BY name ASC`;
-
-  const rows = await getDbClient().query<SwarmRepoRow>(query, params);
+  const rows = await getStorage().repos.config.listRepos(filters ?? {});
   return rows.map(rowToSwarmRepo);
 }
 
 export async function getSwarmRepoById(id: string): Promise<SwarmRepo | null> {
-  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE id = ?", [id]);
+  const row = await getStorage().repos.config.findRepoById(id);
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function getSwarmRepoByName(name: string): Promise<SwarmRepo | null> {
-  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE name = ?", [
-    name,
-  ]);
+  const row = await getStorage().repos.config.findRepoByName(name);
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function getSwarmRepoByUrl(url: string): Promise<SwarmRepo | null> {
-  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE url = ?", [
-    url,
-  ]);
+  const row = await getStorage().repos.config.findRepoByUrl(url);
   return row ? rowToSwarmRepo(row) : null;
 }
 
@@ -7066,22 +5524,17 @@ export async function createSwarmRepo(data: {
   const hooksJson = JSON.stringify(data.hooks ?? { enabled: true });
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
-  const row = await getDbClient().get<SwarmRepoRow>(
-    `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, hooks, guidelines, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.url,
-      data.name,
-      clonePath,
-      data.defaultBranch ?? "main",
-      data.autoClone !== false ? 1 : 0,
-      hooksJson,
-      guidelinesJson,
-      now,
-      now,
-    ],
-  );
+  const row = await getStorage().repos.config.insertRepo({
+    id,
+    url: data.url,
+    name: data.name,
+    clonePath,
+    defaultBranch: data.defaultBranch ?? "main",
+    autoClone: data.autoClone !== false,
+    hooks: hooksJson,
+    guidelines: guidelinesJson,
+    now,
+  });
 
   if (!row) throw new Error("Failed to create repo");
   return rowToSwarmRepo(row);
@@ -7099,46 +5552,28 @@ export async function updateSwarmRepo(
     guidelines: RepoGuidelines | null;
   }>,
 ): Promise<SwarmRepo | null> {
-  const setClauses: string[] = [];
-  const params: (string | number | null)[] = [];
-
-  const stringFields = ["url", "name", "clonePath", "defaultBranch"] as const;
-  for (const field of stringFields) {
-    if (updates[field] !== undefined) {
-      setClauses.push(`${field} = ?`);
-      params.push(updates[field]);
-    }
-  }
-  if (updates.autoClone !== undefined) {
-    setClauses.push("autoClone = ?");
-    params.push(updates.autoClone ? 1 : 0);
-  }
+  const columns: SwarmRepoColumnUpdate = {};
+  if (updates.url !== undefined) columns.url = updates.url;
+  if (updates.name !== undefined) columns.name = updates.name;
+  if (updates.clonePath !== undefined) columns.clonePath = updates.clonePath;
+  if (updates.defaultBranch !== undefined) columns.defaultBranch = updates.defaultBranch;
+  if (updates.autoClone !== undefined) columns.autoClone = updates.autoClone;
   if (updates.hooks !== undefined) {
-    setClauses.push("hooks = ?");
-    params.push(updates.hooks ? JSON.stringify(updates.hooks) : null);
+    columns.hooks = updates.hooks ? JSON.stringify(updates.hooks) : null;
   }
   if (updates.guidelines !== undefined) {
-    setClauses.push("guidelines = ?");
-    params.push(updates.guidelines ? JSON.stringify(updates.guidelines) : null);
+    columns.guidelines = updates.guidelines ? JSON.stringify(updates.guidelines) : null;
   }
 
-  if (setClauses.length === 0) return await getSwarmRepoById(id);
+  if (Object.keys(columns).length === 0) return await getSwarmRepoById(id);
 
-  setClauses.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-
-  const row = await getDbClient().get<SwarmRepoRow>(
-    `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const row = await getStorage().repos.config.updateRepo(id, columns, new Date().toISOString());
 
   return row ? rowToSwarmRepo(row) : null;
 }
 
 export async function deleteSwarmRepo(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.config.deleteRepo(id)) > 0;
 }
 
 // ============================================================================
@@ -7156,27 +5591,17 @@ export interface AgentMailInboxMapping {
 export async function getAgentMailInboxMapping(
   inboxId: string,
 ): Promise<AgentMailInboxMapping | null> {
-  return (
-    (await getDbClient().get<AgentMailInboxMapping>(
-      "SELECT * FROM agentmail_inbox_mappings WHERE inboxId = ?",
-      [inboxId],
-    )) ?? null
-  );
+  return await getStorage().repos.messaging.findAgentMailInboxMapping(inboxId);
 }
 
 export async function getAgentMailInboxMappingsByAgent(
   agentId: string,
 ): Promise<AgentMailInboxMapping[]> {
-  return await getDbClient().query<AgentMailInboxMapping>(
-    "SELECT * FROM agentmail_inbox_mappings WHERE agentId = ? ORDER BY createdAt DESC",
-    [agentId],
-  );
+  return await getStorage().repos.messaging.listAgentMailInboxMappings(agentId);
 }
 
 export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapping[]> {
-  return await getDbClient().query<AgentMailInboxMapping>(
-    "SELECT * FROM agentmail_inbox_mappings ORDER BY createdAt DESC",
-  );
+  return await getStorage().repos.messaging.listAgentMailInboxMappings();
 }
 
 /**
@@ -7192,23 +5617,17 @@ export async function createAgentMailInboxMapping(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<AgentMailInboxMapping>(
-    `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(inboxId) DO UPDATE SET inboxEmail = excluded.inboxEmail
-         WHERE agentmail_inbox_mappings.agentId = excluded.agentId
-       RETURNING *`,
-    [id, inboxId, agentId, inboxEmail ?? null, now],
-  );
-
-  return row ?? null;
+  return await getStorage().repos.messaging.upsertAgentMailInboxMapping({
+    id,
+    inboxId,
+    agentId,
+    inboxEmail: inboxEmail ?? null,
+    createdAt: now,
+  });
 }
 
 export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM agentmail_inbox_mappings WHERE inboxId = ?", [
-    inboxId,
-  ]);
-  return result.changes > 0;
+  return (await getStorage().repos.messaging.deleteAgentMailInboxMapping(inboxId)) > 0;
 }
 
 /**
@@ -7218,13 +5637,7 @@ export async function deleteAgentMailInboxMapping(inboxId: string): Promise<bool
 export async function findTaskByAgentMailThread(
   agentmailThreadId: string,
 ): Promise<AgentTask | null> {
-  const row = await getDbClient().get<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE agentmailThreadId = ?
-       ORDER BY createdAt DESC
-       LIMIT 1`,
-    [agentmailThreadId],
-  );
+  const row = await getStorage().repos.tasks.findLatestTaskByAgentMailThread(agentmailThreadId);
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -7244,84 +5657,52 @@ export async function insertActiveSession(session: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<ActiveSession>(
-    `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, runtimeInstanceId, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      id,
-      session.agentId,
-      session.taskId ?? null,
-      session.triggerType,
-      session.inboxMessageId ?? null,
-      session.taskDescription ?? null,
-      session.runnerSessionId ?? null,
-      session.runtimeInstanceId ?? null,
-      now,
-      now,
-    ],
-  );
+  const row = (await getStorage().repos.agents.insertActiveSession({
+    id,
+    agentId: session.agentId,
+    taskId: session.taskId ?? null,
+    triggerType: session.triggerType,
+    inboxMessageId: session.inboxMessageId ?? null,
+    taskDescription: session.taskDescription ?? null,
+    runnerSessionId: session.runnerSessionId ?? null,
+    runtimeInstanceId: session.runtimeInstanceId ?? null,
+    now,
+  })) as ActiveSession | null;
 
   if (!row) throw new Error("Failed to insert active session");
   return row;
 }
 
 export async function deleteActiveSession(taskId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteActiveSessionByTask(taskId)) > 0;
 }
 
 export async function deleteActiveSessionById(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.agents.deleteActiveSessionById(id)) > 0;
 }
 
 export async function getActiveSessions(
   agentId?: string,
   readableBy?: { userId: string | null },
 ): Promise<ActiveSession[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-  if (agentId) {
-    conditions.push("agentId = ?");
-    params.push(agentId);
-  }
-  if (readableBy) {
-    const readable = readableSessionCondition(readableBy.userId, "active_sessions.taskId", {
-      nullable: true,
-    });
-    conditions.push(readable.sql);
-    params.push(...readable.params);
-  }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return await getDbClient().query<ActiveSession>(
-    `SELECT * FROM active_sessions ${where} ORDER BY startedAt DESC`,
-    params,
-  );
+  return (await getStorage().repos.agents.listActiveSessions(
+    agentId,
+    readableBy,
+  )) as ActiveSession[];
 }
 
 export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = await getDbClient().run(
-    "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?",
-    [now, taskId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.heartbeatActiveSession(taskId, now)) > 0;
 }
 
 export async function cleanupStaleSessions(maxAgeMinutes = 30): Promise<number> {
   const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE lastHeartbeatAt < ?", [
-    cutoff,
-  ]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteActiveSessionsBefore(cutoff);
 }
 
 export async function cleanupAgentSessions(agentId: string): Promise<number> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE agentId = ?", [
-    agentId,
-  ]);
-  return result.changes;
+  return await getStorage().repos.agents.deleteActiveSessionsByAgent(agentId);
 }
 
 /** Update providerSessionId on an active session identified by taskId */
@@ -7329,11 +5710,10 @@ export async function updateActiveSessionProviderSessionId(
   taskId: string,
   providerSessionId: string,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?",
-    [providerSessionId, taskId],
+  return (
+    (await getStorage().repos.agents.setActiveSessionProviderSessionId(taskId, providerSessionId)) >
+    0
   );
-  return result.changes > 0;
 }
 
 /**
@@ -7341,12 +5721,7 @@ export async function updateActiveSessionProviderSessionId(
  * Used by the heartbeat to cross-reference stalled tasks with worker sessions.
  */
 export async function getActiveSessionForTask(taskId: string): Promise<ActiveSession | null> {
-  return (
-    (await getDbClient().get<ActiveSession>(
-      "SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1",
-      [taskId],
-    )) ?? null
-  );
+  return (await getStorage().repos.agents.findActiveSessionByTask(taskId)) as ActiveSession | null;
 }
 
 /**
@@ -7359,11 +5734,7 @@ export async function reassociateSessionLogs(
   runnerSessionId: string,
   realTaskId: string,
 ): Promise<number> {
-  const result = await getDbClient().run(
-    "UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?",
-    [realTaskId, runnerSessionId, realTaskId],
-  );
-  return result.changes;
+  return getStorage().repos.sessions.reassignLogsToTask(runnerSessionId, realTaskId);
 }
 
 // ============================================================================
@@ -7378,13 +5749,8 @@ export async function getStalledInProgressTasks(
   thresholdMinutes: number = 30,
 ): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'in_progress' AND lastUpdatedAt < ?
-       ORDER BY lastUpdatedAt ASC`,
-    [cutoff],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listStalledInProgressTasks(cutoff);
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -7421,18 +5787,8 @@ export async function getStalledInProgressTasks(
  */
 export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'pending'
-         AND (
-           (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
-           OR tags LIKE '%"reboot-retry-pin"%'
-         )
-         AND createdAt < ?
-       ORDER BY createdAt ASC`,
-    [cutoff],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listStalePinnedResumes(cutoff);
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -7454,12 +5810,13 @@ export async function failPendingResumeIfUnclaimed(
 ): Promise<AgentTask | null> {
   const now = new Date().toISOString();
   const scrubbedReason = scrubSecrets(failureReason);
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, statusKind = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status = 'pending' RETURNING *`,
+  const row = await getStorage().repos.tasks.failPendingTask(taskId, {
+    status,
     // The resume budget ran out (failed) or the reaper escalated the pin (cancelled).
-    [status, status === "failed" ? "error" : "system", scrubbedReason, now, now, taskId],
-  );
+    statusKind: status === "failed" ? "error" : "system",
+    failureReason: scrubbedReason,
+    now,
+  });
 
   if (row) {
     try {
@@ -7482,10 +5839,7 @@ export async function failPendingResumeIfUnclaimed(
  * Used by the heartbeat for auto-assignment of pool tasks.
  */
 export async function getIdleWorkersWithCapacity(): Promise<Agent[]> {
-  const rows = await getDbClient().query<AgentRow>(
-    `SELECT * FROM agents
-       WHERE status = 'idle' AND isLead = 0`,
-  );
+  const rows = await getStorage().repos.agents.listIdleWorkers();
   const agents = rows.map((row) => rowToAgent(row));
 
   const withCapacity = await Promise.all(
@@ -7509,14 +5863,8 @@ export async function getUnassignedPoolTasks(
   limit: number = 10,
   offset: number = 0,
 ): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'unassigned'
-       ORDER BY priority DESC, createdAt ASC, rowid ASC
-       LIMIT ? OFFSET ?`,
-    [limit, offset],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listUnassignedTasks(limit, offset);
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 /**
@@ -7526,51 +5874,35 @@ export async function getUnassignedPoolTasks(
  * `isAgentEligibleForTask` before escalating; this only narrows by tag age.
  */
 export async function getStaleUnassignedAffinityTasks(cutoffIso: string): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'unassigned' AND routingAffinity IS NOT NULL AND createdAt < ?
-       ORDER BY createdAt ASC`,
-    [cutoffIso],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listStaleUnassignedAffinityTasks(cutoffIso);
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 export async function getRecentFailedTasks(hours: number = 6): Promise<AgentTask[]> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
-       WHERE status = 'failed'
-         AND finishedAt > ?
-       ORDER BY finishedAt DESC
-       LIMIT 20`,
-    [since],
-  );
-  return rows.map(rowToAgentTask);
+  const rows = await getStorage().repos.tasks.listRecentFailedTasks(since, 20);
+  return rows.map((row) => rowToAgentTask(row));
 }
 
 export async function getRecentCompletedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) as count FROM agent_tasks
-       WHERE status = 'completed' AND finishedAt > ?`,
-    [since],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.tasks.countTasksFinishedSince("completed", since);
 }
 
 export async function getRecentFailedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) as count FROM agent_tasks
-       WHERE status = 'failed' AND finishedAt > ?`,
-    [since],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.tasks.countTasksFinishedSince("failed", since);
 }
 
 // ============================================================================
 // Workflow CRUD
 // ============================================================================
+
+type WorkflowsRepo = ReturnType<typeof getStorage>["repos"]["workflows"];
+type WorkflowColumnUpdate = Parameters<WorkflowsRepo["updateWorkflowColumns"]>[1];
+type WorkflowRunColumnUpdate = Parameters<WorkflowsRepo["updateRunColumns"]>[1];
+type WorkflowRunStepColumnUpdate = Parameters<WorkflowsRepo["updateStepColumns"]>[1];
+type WorkflowVersionRow = NonNullable<Awaited<ReturnType<WorkflowsRepo["getVersion"]>>>;
 
 export async function createWorkflow(
   data: {
@@ -7595,36 +5927,30 @@ export async function createWorkflow(
   source?: "api" | "mcp",
 ): Promise<Workflow> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<WorkflowRow>(
-    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, updatedByAgentId, created_by, updated_by, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
-      data.name,
-      data.description ?? null,
-      JSON.stringify(data.definition),
-      JSON.stringify(data.triggers ?? []),
-      data.cooldown ? JSON.stringify(data.cooldown) : null,
-      data.input ? JSON.stringify(data.input) : null,
-      data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
-      JSON.stringify(data.params ?? {}),
-      JSON.stringify(data.requiredParams ?? []),
-      JSON.stringify(data.requires ?? []),
-      data.dir ?? null,
-      data.vcsRepo ?? null,
-      data.createdByAgentId ?? null,
-      data.createdByAgentId ?? null,
-      data.createdBy ?? null,
-      data.createdBy ?? null,
-      data.enabled === false ? 0 : 1,
-    ],
-  );
+  const row = await getStorage().repos.workflows.insertWorkflow({
+    id,
+    key: normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
+    name: data.name,
+    description: data.description ?? null,
+    definition: JSON.stringify(data.definition),
+    triggers: JSON.stringify(data.triggers ?? []),
+    cooldown: data.cooldown ? JSON.stringify(data.cooldown) : null,
+    input: data.input ? JSON.stringify(data.input) : null,
+    triggerSchema: data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+    params: JSON.stringify(data.params ?? {}),
+    requiredParams: JSON.stringify(data.requiredParams ?? []),
+    requires: JSON.stringify(data.requires ?? []),
+    dir: data.dir ?? null,
+    vcsRepo: data.vcsRepo ?? null,
+    createdByAgentId: data.createdByAgentId ?? null,
+    createdBy: data.createdBy ?? null,
+    enabled: data.enabled !== false,
+  });
   if (!row) throw new Error("Failed to create workflow");
   const workflow = rowToWorkflow(row);
   // afterCommit: a caller's transaction that rolls back must not report the workflow.
   const requestUserId = getCurrentRequestUserId();
-  getDbClient().afterCommit(() =>
+  getStorage().afterCommit(() =>
     telemetry.workflow(
       "created",
       {
@@ -7639,7 +5965,7 @@ export async function createWorkflow(
 }
 
 export async function getWorkflow(id: string): Promise<Workflow | null> {
-  const row = await getDbClient().get<WorkflowRow>("SELECT * FROM workflows WHERE id = ?", [id]);
+  const row = await getStorage().repos.workflows.findWorkflowById(id);
   return row ? rowToWorkflow(row) : null;
 }
 
@@ -7696,51 +6022,16 @@ export async function listWorkflows(
   filters?: WorkflowFilters,
   opts?: { slim?: boolean },
 ): Promise<Workflow[] | WorkflowSummary[]> {
-  let query = "SELECT * FROM workflows WHERE 1=1";
-  const params: (string | number)[] = [];
-  if (filters?.enabled !== undefined) {
-    query += " AND enabled = ?";
-    params.push(filters.enabled ? 1 : 0);
-  }
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  if (filters?.lastRunStatus !== undefined) {
-    query +=
-      " AND (SELECT status FROM workflow_runs WHERE workflowId = workflows.id ORDER BY startedAt DESC LIMIT 1) = ?";
-    params.push(filters.lastRunStatus);
-  }
-  if (filters?.consecutiveErrorsMin !== undefined) {
-    query += ` AND (
-      SELECT COUNT(*)
-      FROM workflow_runs wr
-      WHERE wr.workflowId = workflows.id
-        AND wr.status = 'failed'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM workflow_runs newer_non_failed
-          WHERE newer_non_failed.workflowId = wr.workflowId
-            AND newer_non_failed.status != 'failed'
-            AND newer_non_failed.startedAt > wr.startedAt
-        )
-    ) >= ?`;
-    params.push(filters.consecutiveErrorsMin);
-  }
-  if (filters?.q) {
-    const pattern = `%${literalPrefixPattern(filters.q)}`;
-    query += ` AND (name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR "key" LIKE ? ESCAPE '\\')`;
-    params.push(pattern, pattern, pattern);
-  }
-  query += " ORDER BY lastUpdatedAt DESC";
-  if (filters?.limit !== undefined) {
-    query += " LIMIT ?";
-    params.push(filters.limit);
-  }
-  const rows = await getDbClient().query<WorkflowRow>(query, params);
+  const rows = await getStorage().repos.workflows.listWorkflows({
+    enabled: filters?.enabled,
+    key: filters?.key ? normalizeAssetKey(filters.key) : undefined,
+    keyPattern:
+      !filters?.key && filters?.keyPrefix ? assetKeyPrefixPattern(filters.keyPrefix) : undefined,
+    lastRunStatus: filters?.lastRunStatus,
+    consecutiveErrorsMin: filters?.consecutiveErrorsMin,
+    textPattern: filters?.q ? `%${literalPrefixPattern(filters.q)}` : undefined,
+    limit: filters?.limit,
+  });
   return opts?.slim ? rows.map(rowToWorkflowSummary) : rows.map(rowToWorkflow);
 }
 
@@ -7769,79 +6060,34 @@ export async function updateWorkflow(
     updatedByAgentId?: string | null;
   },
 ): Promise<Workflow | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
-  if (data.key !== undefined) {
-    updates.push('"key" = ?');
-    params.push(normalizeAssetKey(data.key));
-  }
-  if (data.name !== undefined) {
-    updates.push("name = ?");
-    params.push(data.name);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description);
-  }
-  if (data.enabled !== undefined) {
-    updates.push("enabled = ?");
-    params.push(data.enabled ? 1 : 0);
-  }
-  if (data.definition !== undefined) {
-    updates.push("definition = ?");
-    params.push(JSON.stringify(data.definition));
-  }
-  if (data.triggers !== undefined) {
-    updates.push("triggers = ?");
-    params.push(JSON.stringify(data.triggers));
-  }
+  const update: WorkflowColumnUpdate = {};
+  if (data.key !== undefined) update.key = normalizeAssetKey(data.key);
+  if (data.name !== undefined) update.name = data.name;
+  if (data.description !== undefined) update.description = data.description;
+  if (data.enabled !== undefined) update.enabled = data.enabled;
+  if (data.definition !== undefined) update.definition = JSON.stringify(data.definition);
+  if (data.triggers !== undefined) update.triggers = JSON.stringify(data.triggers);
   if (data.cooldown !== undefined) {
-    updates.push("cooldown = ?");
-    params.push(data.cooldown ? JSON.stringify(data.cooldown) : null);
+    update.cooldown = data.cooldown ? JSON.stringify(data.cooldown) : null;
   }
-  if (data.input !== undefined) {
-    updates.push("input = ?");
-    params.push(data.input ? JSON.stringify(data.input) : null);
-  }
+  if (data.input !== undefined) update.input = data.input ? JSON.stringify(data.input) : null;
   if (data.triggerSchema !== undefined) {
-    updates.push("triggerSchema = ?");
-    params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
+    update.triggerSchema = data.triggerSchema ? JSON.stringify(data.triggerSchema) : null;
   }
-  if (data.params !== undefined) {
-    updates.push("params = ?");
-    params.push(JSON.stringify(data.params));
-  }
+  if (data.params !== undefined) update.params = JSON.stringify(data.params);
   if (data.requiredParams !== undefined) {
-    updates.push("requiredParams = ?");
-    params.push(JSON.stringify(data.requiredParams));
+    update.requiredParams = JSON.stringify(data.requiredParams);
   }
-  if (data.requires !== undefined) {
-    updates.push("requires = ?");
-    params.push(JSON.stringify(data.requires));
-  }
-  if (data.dir !== undefined) {
-    updates.push("dir = ?");
-    params.push(data.dir ?? null);
-  }
-  if (data.vcsRepo !== undefined) {
-    updates.push("vcs_repo = ?");
-    params.push(data.vcsRepo ?? null);
-  }
-  if (data.updatedBy !== undefined) {
-    updates.push("updated_by = ?");
-    params.push(data.updatedBy);
-  }
-  if (data.updatedByAgentId !== undefined) {
-    updates.push("updatedByAgentId = ?");
-    params.push(data.updatedByAgentId);
-  }
-  if (updates.length === 0) return await getWorkflow(id);
-  updates.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const row = await getDbClient().get<WorkflowRow>(
-    `UPDATE workflows SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  if (data.requires !== undefined) update.requires = JSON.stringify(data.requires);
+  if (data.dir !== undefined) update.dir = data.dir ?? null;
+  if (data.vcsRepo !== undefined) update.vcsRepo = data.vcsRepo ?? null;
+  if (data.updatedBy !== undefined) update.updatedBy = data.updatedBy;
+  if (data.updatedByAgentId !== undefined) update.updatedByAgentId = data.updatedByAgentId;
+  if (Object.keys(update).length === 0) return await getWorkflow(id);
+  const row = await getStorage().repos.workflows.updateWorkflowColumns(
+    id,
+    update,
+    new Date().toISOString(),
   );
   return row ? rowToWorkflow(row) : null;
 }
@@ -7849,49 +6095,34 @@ export async function updateWorkflow(
 export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promise<boolean> {
   // One transaction: the stored human-free flags must never lag the deleted runs
   // (a scheduled workflow root is human-free only while its run row exists).
-  return await getDbClient().transaction(() => deleteWorkflowRows(id, source));
+  return await getStorage().transaction(() => deleteWorkflowRows(id, source));
 }
 
 async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<boolean> {
-  const client = getDbClient();
-  const linkedTaskIds = (
-    await client.query<{ id: string }>(
-      `SELECT id FROM agent_tasks WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
-      [id],
-    )
-  ).map((row) => row.id);
+  const tasks = getStorage().repos.tasks;
+  const linkedTaskIds = await tasks.listTaskIdsOfWorkflow(id);
   // Cascade delete in FK-safe order:
   // 1. Unlink agent_tasks (they reference steps and runs)
-  await client.run(
-    `UPDATE agent_tasks SET workflowRunId = NULL, workflowRunStepId = NULL WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
-    [id],
-  );
+  await tasks.unlinkTasksFromWorkflow(id);
   // 2. Fail the parent steps of child runs about to go, then delete steps
   await wakeParentsOfDeletedRuns(id);
-  await client.run(
-    `DELETE FROM workflow_run_steps WHERE runId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
-    [id],
-  );
+  const workflows = getStorage().repos.workflows;
+  await workflows.deleteStepsOfWorkflow(id);
   // 3. Delete runs (they reference workflow)
-  const definitionHashes = await client.query<{ definitionHash: string }>(
-    `SELECT DISTINCT definitionHash FROM workflow_runs
-      WHERE workflowId = ? AND definitionHash IS NOT NULL`,
-    [id],
-  );
-  await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
-  await deleteOrphanedRunDefinitions(definitionHashes.map((row) => row.definitionHash));
+  const definitionHashes = await workflows.listRunDefinitionHashesOfWorkflow(id);
+  await workflows.deleteRunsOfWorkflow(id);
+  await deleteOrphanedRunDefinitions(definitionHashes);
   await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete every user's favorite of it (no FK to the workflow)
-  await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
+  await getStorage().repos.users.deleteFavoritesOfItem("workflow", id);
   // 5. Keep Idempotency-Keys that created or triggered it taken, without the stored response
   await tombstoneWorkflowIdempotencyKeys(id);
   // 6. Delete workflow
-  const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
-  const deleted = result.changes > 0;
+  const deleted = (await workflows.deleteWorkflow(id)) > 0;
   if (deleted) {
     // afterCommit: a caller's transaction that rolls back must not report the delete.
     const requestUserId = getCurrentRequestUserId();
-    getDbClient().afterCommit(() =>
+    getStorage().afterCommit(() =>
       telemetry.workflow(
         "deleted",
         { workflowId: id, ...(source ? { via: source } : {}) },
@@ -7907,13 +6138,7 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
  * Uses SQLite JSON functions to query into the triggers JSON array.
  */
 export async function getWorkflowsByScheduleId(scheduleId: string): Promise<Workflow[]> {
-  const rows = await getDbClient().query<WorkflowRow>(
-    `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
-       WHERE w.enabled = 1
-         AND json_extract(t.value, '$.type') = 'schedule'
-         AND json_extract(t.value, '$.scheduleId') = ?`,
-    [scheduleId],
-  );
+  const rows = await getStorage().repos.workflows.listEnabledByScheduleId(scheduleId);
   return rows.map(rowToWorkflow);
 }
 
@@ -7934,31 +6159,32 @@ export async function createWorkflowRun(data: {
   triggeredByAgentId?: string;
   /** The `workflow_run_definitions` row the run is pinned to (migration 283). */
   definitionHash?: string;
+  /** JSON `WorkflowRunPrincipal` decided from the pinned definition (migration 367). */
+  principal?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId, parentStepAttempt, triggeredByAgentId, definitionHash, sourceStepId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      data.id,
-      data.workflowId,
-      data.triggerType ?? "manual",
-      now,
-      data.triggerData ? scrubJsonValue(data.triggerData) : null,
-      data.createdBy ?? null,
-      data.parentStepId ?? null,
-      data.parentStepAttempt ?? 0,
-      data.triggeredByAgentId ?? null,
-      data.definitionHash ?? null,
-      // The script step whose run token started this run (trigger-workflow is
-      // a manual or api trigger). A sub-workflow child is linked by
-      // parentStepId instead, and an event or schedule run is never the
-      // script's, even when it starts inside that script's request.
+  const row = await getStorage().repos.workflows.insertRun({
+    id: data.id,
+    workflowId: data.workflowId,
+    triggerType: data.triggerType ?? "manual",
+    startedAt: now,
+    triggerData: data.triggerData ? scrubJsonValue(data.triggerData) : null,
+    createdBy: data.createdBy ?? null,
+    parentStepId: data.parentStepId ?? null,
+    parentStepAttempt: data.parentStepAttempt ?? 0,
+    triggeredByAgentId: data.triggeredByAgentId ?? null,
+    definitionHash: data.definitionHash ?? null,
+    // The script step whose run token started this run (trigger-workflow is
+    // a manual or api trigger). A sub-workflow child is linked by
+    // parentStepId instead, and an event or schedule run is never the
+    // script's, even when it starts inside that script's request.
+    sourceStepId:
       data.parentStepId ||
       (data.triggerType !== "api" && (data.triggerType ?? "manual") !== "manual")
         ? null
         : (getCurrentRunProvenance()?.sourceStepId ?? null),
-    ],
-  );
+    principal: data.principal ?? null,
+  });
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }
@@ -7967,9 +6193,7 @@ export async function getWorkflowRun(
   id: string,
   view: WorkflowPayloadView = "replay",
 ): Promise<WorkflowRun | null> {
-  const row = await getDbClient().get<WorkflowRunRow>("SELECT * FROM workflow_runs WHERE id = ?", [
-    id,
-  ]);
+  const row = await getStorage().repos.workflows.findRunById(id);
   return row ? rowToWorkflowRun(row, view) : null;
 }
 
@@ -7983,7 +6207,7 @@ function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   // async hook is passed directly (no detached void-IIFE) so a rejected read
   // (e.g. DB closed mid-shutdown) is contained by the scheduler instead of
   // crashing the process as an unhandled rejection.
-  getDbClient().afterCommit(async () => {
+  getStorage().afterCommit(async () => {
     const latest = await getWorkflowRun(run.id);
     if (!latest || latest.status !== status) return;
     const steps = await getWorkflowRunStepsByRunId(run.id);
@@ -8005,53 +6229,34 @@ export async function updateWorkflowRun(
     finishedAt?: string;
   },
 ): Promise<WorkflowRun | null> {
-  const updates: string[] = [];
-  const params: (string | null)[] = [];
-  if (data.status !== undefined) {
-    updates.push("status = ?");
-    params.push(data.status);
-  }
+  const workflows = getStorage().repos.workflows;
+  const columns: WorkflowRunColumnUpdate = {};
+  if (data.status !== undefined) columns.status = data.status;
   if (data.context !== undefined) {
     // Resume/retry/recovery rebuild the live ctx (resolved `secret.*` inputs
     // included, which are never re-resolved) from the sealed exact copy; the
     // scrubbed column serves display and SQL filters.
-    updates.push("context = ?", "context_replay = ?");
-    params.push(scrubJsonValue(data.context), sealJson(data.context));
+    columns.context = scrubJsonValue(data.context);
+    columns.context_replay = sealJson(data.context);
   }
   if (data.error !== undefined) {
-    updates.push("error = ?");
-    params.push(data.error === null ? null : scrubSecrets(data.error));
+    columns.error = data.error === null ? null : scrubSecrets(data.error);
   }
-  if (data.finishedAt !== undefined) {
-    updates.push("finishedAt = ?");
-    params.push(data.finishedAt);
-  }
-  if (updates.length === 0) {
-    const row = await getDbClient().get<WorkflowRunRow>(
-      "SELECT * FROM workflow_runs WHERE id = ?",
-      [id],
-    );
+  if (data.finishedAt !== undefined) columns.finishedAt = data.finishedAt;
+  if (Object.keys(columns).length === 0) {
+    const row = await workflows.findRunById(id);
     return row ? rowToWorkflowRun(row) : null;
   }
-  updates.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const update = () =>
-    getDbClient().get<WorkflowRunRow>(
-      `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-      params,
-    );
+  const now = new Date().toISOString();
+  const update = () => workflows.updateRunColumns(id, columns, now);
   const endsRun = data.status !== undefined && isTerminalWorkflowRunStatus(data.status);
   // A run that ends reads the status it replaces in the same transaction, so
   // only a change out of a live status announces the end: a later terminal
   // write, same status or not, does not announce it again.
   const [previousStatus, row] = endsRun
-    ? await getDbClient().transaction(async () => {
-        const previous = await getDbClient().get<{ status: WorkflowRunStatus }>(
-          "SELECT status FROM workflow_runs WHERE id = ?",
-          [id],
-        );
-        return [previous?.status, await update()] as const;
+    ? await getStorage().transaction(async () => {
+        const previous = (await workflows.getRunStatus(id)) as WorkflowRunStatus | null;
+        return [previous ?? undefined, await update()] as const;
       })
     : [undefined, await update()];
   if (!row) return null;
@@ -8092,29 +6297,12 @@ export async function listWorkflowRuns(
   workflowId: string,
   options: WorkflowRunListOptions = {},
 ): Promise<WorkflowRun[]> {
-  const conditions = ["workflowId = ?"];
-  const params: Array<string | number> = [workflowId];
-  if (options.status) {
-    conditions.push("status = ?");
-    params.push(options.status);
-  }
-
-  let pagination = "";
-  if (options.limit !== undefined) {
-    pagination = " LIMIT ? OFFSET ?";
-    params.push(options.limit, options.offset ?? 0);
-  } else if (options.offset !== undefined) {
-    pagination = " LIMIT -1 OFFSET ?";
-    params.push(options.offset);
-  }
-
-  const columns = options.includeContext ? "*" : WORKFLOW_RUN_SUMMARY_COLUMNS;
-  const rows = await getDbClient().query<WorkflowRunRow>(
-    `SELECT ${columns} FROM workflow_runs
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY startedAt DESC, id DESC${pagination}`,
-    params,
-  );
+  const rows = await getStorage().repos.workflows.listRuns(workflowId, {
+    status: options.status,
+    limit: options.limit,
+    offset: options.offset,
+    includeContext: options.includeContext === true,
+  });
   // List rows are display-only (runs API, list-workflow-runs tool).
   return rows.map((row) => rowToWorkflowRun(row, "display"));
 }
@@ -8123,17 +6311,7 @@ export async function countWorkflowRuns(
   workflowId: string,
   options: Pick<WorkflowRunListOptions, "status"> = {},
 ): Promise<number> {
-  const conditions = ["workflowId = ?"];
-  const params: string[] = [workflowId];
-  if (options.status) {
-    conditions.push("status = ?");
-    params.push(options.status);
-  }
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM workflow_runs WHERE ${conditions.join(" AND ")}`,
-    params,
-  );
-  return row?.count ?? 0;
+  return getStorage().repos.workflows.countRuns(workflowId, options.status || undefined);
 }
 
 export async function listWorkflowRunsPage(
@@ -8170,28 +6348,21 @@ export async function createWorkflowRunStep(data: {
   idempotencyKey?: string;
 }): Promise<WorkflowRunStep> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input, idempotencyKey)
-       VALUES (?, ?, ?, ?, 'running', ?, ?, ?) RETURNING *`,
-    [
-      data.id,
-      data.runId,
-      data.nodeId,
-      data.nodeType,
-      now,
-      data.input ? scrubJsonValue(data.input) : null,
-      data.idempotencyKey ?? null,
-    ],
-  );
+  const row = await getStorage().repos.workflows.insertRunningStep({
+    id: data.id,
+    runId: data.runId,
+    nodeId: data.nodeId,
+    nodeType: data.nodeType,
+    startedAt: now,
+    input: data.input ? scrubJsonValue(data.input) : null,
+    idempotencyKey: data.idempotencyKey ?? null,
+  });
   if (!row) throw new Error("Failed to create workflow run step");
   return rowToWorkflowRunStep(row);
 }
 
 export async function getWorkflowRunStep(id: string): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.workflows.findStepById(id);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -8210,62 +6381,29 @@ export async function updateWorkflowRunStep(
     nextPort?: string;
   },
 ): Promise<WorkflowRunStep | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
-  if (data.status !== undefined) {
-    updates.push("status = ?");
-    params.push(data.status);
-  }
+  const workflows = getStorage().repos.workflows;
+  const columns: WorkflowRunStepColumnUpdate = {};
+  if (data.status !== undefined) columns.status = data.status;
   if (data.output !== undefined) {
     // Scrubbed for display; dedup, convergence and recovery replay the sealed
     // exact copy into downstream nodes.
-    updates.push("output = ?", "output_replay = ?");
-    params.push(scrubJsonValue(data.output), sealJson(data.output));
+    columns.output = scrubJsonValue(data.output);
+    columns.output_replay = sealJson(data.output);
   }
   if (data.error !== undefined) {
-    updates.push("error = ?");
-    params.push(data.error === null ? null : scrubSecrets(data.error));
+    columns.error = data.error === null ? null : scrubSecrets(data.error);
   }
-  if (data.finishedAt !== undefined) {
-    updates.push("finishedAt = ?");
-    params.push(data.finishedAt);
-  }
-  if (data.retryCount !== undefined) {
-    updates.push("retryCount = ?");
-    params.push(data.retryCount);
-  }
-  if (data.maxRetries !== undefined) {
-    updates.push("maxRetries = ?");
-    params.push(data.maxRetries);
-  }
-  if (data.nextRetryAt !== undefined) {
-    updates.push("nextRetryAt = ?");
-    params.push(data.nextRetryAt);
-  }
-  if (data.idempotencyKey !== undefined) {
-    updates.push("idempotencyKey = ?");
-    params.push(data.idempotencyKey);
-  }
-  if (data.diagnostics !== undefined) {
-    updates.push("diagnostics = ?");
-    params.push(scrubSecrets(data.diagnostics));
-  }
-  if (data.nextPort !== undefined) {
-    updates.push("nextPort = ?");
-    params.push(data.nextPort);
-  }
-  if (updates.length === 0) {
-    const row = await getDbClient().get<WorkflowRunStepRow>(
-      "SELECT * FROM workflow_run_steps WHERE id = ?",
-      [id],
-    );
-    return row ? rowToWorkflowRunStep(row) : null;
-  }
-  params.push(id);
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  if (data.finishedAt !== undefined) columns.finishedAt = data.finishedAt;
+  if (data.retryCount !== undefined) columns.retryCount = data.retryCount;
+  if (data.maxRetries !== undefined) columns.maxRetries = data.maxRetries;
+  if (data.nextRetryAt !== undefined) columns.nextRetryAt = data.nextRetryAt;
+  if (data.idempotencyKey !== undefined) columns.idempotencyKey = data.idempotencyKey;
+  if (data.diagnostics !== undefined) columns.diagnostics = scrubSecrets(data.diagnostics);
+  if (data.nextPort !== undefined) columns.nextPort = data.nextPort;
+  const row =
+    Object.keys(columns).length === 0
+      ? await workflows.findStepById(id)
+      : await workflows.updateStepColumns(id, columns);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -8273,10 +6411,7 @@ export async function getWorkflowRunStepsByRunId(
   runId: string,
   view: WorkflowPayloadView = "replay",
 ): Promise<WorkflowRunStep[]> {
-  const rows = await getDbClient().query<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC, rowid ASC",
-    [runId],
-  );
+  const rows = await getStorage().repos.workflows.listSteps(runId);
   return rows.map((row) => rowToWorkflowRunStep(row, view));
 }
 
@@ -8293,111 +6428,54 @@ export interface StuckWorkflowRun {
 }
 
 export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
-  // CROSS JOIN fixes the join order: the few waiting steps drive, and each
-  // one seeks its task through idx_agent_tasks_workflowRunStepId, so `output`
-  // is read only for matched tasks. Driving from agent_tasks by status reads
-  // nearly every finished task.
-  return getDbClient().query<StuckWorkflowRun>(
-    `SELECT
-        wr.id as runId,
-        wrs.id as stepId,
-        wrs.nodeId,
-        at.id as taskId,
-        at.status as taskStatus,
-        at.output as taskOutput,
-        wr.workflowId
-      FROM workflow_run_steps wrs
-      CROSS JOIN workflow_runs wr ON wr.id = wrs.runId
-      CROSS JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
-      WHERE wrs.status = 'waiting'
-        AND wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled', 'skipped')
-      ORDER BY at.createdAt ASC, at.rowid ASC`,
-  );
+  return getStorage().repos.workflows.listStuckRuns();
 }
 
 // --- New Workflow Query Functions ---
 
 export async function getLastSuccessfulRun(workflowId: string): Promise<WorkflowRun | null> {
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `SELECT * FROM workflow_runs
-       WHERE workflowId = ? AND status = 'completed'
-       ORDER BY finishedAt DESC LIMIT 1`,
-    [workflowId],
-  );
+  const row = await getStorage().repos.workflows.lastSuccessfulRun(workflowId);
   return row ? rowToWorkflowRun(row) : null;
 }
 
 export async function getLastRunStart(workflowId: string): Promise<WorkflowRun | null> {
-  const row = await getDbClient().get<WorkflowRunRow>(
-    `SELECT * FROM workflow_runs
-       WHERE workflowId = ? AND status NOT IN ('skipped')
-       ORDER BY startedAt DESC LIMIT 1`,
-    [workflowId],
-  );
+  const row = await getStorage().repos.workflows.lastRunStart(workflowId);
   return row ? rowToWorkflowRun(row) : null;
 }
 
 export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
   const now = new Date().toISOString();
-  const rows = await getDbClient().query<WorkflowRunStepRow>(
-    `SELECT s.* FROM workflow_run_steps s
-       JOIN workflow_runs r ON r.id = s.runId
-       WHERE s.status = 'failed'
-         AND s.nextRetryAt IS NOT NULL
-         AND s.nextRetryAt <= ?
-         AND r.status IN ('running', 'waiting', 'failed')
-       ORDER BY s.nextRetryAt ASC`,
-    [now],
-  );
+  const rows = await getStorage().repos.workflows.listDueRetrySteps(now);
   return rows.map((row) => rowToWorkflowRunStep(row));
 }
 
 export async function getCompletedStepNodeIds(runId: string): Promise<string[]> {
-  const rows = await getDbClient().query<{ nodeId: string }>(
-    `SELECT nodeId FROM workflow_run_steps
-       WHERE runId = ? AND status = 'completed'`,
-    [runId],
-  );
-  return rows.map((r) => r.nodeId);
+  return getStorage().repos.workflows.listCompletedStepNodeIds(runId);
 }
 
 export async function getTaskByWorkflowRunStepId(stepId: string): Promise<AgentTask | null> {
-  const row = await getDbClient().get<AgentTaskRow>(
-    "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
-    [stepId],
-  );
+  const row = await getStorage().repos.tasks.findTaskByWorkflowRunStepId(stepId);
   return row ? rowToAgentTask(row) : null;
 }
 
 export async function detachTaskFromWorkflowRunStep(taskId: string): Promise<void> {
-  await getDbClient().run("UPDATE agent_tasks SET workflowRunStepId = NULL WHERE id = ?", [taskId]);
+  await getStorage().repos.tasks.detachTaskFromWorkflowRunStep(taskId);
 }
 
 export async function getStepByIdempotencyKey(key: string): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE idempotencyKey = ?",
-    [key],
-  );
+  const row = await getStorage().repos.workflows.findStepByIdempotencyKey(key);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
 export async function getStepCountForNode(runId: string, nodeId: string): Promise<number> {
-  const row = await getDbClient().get<{ cnt: number }>(
-    "SELECT COUNT(*) as cnt FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
-    [runId, nodeId],
-  );
-  return row?.cnt ?? 0;
+  return getStorage().repos.workflows.countStepsForNode(runId, nodeId);
 }
 
 export async function getLatestStepForNode(
   runId: string,
   nodeId: string,
 ): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC, rowid DESC LIMIT 1",
-    [runId, nodeId],
-  );
+  const row = await getStorage().repos.workflows.latestStepForNode(runId, nodeId);
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -8413,35 +6491,16 @@ export async function getCurrentStepForNode(
   nodeId: string,
   predecessorIds: string[],
 ): Promise<WorkflowRunStep | null> {
-  const row = await getDbClient().get<WorkflowRunStepRow>(
-    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY rowid DESC LIMIT 1",
-    [runId, nodeId],
-  );
+  const workflows = getStorage().repos.workflows;
+  const row = await workflows.lastInsertedStepForNode(runId, nodeId);
   if (!row || !["running", "waiting", "completed"].includes(row.status)) return null;
   if (predecessorIds.length > 0) {
-    const newer = await getDbClient().get<{ found: number }>(
-      `SELECT 1 AS found FROM workflow_run_steps
-         WHERE runId = ? AND status = 'completed'
-           AND nodeId IN (${predecessorIds.map(() => "?").join(", ")})
-           AND rowid > (SELECT rowid FROM workflow_run_steps WHERE id = ?)
-         LIMIT 1`,
-      [runId, ...predecessorIds, row.id],
-    );
-    if (newer) return null;
+    if (await workflows.hasCompletedStepInsertedAfter(runId, predecessorIds, row.id)) return null;
   }
   return rowToWorkflowRunStep(row);
 }
 
 // --- Workflow Version History ---
-
-type WorkflowVersionRow = {
-  id: string;
-  workflowId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
-  createdAt: string;
-};
 
 function rowToWorkflowVersion(row: WorkflowVersionRow): WorkflowVersion {
   return {
@@ -8461,26 +6520,19 @@ export async function createWorkflowVersion(data: {
   changedByAgentId?: string;
 }): Promise<WorkflowVersion> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<WorkflowVersionRow>(
-    `INSERT INTO workflow_versions (id, workflowId, version, snapshot, changedByAgentId)
-       VALUES (?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.workflowId,
-      data.version,
-      JSON.stringify(data.snapshot),
-      data.changedByAgentId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.workflows.insertVersion({
+    id,
+    workflowId: data.workflowId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create workflow version");
   return rowToWorkflowVersion(row);
 }
 
 export async function getWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
-  const rows = await getDbClient().query<WorkflowVersionRow>(
-    "SELECT * FROM workflow_versions WHERE workflowId = ? ORDER BY version DESC",
-    [workflowId],
-  );
+  const rows = await getStorage().repos.workflows.listVersions(workflowId);
   return rows.map(rowToWorkflowVersion);
 }
 
@@ -8488,10 +6540,7 @@ export async function getWorkflowVersion(
   workflowId: string,
   version: number,
 ): Promise<WorkflowVersion | null> {
-  const row = await getDbClient().get<WorkflowVersionRow>(
-    "SELECT * FROM workflow_versions WHERE workflowId = ? AND version = ?",
-    [workflowId, version],
-  );
+  const row = await getStorage().repos.workflows.getVersion(workflowId, version);
   return row ? rowToWorkflowVersion(row) : null;
 }
 
@@ -8503,15 +6552,6 @@ export type AppVersion = {
   version: number;
   snapshot: unknown;
   changedByAgentId?: string;
-  createdAt: string;
-};
-
-type AppVersionRow = {
-  id: string;
-  appId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
   createdAt: string;
 };
 
@@ -8533,35 +6573,25 @@ export async function createAppVersion(data: {
   changedByAgentId?: string;
 }): Promise<AppVersion> {
   const id = crypto.randomUUID();
-  const row = await getDbClient().get<AppVersionRow>(
-    `INSERT INTO app_versions (id, appId, version, snapshot, changedByAgentId, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.appId,
-      data.version,
-      JSON.stringify(data.snapshot),
-      data.changedByAgentId ?? null,
-      new Date().toISOString(),
-    ],
-  );
+  const row = await getStorage().repos.pages.insertAppVersion({
+    id,
+    appId: data.appId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+    createdAt: new Date().toISOString(),
+  });
   if (!row) throw new Error("Failed to create app version");
   return rowToAppVersion(row);
 }
 
 export async function getAppVersions(appId: string): Promise<AppVersion[]> {
-  const rows = await getDbClient().query<AppVersionRow>(
-    "SELECT * FROM app_versions WHERE appId = ? ORDER BY version DESC",
-    [appId],
-  );
+  const rows = await getStorage().repos.pages.listAppVersions(appId);
   return rows.map(rowToAppVersion);
 }
 
 export async function getAppVersion(appId: string, version: number): Promise<AppVersion | null> {
-  const row = await getDbClient().get<AppVersionRow>(
-    "SELECT * FROM app_versions WHERE appId = ? AND version = ?",
-    [appId, version],
-  );
+  const row = await getStorage().repos.pages.findAppVersion(appId, version);
   return row ? rowToAppVersion(row) : null;
 }
 
@@ -8573,26 +6603,6 @@ export async function getAppVersion(appId: string, version: number): Promise<App
 // holds pre-update snapshots. snapshotPage() (src/pages/version.ts) MUST be
 // called BEFORE updatePage() so the snapshot freezes pre-update content.
 // ============================================================================
-
-type PageRow = {
-  id: string;
-  key: string;
-  agentId: string;
-  slug: string;
-  title: string;
-  description: string | null;
-  contentType: string;
-  authMode: string;
-  passwordHash: string | null;
-  body: string;
-  needsCredentials: string | null;
-  createdAt: string;
-  updatedAt: string;
-  view_count: number;
-  theme: string | null;
-  theme_tokens: string | null;
-  design_version: number;
-};
 
 function rowToPage(row: PageRow): Page {
   return {
@@ -8637,48 +6647,38 @@ export async function createPage(data: {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
   const id = crypto.randomUUID().replace(/-/g, "");
-  const row = await getDbClient().get<PageRow>(
-    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials, theme, theme_tokens, design_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
-      data.agentId,
-      data.slug,
-      data.title,
-      data.description ?? null,
-      data.contentType,
-      data.authMode ?? "authed",
-      data.passwordHash ?? null,
-      data.body,
-      data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
-      data.theme ?? null,
-      data.themeTokens ? JSON.stringify(data.themeTokens) : null,
-      data.designVersion ?? 2,
-    ],
-  );
+  const row = await getStorage().repos.pages.insertPage({
+    id,
+    key: normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
+    agentId: data.agentId,
+    slug: data.slug,
+    title: data.title,
+    description: data.description ?? null,
+    contentType: data.contentType,
+    authMode: data.authMode ?? "authed",
+    passwordHash: data.passwordHash ?? null,
+    body: data.body,
+    needsCredentials: data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
+    theme: data.theme ?? null,
+    theme_tokens: data.themeTokens ? JSON.stringify(data.themeTokens) : null,
+    design_version: data.designVersion ?? 2,
+  });
   if (!row) throw new Error("Failed to create page");
   return rowToPage(row);
 }
 
 export async function getPage(id: string): Promise<Page | null> {
-  const row = await getDbClient().get<PageRow>("SELECT * FROM pages WHERE id = ?", [id]);
+  const row = await getStorage().repos.pages.findPage(id);
   return row ? rowToPage(row) : null;
 }
 
 export async function getPageBySlug(agentId: string, slug: string): Promise<Page | null> {
-  const row = await getDbClient().get<PageRow>(
-    "SELECT * FROM pages WHERE agentId = ? AND slug = ?",
-    [agentId, slug],
-  );
+  const row = await getStorage().repos.pages.findPageBySlug(agentId, slug);
   return row ? rowToPage(row) : null;
 }
 
 export async function getLatestPageBySlug(slug: string): Promise<Page | null> {
-  const row = await getDbClient().get<PageRow>(
-    "SELECT * FROM pages WHERE slug = ? ORDER BY updatedAt DESC LIMIT 1",
-    [slug],
-  );
+  const row = await getStorage().repos.pages.findLatestPageBySlug(slug);
   return row ? rowToPage(row) : null;
 }
 
@@ -8733,19 +6733,7 @@ export async function listPagesByAgent(
   offset = 0,
   opts?: PageListOptions,
 ): Promise<Page[] | PageSummary[]> {
-  let query = "SELECT * FROM pages WHERE agentId = ?";
-  const params: (string | number)[] = [agentId];
-  if (opts?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(opts.key));
-  } else if (opts?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(opts.keyPrefix));
-  }
-  query += pageSearchSql(opts?.q, params);
-  query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-  const rows = await getDbClient().query<PageRow>(query, params);
+  const rows = await getStorage().repos.pages.listPages(pageFilter(opts, agentId), limit, offset);
   return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
@@ -8765,19 +6753,7 @@ export async function listAllPages(
   offset = 0,
   opts?: PageListOptions,
 ): Promise<Page[] | PageSummary[]> {
-  let query = "SELECT * FROM pages WHERE 1=1";
-  const params: (string | number)[] = [];
-  if (opts?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(opts.key));
-  } else if (opts?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(opts.keyPrefix));
-  }
-  query += pageSearchSql(opts?.q, params);
-  query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-  const rows = await getDbClient().query<PageRow>(query, params);
+  const rows = await getStorage().repos.pages.listPages(pageFilter(opts), limit, offset);
   return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
@@ -8788,18 +6764,7 @@ export async function listAllPages(
 export async function countAllPages(
   filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
-  let query = "SELECT COUNT(*) AS count FROM pages WHERE 1=1";
-  const params: (string | number)[] = [];
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  query += pageSearchSql(filters?.q, params);
-  const row = await getDbClient().get<{ count: number }>(query, params);
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countPages(pageFilter(filters));
 }
 
 /** Page count scoped to a single agent — companion to `listPagesByAgent`. */
@@ -8807,18 +6772,7 @@ export async function countPagesByAgent(
   agentId: string,
   filters?: Pick<PageListOptions, "key" | "keyPrefix" | "q">,
 ): Promise<number> {
-  let query = "SELECT COUNT(*) AS count FROM pages WHERE agentId = ?";
-  const params: (string | number)[] = [agentId];
-  if (filters?.key) {
-    query += ' AND "key" = ?';
-    params.push(normalizeAssetKey(filters.key));
-  } else if (filters?.keyPrefix) {
-    query += ` AND "key" LIKE ? ESCAPE '\\'`;
-    params.push(assetKeyPrefixPattern(filters.keyPrefix));
-  }
-  query += pageSearchSql(filters?.q, params);
-  const row = await getDbClient().get<{ count: number }>(query, params);
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countPages(pageFilter(filters, agentId));
 }
 
 /**
@@ -8848,81 +6802,46 @@ export async function updatePage(
     designVersion?: number;
   },
 ): Promise<Page | null> {
-  const updates: string[] = [];
-  const params: (string | number | null)[] = [];
-  if (data.key !== undefined) {
-    updates.push('"key" = ?');
-    params.push(normalizeAssetKey(data.key));
-  }
-  if (data.title !== undefined) {
-    updates.push("title = ?");
-    params.push(data.title);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description ?? null);
-  }
-  if (data.contentType !== undefined) {
-    updates.push("contentType = ?");
-    params.push(data.contentType);
-  }
-  if (data.authMode !== undefined) {
-    updates.push("authMode = ?");
-    params.push(data.authMode);
-  }
-  if (data.passwordHash !== undefined) {
-    updates.push("passwordHash = ?");
-    params.push(data.passwordHash ?? null);
-  }
-  if (data.body !== undefined) {
-    updates.push("body = ?");
-    params.push(data.body);
-  }
-  if (data.needsCredentials !== undefined) {
-    updates.push("needsCredentials = ?");
-    params.push(data.needsCredentials ? JSON.stringify(data.needsCredentials) : null);
-  }
-  if (data.slug !== undefined) {
-    updates.push("slug = ?");
-    params.push(data.slug);
-  }
-  if (data.theme !== undefined) {
-    updates.push("theme = ?");
-    params.push(data.theme);
-  }
-  if (data.themeTokens !== undefined) {
-    updates.push("theme_tokens = ?");
-    params.push(data.themeTokens ? JSON.stringify(data.themeTokens) : null);
-  }
-  if (data.designVersion !== undefined) {
-    updates.push("design_version = ?");
-    params.push(data.designVersion);
-  }
-  if (updates.length === 0) return getPage(id);
-  updates.push("updatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const row = await getDbClient().get<PageRow>(
-    `UPDATE pages SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const update: PageColumnUpdate = {
+    key: data.key === undefined ? undefined : normalizeAssetKey(data.key),
+    title: data.title,
+    description: data.description === undefined ? undefined : (data.description ?? null),
+    contentType: data.contentType,
+    authMode: data.authMode,
+    passwordHash: data.passwordHash === undefined ? undefined : (data.passwordHash ?? null),
+    body: data.body,
+    needsCredentials:
+      data.needsCredentials === undefined
+        ? undefined
+        : data.needsCredentials
+          ? JSON.stringify(data.needsCredentials)
+          : null,
+    slug: data.slug,
+    theme: data.theme,
+    theme_tokens:
+      data.themeTokens === undefined
+        ? undefined
+        : data.themeTokens
+          ? JSON.stringify(data.themeTokens)
+          : null,
+    design_version: data.designVersion,
+  };
+  if (Object.values(update).every((value) => value === undefined)) return getPage(id);
+  const row = await getStorage().repos.pages.updatePage(id, update, new Date().toISOString());
   return row ? rowToPage(row) : null;
 }
 
 export async function deletePage(id: string): Promise<boolean> {
-  const result = await getDbClient().transaction(async (tx) => {
-    await tx.run("DELETE FROM user_favorites WHERE itemType = 'page' AND itemId = ?", [id]);
-    await tx.run("DELETE FROM kv_entries WHERE namespace = ?", [`task:page:${id}`]);
-    // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
-    const deleted = await tx.run("DELETE FROM pages WHERE id = ?", [id]);
-    if (deleted.changes > 0) {
-      getDbClient().afterCommit(() =>
-        realtimeBus.publish("room:namespace-deleted", `task:page:${id}`),
-      );
+  const storage = getStorage();
+  const changes = await storage.transaction(async () => {
+    // Drops every user's favorite and the page's `task:page:<id>` kv namespace with it.
+    const deleted = await storage.repos.pages.deletePageCascade(id);
+    if (deleted > 0) {
+      storage.afterCommit(() => realtimeBus.publish("room:namespace-deleted", `task:page:${id}`));
     }
     return deleted;
   });
-  return result.changes > 0;
+  return changes > 0;
 }
 
 /**
@@ -8934,21 +6853,8 @@ export async function deletePage(id: string): Promise<boolean> {
  * caller so an unexpected DB error never breaks page serving.
  */
 export async function incrementPageViewCount(id: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE pages SET view_count = view_count + 1 WHERE id = ?",
-    [id],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.pages.incrementPageViewCount(id)) > 0;
 }
-
-type PageVersionRow = {
-  id: string;
-  pageId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
-  createdAt: string;
-};
 
 function rowToPageVersion(row: PageVersionRow): PageVersion {
   return {
@@ -8967,28 +6873,23 @@ export async function createPageVersion(data: {
   snapshot: PageSnapshot;
   changedByAgentId?: string;
 }): Promise<PageVersion> {
-  const row = await getDbClient().get<PageVersionRow>(
-    `INSERT INTO page_versions (pageId, version, snapshot, changedByAgentId)
-       VALUES (?, ?, ?, ?) RETURNING *`,
-    [data.pageId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null],
-  );
+  const row = await getStorage().repos.pages.insertPageVersion({
+    pageId: data.pageId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create page version");
   return rowToPageVersion(row);
 }
 
 export async function getPageVersions(pageId: string): Promise<PageVersion[]> {
-  const rows = await getDbClient().query<PageVersionRow>(
-    "SELECT * FROM page_versions WHERE pageId = ? ORDER BY version DESC",
-    [pageId],
-  );
+  const rows = await getStorage().repos.pages.listPageVersions(pageId);
   return rows.map(rowToPageVersion);
 }
 
 export async function getPageVersion(pageId: string, version: number): Promise<PageVersion | null> {
-  const row = await getDbClient().get<PageVersionRow>(
-    "SELECT * FROM page_versions WHERE pageId = ? AND version = ?",
-    [pageId, version],
-  );
+  const row = await getStorage().repos.pages.findPageVersion(pageId, version);
   return row ? rowToPageVersion(row) : null;
 }
 
@@ -8998,17 +6899,6 @@ export async function getPageVersion(pageId: string, version: number): Promise<P
 // Config-driven metrics mirror Pages: parent table `metrics` holds the current
 // JSON definition, and `metric_versions` holds pre-update snapshots.
 // ============================================================================
-
-type MetricRow = {
-  id: string;
-  agentId: string;
-  slug: string;
-  title: string;
-  description: string | null;
-  definition: string;
-  createdAt: string;
-  updatedAt: string;
-};
 
 function rowToMetric(row: MetricRow): Metric {
   return {
@@ -9042,31 +6932,24 @@ export async function createMetric(data: {
   description?: string;
   definition: MetricDefinition;
 }): Promise<Metric> {
-  const row = await getDbClient().get<MetricRow>(
-    `INSERT INTO metrics (agentId, slug, title, description, definition)
-       VALUES (?, ?, ?, ?, ?) RETURNING *`,
-    [
-      data.agentId,
-      data.slug,
-      data.title,
-      data.description ?? null,
-      JSON.stringify(data.definition),
-    ],
-  );
+  const row = await getStorage().repos.pages.insertMetric({
+    agentId: data.agentId,
+    slug: data.slug,
+    title: data.title,
+    description: data.description ?? null,
+    definition: JSON.stringify(data.definition),
+  });
   if (!row) throw new Error("Failed to create metric");
   return rowToMetric(row);
 }
 
 export async function getMetric(id: string): Promise<Metric | null> {
-  const row = await getDbClient().get<MetricRow>("SELECT * FROM metrics WHERE id = ?", [id]);
+  const row = await getStorage().repos.pages.findMetric(id);
   return row ? rowToMetric(row) : null;
 }
 
 export async function getMetricBySlug(agentId: string, slug: string): Promise<Metric | null> {
-  const row = await getDbClient().get<MetricRow>(
-    "SELECT * FROM metrics WHERE agentId = ? AND slug = ?",
-    [agentId, slug],
-  );
+  const row = await getStorage().repos.pages.findMetricBySlug(agentId, slug);
   return row ? rowToMetric(row) : null;
 }
 
@@ -9087,10 +6970,7 @@ export async function listMetricsByAgent(
   offset = 0,
   opts?: { slim?: boolean },
 ): Promise<Metric[] | MetricSummary[]> {
-  const rows = await getDbClient().query<MetricRow>(
-    "SELECT * FROM metrics WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
-    [agentId, limit, offset],
-  );
+  const rows = await getStorage().repos.pages.listMetrics(agentId, limit, offset);
   return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
 }
 
@@ -9105,24 +6985,16 @@ export async function listAllMetrics(
   offset = 0,
   opts?: { slim?: boolean },
 ): Promise<Metric[] | MetricSummary[]> {
-  const rows = await getDbClient().query<MetricRow>(
-    "SELECT * FROM metrics ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
-    [limit, offset],
-  );
+  const rows = await getStorage().repos.pages.listMetrics(null, limit, offset);
   return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
 }
 
 export async function countAllMetrics(): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM metrics");
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countMetrics(null);
 }
 
 export async function countMetricsByAgent(agentId: string): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM metrics WHERE agentId = ?",
-    [agentId],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.pages.countMetrics(agentId);
 }
 
 export async function updateMetric(
@@ -9134,48 +7006,20 @@ export async function updateMetric(
     slug?: string;
   },
 ): Promise<Metric | null> {
-  const updates: string[] = [];
-  const params: (string | null)[] = [];
-  if (data.title !== undefined) {
-    updates.push("title = ?");
-    params.push(data.title);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description ?? null);
-  }
-  if (data.definition !== undefined) {
-    updates.push("definition = ?");
-    params.push(JSON.stringify(data.definition));
-  }
-  if (data.slug !== undefined) {
-    updates.push("slug = ?");
-    params.push(data.slug);
-  }
-  if (updates.length === 0) return getMetric(id);
-  updates.push("updatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-  const row = await getDbClient().get<MetricRow>(
-    `UPDATE metrics SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const update: MetricColumnUpdate = {
+    title: data.title,
+    description: data.description === undefined ? undefined : (data.description ?? null),
+    definition: data.definition === undefined ? undefined : JSON.stringify(data.definition),
+    slug: data.slug,
+  };
+  if (Object.values(update).every((value) => value === undefined)) return getMetric(id);
+  const row = await getStorage().repos.pages.updateMetric(id, update, new Date().toISOString());
   return row ? rowToMetric(row) : null;
 }
 
 export async function deleteMetric(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM metrics WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.pages.deleteMetric(id)) > 0;
 }
-
-type MetricVersionRow = {
-  id: string;
-  metricId: string;
-  version: number;
-  snapshot: string;
-  changedByAgentId: string | null;
-  createdAt: string;
-};
 
 function rowToMetricVersion(row: MetricVersionRow): MetricVersion {
   return {
@@ -9194,20 +7038,18 @@ export async function createMetricVersion(data: {
   snapshot: MetricSnapshot;
   changedByAgentId?: string;
 }): Promise<MetricVersion> {
-  const row = await getDbClient().get<MetricVersionRow>(
-    `INSERT INTO metric_versions (metricId, version, snapshot, changedByAgentId)
-       VALUES (?, ?, ?, ?) RETURNING *`,
-    [data.metricId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null],
-  );
+  const row = await getStorage().repos.pages.insertMetricVersion({
+    metricId: data.metricId,
+    version: data.version,
+    snapshot: JSON.stringify(data.snapshot),
+    changedByAgentId: data.changedByAgentId ?? null,
+  });
   if (!row) throw new Error("Failed to create metric version");
   return rowToMetricVersion(row);
 }
 
 export async function getMetricVersions(metricId: string): Promise<MetricVersion[]> {
-  const rows = await getDbClient().query<MetricVersionRow>(
-    "SELECT * FROM metric_versions WHERE metricId = ? ORDER BY version DESC",
-    [metricId],
-  );
+  const rows = await getStorage().repos.pages.listMetricVersions(metricId);
   return rows.map(rowToMetricVersion);
 }
 
@@ -9215,30 +7057,13 @@ export async function getMetricVersion(
   metricId: string,
   version: number,
 ): Promise<MetricVersion | null> {
-  const row = await getDbClient().get<MetricVersionRow>(
-    "SELECT * FROM metric_versions WHERE metricId = ? AND version = ?",
-    [metricId, version],
-  );
+  const row = await getStorage().repos.pages.findMetricVersion(metricId, version);
   return row ? rowToMetricVersion(row) : null;
 }
 
 // ============================================================================
 // Prompt Template Operations
 // ============================================================================
-
-type PromptTemplateRow = {
-  id: string;
-  eventType: string;
-  scope: string;
-  scopeId: string | null;
-  state: string;
-  body: string;
-  isDefault: number; // SQLite boolean
-  version: number;
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
 
 type PromptTemplateHistoryRow = {
   id: string;
@@ -9250,22 +7075,6 @@ type PromptTemplateHistoryRow = {
   changedAt: string;
   changeReason: string | null;
 };
-
-function rowToPromptTemplate(row: PromptTemplateRow): PromptTemplate {
-  return {
-    id: row.id,
-    eventType: row.eventType,
-    scope: row.scope as "global" | "agent" | "repo",
-    scopeId: row.scopeId ?? null,
-    state: row.state as "enabled" | "default_prompt_fallback" | "skip_event",
-    body: row.body,
-    isDefault: row.isDefault === 1,
-    version: row.version,
-    createdBy: row.createdBy ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
 
 function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTemplateHistory {
   return {
@@ -9282,182 +7091,79 @@ function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTempla
 
 /**
  * List prompt templates with optional filters.
- *
- * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
- * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
- * `initDb`'s body — stays on the raw sync handle.
  */
-export function getPromptTemplates(filters?: {
+export async function getPromptTemplates(filters?: {
   eventType?: string;
   scope?: string;
   scopeId?: string;
   isDefault?: boolean;
-}): PromptTemplate[] {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.eventType) {
-    conditions.push("eventType = ?");
-    params.push(filters.eventType);
-  }
-  if (filters?.scope) {
-    conditions.push("scope = ?");
-    params.push(filters.scope);
-  }
-  if (filters?.scopeId) {
-    conditions.push("scopeId = ?");
-    params.push(filters.scopeId);
-  }
-  if (filters?.isDefault !== undefined) {
-    conditions.push("isDefault = ?");
-    params.push(filters.isDefault ? 1 : 0);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM prompt_templates ${whereClause} ORDER BY eventType ASC`;
-
-  return getDb()
-    .prepare<PromptTemplateRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToPromptTemplate);
+}): Promise<PromptTemplate[]> {
+  const rows = await getStorage().repos.promptTemplates.listPromptTemplates(filters ?? {});
+  return rows.map(rowToPromptTemplate);
 }
 
 /**
  * Get a single prompt template by ID.
  */
 export async function getPromptTemplateById(id: string): Promise<PromptTemplate | null> {
-  const row = await getDbClient().get<PromptTemplateRow>(
-    "SELECT * FROM prompt_templates WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.promptTemplates.findPromptTemplate(id);
   return row ? rowToPromptTemplate(row) : null;
 }
 
 /**
  * Upsert a prompt template. Inserts or updates by (eventType, scope, scopeId) unique constraint.
  * Creates a history entry on both insert and update.
- *
- * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
- * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
- * `initDb`'s body — stays on the raw sync handle.
  */
-export function upsertPromptTemplate(data: {
-  eventType: string;
-  scope: "global" | "agent" | "repo";
-  scopeId?: string | null;
-  state?: "enabled" | "default_prompt_fallback" | "skip_event";
-  body: string;
-  createdBy?: string | null;
-  changedBy?: string | null;
-  changeReason?: string | null;
-  isDefault?: boolean;
-}): PromptTemplate {
+export async function upsertPromptTemplate(data: PromptTemplateUpsert): Promise<PromptTemplate> {
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
   const state = data.state ?? "enabled";
-  const createdBy = data.createdBy ?? data.changedBy ?? null;
   const changedBy = data.changedBy ?? data.createdBy ?? null;
   const changeReason = data.changeReason ?? null;
 
-  // Manual check for existing entry because SQLite's UNIQUE constraint
-  // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
-  const existing =
-    scopeId === null
-      ? getDb()
-          .prepare<PromptTemplateRow, [string, string]>(
-            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
-          )
-          .get(data.eventType, data.scope)
-      : getDb()
-          .prepare<PromptTemplateRow, [string, string, string]>(
-            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
-          )
-          .get(data.eventType, data.scope, scopeId);
+  // One transaction around the existence check and both writes: the
+  // synchronous version ran them without yielding the event loop.
+  const storage = getStorage();
+  const templates = storage.repos.promptTemplates;
+  const row = await storage.transaction(async () => {
+    // Manual check for existing entry because SQLite's UNIQUE constraint
+    // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
+    const existing = await templates.findPromptTemplateAtScope(data.eventType, data.scope, scopeId);
 
-  let row: PromptTemplateRow | null;
+    if (existing) {
+      // If upserting at global scope and existing record has isDefault=true, flip it to false
+      const newIsDefault =
+        data.scope === "global" && existing.isDefault === 1 ? false : existing.isDefault === 1;
+      const newVersion = existing.version + 1;
 
-  if (existing) {
-    // If upserting at global scope and existing record has isDefault=true, flip it to false
-    const newIsDefault =
-      data.scope === "global" && existing.isDefault === 1 ? 0 : existing.isDefault;
-    const newVersion = existing.version + 1;
+      const updated = await templates.updatePromptTemplateRecord(existing.id, {
+        body: data.body,
+        state,
+        isDefault: newIsDefault,
+        version: newVersion,
+        updatedAt: now,
+      });
 
-    row = getDb()
-      .prepare<PromptTemplateRow, [string, string, number, number, string, string]>(
-        `UPDATE prompt_templates SET body = ?, state = ?, isDefault = ?, version = ?, updatedAt = ?
-         WHERE id = ? RETURNING *`,
-      )
-      .get(data.body, state, newIsDefault, newVersion, now, existing.id);
-
-    // Create history entry for the update
-    getDb()
-      .prepare(
-        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        crypto.randomUUID(),
-        existing.id,
-        newVersion,
-        data.body,
+      // Create history entry for the update
+      await templates.insertPromptTemplateHistory({
+        id: crypto.randomUUID(),
+        templateId: existing.id,
+        version: newVersion,
+        body: data.body,
         state,
         changedBy,
-        now,
+        changedAt: now,
         changeReason,
-      );
-  } else {
-    const id = crypto.randomUUID();
-    row = getDb()
-      .prepare<
-        PromptTemplateRow,
-        [
-          string,
-          string,
-          string,
-          string | null,
-          string,
-          string,
-          number,
-          number,
-          string | null,
-          string,
-          string,
-        ]
-      >(
-        `INSERT INTO prompt_templates (id, eventType, scope, scopeId, state, body, isDefault, version, createdBy, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      )
-      .get(
-        id,
-        data.eventType,
-        data.scope,
-        scopeId,
-        state,
-        data.body,
-        data.isDefault ? 1 : 0,
-        1,
-        createdBy,
-        now,
-        now,
-      );
+      });
+      return updated;
+    }
 
+    const created = newPromptTemplateRows(data, scopeId, now);
+    const inserted = await templates.insertPromptTemplate(created.row);
     // Create history entry for the insert
-    getDb()
-      .prepare(
-        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        crypto.randomUUID(),
-        id,
-        1,
-        data.body,
-        state,
-        changedBy,
-        now,
-        changeReason ?? "Initial creation",
-      );
-  }
+    await templates.insertPromptTemplateHistory(created.history);
+    return inserted;
+  });
 
   if (!row) throw new Error("Failed to upsert prompt template");
   return rowToPromptTemplate(row);
@@ -9468,10 +7174,7 @@ export function upsertPromptTemplate(data: {
  * Does NOT delete history rows (intentional for audit trail).
  */
 export async function deletePromptTemplate(id: string): Promise<boolean> {
-  const existing = await getDbClient().get<PromptTemplateRow>(
-    "SELECT * FROM prompt_templates WHERE id = ?",
-    [id],
-  );
+  const existing = await getStorage().repos.promptTemplates.findPromptTemplate(id);
 
   if (!existing) return false;
   if (existing.isDefault === 1) {
@@ -9480,53 +7183,33 @@ export async function deletePromptTemplate(id: string): Promise<boolean> {
     );
   }
 
-  const result = await getDbClient().run("DELETE FROM prompt_templates WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.promptTemplates.deletePromptTemplate(id)) > 0;
 }
 
 /**
  * Reset a prompt template to its default state.
  * Sets body to defaultBody, isDefault=true, state='enabled', bumps version.
- *
- * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
- * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
- * `initDb`'s body — stays on the raw sync handle.
  */
-export function resetPromptTemplateToDefault(id: string, defaultBody: string): PromptTemplate {
+export async function resetPromptTemplateToDefault(
+  id: string,
+  defaultBody: string,
+): Promise<PromptTemplate> {
   const now = new Date().toISOString();
-  const existing = getDb()
-    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
-    .get(id);
+  // One transaction: the synchronous version read and wrote without yielding.
+  const storage = getStorage();
+  const templates = storage.repos.promptTemplates;
+  const row = await storage.transaction(async () => {
+    const existing = await templates.findPromptTemplate(id);
+    if (!existing) throw new Error(`Prompt template ${id} not found`);
 
-  if (!existing) throw new Error(`Prompt template ${id} not found`);
+    const reset = resetPromptTemplateRows(id, existing.version, defaultBody, now);
+    const updated = await templates.updatePromptTemplateRecord(id, reset.update);
+    if (!updated) throw new Error("Failed to reset prompt template to default");
 
-  const newVersion = existing.version + 1;
-
-  const row = getDb()
-    .prepare<PromptTemplateRow, [string, number, string, string]>(
-      `UPDATE prompt_templates SET body = ?, state = 'enabled', isDefault = 1, version = ?, updatedAt = ?
-       WHERE id = ? RETURNING *`,
-    )
-    .get(defaultBody, newVersion, now, id);
-
-  if (!row) throw new Error("Failed to reset prompt template to default");
-
-  // Create history entry
-  getDb()
-    .prepare(
-      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      crypto.randomUUID(),
-      id,
-      newVersion,
-      defaultBody,
-      "enabled",
-      null,
-      now,
-      "Reset to default",
-    );
+    // Create history entry
+    await templates.insertPromptTemplateHistory(reset.history);
+    return updated;
+  });
 
   return rowToPromptTemplate(row);
 }
@@ -9537,10 +7220,7 @@ export function resetPromptTemplateToDefault(id: string, defaultBody: string): P
 export async function getPromptTemplateHistory(
   templateId: string,
 ): Promise<PromptTemplateHistory[]> {
-  const rows = await getDbClient().query<PromptTemplateHistoryRow>(
-    "SELECT * FROM prompt_template_history WHERE templateId = ? ORDER BY version DESC",
-    [templateId],
-  );
+  const rows = await getStorage().repos.promptTemplates.listPromptTemplateHistory(templateId);
   return rows.map(rowToPromptTemplateHistory);
 }
 
@@ -9558,49 +7238,18 @@ export async function getPromptTemplateHistory(
  *   - 'enabled': return the template
  *   - 'skip_event': return { skip: true }
  *   - 'default_prompt_fallback': continue to next scope level
- *
- * DEFERRED (boot-path rule): injected as `src/prompts/resolver.ts`'s
- * `dbResolverFn` via `configureDbResolver` (called from `initDb`'s body) and
- * invoked synchronously, on every render, by that module's still-sync
- * `resolveTemplate()` / `resolveTemplateViaDb()` / `expandTemplateRefs()` —
- * a public API used pervasively across GitHub/GitLab/Linear/Jira/Slack/
- * agentmail handlers, heartbeat, and workflows. Converting this function
- * would force `resolveTemplate()` itself async, cascading into dozens of
- * unrelated call sites outside this batch's blast radius. Stays on the raw
- * sync handle; `resolveTemplateAsync()` already exists as the async path for
- * callers that need one.
  */
-export function resolvePromptTemplate(
+export async function resolvePromptTemplate(
   eventType: string,
   agentId?: string,
   repoId?: string,
-): { template: PromptTemplate } | { skip: true } | null {
-  // Helper to look up a template at a specific scope
-  const lookupAtScope = (
-    et: string,
-    scope: "global" | "agent" | "repo",
-    scopeId: string | null,
-  ): PromptTemplateRow | undefined => {
-    if (scopeId === null) {
-      return (
-        getDb()
-          .prepare<PromptTemplateRow, [string, string]>(
-            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
-          )
-          .get(et, scope) ?? undefined
-      );
-    }
-    return (
-      getDb()
-        .prepare<PromptTemplateRow, [string, string, string]>(
-          "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
-        )
-        .get(et, scope, scopeId) ?? undefined
-    );
-  };
+): Promise<{ template: PromptTemplate } | { skip: true } | null> {
+  const templates = getStorage().repos.promptTemplates;
 
   // Try resolution at the scope chain for a given eventType string
-  const tryResolve = (et: string): { template: PromptTemplate } | { skip: true } | "continue" => {
+  const tryResolve = async (
+    et: string,
+  ): Promise<{ template: PromptTemplate } | { skip: true } | "continue"> => {
     // Build scope chain: agent → repo → global
     const scopeChain: Array<{ scope: "global" | "agent" | "repo"; scopeId: string | null }> = [];
     if (agentId) scopeChain.push({ scope: "agent", scopeId: agentId });
@@ -9608,7 +7257,7 @@ export function resolvePromptTemplate(
     scopeChain.push({ scope: "global", scopeId: null });
 
     for (const { scope, scopeId } of scopeChain) {
-      const row = lookupAtScope(et, scope, scopeId);
+      const row = await templates.findPromptTemplateAtScope(et, scope, scopeId);
       if (!row) continue;
 
       if (row.state === "enabled") {
@@ -9624,7 +7273,7 @@ export function resolvePromptTemplate(
   };
 
   // Pass 1: exact match
-  const exactResult = tryResolve(eventType);
+  const exactResult = await tryResolve(eventType);
   if (exactResult !== "continue") return exactResult;
 
   // Pass 2: wildcard matching
@@ -9636,7 +7285,7 @@ export function resolvePromptTemplate(
   }
 
   for (const wildcard of wildcards) {
-    const wildcardResult = tryResolve(wildcard);
+    const wildcardResult = await tryResolve(wildcard);
     if (wildcardResult !== "continue") return wildcardResult;
   }
 
@@ -9659,45 +7308,38 @@ export async function checkoutPromptTemplate(
   // prompt_template_history rows at one version (no UNIQUE on
   // (templateId, version)) so a later checkout restores whichever body the
   // index scan reaches first.
-  const row = await getDbClient().transaction(async () => {
-    const existing = await getDbClient().get<PromptTemplateRow>(
-      "SELECT * FROM prompt_templates WHERE id = ?",
-      [id],
-    );
+  const storage = getStorage();
+  const templates = storage.repos.promptTemplates;
+  const row = await storage.transaction(async () => {
+    const existing = await templates.findPromptTemplate(id);
     if (!existing) throw new Error(`Prompt template ${id} not found`);
 
-    const historyEntry = await getDbClient().get<PromptTemplateHistoryRow>(
-      "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
-      [id, targetVersion],
-    );
+    const historyEntry = await templates.findPromptTemplateHistoryVersion(id, targetVersion);
     if (!historyEntry)
       throw new Error(`No history entry at version ${targetVersion} for template ${id}`);
 
     const newVersion = existing.version + 1;
 
-    const updated = await getDbClient().get<PromptTemplateRow>(
-      `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
-       WHERE id = ? RETURNING *`,
-      [historyEntry.body, historyEntry.state, newVersion, now, id],
-    );
+    const updated = await templates.setPromptTemplateContent(id, {
+      body: historyEntry.body,
+      state: historyEntry.state,
+      version: newVersion,
+      updatedAt: now,
+    });
 
     if (!updated) throw new Error("Failed to checkout prompt template");
 
     // Create history entry for the checkout
-    await getDbClient().run(
-      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        crypto.randomUUID(),
-        id,
-        newVersion,
-        historyEntry.body,
-        historyEntry.state,
-        null,
-        now,
-        `Checked out from version ${targetVersion}`,
-      ],
-    );
+    await templates.insertPromptTemplateHistory({
+      id: crypto.randomUUID(),
+      templateId: id,
+      version: newVersion,
+      body: historyEntry.body,
+      state: historyEntry.state,
+      changedBy: null,
+      changedAt: now,
+      changeReason: `Checked out from version ${targetVersion}`,
+    });
 
     return updated;
   });
@@ -9706,12 +7348,6 @@ export async function checkoutPromptTemplate(
 }
 
 // ─── Channel Activity Cursors ─────────────────────────────────────────────────
-
-type ChannelActivityCursorRow = {
-  channelId: string;
-  lastSeenTs: string;
-  updatedAt: string;
-};
 
 export interface ChannelActivityCursor {
   channelId: string;
@@ -9728,19 +7364,14 @@ function rowToChannelActivityCursor(row: ChannelActivityCursorRow): ChannelActiv
 }
 
 export async function getAllChannelActivityCursors(): Promise<ChannelActivityCursor[]> {
-  const rows = await getDbClient().query<ChannelActivityCursorRow>(
-    "SELECT * FROM channel_activity_cursors",
-  );
+  const rows = await getStorage().repos.messaging.listChannelActivityCursors();
   return rows.map(rowToChannelActivityCursor);
 }
 
 export async function getChannelActivityCursor(
   channelId: string,
 ): Promise<ChannelActivityCursor | null> {
-  const row = await getDbClient().get<ChannelActivityCursorRow>(
-    "SELECT * FROM channel_activity_cursors WHERE channelId = ?",
-    [channelId],
-  );
+  const row = await getStorage().repos.messaging.findChannelActivityCursor(channelId);
   return row ? rowToChannelActivityCursor(row) : null;
 }
 
@@ -9748,12 +7379,7 @@ export async function upsertChannelActivityCursor(
   channelId: string,
   lastSeenTs: string,
 ): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
-       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       ON CONFLICT(channelId) DO UPDATE SET lastSeenTs = excluded.lastSeenTs, updatedAt = excluded.updatedAt`,
-    [channelId, lastSeenTs],
-  );
+  await getStorage().repos.messaging.upsertChannelActivityCursor(channelId, lastSeenTs);
 }
 
 // ============================================================================
@@ -9782,28 +7408,7 @@ export interface ApprovalRequest {
   updatedAt: string;
 }
 
-interface ApprovalRequestRow {
-  id: string;
-  title: string;
-  questions: string;
-  workflowRunId: string | null;
-  workflowRunStepId: string | null;
-  sourceTaskId: string | null;
-  approvers: string;
-  status: string;
-  responses: string | null;
-  approvals: string | null;
-  resolvedBy: string | null;
-  resolvedAt: string | null;
-  resolutionReason: string | null;
-  cancellationNotificationClaims: string | null;
-  timeoutSeconds: number | null;
-  expiresAt: string | null;
-  notificationChannels: string | null;
-  created_by: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+type ApprovalRequestRow = NonNullable<Awaited<ReturnType<WorkflowsRepo["findApprovalById"]>>>;
 
 function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
   return {
@@ -9848,7 +7453,7 @@ export async function createApprovalRequest(data: {
     ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
     : null;
 
-  const row = await getDbClient().transaction(async () => {
+  const row = await getStorage().transaction(async () => {
     let status: ApprovalRequest["status"] = "pending";
     let resolutionReason: string | null = null;
     // A request linked to an existing run, with or without a step, is born
@@ -9877,42 +7482,32 @@ export async function createApprovalRequest(data: {
       }
     }
 
-    return getDbClient().get<ApprovalRequestRow>(
-      `INSERT INTO approval_requests
-         (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId,
-          approvers, status, resolutionReason, resolvedAt, timeoutSeconds, expiresAt,
-          notificationChannels, created_by, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-      [
-        data.id,
-        scrubSecrets(data.title),
-        scrubJsonValue(data.questions),
-        data.workflowRunId ?? null,
-        data.workflowRunStepId ?? null,
-        data.sourceTaskId ?? null,
-        JSON.stringify(data.approvers),
-        status,
-        resolutionReason == null ? null : scrubSecrets(resolutionReason),
-        status === "cancelled" ? now : null,
-        data.timeoutSeconds ?? null,
-        expiresAt,
-        data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
-        data.createdBy ?? null,
-        now,
-        now,
-      ],
-    );
+    return getStorage().repos.workflows.insertApproval({
+      id: data.id,
+      title: scrubSecrets(data.title),
+      questions: scrubJsonValue(data.questions),
+      workflowRunId: data.workflowRunId ?? null,
+      workflowRunStepId: data.workflowRunStepId ?? null,
+      sourceTaskId: data.sourceTaskId ?? null,
+      approvers: JSON.stringify(data.approvers),
+      status,
+      resolutionReason: resolutionReason == null ? null : scrubSecrets(resolutionReason),
+      resolvedAt: status === "cancelled" ? now : null,
+      timeoutSeconds: data.timeoutSeconds ?? null,
+      expiresAt,
+      notificationChannels: data.notificationChannels
+        ? JSON.stringify(data.notificationChannels)
+        : null,
+      createdBy: data.createdBy ?? null,
+      now,
+    });
   });
 
   return rowToApprovalRequest(row!);
 }
 
 export async function getApprovalRequestById(id: string): Promise<ApprovalRequest | null> {
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    "SELECT * FROM approval_requests WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.workflows.findApprovalById(id);
   return row ? rowToApprovalRequest(row) : null;
 }
 
@@ -9928,43 +7523,19 @@ export async function resolveApprovalRequest(
   options?: { requireActionableWorkflow?: boolean },
 ): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
-  const actionableWorkflowClause = options?.requireActionableWorkflow
-    ? `AND (
-         workflowRunId IS NULL
-         OR (
-           EXISTS (
-             SELECT 1 FROM workflow_runs
-             WHERE id = approval_requests.workflowRunId
-               AND status IN ('running', 'waiting')
-           )
-           AND EXISTS (
-           SELECT 1 FROM workflow_run_steps
-             WHERE id = approval_requests.workflowRunStepId
-               AND runId = approval_requests.workflowRunId
-               AND status = 'waiting'
-           )
-         )
-       )`
-    : "";
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    `UPDATE approval_requests
-       SET status = ?, responses = ?, approvals = COALESCE(?, approvals), resolvedBy = ?,
-           resolutionReason = ?, resolvedAt = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-         ${actionableWorkflowClause}
-       RETURNING *`,
-    [
-      data.status,
+  const row = await getStorage().repos.workflows.resolveApproval(
+    id,
+    {
+      status: data.status,
       // Sealed, not scrubbed: recovery resumes the workflow from this answer,
       // so it must stay byte-exact. Votes are diagnostic and get redacted.
-      data.responses ? sealJson(data.responses) : null,
-      data.approvals ? scrubApprovalVotesJson(data.approvals) : null,
-      data.resolvedBy ?? null,
-      data.resolutionReason == null ? null : scrubSecrets(data.resolutionReason),
+      responses: data.responses ? sealJson(data.responses) : null,
+      approvals: data.approvals ? scrubApprovalVotesJson(data.approvals) : null,
+      resolvedBy: data.resolvedBy ?? null,
+      resolutionReason: data.resolutionReason == null ? null : scrubSecrets(data.resolutionReason),
       now,
-      now,
-      id,
-    ],
+    },
+    options?.requireActionableWorkflow === true,
   );
   if (!row) return null;
   const resolved = rowToApprovalRequest(row);
@@ -9979,12 +7550,11 @@ export async function cancelApprovalRequestById(
   data: { reason: string; resolvedBy: string | null },
 ): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    `UPDATE approval_requests
-       SET status = 'cancelled', resolutionReason = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING *`,
-    [scrubSecrets(data.reason), data.resolvedBy, now, now, id],
+  const row = await getStorage().repos.workflows.cancelApproval(
+    id,
+    scrubSecrets(data.reason),
+    data.resolvedBy,
+    now,
   );
   if (!row) return null;
   const cancelled = rowToApprovalRequest(row);
@@ -9997,12 +7567,10 @@ export async function cancelPendingApprovalRequestsForRun(
   reason: string,
 ): Promise<ApprovalRequest[]> {
   const now = new Date().toISOString();
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `UPDATE approval_requests
-       SET status = 'cancelled', resolutionReason = ?, resolvedAt = ?, updatedAt = ?
-       WHERE workflowRunId = ? AND status = 'pending'
-       RETURNING *`,
-    [scrubSecrets(reason), now, now, workflowRunId],
+  const rows = await getStorage().repos.workflows.cancelPendingApprovalsOfRun(
+    workflowRunId,
+    scrubSecrets(reason),
+    now,
   );
   const cancelled = rows.map(rowToApprovalRequest);
   scheduleApprovalCardUpdates(cancelled);
@@ -10012,22 +7580,14 @@ export async function cancelPendingApprovalRequestsForRun(
 export async function listCancelledApprovalRequestsForRun(
   workflowRunId: string,
 ): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE workflowRunId = ? AND status = 'cancelled'`,
-    [workflowRunId],
-  );
+  const rows = await getStorage().repos.workflows.listCancelledApprovalsOfRun(workflowRunId);
   return rows.map(rowToApprovalRequest);
 }
 
 export async function listCancelledApprovalRequestsForStep(
   workflowRunStepId: string,
 ): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE workflowRunStepId = ? AND status = 'cancelled'`,
-    [workflowRunStepId],
-  );
+  const rows = await getStorage().repos.workflows.listCancelledApprovalsOfStep(workflowRunStepId);
   return rows.map(rowToApprovalRequest);
 }
 
@@ -10042,12 +7602,10 @@ export async function claimApprovalCancellationNotification(
   notificationKey: string,
   options?: { anyTerminal?: boolean },
 ): Promise<{ approval: ApprovalRequest; leaseToken: string } | null> {
-  const statusClause = options?.anyTerminal ? "status <> 'pending'" : "status = 'cancelled'";
-  return getDbClient().transaction(async () => {
-    const row = await getDbClient().get<ApprovalRequestRow>(
-      `SELECT * FROM approval_requests WHERE id = ? AND ${statusClause}`,
-      [id],
-    );
+  const anyTerminal = options?.anyTerminal === true;
+  const workflows = getStorage().repos.workflows;
+  return getStorage().transaction(async () => {
+    const row = await workflows.findSettledApproval(id, anyTerminal);
     if (!row) return null;
     const claims = row.cancellationNotificationClaims
       ? (JSON.parse(row.cancellationNotificationClaims) as Record<
@@ -10068,12 +7626,7 @@ export async function claimApprovalCancellationNotification(
     const now = new Date().toISOString();
     const leaseToken = crypto.randomUUID();
     claims[notificationKey] = { claimedAt: now, leaseToken };
-    await getDbClient().run(
-      `UPDATE approval_requests
-         SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND ${statusClause}`,
-      [JSON.stringify(claims), now, id],
-    );
+    await workflows.setApprovalNotificationClaims(id, JSON.stringify(claims), now, anyTerminal);
     return { approval: rowToApprovalRequest(row), leaseToken };
   });
 }
@@ -10100,11 +7653,9 @@ async function updateApprovalCancellationNotificationClaim(
   leaseToken: string,
   value: "delivered" | null,
 ): Promise<void> {
-  await getDbClient().transaction(async () => {
-    const row = await getDbClient().get<{ claims: string | null }>(
-      "SELECT cancellationNotificationClaims AS claims FROM approval_requests WHERE id = ?",
-      [id],
-    );
+  const workflows = getStorage().repos.workflows;
+  await getStorage().transaction(async () => {
+    const row = await workflows.getApprovalNotificationClaims(id);
     const claims = row?.claims
       ? (JSON.parse(row.claims) as Record<
           string,
@@ -10117,11 +7668,11 @@ async function updateApprovalCancellationNotificationClaim(
     }
     if (value === null) delete claims[notificationKey];
     else claims[notificationKey] = value;
-    await getDbClient().run(
-      `UPDATE approval_requests
-         SET cancellationNotificationClaims = ?, updatedAt = ?
-         WHERE id = ? AND status <> 'pending'`,
-      [JSON.stringify(claims), new Date().toISOString(), id],
+    await workflows.setApprovalNotificationClaims(
+      id,
+      JSON.stringify(claims),
+      new Date().toISOString(),
+      true,
     );
   });
 }
@@ -10131,20 +7682,17 @@ export async function updateApprovalRequestNotifications(
   notificationChannels: Array<{ channel: string; target: string; messageTs?: string }>,
 ): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    "UPDATE approval_requests SET notificationChannels = ?, updatedAt = ? WHERE id = ?",
-    [JSON.stringify(notificationChannels), now, id],
+  await getStorage().repos.workflows.setApprovalNotificationChannels(
+    id,
+    JSON.stringify(notificationChannels),
+    now,
   );
 }
 
 export async function listApprovalRequests(
   filters?: ApprovalRequestListFilters,
 ): Promise<ApprovalRequest[]> {
-  const { sql, params } = approvalRequestListClause(filters);
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests ${sql}`,
-    params,
-  );
+  const rows = await getStorage().repos.workflows.listApprovals(approvalListFilter(filters));
   return rows.map(rowToApprovalRequest);
 }
 
@@ -10160,23 +7708,7 @@ export interface StuckApprovalRun {
 }
 
 export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
-  const rows = await getDbClient().query<StuckApprovalRun>(
-    `SELECT
-        wr.id as runId,
-        wrs.id as stepId,
-        wrs.nodeId,
-        wr.workflowId,
-        ar.id as approvalId,
-        ar.status as approvalStatus,
-        ar.responses as approvalResponses,
-        ar.expiresAt
-      FROM workflow_runs wr
-      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
-      JOIN approval_requests ar ON ar.workflowRunStepId = wrs.id
-      WHERE wr.status = 'waiting'
-        AND (ar.status IN ('approved', 'rejected', 'timeout')
-             OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
-  );
+  const rows = await getStorage().repos.workflows.listStuckApprovalRuns();
   return rows.map((row) => ({
     ...row,
     approvalResponses:
@@ -10185,10 +7717,7 @@ export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
 }
 
 export async function getApprovalRequestByStepId(stepId: string): Promise<ApprovalRequest | null> {
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    "SELECT * FROM approval_requests WHERE workflowRunStepId = ?",
-    [stepId],
-  );
+  const row = await getStorage().repos.workflows.findApprovalByStepId(stepId);
   return row ? rowToApprovalRequest(row) : null;
 }
 
@@ -10196,13 +7725,8 @@ export async function getApprovalRequestByStepId(stepId: string): Promise<Approv
 export async function getExpiredPendingApprovals(opts?: {
   now?: string;
 }): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE status = 'pending'
-         AND expiresAt IS NOT NULL
-         AND expiresAt < ?
-       ORDER BY expiresAt ASC`,
-    [opts?.now ?? new Date().toISOString()],
+  const rows = await getStorage().repos.workflows.listExpiredPendingApprovals(
+    opts?.now ?? new Date().toISOString(),
   );
   return rows.map(rowToApprovalRequest);
 }
@@ -10213,14 +7737,7 @@ export async function getExpiredPendingApprovals(opts?: {
 export async function getStaleApprovalRequests(opts: {
   cutoff: string;
 }): Promise<ApprovalRequest[]> {
-  const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests
-       WHERE status = 'pending'
-         AND expiresAt IS NULL
-         AND createdAt < ?
-       ORDER BY createdAt ASC`,
-    [opts.cutoff],
-  );
+  const rows = await getStorage().repos.workflows.listStalePendingApprovals(opts.cutoff);
   return rows.map(rowToApprovalRequest);
 }
 
@@ -10234,22 +7751,7 @@ export async function getStaleApprovalRequests(opts: {
 // race-safe transition gate — concurrent callers (poller + bus listener)
 // rely on `WHERE status='pending'` so only the first one wins.
 
-interface WaitStateRowDb {
-  id: string;
-  workflowRunId: string;
-  workflowRunStepId: string;
-  mode: string;
-  wakeUpAt: string | null;
-  eventName: string | null;
-  eventFilter: string | null;
-  expiresAt: string | null;
-  status: string;
-  firedPayload: string | null;
-  resolvedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  eventScope: string;
-}
+type WaitStateRowDb = NonNullable<Awaited<ReturnType<WorkflowsRepo["findWaitStateById"]>>>;
 
 function rowToWaitState(row: WaitStateRowDb): WaitStateRow {
   let parsedFilter: WaitStateRow["eventFilter"] = null;
@@ -10297,34 +7799,26 @@ export interface CreateWaitStateInput {
 
 export async function createWaitState(input: CreateWaitStateInput): Promise<WaitStateRow> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WaitStateRowDb>(
-    `INSERT INTO wait_states
-         (id, workflowRunId, workflowRunStepId, mode, wakeUpAt, eventName, eventFilter, expiresAt, eventScope, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-    [
-      input.id,
-      input.workflowRunId,
-      input.workflowRunStepId,
-      input.mode,
-      input.wakeUpAt ?? null,
-      input.eventName ?? null,
+  const row = await getStorage().repos.workflows.insertWaitState({
+    id: input.id,
+    workflowRunId: input.workflowRunId,
+    workflowRunStepId: input.workflowRunStepId,
+    mode: input.mode,
+    wakeUpAt: input.wakeUpAt ?? null,
+    eventName: input.eventName ?? null,
+    eventFilter:
       input.eventFilter !== undefined && input.eventFilter !== null
         ? JSON.stringify(input.eventFilter)
         : null,
-      input.expiresAt ?? null,
-      input.scope ?? "run",
-      now,
-      now,
-    ],
-  );
+    expiresAt: input.expiresAt ?? null,
+    eventScope: input.scope ?? "run",
+    now,
+  });
   return rowToWaitState(row!);
 }
 
 export async function getWaitStateById(id: string): Promise<WaitStateRow | null> {
-  const row = await getDbClient().get<WaitStateRowDb>("SELECT * FROM wait_states WHERE id = ?", [
-    id,
-  ]);
+  const row = await getStorage().repos.workflows.findWaitStateById(id);
   return row ? rowToWaitState(row) : null;
 }
 
@@ -10333,10 +7827,7 @@ export async function getWaitStateById(id: string): Promise<WaitStateRow | null>
  * the same wait node finds its existing row instead of inserting a duplicate.
  */
 export async function getWaitStateByStepId(stepId: string): Promise<WaitStateRow | null> {
-  const row = await getDbClient().get<WaitStateRowDb>(
-    "SELECT * FROM wait_states WHERE workflowRunStepId = ?",
-    [stepId],
-  );
+  const row = await getStorage().repos.workflows.findWaitStateByStepId(stepId);
   return row ? rowToWaitState(row) : null;
 }
 
@@ -10346,17 +7837,7 @@ export async function getWaitStateByStepId(stepId: string): Promise<WaitStateRow
  *   - mode='event' with non-null `expiresAt <= now` (timeout branch).
  */
 export async function getDueWaitStates(): Promise<WaitStateRow[]> {
-  const rows = await getDbClient().query<WaitStateRowDb>(
-    `SELECT * FROM wait_states
-       WHERE status = 'pending'
-         AND (
-           (mode = 'time' AND wakeUpAt IS NOT NULL
-              AND wakeUpAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           OR
-           (mode = 'event' AND expiresAt IS NOT NULL
-              AND expiresAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         )`,
-  );
+  const rows = await getStorage().repos.workflows.listDueWaitStates();
   return rows.map(rowToWaitState);
 }
 
@@ -10365,11 +7846,7 @@ export async function getDueWaitStates(): Promise<WaitStateRow[]> {
  * by the wait-bus subscription system to register one listener per event name.
  */
 export async function getPendingEventWaitNames(): Promise<string[]> {
-  const rows = await getDbClient().query<{ eventName: string }>(
-    `SELECT DISTINCT eventName FROM wait_states
-       WHERE status = 'pending' AND eventName IS NOT NULL`,
-  );
-  return rows.map((r) => r.eventName);
+  return getStorage().repos.workflows.listPendingEventWaitNames();
 }
 
 /**
@@ -10381,19 +7858,7 @@ export async function getPendingWaitsByEvent(
   eventName: string,
   runId?: string,
 ): Promise<WaitStateRow[]> {
-  if (runId !== undefined) {
-    const rows = await getDbClient().query<WaitStateRowDb>(
-      `SELECT * FROM wait_states
-         WHERE status = 'pending' AND mode = 'event' AND eventName = ? AND workflowRunId = ?`,
-      [eventName, runId],
-    );
-    return rows.map(rowToWaitState);
-  }
-  const rows = await getDbClient().query<WaitStateRowDb>(
-    `SELECT * FROM wait_states
-       WHERE status = 'pending' AND mode = 'event' AND eventName = ?`,
-    [eventName],
-  );
+  const rows = await getStorage().repos.workflows.listPendingWaitsByEvent(eventName, runId);
   return rows.map(rowToWaitState);
 }
 
@@ -10407,18 +7872,11 @@ export async function resolveWaitState(
   data: { status: Exclude<WaitStateStatus, "pending">; firedPayload?: unknown },
 ): Promise<{ updated: boolean; row: WaitStateRow | null }> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<WaitStateRowDb>(
-    `UPDATE wait_states
-       SET status = ?, firedPayload = ?, resolvedAt = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING *`,
-    [
-      data.status,
-      data.firedPayload !== undefined ? JSON.stringify(data.firedPayload) : null,
-      now,
-      now,
-      id,
-    ],
+  const row = await getStorage().repos.workflows.resolveWaitState(
+    id,
+    data.status,
+    data.firedPayload !== undefined ? JSON.stringify(data.firedPayload) : null,
+    now,
   );
   return { updated: row !== null, row: row ? rowToWaitState(row) : null };
 }
@@ -10446,76 +7904,12 @@ export interface StuckWaitRun {
  * recovery avoids the up-to-5s startup latency window for stuck runs.
  */
 export async function getStuckWaitRuns(): Promise<StuckWaitRun[]> {
-  return getDbClient().query<StuckWaitRun>(
-    `SELECT
-        wr.id as runId,
-        wrs.id as stepId,
-        wrs.nodeId,
-        wr.workflowId,
-        ws.id as waitId,
-        ws.mode as waitMode,
-        ws.status as waitStatus,
-        ws.wakeUpAt as wakeUpAt,
-        ws.expiresAt as expiresAt,
-        ws.firedPayload as firedPayload
-      FROM workflow_runs wr
-      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting' AND wrs.nodeType = 'wait'
-      JOIN wait_states ws ON ws.workflowRunStepId = wrs.id
-      WHERE wr.status = 'waiting'
-        AND (
-          ws.status IN ('fired', 'timeout')
-          OR (
-            ws.status = 'pending'
-            AND (
-              (ws.wakeUpAt IS NOT NULL
-                AND ws.wakeUpAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-              OR
-              (ws.expiresAt IS NOT NULL
-                AND ws.expiresAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-          )
-        )`,
-  );
+  return getStorage().repos.workflows.listStuckWaitRuns();
 }
 
 // ============================================================================
 // Skills
 // ============================================================================
-
-type SkillRow = {
-  id: string;
-  name: string;
-  description: string;
-  content: string;
-  type: string;
-  scope: string;
-  ownerAgentId: string | null;
-  sourceUrl: string | null;
-  sourceRepo: string | null;
-  sourcePath: string | null;
-  sourceBranch: string;
-  sourceHash: string | null;
-  isComplex: number;
-  allowedTools: string | null;
-  model: string | null;
-  effort: string | null;
-  context: string | null;
-  agent: string | null;
-  disableModelInvocation: number;
-  userInvocable: number;
-  version: number;
-  isEnabled: number;
-  systemDefault: number;
-  invocationCount: number;
-  lastInvokedAt: string | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  created_by: string | null;
-  updated_by: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  lastFetchedAt: string | null;
-};
 
 function rowToSkill(row: SkillRow): Skill {
   return {
@@ -10572,13 +7966,6 @@ function rowToAgentSkill(row: AgentSkillRow): AgentSkill {
   };
 }
 
-type SkillWithInstallRow = SkillRow & {
-  isActive: number;
-  installedAt: string;
-  sourceRank?: number;
-  typeRank?: number;
-};
-
 function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
   return {
     ...rowToSkill(row),
@@ -10586,18 +7973,6 @@ function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
     installedAt: row.installedAt,
   };
 }
-
-type SkillFileRow = {
-  id: string;
-  skillId: string;
-  path: string;
-  content: string;
-  mimeType: string;
-  isBinary: number;
-  size: number | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
 
 function rowToSkillFile(row: SkillFileRow): SkillFile {
   return {
@@ -10741,45 +8116,36 @@ export async function createSkill(data: SkillInsert): Promise<Skill> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<SkillRow>(
-    `INSERT INTO skills (
-        id, name, description, content, type, scope, ownerAgentId,
-        sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
-        allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
-        version, isEnabled, systemDefault, createdAt, lastUpdatedAt,
-        createdByAgentId, updatedByAgentId, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.name,
-      data.description,
-      data.content,
-      data.type ?? "personal",
-      data.scope ?? "agent",
-      data.ownerAgentId ?? null,
-      data.sourceUrl ?? null,
-      data.sourceRepo ?? null,
-      data.sourcePath ?? null,
-      data.sourceBranch ?? "main",
-      data.sourceHash ?? null,
-      data.isComplex ? 1 : 0,
-      data.allowedTools ?? null,
-      data.model ?? null,
-      data.effort ?? null,
-      data.context ?? null,
-      data.agent ?? null,
-      data.disableModelInvocation ? 1 : 0,
-      data.userInvocable === false ? 0 : 1,
-      data.isEnabled === false ? 0 : 1,
-      data.systemDefault ? 1 : 0,
-      now,
-      now,
-      data.createdByAgentId ?? null,
-      data.createdByAgentId ?? null,
-      data.createdBy ?? null,
-      data.createdBy ?? null,
-    ],
-  );
+  const row = await getStorage().repos.skills.insertSkill({
+    id,
+    name: data.name,
+    description: data.description,
+    content: data.content,
+    type: data.type ?? "personal",
+    scope: data.scope ?? "agent",
+    ownerAgentId: data.ownerAgentId ?? null,
+    sourceUrl: data.sourceUrl ?? null,
+    sourceRepo: data.sourceRepo ?? null,
+    sourcePath: data.sourcePath ?? null,
+    sourceBranch: data.sourceBranch ?? "main",
+    sourceHash: data.sourceHash ?? null,
+    isComplex: !!data.isComplex,
+    allowedTools: data.allowedTools ?? null,
+    model: data.model ?? null,
+    effort: data.effort ?? null,
+    context: data.context ?? null,
+    agent: data.agent ?? null,
+    disableModelInvocation: !!data.disableModelInvocation,
+    userInvocable: data.userInvocable !== false,
+    isEnabled: data.isEnabled !== false,
+    systemDefault: !!data.systemDefault,
+    createdAt: now,
+    lastUpdatedAt: now,
+    createdByAgentId: data.createdByAgentId ?? null,
+    updatedByAgentId: data.createdByAgentId ?? null,
+    created_by: data.createdBy ?? null,
+    updated_by: data.createdBy ?? null,
+  });
 
   if (!row) throw new Error("Failed to create skill");
   return rowToSkill(row);
@@ -10816,127 +8182,48 @@ export async function updateSkill(
   if (!existing) return null;
 
   const now = new Date().toISOString();
-  const sets: string[] = ["lastUpdatedAt = ?"];
-  const params: (string | number | null)[] = [now];
-
-  if (updates.name !== undefined) {
-    sets.push("name = ?");
-    params.push(updates.name);
-  }
-  if (updates.description !== undefined) {
-    sets.push("description = ?");
-    params.push(updates.description);
-  }
-  if (updates.content !== undefined) {
-    sets.push("content = ?");
-    params.push(updates.content);
-  }
-  if (updates.scope !== undefined) {
-    sets.push("scope = ?");
-    params.push(updates.scope);
-  }
-  if (updates.isEnabled !== undefined) {
-    sets.push("isEnabled = ?");
-    params.push(updates.isEnabled ? 1 : 0);
-  }
-  if (updates.systemDefault !== undefined) {
-    sets.push("systemDefault = ?");
-    params.push(updates.systemDefault ? 1 : 0);
-  }
-  if (updates.allowedTools !== undefined) {
-    sets.push("allowedTools = ?");
-    params.push(updates.allowedTools ?? null);
-  }
-  if (updates.model !== undefined) {
-    sets.push("model = ?");
-    params.push(updates.model ?? null);
-  }
-  if (updates.effort !== undefined) {
-    sets.push("effort = ?");
-    params.push(updates.effort ?? null);
-  }
-  if (updates.context !== undefined) {
-    sets.push("context = ?");
-    params.push(updates.context ?? null);
-  }
-  if (updates.agent !== undefined) {
-    sets.push("agent = ?");
-    params.push(updates.agent ?? null);
-  }
-  if (updates.disableModelInvocation !== undefined) {
-    sets.push("disableModelInvocation = ?");
-    params.push(updates.disableModelInvocation ? 1 : 0);
-  }
-  if (updates.userInvocable !== undefined) {
-    sets.push("userInvocable = ?");
-    params.push(updates.userInvocable ? 1 : 0);
-  }
-  if (updates.sourceUrl !== undefined) {
-    sets.push("sourceUrl = ?");
-    params.push(updates.sourceUrl ?? null);
-  }
-  if (updates.sourceRepo !== undefined) {
-    sets.push("sourceRepo = ?");
-    params.push(updates.sourceRepo ?? null);
-  }
-  if (updates.sourcePath !== undefined) {
-    sets.push("sourcePath = ?");
-    params.push(updates.sourcePath ?? null);
-  }
-  if (updates.sourceBranch !== undefined) {
-    sets.push("sourceBranch = ?");
-    params.push(updates.sourceBranch ?? "main");
-  }
-  if (updates.sourceHash !== undefined) {
-    sets.push("sourceHash = ?");
-    params.push(updates.sourceHash ?? null);
-  }
-  if (updates.isComplex !== undefined) {
-    sets.push("isComplex = ?");
-    params.push(updates.isComplex ? 1 : 0);
-  }
-  if (updates.lastFetchedAt !== undefined) {
-    sets.push("lastFetchedAt = ?");
-    params.push(updates.lastFetchedAt);
-  }
-  if (updates.updatedBy !== undefined) {
-    sets.push("updated_by = ?");
-    params.push(updates.updatedBy);
-  }
-  if (updates.updatedByAgentId !== undefined) {
-    sets.push("updatedByAgentId = ?");
-    params.push(updates.updatedByAgentId);
-  }
-
-  // Bump version when content changes
-  if (updates.content !== undefined) {
-    sets.push("version = version + 1");
-  }
-
-  params.push(id);
-  const row = await getDbClient().get<SkillRow>(
-    `UPDATE skills SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  const nullable = (value: string | null | undefined) =>
+    value === undefined ? undefined : (value ?? null);
+  // Bumps the version when content changes.
+  const row = await getStorage().repos.skills.updateSkill(
+    id,
+    {
+      name: updates.name,
+      description: updates.description,
+      content: updates.content,
+      scope: updates.scope,
+      isEnabled: updates.isEnabled,
+      systemDefault: updates.systemDefault,
+      allowedTools: nullable(updates.allowedTools),
+      model: nullable(updates.model),
+      effort: nullable(updates.effort),
+      context: nullable(updates.context),
+      agent: nullable(updates.agent),
+      disableModelInvocation: updates.disableModelInvocation,
+      userInvocable: updates.userInvocable,
+      sourceUrl: nullable(updates.sourceUrl),
+      sourceRepo: nullable(updates.sourceRepo),
+      sourcePath: nullable(updates.sourcePath),
+      sourceBranch:
+        updates.sourceBranch === undefined ? undefined : (updates.sourceBranch ?? "main"),
+      sourceHash: nullable(updates.sourceHash),
+      isComplex: updates.isComplex,
+      lastFetchedAt: updates.lastFetchedAt,
+      updated_by: updates.updatedBy,
+      updatedByAgentId: updates.updatedByAgentId,
+    },
+    now,
   );
 
   return row ? rowToSkill(row) : null;
 }
 
 async function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
-  await getDbClient().run(
-    "UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?",
-    [now, skillId],
-  );
+  await getStorage().repos.skills.bumpSkillVersion(skillId, now);
 }
 
 export async function listSkillFileManifest(skillId: string): Promise<SkillFileManifestEntry[]> {
-  const rows = await getDbClient().query<SkillFileRow>(
-    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-       FROM skill_files
-       WHERE skillId = ?
-       ORDER BY path ASC`,
-    [skillId],
-  );
+  const rows = await getStorage().repos.skills.listSkillFiles(skillId);
   return rows.map((row) => {
     const { content: _content, ...manifest } = rowToSkillFile(row);
     return manifest;
@@ -10944,24 +8231,13 @@ export async function listSkillFileManifest(skillId: string): Promise<SkillFileM
 }
 
 export async function getSkillFiles(skillId: string): Promise<SkillFile[]> {
-  const rows = await getDbClient().query<SkillFileRow>(
-    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-       FROM skill_files
-       WHERE skillId = ?
-       ORDER BY path ASC`,
-    [skillId],
-  );
+  const rows = await getStorage().repos.skills.listSkillFiles(skillId);
   return rows.map(rowToSkillFile);
 }
 
 export async function getSkillFile(skillId: string, path: string): Promise<SkillFile | null> {
   const normalizedPath = normalizeSkillFilePath(path);
-  const row = await getDbClient().get<SkillFileRow>(
-    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-       FROM skill_files
-       WHERE skillId = ? AND path = ?`,
-    [skillId, normalizedPath],
-  );
+  const row = await getStorage().repos.skills.findSkillFile(skillId, normalizedPath);
   return row ? rowToSkillFile(row) : null;
 }
 
@@ -10985,29 +8261,17 @@ async function upsertSkillFileUnchecked(
   now: string,
   bumpVersion: boolean,
 ): Promise<SkillFile> {
-  const row = await getDbClient().get<SkillFileRow>(
-    `INSERT INTO skill_files (
-        id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(skillId, path) DO UPDATE SET
-        content = excluded.content,
-        mimeType = excluded.mimeType,
-        isBinary = excluded.isBinary,
-        size = excluded.size,
-        lastUpdatedAt = excluded.lastUpdatedAt
-      RETURNING *`,
-    [
-      id,
-      skillId,
-      payload.path,
-      payload.content,
-      payload.mimeType,
-      payload.isBinary ? 1 : 0,
-      payload.size,
-      now,
-      now,
-    ],
-  );
+  const row = await getStorage().repos.skills.upsertSkillFile({
+    id,
+    skillId,
+    path: payload.path,
+    content: payload.content,
+    mimeType: payload.mimeType,
+    isBinary: !!payload.isBinary,
+    size: payload.size,
+    createdAt: now,
+    lastUpdatedAt: now,
+  });
 
   if (!row) throw new Error("Failed to upsert skill file");
   if (bumpVersion) await bumpSkillVersion(skillId, now);
@@ -11023,7 +8287,7 @@ export async function upsertSkillFiles(
   await assertSkillFileLimits(skillId, normalized, false);
 
   const now = new Date().toISOString();
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const rows: SkillFile[] = [];
     for (const file of normalized) {
       rows.push(await upsertSkillFileUnchecked(skillId, file, crypto.randomUUID(), now, false));
@@ -11035,11 +8299,8 @@ export async function upsertSkillFiles(
 
 export async function deleteSkillFile(skillId: string, path: string): Promise<boolean> {
   const normalizedPath = normalizeSkillFilePath(path);
-  const result = await getDbClient().run("DELETE FROM skill_files WHERE skillId = ? AND path = ?", [
-    skillId,
-    normalizedPath,
-  ]);
-  if (result.changes > 0) {
+  const changes = await getStorage().repos.skills.deleteSkillFile(skillId, normalizedPath);
+  if (changes > 0) {
     await bumpSkillVersion(skillId);
     return true;
   }
@@ -11047,12 +8308,11 @@ export async function deleteSkillFile(skillId: string, path: string): Promise<bo
 }
 
 export async function deleteSkill(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM skills WHERE id = ?", [id]);
-  return result.changes > 0;
+  return (await getStorage().repos.skills.deleteSkill(id)) > 0;
 }
 
 export async function getSkillById(id: string): Promise<Skill | null> {
-  const row = await getDbClient().get<SkillRow>("SELECT * FROM skills WHERE id = ?", [id]);
+  const row = await getStorage().repos.skills.findSkillById(id);
   return row ? rowToSkill(row) : null;
 }
 
@@ -11061,10 +8321,7 @@ export async function getSkillByName(
   scope: SkillScope,
   ownerAgentId?: string,
 ): Promise<Skill | null> {
-  const row = await getDbClient().get<SkillRow>(
-    "SELECT * FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
-    [name, scope, ownerAgentId ?? ""],
-  );
+  const row = await getStorage().repos.skills.findSkillByName(name, scope, ownerAgentId ?? "");
   return row ? rowToSkill(row) : null;
 }
 
@@ -11078,49 +8335,16 @@ export interface SkillFilters {
   includeContent?: boolean;
 }
 
-/**
- * Explicit column list used when `includeContent: false` — selects every
- * skill column except the heavy `content` (the full SKILL.md, avg ~10 KB),
- * which is replaced with an empty string so the row still satisfies `Skill`.
- */
-const SKILL_SLIM_COLUMNS =
-  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, invocationCount, lastInvokedAt, createdByAgentId, updatedByAgentId, created_by, updated_by, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
-
 export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
-  const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";
-  let query = `SELECT ${columns} FROM skills WHERE 1=1`;
-  const params: (string | number)[] = [];
-
-  if (filters?.type) {
-    query += " AND type = ?";
-    params.push(filters.type);
-  }
-  if (filters?.scope) {
-    query += " AND scope = ?";
-    params.push(filters.scope);
-  }
-  if (filters?.ownerAgentId) {
-    query += " AND ownerAgentId = ?";
-    params.push(filters.ownerAgentId);
-  }
-  if (filters?.isEnabled !== undefined) {
-    query += " AND isEnabled = ?";
-    params.push(filters.isEnabled ? 1 : 0);
-  }
-  if (filters?.search) {
-    query += " AND (name LIKE ? OR description LIKE ?)";
-    const term = `%${filters.search}%`;
-    params.push(term, term);
-  }
-
-  query += " ORDER BY name ASC";
-
-  if (filters?.limit) {
-    query += " LIMIT ?";
-    params.push(filters.limit);
-  }
-
-  const rows = await getDbClient().query<SkillRow>(query, params);
+  const rows = await getStorage().repos.skills.listSkills({
+    type: filters?.type,
+    scope: filters?.scope,
+    ownerAgentId: filters?.ownerAgentId,
+    isEnabled: filters?.isEnabled,
+    search: filters?.search,
+    limit: filters?.limit,
+    slim: filters?.includeContent === false,
+  });
   return rows.map(rowToSkill);
 }
 
@@ -11142,15 +8366,11 @@ export async function searchSkills(
   if (ranked.length > 0) return ranked.map(rowToSkill);
 
   const tokens = query.split(/\s+/).filter(Boolean);
-  const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
-  const searchClauses = tokens.map(() => "(name LIKE ? OR description LIKE ? OR content LIKE ?)");
-  const params = tokens.flatMap((token) => {
-    const term = `%${token}%`;
-    return [term, term, term];
-  });
-  const rows = await getDbClient().query<SkillRow>(
-    `SELECT ${columns} FROM skills WHERE ${[...searchClauses, "isEnabled = 1"].join(" AND ")} ORDER BY lower(name) = lower(?) DESC, name ASC LIMIT ?`,
-    [...params, query.trim(), limit],
+  const rows = await getStorage().repos.skills.searchSkillsBySubstring(
+    tokens,
+    query.trim(),
+    limit,
+    includeContent === false,
   );
   return rows.map(rowToSkill);
 }
@@ -11159,22 +8379,14 @@ export async function installSkill(agentId: string, skillId: string): Promise<Ag
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<AgentSkillRow>(
-    `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(agentId, skillId) DO UPDATE SET isActive = 1
-       RETURNING *`,
-    [id, agentId, skillId, now],
-  );
+  const row = await getStorage().repos.agents.installSkill(id, agentId, skillId, now);
 
   if (!row) throw new Error("Failed to install skill");
   return rowToAgentSkill(row);
 }
 
 export async function getSystemDefaultSkills(): Promise<Skill[]> {
-  const rows = await getDbClient().query<SkillRow>(
-    "SELECT * FROM skills WHERE systemDefault = 1 AND isEnabled = 1 ORDER BY name ASC",
-  );
+  const rows = await getStorage().repos.skills.listSystemDefaultSkills();
   return rows.map(rowToSkill);
 }
 
@@ -11188,38 +8400,14 @@ export async function installSystemDefaultSkillsForAgent(agentId: string): Promi
 }
 
 export async function uninstallSkill(agentId: string, skillId: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM agent_skills WHERE agentId = ? AND skillId = ?",
-    [agentId, skillId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.uninstallSkill(agentId, skillId)) > 0;
 }
 
 export async function getAgentSkills(
   agentId: string,
   activeOnly = true,
 ): Promise<SkillWithInstallInfo[]> {
-  const query = `
-    SELECT s.*, as2.isActive, as2.installedAt, 0 as sourceRank,
-      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
-    FROM skills s
-    JOIN agent_skills as2 ON s.id = as2.skillId
-    WHERE as2.agentId = ?
-      ${activeOnly ? "AND as2.isActive = 1" : ""}
-      AND s.isEnabled = 1
-    UNION ALL
-    SELECT s.*, 1 as isActive, s.createdAt as installedAt, 1 as sourceRank,
-      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END as typeRank
-    FROM skills s
-    WHERE (s.systemDefault = 1 OR s.scope = 'swarm')
-      AND s.isEnabled = 1
-    ORDER BY
-      sourceRank,
-      typeRank,
-      name
-  `;
-
-  const rows = await getDbClient().query<SkillWithInstallRow>(query, [agentId]);
+  const rows = await getStorage().repos.skills.listAgentSkills(agentId, activeOnly);
 
   // Deduplicate by name — personal skills take precedence (already sorted first)
   const seen = new Set<string>();
@@ -11237,35 +8425,10 @@ export async function toggleAgentSkill(
   skillId: string,
   isActive: boolean,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "UPDATE agent_skills SET isActive = ? WHERE agentId = ? AND skillId = ?",
-    [isActive ? 1 : 0, agentId, skillId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.setSkillActive(agentId, skillId, isActive)) > 0;
 }
 
 // ── MCP Servers ──────────────────────────────────────────────────────────
-
-type McpServerRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  scope: string;
-  ownerAgentId: string | null;
-  transport: string;
-  command: string | null;
-  args: string | null;
-  url: string | null;
-  headers: string | null;
-  envConfigKeys: string | null;
-  headerConfigKeys: string | null;
-  extraAuthorizeParams: string | null;
-  authMethod: string | null;
-  isEnabled: number;
-  version: number;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
 
 type AgentMcpServerRow = {
   id: string;
@@ -11274,8 +8437,6 @@ type AgentMcpServerRow = {
   isActive: number;
   installedAt: string;
 };
-
-type McpServerWithInstallRow = McpServerRow & { isActive: number; installedAt: string };
 
 function rowToMcpServer(row: McpServerRow): McpServer {
   return {
@@ -11337,31 +8498,23 @@ export async function createMcpServer(data: McpServerInsert): Promise<McpServer>
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<McpServerRow>(
-    `INSERT INTO mcp_servers (
-        id, name, description, scope, ownerAgentId, transport,
-        command, args, url, headers,
-        envConfigKeys, headerConfigKeys, extraAuthorizeParams,
-        isEnabled, version, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
-    [
-      id,
-      data.name,
-      data.description ?? null,
-      data.scope ?? "agent",
-      data.ownerAgentId ?? null,
-      data.transport,
-      data.command ?? null,
-      data.args ?? null,
-      data.url ?? null,
-      data.headers ?? null,
-      data.envConfigKeys ?? null,
-      data.headerConfigKeys ?? null,
-      data.extraAuthorizeParams ?? null,
-      now,
-      now,
-    ],
-  );
+  const row = await getStorage().repos.mcpServers.insertMcpServer({
+    id,
+    name: data.name,
+    description: data.description ?? null,
+    scope: data.scope ?? "agent",
+    ownerAgentId: data.ownerAgentId ?? null,
+    transport: data.transport,
+    command: data.command ?? null,
+    args: data.args ?? null,
+    url: data.url ?? null,
+    headers: data.headers ?? null,
+    envConfigKeys: data.envConfigKeys ?? null,
+    headerConfigKeys: data.headerConfigKeys ?? null,
+    extraAuthorizeParams: data.extraAuthorizeParams ?? null,
+    createdAt: now,
+    lastUpdatedAt: now,
+  });
 
   if (!row) throw new Error("Failed to create MCP server");
   return rowToMcpServer(row);
@@ -11370,10 +8523,8 @@ export async function createMcpServer(data: McpServerInsert): Promise<McpServer>
 /** Shared by HTTP and MCP-tool creation paths so each new server emits once. */
 export async function emitMcpServerConnectedTelemetry(): Promise<void> {
   try {
-    const row = await getDbClient().get<{ count: number }>(
-      "SELECT COUNT(*) as count FROM mcp_servers",
-    );
-    emitIntegrationConnected("other", undefined, row?.count === 1);
+    const count = await getStorage().repos.mcpServers.countMcpServers();
+    emitIntegrationConnected("other", undefined, count === 1);
   } catch {
     // Telemetry must never break MCP server creation.
   }
@@ -11390,85 +8541,29 @@ export async function updateMcpServer(
   if (!existing) return null;
 
   const now = new Date().toISOString();
-  const sets: string[] = ["lastUpdatedAt = ?"];
-  const params: (string | number | null)[] = [now];
-
-  if (updates.name !== undefined) {
-    sets.push("name = ?");
-    params.push(updates.name);
-  }
-  if (updates.description !== undefined) {
-    sets.push("description = ?");
-    params.push(updates.description ?? null);
-  }
-  if (updates.scope !== undefined) {
-    sets.push("scope = ?");
-    params.push(updates.scope);
-  }
-  if (updates.transport !== undefined) {
-    sets.push("transport = ?");
-    params.push(updates.transport);
-  }
-  if (updates.command !== undefined) {
-    sets.push("command = ?");
-    params.push(updates.command ?? null);
-  }
-  if (updates.args !== undefined) {
-    sets.push("args = ?");
-    params.push(updates.args ?? null);
-  }
-  if (updates.url !== undefined) {
-    sets.push("url = ?");
-    params.push(updates.url ?? null);
-  }
-  if (updates.headers !== undefined) {
-    sets.push("headers = ?");
-    params.push(updates.headers ?? null);
-  }
-  if (updates.envConfigKeys !== undefined) {
-    sets.push("envConfigKeys = ?");
-    params.push(updates.envConfigKeys ?? null);
-  }
-  if (updates.headerConfigKeys !== undefined) {
-    sets.push("headerConfigKeys = ?");
-    params.push(updates.headerConfigKeys ?? null);
-  }
-  if (updates.extraAuthorizeParams !== undefined) {
-    sets.push("extraAuthorizeParams = ?");
-    params.push(updates.extraAuthorizeParams ?? null);
-  }
-  if (updates.isEnabled !== undefined) {
-    sets.push("isEnabled = ?");
-    params.push(updates.isEnabled ? 1 : 0);
-  }
-  if (updates.ownerAgentId !== undefined) {
-    sets.push("ownerAgentId = ?");
-    params.push(updates.ownerAgentId ?? null);
-  }
-  if (updates.authMethod !== undefined) {
-    sets.push("authMethod = ?");
-    params.push(updates.authMethod);
-  }
-
-  // Bump version on config changes
-  const configFields = [
-    "command",
-    "args",
-    "url",
-    "headers",
-    "envConfigKeys",
-    "headerConfigKeys",
-    "extraAuthorizeParams",
-    "transport",
-  ];
-  if (configFields.some((f) => (updates as Record<string, unknown>)[f] !== undefined)) {
-    sets.push("version = version + 1");
-  }
-
-  params.push(id);
-  const row = await getDbClient().get<McpServerRow>(
-    `UPDATE mcp_servers SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    params,
+  const nullable = (value: string | null | undefined) =>
+    value === undefined ? undefined : (value ?? null);
+  // Config changes (command, args, url, headers, env/header keys, authorize
+  // params, transport) bump the version.
+  const row = await getStorage().repos.mcpServers.updateMcpServer(
+    id,
+    {
+      name: updates.name,
+      description: nullable(updates.description),
+      scope: updates.scope,
+      transport: updates.transport,
+      command: nullable(updates.command),
+      args: nullable(updates.args),
+      url: nullable(updates.url),
+      headers: nullable(updates.headers),
+      envConfigKeys: nullable(updates.envConfigKeys),
+      headerConfigKeys: nullable(updates.headerConfigKeys),
+      extraAuthorizeParams: nullable(updates.extraAuthorizeParams),
+      isEnabled: updates.isEnabled,
+      ownerAgentId: nullable(updates.ownerAgentId),
+      authMethod: updates.authMethod,
+    },
+    now,
   );
 
   return row ? rowToMcpServer(row) : null;
@@ -11480,27 +8575,21 @@ export type DeleteMcpServerResult = {
 };
 
 export async function deleteMcpServer(id: string): Promise<DeleteMcpServerResult> {
-  const existing = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM mcp_servers WHERE id = ?",
-    [id],
-  );
+  const storage = getStorage();
+  const existing = await storage.repos.mcpServers.findMcpServerById(id);
   if (!existing) return { deleted: false, deletedScriptConnectionCount: 0 };
 
-  return await getDbClient().transaction(async (tx) => {
-    const deletedConnections = await tx.run(
-      "DELETE FROM script_connections WHERE mcp_server_id = ?",
-      [id],
-    );
-    const deletedServer = await tx.run("DELETE FROM mcp_servers WHERE id = ?", [id]);
+  return await storage.transaction(async () => {
+    const deleted = await storage.repos.mcpServers.deleteMcpServerCascade(id);
     return {
-      deleted: deletedServer.changes > 0,
-      deletedScriptConnectionCount: deletedConnections.changes,
+      deleted: deleted.servers > 0,
+      deletedScriptConnectionCount: deleted.scriptConnections,
     };
   });
 }
 
 export async function getMcpServerById(id: string): Promise<McpServer | null> {
-  const row = await getDbClient().get<McpServerRow>("SELECT * FROM mcp_servers WHERE id = ?", [id]);
+  const row = await getStorage().repos.mcpServers.findMcpServerById(id);
   return row ? rowToMcpServer(row) : null;
 }
 
@@ -11509,9 +8598,10 @@ export async function getMcpServerByName(
   scope: McpServerScope,
   ownerAgentId: string | null,
 ): Promise<McpServer | null> {
-  const row = await getDbClient().get<McpServerRow>(
-    "SELECT * FROM mcp_servers WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
-    [name, scope, ownerAgentId ?? ""],
+  const row = await getStorage().repos.mcpServers.findMcpServerByName(
+    name,
+    scope,
+    ownerAgentId ?? "",
   );
   return row ? rowToMcpServer(row) : null;
 }
@@ -11525,34 +8615,7 @@ export interface McpServerFilters {
 }
 
 export async function listMcpServers(filters?: McpServerFilters): Promise<McpServer[]> {
-  let query = "SELECT * FROM mcp_servers WHERE 1=1";
-  const params: (string | number)[] = [];
-
-  if (filters?.scope) {
-    query += " AND scope = ?";
-    params.push(filters.scope);
-  }
-  if (filters?.ownerAgentId) {
-    query += " AND ownerAgentId = ?";
-    params.push(filters.ownerAgentId);
-  }
-  if (filters?.transport) {
-    query += " AND transport = ?";
-    params.push(filters.transport);
-  }
-  if (filters?.isEnabled !== undefined) {
-    query += " AND isEnabled = ?";
-    params.push(filters.isEnabled ? 1 : 0);
-  }
-  if (filters?.search) {
-    query += " AND (name LIKE ? OR description LIKE ?)";
-    const term = `%${filters.search}%`;
-    params.push(term, term);
-  }
-
-  query += " ORDER BY name ASC";
-
-  const rows = await getDbClient().query<McpServerRow>(query, params);
+  const rows = await getStorage().repos.mcpServers.listMcpServers(filters ?? {});
   return rows.map(rowToMcpServer);
 }
 
@@ -11563,65 +8626,27 @@ export async function installMcpServer(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = await getDbClient().get<AgentMcpServerRow>(
-    `INSERT INTO agent_mcp_servers (id, agentId, mcpServerId, isActive, installedAt)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(agentId, mcpServerId) DO UPDATE SET isActive = 1
-       RETURNING *`,
-    [id, agentId, mcpServerId, now],
-  );
+  const row = await getStorage().repos.agents.installMcpServer(id, agentId, mcpServerId, now);
 
   if (!row) throw new Error("Failed to install MCP server");
   return rowToAgentMcpServer(row);
 }
 
 export async function uninstallMcpServer(agentId: string, mcpServerId: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?",
-    [agentId, mcpServerId],
-  );
-  return result.changes > 0;
+  return (await getStorage().repos.agents.uninstallMcpServer(agentId, mcpServerId)) > 0;
 }
 
 export async function getAgentMcpServers(
   agentId: string,
   activeOnly = true,
 ): Promise<McpServerWithInstallInfo[]> {
-  const query = `
-    SELECT ms.*, ams.isActive, ams.installedAt
-    FROM mcp_servers ms
-    JOIN agent_mcp_servers ams ON ms.id = ams.mcpServerId
-    WHERE ams.agentId = ?
-      ${activeOnly ? "AND ams.isActive = 1" : ""}
-      AND ms.isEnabled = 1
-    ORDER BY ms.name ASC
-  `;
-
-  const rows = await getDbClient().query<McpServerWithInstallRow>(query, [agentId]);
+  const rows = await getStorage().repos.mcpServers.listAgentMcpServers(agentId, activeOnly);
   return rows.map(rowToMcpServerWithInstall);
 }
 
 // ============================================================================
 // Context Usage Snapshots
 // ============================================================================
-
-type ContextSnapshotRow = {
-  id: string;
-  taskId: string;
-  agentId: string;
-  sessionId: string;
-  contextUsedTokens: number | null;
-  contextTotalTokens: number | null;
-  contextPercent: number | null;
-  eventType: ContextSnapshotEventType;
-  compactTrigger: string | null;
-  preCompactTokens: number | null;
-  cumulativeInputTokens: number;
-  cumulativeOutputTokens: number;
-  // Migration 063 — see ContextFormulaSchema in src/types.ts for the value set.
-  contextFormula: string | null;
-  createdAt: string;
-};
 
 function rowToContextSnapshot(row: ContextSnapshotRow): ContextSnapshot {
   return {
@@ -11632,7 +8657,7 @@ function rowToContextSnapshot(row: ContextSnapshotRow): ContextSnapshot {
     contextUsedTokens: row.contextUsedTokens ?? undefined,
     contextTotalTokens: row.contextTotalTokens ?? undefined,
     contextPercent: row.contextPercent ?? undefined,
-    eventType: row.eventType,
+    eventType: row.eventType as ContextSnapshotEventType,
     compactTrigger: (row.compactTrigger as "auto" | "manual" | "auto-inferred" | null) ?? undefined,
     preCompactTokens: row.preCompactTokens ?? undefined,
     cumulativeInputTokens: row.cumulativeInputTokens,
@@ -11663,68 +8688,34 @@ export async function createContextSnapshot(
 ): Promise<ContextSnapshot> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const client = getDbClient();
+  const tasks = getStorage().repos.tasks;
 
-  await client.run(
-    `INSERT INTO task_context_snapshots (id, taskId, agentId, sessionId, contextUsedTokens, contextTotalTokens, contextPercent, eventType, compactTrigger, preCompactTokens, cumulativeInputTokens, cumulativeOutputTokens, contextFormula, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      input.taskId,
-      input.agentId,
-      input.sessionId,
-      input.contextUsedTokens ?? null,
-      input.contextTotalTokens ?? null,
-      input.contextPercent ?? null,
-      input.eventType,
-      input.compactTrigger ?? null,
-      input.preCompactTokens ?? null,
-      input.cumulativeInputTokens ?? 0,
-      input.cumulativeOutputTokens ?? 0,
-      input.contextFormula ?? null,
-      now,
-    ],
-  );
+  await tasks.insertContextSnapshot({
+    id,
+    taskId: input.taskId,
+    agentId: input.agentId,
+    sessionId: input.sessionId,
+    contextUsedTokens: input.contextUsedTokens ?? null,
+    contextTotalTokens: input.contextTotalTokens ?? null,
+    contextPercent: input.contextPercent ?? null,
+    eventType: input.eventType,
+    compactTrigger: input.compactTrigger ?? null,
+    preCompactTokens: input.preCompactTokens ?? null,
+    cumulativeInputTokens: input.cumulativeInputTokens ?? 0,
+    cumulativeOutputTokens: input.cumulativeOutputTokens ?? 0,
+    contextFormula: input.contextFormula ?? null,
+    createdAt: now,
+  });
 
-  // Update aggregate columns on agent_tasks
-  if (input.contextPercent != null) {
-    await client.run(
-      `UPDATE agent_tasks SET peakContextPercent = MAX(COALESCE(peakContextPercent, 0), ?)
-         WHERE id = ?`,
-      [input.contextPercent, input.taskId],
-    );
-  }
-
-  // Migration 063: peakContextTokens is monotonic-max across snapshots, not a
-  // rolling latest. Mirrors Claude Code's status-line "peak context" semantic.
-  if (input.contextUsedTokens != null) {
-    await client.run(
-      `UPDATE agent_tasks
-         SET peakContextTokens = MAX(COALESCE(peakContextTokens, 0), ?)
-         WHERE id = ?`,
-      [input.contextUsedTokens, input.taskId],
-    );
-  }
-
-  if (input.eventType === "compaction") {
-    await client.run(
-      "UPDATE agent_tasks SET compactionCount = COALESCE(compactionCount, 0) + 1 WHERE id = ?",
-      [input.taskId],
-    );
-  }
-
-  // Phase 10: set contextWindowSize on the FIRST snapshot that carries one
-  // (was previously gated on eventType === 'completion', meaning the UI saw
-  // NULL throughout running tasks). Subsequent snapshots leave it alone — the
-  // window doesn't change mid-session.
-  if (input.contextTotalTokens != null) {
-    await client.run(
-      `UPDATE agent_tasks
-         SET contextWindowSize = ?
-         WHERE id = ? AND contextWindowSize IS NULL`,
-      [input.contextTotalTokens, input.taskId],
-    );
-  }
+  // Update aggregate columns on agent_tasks. Migration 063: peakContextTokens is
+  // monotonic-max across snapshots (Claude Code's status-line "peak context").
+  // contextWindowSize is set by the FIRST snapshot that carries one (Phase 10).
+  await tasks.applyContextSnapshotToTask(input.taskId, {
+    contextPercent: input.contextPercent ?? null,
+    contextUsedTokens: input.contextUsedTokens ?? null,
+    contextTotalTokens: input.contextTotalTokens ?? null,
+    compaction: input.eventType === "compaction",
+  });
 
   return {
     id,
@@ -11748,10 +8739,7 @@ export async function getContextSnapshotsByTaskId(
   taskId: string,
   limit = 500,
 ): Promise<ContextSnapshot[]> {
-  const rows = await getDbClient().query<ContextSnapshotRow>(
-    "SELECT * FROM task_context_snapshots WHERE taskId = ? ORDER BY createdAt ASC LIMIT ?",
-    [taskId, limit],
-  );
+  const rows = await getStorage().repos.tasks.listContextSnapshots({ taskId }, limit);
   return rows.map(rowToContextSnapshot);
 }
 
@@ -11759,10 +8747,7 @@ export async function getContextSnapshotsBySessionId(
   sessionId: string,
   limit = 500,
 ): Promise<ContextSnapshot[]> {
-  const rows = await getDbClient().query<ContextSnapshotRow>(
-    "SELECT * FROM task_context_snapshots WHERE sessionId = ? ORDER BY createdAt ASC LIMIT ?",
-    [sessionId, limit],
-  );
+  const rows = await getStorage().repos.tasks.listContextSnapshots({ sessionId }, limit);
   return rows.map(rowToContextSnapshot);
 }
 
@@ -11777,17 +8762,14 @@ export interface ContextSummary {
 
 export async function getContextSummaryByTaskId(taskId: string): Promise<ContextSummary> {
   const task = await getTaskById(taskId);
-  const countRow = await getDbClient().get<{ cnt: number }>(
-    "SELECT COUNT(*) as cnt FROM task_context_snapshots WHERE taskId = ?",
-    [taskId],
-  );
+  const snapshotCount = await getStorage().repos.tasks.countContextSnapshots(taskId);
 
   return {
     compactionCount: task?.compactionCount ?? 0,
     peakContextPercent: task?.peakContextPercent ?? null,
     peakContextTokens: task?.peakContextTokens ?? null,
     contextWindowSize: task?.contextWindowSize ?? null,
-    snapshotCount: countRow?.cnt ?? 0,
+    snapshotCount,
   };
 }
 
@@ -11832,12 +8814,6 @@ export interface ApiKeyStatus {
   updatedAt: string;
 }
 
-type ApiKeyStatusRow = Omit<ApiKeyStatus, "rateLimitWindows" | "providerAccount" | "spendCap"> & {
-  rateLimitWindows: string | null;
-  providerAccount: string | null;
-  spendCap: string | null;
-};
-
 function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitWindowTelemetry {
   if (!value) return {};
   try {
@@ -11854,6 +8830,7 @@ function parseRateLimitWindowsJson(value: string | null | undefined): RateLimitW
 function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
   return {
     ...row,
+    planSource: row.planSource as PlanSource | null,
     rateLimitWindows: parseRateLimitWindowsJson(row.rateLimitWindows),
     providerAccount: parseProviderAccount(row.providerAccount),
     spendCap: row.spendCap ? (JSON.parse(row.spendCap) as SpendCap) : null,
@@ -11921,39 +8898,17 @@ export async function getAvailableKeyIndices(
 ): Promise<AvailableKeyIndicesResult> {
   const now = new Date().toISOString();
   const nowMs = Date.now();
-  const client = getDbClient();
+  const keys = getStorage().repos.config;
   const effectiveScopeId = scopeId ?? "";
   const suffixes = keySuffixes?.length ? keySuffixes : undefined;
   const rowFilter = suffixes
-    ? `keyType = ? AND keySuffix IN (${suffixes.map(() => "?").join(", ")})`
-    : "keyType = ? AND scope = ? AND scopeId = ?";
-  const rowParams = suffixes ? [keyType, ...suffixes] : [keyType, scope, effectiveScopeId];
+    ? { keyType, suffixes }
+    : { keyType, scope, scopeId: effectiveScopeId };
 
   // Auto-clear expired rate limits. Never an auth bench: only `clearAuthBench` lifts it.
-  await client.run(
-    `UPDATE api_key_status
-     SET status = 'available', rateLimitedUntil = NULL, spendCap = NULL, updatedAt = ?
-     WHERE ${rowFilter}
-       AND status = 'rate_limited' AND rateLimitedUntil <= ? AND consecutiveAuthFailures < ?`,
-    [now, ...rowParams, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD],
-  );
+  await keys.clearExpiredRateLimits(rowFilter, now, CODEX_AUTH_FAILURE_BENCH_THRESHOLD);
 
-  const rows = await client.query<{
-    keyIndex: number;
-    keySuffix: string;
-    scope: string;
-    scopeId: string;
-    status: string;
-    rateLimitWindows: string | null;
-    plan: string | null;
-    authFailureSeq: number;
-    lastValidationFailedAt: string | null;
-    spendCap: string | null;
-  }>(
-    `SELECT keyIndex, keySuffix, scope, scopeId, status, rateLimitWindows, plan, authFailureSeq, lastValidationFailedAt, spendCap FROM api_key_status
-       WHERE ${rowFilter}`,
-    rowParams,
-  );
+  const rows = await keys.listAdmissionRows(rowFilter);
   // Pool positions a row applies to: the position holding its suffix, or its stored index.
   // A suffix held by several pool members cannot tell them apart, so it falls back to
   // the index read: only a row of the requested scope, at its stored index.
@@ -12048,12 +9003,9 @@ export async function getAvailableKeyIndices(
   const distinctSuffixes = [...new Set(positionSuffixes.filter((s): s is string => !!s))];
   const sessionsBySuffix = new Map<string, number>();
   if (distinctSuffixes.length > 0) {
-    const counts = await client.query<{ suffix: string; n: number }>(
-      `SELECT credentialKeySuffix AS suffix, COUNT(*) AS n FROM agent_tasks
-         WHERE status = 'in_progress' AND credentialKeyType = ?
-           AND credentialKeySuffix IN (${distinctSuffixes.map(() => "?").join(", ")})
-         GROUP BY credentialKeySuffix`,
-      [keyType, ...distinctSuffixes],
+    const counts = await getStorage().repos.tasks.countInProgressByCredentialSuffix(
+      keyType,
+      distinctSuffixes,
     );
     for (const { suffix, n } of counts) sessionsBySuffix.set(suffix, n);
   }
@@ -12087,11 +9039,15 @@ export async function recordKeyUsage(
   scope = "global",
   scopeId: string | null = null,
   /** Plan id the worker detected on the credential (for example from the Codex JWT). */
-  plan: string | null = null,
+  reportedPlan: string | null = null,
   planRaw?: string | null,
 ): Promise<{ planChanged: boolean }> {
   const now = new Date().toISOString();
-  return getDbClient().transaction(async (client) => {
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  return storage.transaction(async () => {
+    // A local copy: a replayed attempt (decision D6) must start from the report.
+    let plan = reportedPlan;
     const effectiveScopeId = scopeId ?? "";
 
     // Upsert key status record. Sets `provider` on insert (auto-derived from
@@ -12099,16 +9055,11 @@ export async function recordKeyUsage(
     // The `name` column is left null on insert and only set via the
     // setApiKeyName API endpoint when the user manually labels the key.
     const provider = deriveProviderFromKeyType(keyType);
-    await client.run(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, provider, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-     ON CONFLICT(keyType, keySuffix, scope, scopeId)
-     DO UPDATE SET
-       lastUsedAt = excluded.lastUsedAt,
-       totalUsageCount = totalUsageCount + 1,
-       keyIndex = excluded.keyIndex,
-       updatedAt = excluded.updatedAt`,
-      [keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now],
+    await keys.upsertKeyUsage(
+      { keyType, keySuffix, scope, scopeId: effectiveScopeId },
+      keyIndex,
+      provider,
+      now,
     );
 
     const ambiguousPro =
@@ -12122,36 +9073,20 @@ export async function recordKeyUsage(
         : null;
     // A legacy plan report must not retain a contradictory raw claim.
     if (rawIdentity || plan) {
-      await client.run(
-        "UPDATE api_key_status SET detectedPlanRaw = ? WHERE keyType = ? AND keySuffix = ?",
-        [rawIdentity, keyType, keySuffix],
-      );
+      await keys.setDetectedPlanRaw(keyType, keySuffix, rawIdentity);
     }
     if (ambiguousPro || (keyType === "CODEX_OAUTH" && planRaw && !codexPlanFromClaim(planRaw))) {
       plan = null;
-      const cleared = await client.run(
-        "UPDATE api_key_status SET plan = NULL, planSource = 'detected' WHERE keyType = ? AND keySuffix = ? AND COALESCE(planSource, '') != 'manual' AND (plan IS NOT NULL OR planSource IS NOT 'detected')",
-        [keyType, keySuffix],
-      );
-      planChanged = cleared.changes > 0;
+      planChanged = (await keys.setDetectedPlan(keyType, keySuffix, null)) > 0;
     }
     // A detected plan replaces an estimate, never a plan the operator picked.
     if (plan) {
-      const result = await client.run(
-        `UPDATE api_key_status SET plan = ?, planSource = 'detected'
-         WHERE keyType = ? AND keySuffix = ? AND COALESCE(planSource, '') != 'manual'
-           AND (plan IS NOT ? OR planSource IS NOT 'detected')`,
-        [plan, keyType, keySuffix, plan],
-      );
-      planChanged = result.changes > 0;
+      planChanged = (await keys.setDetectedPlan(keyType, keySuffix, plan)) > 0;
     }
 
     // Record which key was used on the task
     if (taskId) {
-      await client.run(
-        "UPDATE agent_tasks SET credentialKeySuffix = ?, credentialKeyType = ? WHERE id = ?",
-        [keySuffix, keyType, taskId],
-      );
+      await storage.repos.tasks.setTaskCredentialKey(taskId, keySuffix, keyType);
     }
     return { planChanged };
   });
@@ -12168,21 +9103,7 @@ export async function setApiKeyPlan(
   plan: string | null,
 ): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = plan
-    ? await getDbClient().run(
-        `UPDATE api_key_status SET plan = ?, planSource = 'manual', updatedAt = ?
-           WHERE keyType = ? AND keySuffix = ?`,
-        [plan, now, keyType, keySuffix],
-      )
-    : await getDbClient().run(
-        `UPDATE api_key_status
-           SET plan = CASE WHEN planSource = 'manual' THEN NULL ELSE plan END,
-               planSource = CASE WHEN planSource = 'manual' THEN NULL ELSE planSource END,
-               updatedAt = ?
-           WHERE keyType = ? AND keySuffix = ?`,
-        [now, keyType, keySuffix],
-      );
-  return result.changes > 0;
+  return (await getStorage().repos.config.setManualPlan(keyType, keySuffix, plan, now)) > 0;
 }
 
 /**
@@ -12201,30 +9122,16 @@ export async function markKeyRateLimited(
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  await getDbClient().run(
-    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, provider, updatedAt, spendCap)
-       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?, ?, ?)
-       ON CONFLICT(keyType, keySuffix, scope, scopeId)
-       DO UPDATE SET
-         status = 'rate_limited',
-         rateLimitedUntil = CASE WHEN status = 'rate_limited' AND consecutiveAuthFailures >= ${CODEX_AUTH_FAILURE_BENCH_THRESHOLD} THEN MAX(COALESCE(rateLimitedUntil, ''), excluded.rateLimitedUntil) ELSE excluded.rateLimitedUntil END,
-         spendCap = excluded.spendCap,
-         lastRateLimitAt = excluded.lastRateLimitAt,
-         rateLimitCount = rateLimitCount + 1,
-         keyIndex = excluded.keyIndex,
-         updatedAt = excluded.updatedAt`,
-    [
-      keyType,
-      keySuffix,
+  await getStorage().repos.config.markRateLimited(
+    { keyType, keySuffix, scope, scopeId: effectiveScopeId },
+    {
       keyIndex,
-      scope,
-      effectiveScopeId,
       rateLimitedUntil,
-      now,
+      spendCap: spendCap ? JSON.stringify(spendCap) : null,
       provider,
       now,
-      spendCap ? JSON.stringify(spendCap) : null,
-    ],
+      benchThreshold: CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
+    },
   );
 }
 
@@ -12244,20 +9151,13 @@ export async function recordKeyAuthFailure(
 ): Promise<KeyAuthFailureResult> {
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  const ref: ApiKeyRef = { keyType, keySuffix, scope, scopeId: effectiveScopeId };
+  return await storage.transaction(async () => {
     const now = new Date().toISOString();
     const source = "report-auth-failure";
-    const row = await tx.get<{ consecutiveAuthFailures: number; rateLimitedUntil: string | null }>(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, consecutiveAuthFailures, lastAuthFailureAt, authFailureSeq, provider, updatedAt)
-         VALUES (?, ?, ?, ?, ?, 'available', 1, ?, (SELECT COALESCE(MAX(authFailureSeq), 0) + 1 FROM api_key_status), ?, ?)
-         ON CONFLICT(keyType, keySuffix, scope, scopeId)
-         DO UPDATE SET
-           consecutiveAuthFailures = consecutiveAuthFailures + 1,
-           lastAuthFailureAt = excluded.lastAuthFailureAt, authFailureSeq = excluded.authFailureSeq,
-           keyIndex = excluded.keyIndex, updatedAt = excluded.updatedAt
-         RETURNING consecutiveAuthFailures, rateLimitedUntil`,
-      [keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now],
-    );
+    const row = await keys.recordAuthFailure(ref, keyIndex, provider, now);
     if (!row) throw new Error("Failed to record auth failure");
     const { consecutiveAuthFailures } = row;
     if (consecutiveAuthFailures < CODEX_AUTH_FAILURE_BENCH_THRESHOLD) {
@@ -12267,13 +9167,7 @@ export async function recordKeyAuthFailure(
     if (row.rateLimitedUntil && Date.parse(row.rateLimitedUntil) > Date.parse(benchedUntil)) {
       benchedUntil = row.rateLimitedUntil;
     }
-    await tx.run(
-      `UPDATE api_key_status
-         SET status = 'rate_limited', rateLimitedUntil = ?, lastRateLimitAt = ?,
-             rateLimitCount = rateLimitCount + 1, updatedAt = ?
-         WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
-      [benchedUntil, now, now, keyType, keySuffix, scope, effectiveScopeId],
-    );
+    await keys.benchKey(ref, benchedUntil, now);
     await upsertKv({
       namespace: CODEX_AUTH_WATCH_NAMESPACE,
       key: codexAuthBenchMarkerKey(keySuffix),
@@ -12307,15 +9201,11 @@ export async function recordKeyRateLimitWindows(
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  await getDbClient().transaction(async (tx) => {
-    const existing = await tx.get<{
-      rateLimitWindows: string | null;
-      providerAccount: string | null;
-    }>(
-      `SELECT rateLimitWindows, providerAccount FROM api_key_status
-         WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
-      [keyType, keySuffix, scope, effectiveScopeId],
-    );
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  const ref: ApiKeyRef = { keyType, keySuffix, scope, scopeId: effectiveScopeId };
+  await storage.transaction(async () => {
+    const existing = await keys.getRateLimitWindows(ref);
     const { windows: mergedWindows, account: mergedAccount } = applyProviderQuotaReport(
       {
         windows: parseRateLimitWindowsJson(existing?.rateLimitWindows),
@@ -12324,28 +9214,13 @@ export async function recordKeyRateLimitWindows(
       scrubProviderQuotaReport({ windows, account, replace }),
     );
     assertProviderQuotaCapacity({ windows: mergedWindows, account: mergedAccount });
-    await tx.run(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, providerAccount, provider, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(keyType, keySuffix, scope, scopeId)
-         DO UPDATE SET
-           rateLimitWindows = excluded.rateLimitWindows,
-           providerAccount = excluded.providerAccount,
-           keyIndex = excluded.keyIndex,
-           provider = excluded.provider,
-           updatedAt = excluded.updatedAt`,
-      [
-        keyType,
-        keySuffix,
-        keyIndex,
-        scope,
-        effectiveScopeId,
-        JSON.stringify(mergedWindows),
-        mergedAccount ? JSON.stringify(mergedAccount) : null,
-        provider,
-        now,
-      ],
-    );
+    await keys.upsertRateLimitWindows(ref, {
+      keyIndex,
+      rateLimitWindows: JSON.stringify(mergedWindows),
+      providerAccount: mergedAccount ? JSON.stringify(mergedAccount) : null,
+      provider,
+      now,
+    });
   });
 }
 
@@ -12361,13 +9236,12 @@ export async function setApiKeyName(
   scope = "global",
   scopeId: string | null = null,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    `UPDATE api_key_status
-       SET name = ?, updatedAt = ?
-       WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
-    [name, new Date().toISOString(), keyType, keySuffix, scope, scopeId ?? ""],
+  const changes = await getStorage().repos.config.setKeyName(
+    { keyType, keySuffix, scope, scopeId: scopeId ?? "" },
+    name,
+    new Date().toISOString(),
   );
-  return result.changes > 0;
+  return changes > 0;
 }
 
 /**
@@ -12387,36 +9261,25 @@ export async function clearKeyRateLimit(
   const effectiveScopeId = scopeId ?? "";
   const { keyIndex = -1, authFence = null } = opts;
   const clearAuthBench = opts.clearAuthBench === true && authFence !== null;
-  return await getDbClient().transaction(async (tx) => {
+  const storage = getStorage();
+  const keys = storage.repos.config;
+  return await storage.transaction(async () => {
     // The key's rows in every scope: `getAvailableKeyIndices` reads them all by suffix.
-    const result = await tx.run(
-      `UPDATE api_key_status
-         SET status = 'available', rateLimitedUntil = NULL, spendCap = NULL, updatedAt = ?
-         WHERE keyType = ? AND keySuffix = ?
-           AND status = 'rate_limited' AND ((? AND authFailureSeq <= ?) OR consecutiveAuthFailures < ?)`,
-      [
-        now,
-        keyType,
-        keySuffix,
-        clearAuthBench ? 1 : 0,
-        authFence,
-        CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
-      ],
-    );
-    const cleared = result.changes > 0;
+    const changes = await keys.clearRateLimit(keyType, keySuffix, {
+      now,
+      liftAuthBench: clearAuthBench,
+      authFence,
+      benchThreshold: CODEX_AUTH_FAILURE_BENCH_THRESHOLD,
+    });
+    const cleared = changes > 0;
     if (!clearAuthBench) return cleared;
-    const lifted = await tx.query<{ keySuffix: string }>(
-      `UPDATE api_key_status SET consecutiveAuthFailures = 0, updatedAt = ?1,
-           status = CASE WHEN keySuffix = ?2 THEN status ELSE 'available' END, rateLimitedUntil = CASE WHEN keySuffix = ?2 THEN rateLimitedUntil END,
-           spendCap = CASE WHEN keySuffix = ?2 THEN spendCap END
-         WHERE keyType = ?3 AND (consecutiveAuthFailures > 0 OR status = 'rate_limited')
-           AND ((keySuffix = ?2 AND authFailureSeq <= ?7)
-             OR (keySuffix != ?2 AND keyIndex = ?6 AND scope = ?4 AND scopeId = ?5)) RETURNING keySuffix`,
-      [now, keySuffix, keyType, scope, effectiveScopeId, keyIndex, authFence],
+    const lifted = await keys.liftAuthBench(
+      { keyType, keySuffix, scope, scopeId: effectiveScopeId },
+      { keyIndex, authFence, now },
     );
-    const retired = lifted.filter((row) => row.keySuffix !== keySuffix);
+    const retired = lifted.filter((suffix) => suffix !== keySuffix);
     if (keyType === "CODEX_OAUTH") {
-      for (const suffix of [...(cleared ? [keySuffix] : []), ...retired.map((r) => r.keySuffix)]) {
+      for (const suffix of [...(cleared ? [keySuffix] : []), ...retired]) {
         await deleteKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(suffix));
       }
     }
@@ -12432,27 +9295,11 @@ export async function getKeyStatuses(
   scope?: string,
   scopeId?: string | null,
 ): Promise<ApiKeyStatus[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (keyType) {
-    conditions.push("keyType = ?");
-    params.push(keyType);
-  }
-  if (scope) {
-    conditions.push("scope = ?");
-    params.push(scope);
-    if (scopeId !== undefined) {
-      conditions.push("scopeId = ?");
-      params.push(scopeId ?? "");
-    }
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await getDbClient().query<ApiKeyStatusRow>(
-    `SELECT * FROM api_key_status ${where} ORDER BY keyIndex`,
-    params,
-  );
+  const rows = await getStorage().repos.config.listKeyStatuses({
+    keyType,
+    scope,
+    scopeId: scopeId === undefined ? undefined : (scopeId ?? ""),
+  });
   return rows.map(rowToApiKeyStatus);
 }
 
@@ -12469,29 +9316,7 @@ export interface KeyCostSummary {
  * Aggregate cost data using immutable session credentials (legacy rows: the task's).
  */
 export async function getKeyCostSummary(keyType?: string): Promise<KeyCostSummary[]> {
-  const conditions = [`${CREDENTIAL_SUFFIX_SQL} IS NOT NULL`];
-  const params: string[] = [];
-
-  if (keyType) {
-    conditions.push(`${CREDENTIAL_TYPE_SQL} = ?`);
-    params.push(keyType);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return getDbClient().query<KeyCostSummary>(
-    `SELECT
-        ${CREDENTIAL_TYPE_SQL} as keyType,
-        ${CREDENTIAL_SUFFIX_SQL} as keySuffix,
-        COALESCE(SUM(sc.totalCostUsd), 0) as totalCost,
-        COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
-        COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
-        COUNT(DISTINCT sc.taskId) as taskCount
-      FROM session_costs sc
-      LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc.taskId
-      ${where}
-      GROUP BY ${CREDENTIAL_TYPE_SQL}, ${CREDENTIAL_SUFFIX_SQL}`,
-    params,
-  );
+  return getStorage().repos.sessions.keyCostSummary(keyType);
 }
 
 // ============================================================================
@@ -12539,12 +9364,12 @@ function rowToUser(row: UserRow): User {
 }
 
 export async function getUserById(id: string): Promise<User | null> {
-  const row = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+  const row = await getStorage().repos.users.findUserById(id);
   return row ? rowToUser(row) : null;
 }
 
 export async function getAllUsers(): Promise<User[]> {
-  const rows = await getDbClient().query<UserRow>("SELECT * FROM users ORDER BY name");
+  const rows = await getStorage().repos.users.listUsers();
   return rows.map(rowToUser);
 }
 
@@ -12563,29 +9388,25 @@ export async function createUser(data: {
 }): Promise<User> {
   const id = crypto.randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
-  const row = await getDbClient().get<UserRow>(
-    `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, metadata, dailyBudgetUsd, status, avatar, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      data.name,
-      data.email ?? null,
-      data.role ?? null,
-      data.notes ?? null,
-      JSON.stringify(data.emailAliases ?? []),
-      data.preferredChannel ?? "slack",
-      data.timezone ?? null,
-      data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
-      data.dailyBudgetUsd ?? null,
-      data.status ?? "active",
-      data.avatar ? JSON.stringify(data.avatar) : null,
-      now,
-      now,
-    ],
-  );
+  const storage = getStorage();
+  const row = await storage.repos.users.insertUser({
+    id,
+    name: data.name,
+    email: data.email ?? null,
+    role: data.role ?? null,
+    notes: data.notes ?? null,
+    emailAliases: JSON.stringify(data.emailAliases ?? []),
+    preferredChannel: data.preferredChannel ?? "slack",
+    timezone: data.timezone ?? null,
+    metadata: data.metadata !== undefined ? JSON.stringify(data.metadata) : null,
+    dailyBudgetUsd: data.dailyBudgetUsd ?? null,
+    status: data.status ?? "active",
+    avatar: data.avatar ? JSON.stringify(data.avatar) : null,
+    now,
+  });
   if (!row) throw new Error("Failed to create user");
   // The org's email domain may come from this user (debounced, post-commit).
-  getDbClient().afterCommit(scheduleOrgDomainRecompute);
+  storage.afterCommit(scheduleOrgDomainRecompute);
   return rowToUser(row);
 }
 
@@ -12606,66 +9427,27 @@ export async function updateUser(
     avatar: UserAvatar | null;
   }>,
 ): Promise<User | null> {
-  const sets: string[] = [];
-  const params: (string | number | null)[] = [];
+  const update: import("@desplega/storage").UserColumnUpdate = {};
+  if (data.name !== undefined) update.name = data.name;
+  if (data.email !== undefined) update.email = data.email;
+  if (data.role !== undefined) update.role = data.role;
+  if (data.notes !== undefined) update.notes = data.notes;
+  if (data.emailAliases !== undefined) update.emailAliases = JSON.stringify(data.emailAliases);
+  if (data.preferredChannel !== undefined) update.preferredChannel = data.preferredChannel;
+  if (data.timezone !== undefined) update.timezone = data.timezone;
+  if (data.metadata !== undefined)
+    update.metadata = data.metadata === null ? null : JSON.stringify(data.metadata);
+  if (data.dailyBudgetUsd !== undefined) update.dailyBudgetUsd = data.dailyBudgetUsd;
+  if (data.status !== undefined) update.status = data.status;
+  if (data.avatar !== undefined)
+    update.avatar = data.avatar === null ? null : JSON.stringify(data.avatar);
 
-  if (data.name !== undefined) {
-    sets.push("name = ?");
-    params.push(data.name);
-  }
-  if (data.email !== undefined) {
-    sets.push("email = ?");
-    params.push(data.email);
-  }
-  if (data.role !== undefined) {
-    sets.push("role = ?");
-    params.push(data.role);
-  }
-  if (data.notes !== undefined) {
-    sets.push("notes = ?");
-    params.push(data.notes);
-  }
-  if (data.emailAliases !== undefined) {
-    sets.push("emailAliases = ?");
-    params.push(JSON.stringify(data.emailAliases));
-  }
-  if (data.preferredChannel !== undefined) {
-    sets.push("preferredChannel = ?");
-    params.push(data.preferredChannel);
-  }
-  if (data.timezone !== undefined) {
-    sets.push("timezone = ?");
-    params.push(data.timezone);
-  }
-  if (data.metadata !== undefined) {
-    sets.push("metadata = ?");
-    params.push(data.metadata === null ? null : JSON.stringify(data.metadata));
-  }
-  if (data.dailyBudgetUsd !== undefined) {
-    sets.push("dailyBudgetUsd = ?");
-    params.push(data.dailyBudgetUsd);
-  }
-  if (data.status !== undefined) {
-    sets.push("status = ?");
-    params.push(data.status);
-  }
-  if (data.avatar !== undefined) {
-    sets.push("avatar = ?");
-    params.push(data.avatar === null ? null : JSON.stringify(data.avatar));
-  }
+  if (Object.keys(update).length === 0) return getUserById(id);
 
-  if (sets.length === 0) return getUserById(id);
-
-  sets.push("lastUpdatedAt = ?");
-  params.push(new Date().toISOString());
-  params.push(id);
-
-  const row = await getDbClient().get<UserRow>(
-    `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    params,
-  );
+  const storage = getStorage();
+  const row = await storage.repos.users.updateUser(id, update, new Date().toISOString());
   if (row) {
-    getDbClient().afterCommit(() => {
+    storage.afterCommit(() => {
       invalidateTelemetryUserRole(id);
       scheduleOrgDomainRecompute();
     });
@@ -12686,23 +9468,14 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     throw new Error("Replacement user must differ from deleted user");
   }
 
-  return await getDbClient().transaction(async (tx) => {
-    const userExists = (
-      await tx.get<{ present: number }>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
-        [id],
-      )
-    )?.present;
-    if (!userExists) return false;
+  return await getStorage().transaction(async () => {
+    const users = getStorage().repos.users;
+    if (!(await users.userExists(id))) return false;
 
     if (replacementUserId) {
-      const replacementExists = (
-        await tx.get<{ present: number }>(
-          "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
-          [replacementUserId],
-        )
-      )?.present;
-      if (!replacementExists) throw new Error("Replacement user not found");
+      if (!(await users.userExists(replacementUserId))) {
+        throw new Error("Replacement user not found");
+      }
     }
 
     // Preserve rows that carry user attribution but lack ON DELETE semantics.
@@ -12710,7 +9483,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // Migration 103 accidentally dropped the scheduled_tasks audit FKs while
     // recreating that table, so discover those two known logical references as
     // well until the table is next rebuilt with its original constraints.
-    const references = await tx.query<UserReferenceRow>(USER_REFERENCE_COLUMNS_SQL);
+    const references = await users.listUserReferenceColumns();
     const replacement = replacementUserId ?? null;
     // The human-free rule only asks whether a task's requester or its workflow
     // run's creator is NULL, so only clearing them (no replacement) can change a
@@ -12718,15 +9491,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // them. The workflow branch covers roots whose requester was never set.
     const reclassifySeedIds: string[] = replacementUserId
       ? []
-      : (
-          await tx.query<{ id: string }>(
-            `SELECT id FROM agent_tasks WHERE requestedByUserId = ?
-             UNION
-             SELECT id FROM agent_tasks
-             WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE created_by = ?)`,
-            [id, id],
-          )
-        ).map((row) => row.id);
+      : await getStorage().repos.tasks.listTaskIdsRequestedByUser(id);
     // Workflow context is persisted JSON rather than a relational column, but
     // it exposes the same requester identity to downstream interpolation. Keep
     // it consistent with workflow_runs.created_by inside this transaction.
@@ -12734,10 +9499,11 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // touch only this user's runs instead of parsing the JSON of every row
     // (153 s on 493k prod rows). The sealed replay copy is what a resume
     // reads, so rewrite it first, while the scrubbed column still matches.
-    const sealedContexts = await tx.query<{ id: string; context_replay: string }>(
-      WORKFLOW_SEALED_CONTEXT_BY_REQUESTER_SQL,
-      [id],
-    );
+    const requesterRunIds = await users.listWorkflowRunIdsRequestedBy(id);
+    const sealedContexts =
+      requesterRunIds.length > 0
+        ? await users.listSealedWorkflowContextsRequestedBy(requesterRunIds, id)
+        : [];
     for (const row of sealedContexts) {
       let context: Record<string, unknown>;
       try {
@@ -12751,54 +9517,37 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
       if (swarm.requestedByUserId !== id) continue;
       if (replacementUserId) swarm.requestedByUserId = replacementUserId;
       else delete swarm.requestedByUserId;
-      await tx.run("UPDATE workflow_runs SET context_replay = ? WHERE id = ?", [
-        sealJson({ ...context, swarm }),
+      await getStorage().repos.workflows.setRunContextReplay(
         row.id,
-      ]);
+        sealJson({ ...context, swarm }),
+      );
     }
-    if (replacementUserId) {
-      await tx.run(WORKFLOW_CONTEXT_SET_REQUESTER_SQL, [replacementUserId, id]);
-    } else {
-      await tx.run(WORKFLOW_CONTEXT_REMOVE_REQUESTER_SQL, [id]);
+    if (requesterRunIds.length > 0) {
+      await users.rewriteWorkflowRunContextRequester(requesterRunIds, id, replacement);
     }
 
     // Migration 319 indexes every discovered column (the user-delete-perf test
     // pins the plans), so these are index lookups rather than table scans.
     for (const reference of references) {
-      await tx.run(userReferenceRewriteSql(reference), [replacement, id]);
+      await users.rewriteUserReferenceColumn(reference, id, replacement);
     }
 
     await reclassifyTaskHumanFree(reclassifySeedIds);
 
-    const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
-    if (result.changes > 0) {
-      getDbClient().afterCommit(() => {
+    const deleted = await users.deleteUser(id);
+    if (deleted > 0) {
+      getStorage().afterCommit(() => {
         invalidateTelemetryUserRole(id);
         scheduleOrgDomainRecompute();
       });
     }
-    return result.changes > 0;
+    return deleted > 0;
   });
 }
 
 // ============================================================================
 // Inbox Item State (per-user dismiss/snooze/done for action-items inbox)
 // ============================================================================
-
-interface InboxItemStateRow {
-  id: string;
-  userId: string;
-  itemType: string;
-  itemId: string;
-  status: string;
-  snoozeUntil: string | null;
-  dismissedAt: string | null;
-  doneAt: string | null;
-  readAt: string | null;
-  lastReadAt: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-}
 
 function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
   return {
@@ -12822,23 +9571,7 @@ export async function listInboxState(opts: {
   status?: InboxItemStatus;
   itemType?: InboxItemType;
 }): Promise<InboxItemState[]> {
-  const conditions: string[] = ["userId = ?"];
-  const params: string[] = [opts.userId];
-
-  if (opts.status) {
-    conditions.push("status = ?");
-    params.push(opts.status);
-  }
-  if (opts.itemType) {
-    conditions.push("itemType = ?");
-    params.push(opts.itemType);
-  }
-
-  const where = conditions.join(" AND ");
-  const rows = await getDbClient().query<InboxItemStateRow>(
-    `SELECT * FROM inbox_item_state WHERE ${where} ORDER BY lastUpdatedAt DESC`,
-    params,
-  );
+  const rows = await getStorage().repos.messaging.listInboxItemStates(opts);
   return rows.map(rowToInboxItemState);
 }
 
@@ -12861,36 +9594,25 @@ export async function upsertInboxState(opts: {
   const snoozeUntil = opts.snoozeUntil ?? null;
   const readAt = opts.readAt ?? null;
 
-  // SQLite upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the
-  // first non-null value written wins on every subsequent conflict.
+  // Upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the first
+  // non-null value written wins on every subsequent conflict.
   // `triageSessionList` in src/be/db/session-tree.ts copies these conflict
   // rules for whole-list triage. Keep the two in step.
-  const row = await getDbClient().get<InboxItemStateRow>(
-    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, lastReadAt, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
-         status = excluded.status,
-         snoozeUntil = excluded.snoozeUntil,
-         dismissedAt = excluded.dismissedAt,
-         doneAt = excluded.doneAt,
-         readAt = COALESCE(inbox_item_state.readAt, excluded.readAt),
-         lastReadAt = CASE WHEN ? THEN excluded.lastReadAt ELSE inbox_item_state.lastReadAt END,
-         lastUpdatedAt = excluded.lastUpdatedAt
-       RETURNING *`,
-    [
-      opts.userId,
-      opts.itemType,
-      opts.itemId,
-      opts.status,
+  const row = await getStorage().repos.messaging.upsertInboxItemState(
+    {
+      userId: opts.userId,
+      itemType: opts.itemType,
+      itemId: opts.itemId,
+      status: opts.status,
       snoozeUntil,
       dismissedAt,
       doneAt,
       readAt,
-      opts.lastReadAt ?? null,
-      now,
-      now,
-      opts.lastReadAt !== undefined ? 1 : 0,
-    ],
+      lastReadAt: opts.lastReadAt ?? null,
+      createdAt: now,
+      lastUpdatedAt: now,
+    },
+    opts.lastReadAt !== undefined,
   );
   if (!row) throw new Error("Failed to upsert inbox state");
   return rowToInboxItemState(row);
@@ -12930,23 +9652,7 @@ export async function listFavorites(opts: {
   itemType?: FavoriteItemType;
   itemIds?: string[];
 }): Promise<UserFavorite[]> {
-  const conditions = ["favoriteScope = ?"];
-  const params: string[] = [opts.favoriteScope];
-
-  if (opts.itemType) {
-    conditions.push("itemType = ?");
-    params.push(opts.itemType);
-  }
-
-  if (opts.itemIds && opts.itemIds.length > 0) {
-    conditions.push(`itemId IN (${opts.itemIds.map(() => "?").join(",")})`);
-    params.push(...opts.itemIds);
-  }
-
-  const rows = await getDbClient().query<UserFavoriteRow>(
-    `SELECT * FROM user_favorites WHERE ${conditions.join(" AND ")} ORDER BY lastUpdatedAt DESC`,
-    params,
-  );
+  const rows = await getStorage().repos.users.listFavorites(opts);
   return rows.map(rowToUserFavorite);
 }
 
@@ -12978,26 +9684,20 @@ export async function setFavorite(opts: {
   // A `key` item id arrives normalized: `PUT /api/favorites` normalizes it and answers 400.
   const itemId = opts.itemId;
   if (!opts.favorite) {
-    await getDbClient().run(
-      "DELETE FROM user_favorites WHERE favoriteScope = ? AND itemType = ? AND itemId = ?",
-      [opts.favoriteScope, opts.itemType, itemId],
-    );
+    await getStorage().repos.users.deleteFavorite(opts.favoriteScope, opts.itemType, itemId);
     return null;
   }
 
   const now = new Date().toISOString();
   const actor = opts.actorId ?? opts.userId ?? opts.favoriteScope;
-  const row = await getDbClient().get<UserFavoriteRow>(
-    `INSERT INTO user_favorites (
-         favoriteScope, userId, itemType, itemId, createdAt, lastUpdatedAt, created_by, updated_by
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(favoriteScope, itemType, itemId) DO UPDATE SET
-         lastUpdatedAt = excluded.lastUpdatedAt,
-         updated_by = excluded.updated_by
-       RETURNING *`,
-    [opts.favoriteScope, opts.userId ?? null, opts.itemType, itemId, now, now, actor, actor],
-  );
+  const row = await getStorage().repos.users.upsertFavorite({
+    favoriteScope: opts.favoriteScope,
+    userId: opts.userId ?? null,
+    itemType: opts.itemType,
+    itemId,
+    actor,
+    now,
+  });
   if (!row) throw new Error("Failed to set favorite");
   return rowToUserFavorite(row);
 }
@@ -13035,18 +9735,6 @@ export async function withFavoriteFlags<T extends { id: string }>(
 // Task Templates ("To start" bucket — polymorphic starters registry)
 // ============================================================================
 
-interface TaskTemplateRow {
-  id: string;
-  title: string;
-  description: string;
-  prompt: string;
-  kind: string;
-  payload: string;
-  category: string | null;
-  tags: string;
-  createdAt: string;
-}
-
 function rowToTaskTemplate(row: TaskTemplateRow): TaskTemplate {
   let payload: Record<string, unknown> = {};
   try {
@@ -13074,30 +9762,8 @@ export async function listTaskTemplates(opts?: {
   kind?: TaskTemplateKind;
   query?: string;
 }): Promise<TaskTemplate[]> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-
-  if (opts?.category) {
-    conditions.push("category = ?");
-    params.push(opts.category);
-  }
-  if (opts?.kind) {
-    conditions.push("kind = ?");
-    params.push(opts.kind);
-  }
-  if (opts?.query && opts.query.trim().length > 0) {
-    // Case-insensitive LIKE match against title OR description, single
-    // parameter-bound WHERE clause to prevent injection.
-    conditions.push("(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)");
-    const needle = `%${opts.query.toLowerCase()}%`;
-    params.push(needle, needle);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await getDbClient().query<TaskTemplateRow>(
-    `SELECT * FROM task_templates ${where} ORDER BY createdAt`,
-    params,
-  );
+  // `query` is a case-insensitive match against title OR description.
+  const rows = await getStorage().repos.tasks.listTaskTemplates(opts ?? {});
   return rows.map(rowToTaskTemplate);
 }
 
@@ -13112,20 +9778,7 @@ export async function listTaskTemplates(opts?: {
  * `totalCostUsd`, so the session header can total the whole chain, not only the root.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
-  const rows = await getDbClient().query<AgentTaskRow>(
-    `WITH RECURSIVE chain(id) AS (
-         SELECT id FROM agent_tasks WHERE id = ?
-         UNION ALL
-         SELECT t.id FROM agent_tasks t
-         JOIN chain c ON t.parentTaskId = c.id
-       )
-       SELECT t.*,
-         (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = t.id) AS totalCostUsd
-       FROM chain
-       CROSS JOIN agent_tasks t ON t.id = chain.id
-       ORDER BY t.createdAt, t.rowid`,
-    [rootTaskId],
-  );
+  const rows = await getStorage().repos.sessions.listChainWithCosts(rootTaskId);
   return rows.map(rowToAgentTask);
 }
 
@@ -13165,12 +9818,7 @@ export async function listRecentSessions(
 export async function listRecentSessions(
   opts: ListRecentSessionsOpts = {},
 ): Promise<SessionListItem[] | SessionListItemSummary[]> {
-  const query = sessionSummaryQuery(opts);
-  const threadRoots = threadRootsSql();
-  const order = (a: string) =>
-    `${opts.triage === "later" ? `${a}.snoozeUntil ASC,` : ""}
-    ${a}.lastActivityAt DESC, ${a}.rootCreatedAt DESC, ${a}.root_id DESC`;
-  const rootRows = await getDbClient().query<
+  const rootRows = await listSessionPageRows<
     AgentTaskRow & {
       __chainCount: number;
       __lastActivityAt: string;
@@ -13180,17 +9828,7 @@ export async function listRecentSessions(
       __needsYou: number;
       __threadRoots: number;
     }
-  >(
-    // Page first on the summaries, then read agent_tasks for the page roots only.
-    `SELECT r.*, a.chainCount AS __chainCount, a.lastActivityAt AS __lastActivityAt,
-      a.latestStatus AS __latestStatus, a.readState AS __readState,
-      a.snoozeUntil AS __snoozeUntil, a.needsYou AS __needsYou,
-      ${threadRoots.sql} AS __threadRoots
-    FROM (SELECT * FROM (${query.sql}) page ORDER BY ${order("page")} LIMIT ? OFFSET ?) a
-    CROSS JOIN agent_tasks r ON r.id = a.root_id
-    ORDER BY ${order("a")}`,
-    [...threadRoots.params, ...query.params, opts.limit ?? 25, opts.offset ?? 0],
-  );
+  >(opts);
   const fields = await sessionPageFields(
     rootRows.map((row) => ({
       id: row.id,
@@ -13212,9 +9850,7 @@ export async function listRecentSessions(
 
 /** Count roots directly unless a filter needs chain activity or participants. */
 export async function countSessions(opts: SessionFilters = {}): Promise<number> {
-  const query = sessionCountQuery(opts);
-  const row = await getDbClient().get<{ count: number }>(query.sql, query.params);
-  return row?.count ?? 0;
+  return countSessionRoots(opts);
 }
 
 // ============================================================================
@@ -13225,34 +9861,7 @@ export async function countSessions(opts: SessionFilters = {}): Promise<number> 
 // 044). All inserts here use `Date.now()` accordingly.
 // ============================================================================
 
-interface BudgetRow {
-  scope: string;
-  scope_id: string;
-  daily_budget_usd: number;
-  createdAt: number;
-  lastUpdatedAt: number;
-}
-
-interface BudgetRefusalNotificationRow {
-  task_id: string;
-  date: string;
-  agent_id: string;
-  cause: string;
-  agent_spend_usd: number | null;
-  agent_budget_usd: number | null;
-  global_spend_usd: number | null;
-  global_budget_usd: number | null;
-  user_spend_usd: number | null;
-  user_budget_usd: number | null;
-  follow_up_task_id: string | null;
-  createdAt: number;
-}
-
-interface CoalesceSumRow {
-  total: number;
-}
-
-function rowToBudget(row: BudgetRow): Budget {
+function rowToBudget(row: BudgetRowDb): Budget {
   return {
     scope: row.scope as BudgetScope,
     scopeId: row.scope_id,
@@ -13263,7 +9872,7 @@ function rowToBudget(row: BudgetRow): Budget {
 }
 
 function rowToBudgetRefusalNotification(
-  row: BudgetRefusalNotificationRow,
+  row: BudgetRefusalNotificationRowDb,
 ): BudgetRefusalNotification {
   return {
     taskId: row.task_id,
@@ -13286,10 +9895,7 @@ function rowToBudgetRefusalNotification(
  * exists — callers treat that as "unlimited / no budget configured".
  */
 export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Budget | null> {
-  const row = await getDbClient().get<BudgetRow>(
-    "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
-    [scope, scopeId],
-  );
+  const row = await getStorage().repos.sessions.findBudget(scope, scopeId);
   return row ? rowToBudget(row) : null;
 }
 
@@ -13298,9 +9904,7 @@ export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Bu
  * Order is `(scope, scope_id)` for stable output across calls.
  */
 export async function getBudgets(): Promise<Budget[]> {
-  const rows = await getDbClient().query<BudgetRow>(
-    "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets ORDER BY scope, scope_id",
-  );
+  const rows = await getStorage().repos.sessions.listBudgets();
   return rows.map(rowToBudget);
 }
 
@@ -13315,14 +9919,7 @@ export async function upsertBudget(
   dailyBudgetUsd: number,
 ): Promise<Budget> {
   const now = Date.now();
-  await getDbClient().run(
-    `INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(scope, scope_id) DO UPDATE SET
-         daily_budget_usd = excluded.daily_budget_usd,
-         lastUpdatedAt = excluded.lastUpdatedAt`,
-    [scope, scopeId, dailyBudgetUsd, now, now],
-  );
+  await getStorage().repos.sessions.upsertBudget(scope, scopeId, dailyBudgetUsd, now);
 
   const updated = await getBudget(scope, scopeId);
   if (!updated) {
@@ -13338,11 +9935,7 @@ export async function upsertBudget(
  * if `(scope, scopeId)` did not exist.
  */
 export async function deleteBudget(scope: BudgetScope, scopeId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM budgets WHERE scope = ? AND scope_id = ?", [
-    scope,
-    scopeId,
-  ]);
-  return result.changes > 0;
+  return (await getStorage().repos.sessions.deleteBudget(scope, scopeId)) > 0;
 }
 
 // ============================================================================
@@ -13355,16 +9948,6 @@ export async function deleteBudget(scope: BudgetScope, scopeId: string): Promise
 // `effective_from <= atEpochMs`, which is the correct "what price was in
 // effect at time T" semantics regardless of insertion order.
 // ============================================================================
-
-interface PricingRowDb {
-  provider: string;
-  model: string;
-  token_class: string;
-  effective_from: number;
-  price_per_million_usd: number;
-  createdAt: number;
-  lastUpdatedAt: number;
-}
 
 function rowToPricingRow(row: PricingRowDb): PricingRow {
   return {
@@ -13380,9 +9963,7 @@ function rowToPricingRow(row: PricingRowDb): PricingRow {
 
 /** Phase 6: list every pricing row, latest-effective first. */
 export async function getAllPricingRows(): Promise<PricingRow[]> {
-  const rows = await getDbClient().query<PricingRowDb>(
-    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing ORDER BY provider, model, token_class, effective_from DESC",
-  );
+  const rows = await getStorage().repos.sessions.listPricingRows();
   return rows.map(rowToPricingRow);
 }
 
@@ -13395,10 +9976,7 @@ export async function getPricingRows(
   model: string,
   tokenClass: PricingTokenClass,
 ): Promise<PricingRow[]> {
-  const rows = await getDbClient().query<PricingRowDb>(
-    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? ORDER BY effective_from DESC",
-    [provider, model, tokenClass],
-  );
+  const rows = await getStorage().repos.sessions.listPricingRowsFor(provider, model, tokenClass);
   return rows.map(rowToPricingRow);
 }
 
@@ -13414,9 +9992,11 @@ export async function getActivePricingRow(
   tokenClass: PricingTokenClass,
   atEpochMs: number,
 ): Promise<PricingRow | null> {
-  const row = await getDbClient().get<PricingRowDb>(
-    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
-    [provider, model, tokenClass, atEpochMs],
+  const row = await getStorage().repos.sessions.findActivePricingRow(
+    provider,
+    model,
+    tokenClass,
+    atEpochMs,
   );
   return row ? rowToPricingRow(row) : null;
 }
@@ -13436,19 +10016,15 @@ export interface InsertPricingRowInput {
  */
 export async function insertPricingRow(input: InsertPricingRowInput): Promise<PricingRow> {
   const now = Date.now();
-  await getDbClient().run(
-    `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      input.provider,
-      input.model,
-      input.tokenClass,
-      input.effectiveFrom,
-      input.pricePerMillionUsd,
-      now,
-      now,
-    ],
-  );
+  await getStorage().repos.sessions.insertPricingRow({
+    provider: input.provider,
+    model: input.model,
+    token_class: input.tokenClass,
+    effective_from: input.effectiveFrom,
+    price_per_million_usd: input.pricePerMillionUsd,
+    createdAt: now,
+    lastUpdatedAt: now,
+  });
   return {
     provider: input.provider,
     model: input.model,
@@ -13471,11 +10047,14 @@ export async function deletePricingRow(
   tokenClass: PricingTokenClass,
   effectiveFrom: number,
 ): Promise<boolean> {
-  const result = await getDbClient().run(
-    "DELETE FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
-    [provider, model, tokenClass, effectiveFrom],
+  return (
+    (await getStorage().repos.sessions.deletePricingRow(
+      provider,
+      model,
+      tokenClass,
+      effectiveFrom,
+    )) > 0
   );
-  return result.changes > 0;
 }
 
 /**
@@ -13492,11 +10071,7 @@ export async function deletePricingRow(
  * in the test suite).
  */
 export async function getDailySpendForAgent(agentId: string, dateUtc: string): Promise<number> {
-  const row = await getDbClient().get<CoalesceSumRow>(
-    "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
-    [agentId, dateUtc],
-  );
-  return row?.total ?? 0;
+  return getStorage().repos.sessions.dailySpendForAgent(agentId, dateUtc);
 }
 
 /**
@@ -13512,11 +10087,7 @@ export async function getDailySpendForAgent(agentId: string, dateUtc: string): P
  * functional index on `substr(createdAt, 1, 10)` would be the fix.
  */
 export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
-  const row = await getDbClient().get<CoalesceSumRow>(
-    "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
-    [dateUtc],
-  );
-  return row?.total ?? 0;
+  return getStorage().repos.sessions.dailySpendGlobal(dateUtc);
 }
 
 /**
@@ -13526,14 +10097,7 @@ export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
  * `session_costs` stays task/session-scoped and does not grow a userId column.
  */
 export async function getDailySpendForUser(userId: string, dateUtc: string): Promise<number> {
-  const row = await getDbClient().get<CoalesceSumRow>(
-    `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
-       FROM session_costs sc
-       JOIN agent_tasks t ON sc.taskId = t.id
-       WHERE t.requestedByUserId = ? AND substr(sc.createdAt, 1, 10) = ?`,
-    [userId, dateUtc],
-  );
-  return row?.total ?? 0;
+  return getStorage().repos.sessions.dailySpendForUser(userId, dateUtc);
 }
 
 export interface RecordBudgetRefusalNotificationInput {
@@ -13562,30 +10126,24 @@ export async function recordBudgetRefusalNotification(
   inserted: boolean;
   row: BudgetRefusalNotification;
 }> {
-  const client = getDbClient();
   const now = Date.now();
-  const result = await client.run(
-    `INSERT OR IGNORE INTO budget_refusal_notifications
-       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, user_spend_usd, user_budget_usd, follow_up_task_id, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-    [
-      input.taskId,
-      input.date,
-      input.agentId,
-      input.cause,
-      input.agentSpendUsd ?? null,
-      input.agentBudgetUsd ?? null,
-      input.globalSpendUsd ?? null,
-      input.globalBudgetUsd ?? null,
-      input.userSpendUsd ?? null,
-      input.userBudgetUsd ?? null,
-      now,
-    ],
-  );
+  const inserted = await getStorage().repos.sessions.insertBudgetRefusalNotification({
+    task_id: input.taskId,
+    date: input.date,
+    agent_id: input.agentId,
+    cause: input.cause,
+    agent_spend_usd: input.agentSpendUsd ?? null,
+    agent_budget_usd: input.agentBudgetUsd ?? null,
+    global_spend_usd: input.globalSpendUsd ?? null,
+    global_budget_usd: input.globalBudgetUsd ?? null,
+    user_spend_usd: input.userSpendUsd ?? null,
+    user_budget_usd: input.userBudgetUsd ?? null,
+    createdAt: now,
+  });
 
-  const existing = await client.get<BudgetRefusalNotificationRow>(
-    "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
-    [input.taskId, input.date],
+  const existing = await getStorage().repos.sessions.findBudgetRefusalNotification(
+    input.taskId,
+    input.date,
   );
 
   if (!existing) {
@@ -13597,7 +10155,7 @@ export async function recordBudgetRefusalNotification(
   }
 
   return {
-    inserted: result.changes > 0,
+    inserted: inserted > 0,
     row: rowToBudgetRefusalNotification(existing),
   };
 }
@@ -13609,10 +10167,7 @@ export async function getBudgetRefusalNotification(
   taskId: string,
   date: string,
 ): Promise<BudgetRefusalNotification | null> {
-  const row = await getDbClient().get<BudgetRefusalNotificationRow>(
-    "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
-    [taskId, date],
-  );
+  const row = await getStorage().repos.sessions.findBudgetRefusalNotification(taskId, date);
   return row ? rowToBudgetRefusalNotification(row) : null;
 }
 
@@ -13624,10 +10179,7 @@ export async function getBudgetRefusalNotification(
 export async function getRecentBudgetRefusalNotifications(
   limit = 50,
 ): Promise<BudgetRefusalNotification[]> {
-  const rows = await getDbClient().query<BudgetRefusalNotificationRow>(
-    "SELECT * FROM budget_refusal_notifications ORDER BY createdAt DESC LIMIT ?",
-    [limit],
-  );
+  const rows = await getStorage().repos.sessions.listRecentBudgetRefusalNotifications(limit);
   return rows.map(rowToBudgetRefusalNotification);
 }
 
@@ -13639,11 +10191,7 @@ export async function hasBudgetRefusalNotificationToday(
   taskId: string,
   date: string,
 ): Promise<boolean> {
-  const row = await getDbClient().get<{ one: number }>(
-    "SELECT 1 as one FROM budget_refusal_notifications WHERE task_id = ? AND date = ? LIMIT 1",
-    [taskId, date],
-  );
-  return row !== null;
+  return getStorage().repos.sessions.hasBudgetRefusalNotification(taskId, date);
 }
 
 /**
@@ -13660,10 +10208,7 @@ export async function setBudgetRefusalFollowUpTaskId(
   date: string,
   followUpTaskId: string,
 ): Promise<void> {
-  await getDbClient().run(
-    "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
-    [followUpTaskId, taskId, date],
-  );
+  await getStorage().repos.sessions.setBudgetRefusalFollowUpTaskId(taskId, date, followUpTaskId);
 }
 
 // ============================================================================
@@ -13684,16 +10229,7 @@ export async function getLiveAgentCounts(minutes: number = 5): Promise<{
   leads_alive: number;
   workers_alive: number;
 }> {
-  const row = await getDbClient().get<{ leads_alive: number | null; workers_alive: number | null }>(
-    `SELECT
-         SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads_alive,
-         SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers_alive
-       FROM agents
-       WHERE lastActivityAt IS NOT NULL
-         AND lastActivityAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?1 || ' minutes')
-         AND status != 'offline'`,
-    [minutes],
-  );
+  const row = await getStorage().repos.agents.countLiveAgents(minutes);
   return {
     leads_alive: row?.leads_alive ?? 0,
     workers_alive: row?.workers_alive ?? 0,
@@ -13706,12 +10242,7 @@ export async function getLiveAgentCounts(minutes: number = 5): Promise<{
  * while the `/status` heartbeat window (`lastActivityAt`) lags for idle agents.
  */
 export async function getReadyAgentCounts(): Promise<{ leads: number; workers: number }> {
-  const row = await getDbClient().get<{ leads: number | null; workers: number | null }>(
-    `SELECT SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads,
-            SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers
-       FROM agents
-      WHERE status IN ('idle', 'busy') AND ${NOT_EXTENSION_AGENT_SQL}`,
-  );
+  const row = await getStorage().repos.agents.countReadyAgents();
   return { leads: row?.leads ?? 0, workers: row?.workers ?? 0 };
 }
 
@@ -13729,14 +10260,11 @@ export async function getInstanceActivity(): Promise<{
   recent_tasks_count: number;
 }> {
   const { leads_alive, workers_alive } = await getLiveAgentCounts(5);
-  const tasksRow = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agent_tasks
-       WHERE createdAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`,
-  );
+  const recentTasks = await getStorage().repos.tasks.countTasksCreatedLastDay();
   return {
     agents_online: leads_alive + workers_alive,
     leads_online: leads_alive,
-    recent_tasks_count: tasksRow?.count ?? 0,
+    recent_tasks_count: recentTasks,
   };
 }
 
@@ -13756,15 +10284,10 @@ export interface SwarmMetrics {
  * grouping rides the indexes added in migration 069.
  */
 export async function getSwarmMetrics(): Promise<SwarmMetrics> {
-  const client = getDbClient();
-
-  const groupCounts = async (
-    table: string,
-    where?: string,
-  ): Promise<{ total: number; by_status: Record<string, number> }> => {
-    const rows = await client.query<{ status: string; count: number }>(
-      `SELECT status, COUNT(*) AS count FROM ${table}${where ? ` WHERE ${where}` : ""} GROUP BY status`,
-    );
+  const repos = getStorage().repos;
+  const groupCounts = (
+    rows: { status: string; count: number }[],
+  ): { total: number; by_status: Record<string, number> } => {
     const by_status: Record<string, number> = {};
     let total = 0;
     for (const r of rows) {
@@ -13774,22 +10297,18 @@ export async function getSwarmMetrics(): Promise<SwarmMetrics> {
     return { total, by_status };
   };
 
-  const workflowRow = await client.get<{ total: number; enabled: number }>(
-    "SELECT COUNT(*) AS total, SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS enabled FROM workflows",
-  );
-  const pagesRow = await client.get<{ count: number }>("SELECT COUNT(*) AS count FROM pages");
-  const sessionsRow = await client.get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM active_sessions",
-  );
-  const skillsRow = await client.get<{ count: number }>("SELECT COUNT(*) AS count FROM skills");
+  const workflowRow = await repos.workflows.countWorkflows();
+  const pages = await repos.pages.countPages({});
+  const sessions = await repos.agents.countActiveSessions();
+  const skills = await repos.skills.countSkills();
 
   return {
-    tasks: await groupCounts("agent_tasks"),
-    agents: await groupCounts("agents", NOT_EXTENSION_AGENT_SQL),
+    tasks: groupCounts(await repos.tasks.countTasksByStatus()),
+    agents: groupCounts(await repos.agents.countAgentsByStatus()),
     workflows: { total: workflowRow?.total ?? 0, enabled: workflowRow?.enabled ?? 0 },
-    pages: { total: pagesRow?.count ?? 0 },
-    sessions: { active: sessionsRow?.count ?? 0 },
-    skills: { total: skillsRow?.count ?? 0 },
+    pages: { total: pages },
+    sessions: { active: sessions },
+    skills: { total: skills },
   };
 }
 
@@ -13798,10 +10317,7 @@ export async function getSwarmMetrics(): Promise<SwarmMetrics> {
  * Cheap LIMIT 1 probe; the row's contents don't matter, only existence.
  */
 export async function hasFirstCompletedTask(): Promise<boolean> {
-  const row = await getDbClient().get<{ one: number }>(
-    `SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
-  );
-  return row !== null;
+  return await getStorage().repos.tasks.hasCompletedTask();
 }
 
 // ============================================================================
@@ -13887,17 +10403,11 @@ function encodeKvValue(value: unknown, valueType: KvValueType): string {
  * time without a background sweeper.
  */
 export async function getKv(namespace: string, key: string): Promise<KvEntry | null> {
-  const row = await getDbClient().get<KvRow>(
-    `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
-         FROM kv_entries WHERE namespace = ? AND key = ?`,
-    [namespace, key],
-  );
+  const kv = getStorage().repos.kv;
+  const row = (await kv.findEntry(namespace, key)) as KvRow | null;
   if (!row) return null;
   if (row.expires_at !== null && row.expires_at <= Date.now()) {
-    await getDbClient().run(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`, [
-      namespace,
-      key,
-    ]);
+    await kv.deleteEntry(namespace, key);
     return null;
   }
   return decodeKvRow(row);
@@ -13906,14 +10416,7 @@ export async function getKv(namespace: string, key: string): Promise<KvEntry | n
 /** Delete expired entries in one namespace. Used by internal TTL-backed stores
  * that need proactive cleanup rather than waiting for a point read. */
 export async function sweepExpiredKv(namespace: string, now = Date.now()): Promise<number> {
-  const result = await getDbClient().run(
-    `DELETE FROM kv_entries
-        WHERE namespace = ?
-          AND expires_at IS NOT NULL
-          AND expires_at <= ?`,
-    [namespace, now],
-  );
-  return result.changes;
+  return await getStorage().repos.kv.deleteExpired(namespace, now);
 }
 
 /** Delete expired entries across a namespace family (`prefix` and
@@ -13934,18 +10437,14 @@ export async function sweepExpiredKvPrefix(
   // ROWID, so a batch selects the (namespace, key) primary key.
   let removed = 0;
   for (;;) {
-    const result = await getDbClient().run(
-      `DELETE FROM kv_entries
-          WHERE (namespace, key) IN (
-            SELECT namespace, key FROM kv_entries
-              WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
-                AND expires_at IS NOT NULL
-                AND expires_at <= ?
-              LIMIT ?)`,
-      [prefix, `${escaped}:%`, now, batchSize],
+    const changes = await getStorage().repos.kv.deleteExpiredInFamilyBatch(
+      prefix,
+      `${escaped}:%`,
+      now,
+      batchSize,
     );
-    removed += result.changes;
-    if (result.changes < batchSize) return removed;
+    removed += changes;
+    if (changes < batchSize) return removed;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }
@@ -13967,17 +10466,15 @@ export async function upsertKv(input: {
   const encoded = encodeKvValue(input.value, input.valueType);
   const expiresAt = input.expiresAt ?? null;
   const now = Date.now();
-  const row = await getDbClient().get<KvRow>(
-    `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(namespace, key) DO UPDATE SET
-         value = excluded.value,
-         value_type = excluded.value_type,
-         expires_at = excluded.expires_at,
-         updated_at = excluded.updated_at
-       RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-    [input.namespace, input.key, encoded, input.valueType, expiresAt, now, now],
-  );
+  const row = (await getStorage().repos.kv.upsertEntry({
+    namespace: input.namespace,
+    key: input.key,
+    value: encoded,
+    value_type: input.valueType,
+    expires_at: expiresAt,
+    created_at: now,
+    updated_at: now,
+  })) as KvRow | null;
   if (!row) throw new Error("Failed to upsert kv entry");
   return decodeKvRow(row);
 }
@@ -13999,18 +10496,19 @@ export async function claimKv(input: {
   const encoded = encodeKvValue(input.value, input.valueType);
   const expiresAt = input.expiresAt ?? null;
   const now = Date.now();
-  const result = await getDbClient().run(
-    `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(namespace, key) DO UPDATE SET
-         value = excluded.value,
-         value_type = excluded.value_type,
-         expires_at = excluded.expires_at,
-         updated_at = excluded.updated_at
-       WHERE kv_entries.expires_at IS NOT NULL AND kv_entries.expires_at <= ?`,
-    [input.namespace, input.key, encoded, input.valueType, expiresAt, now, now, now],
+  const changes = await getStorage().repos.kv.claimEntry(
+    {
+      namespace: input.namespace,
+      key: input.key,
+      value: encoded,
+      value_type: input.valueType,
+      expires_at: expiresAt,
+      created_at: now,
+      updated_at: now,
+    },
+    now,
   );
-  return result.changes > 0;
+  return changes > 0;
 }
 
 /**
@@ -14018,11 +10516,7 @@ export async function claimKv(input: {
  * existed. Does not differentiate expired-but-not-yet-swept from never-existed.
  */
 export async function deleteKv(namespace: string, key: string): Promise<boolean> {
-  const result = await getDbClient().run(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`, [
-    namespace,
-    key,
-  ]);
-  return result.changes > 0;
+  return (await getStorage().repos.kv.deleteEntry(namespace, key)) > 0;
 }
 
 export class KvTypeCollisionError extends Error {
@@ -14044,12 +10538,10 @@ export async function incrKv(namespace: string, key: string, by: number): Promis
   if (!Number.isInteger(by) || !Number.isSafeInteger(by)) {
     throw new Error("INCR `by` must be a JS-safe integer");
   }
-  return await getDbClient().transaction(async (tx): Promise<KvEntry> => {
-    const existing = await tx.get<KvRow>(
-      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
-           FROM kv_entries WHERE namespace = ? AND key = ?`,
-      [namespace, key],
-    );
+  const storage = getStorage();
+  const kv = storage.repos.kv;
+  return await storage.transaction(async (): Promise<KvEntry> => {
+    const existing = (await kv.findEntry(namespace, key)) as KvRow | null;
 
     const now = Date.now();
     const expired =
@@ -14061,17 +10553,15 @@ export async function incrKv(namespace: string, key: string, by: number): Promis
     if (!existing || expired) {
       // Insert (or replace if expired). `upsertKv` re-enters the prepared
       // statement cache cheaply; inlining keeps this in one transaction.
-      const row = await tx.get<KvRow>(
-        `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-             VALUES (?, ?, ?, 'integer', ?, ?, ?)
-           ON CONFLICT(namespace, key) DO UPDATE SET
-             value = excluded.value,
-             value_type = excluded.value_type,
-             expires_at = excluded.expires_at,
-             updated_at = excluded.updated_at
-           RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-        [namespace, key, String(by), null, now, now],
-      );
+      const row = (await kv.upsertEntry({
+        namespace,
+        key,
+        value: String(by),
+        value_type: "integer",
+        expires_at: null,
+        created_at: now,
+        updated_at: now,
+      })) as KvRow | null;
       if (!row) throw new Error("Failed to insert kv entry on INCR");
       return decodeKvRow(row);
     }
@@ -14089,12 +10579,7 @@ export async function incrKv(namespace: string, key: string, by: number): Promis
       throw new Error("INCR would overflow JS-safe integer range");
     }
 
-    const row = await tx.get<KvRow>(
-      `UPDATE kv_entries SET value = ?, updated_at = ?
-           WHERE namespace = ? AND key = ?
-         RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-      [String(next), now, namespace, key],
-    );
+    const row = (await kv.setEntryValue(namespace, key, String(next), now)) as KvRow | null;
     if (!row) throw new Error("Failed to update kv entry on INCR");
     return decodeKvRow(row);
   });
@@ -14123,23 +10608,17 @@ export function kvPrefixUpperBound(prefix: string): string | null {
  * BINARY), so it scanned every row of the namespace. A range seeks straight
  * to the prefix and matches it exactly (case-sensitive).
  */
-function kvPrefixCondition(prefix: string | undefined): { sql: string; params: string[] } {
-  if (prefix === undefined || prefix.length === 0) return { sql: "", params: [] };
+function kvPrefixCondition(prefix: string | undefined): KvKeyRange {
+  if (prefix === undefined || prefix.length === 0) return {};
   const upper = kvPrefixUpperBound(prefix);
-  return upper === null
-    ? { sql: "AND key >= ?", params: [prefix] }
-    : { sql: "AND key >= ? AND key < ?", params: [prefix, upper] };
+  return upper === null ? { from: prefix } : { from: prefix, before: upper };
 }
 
 /** Top-level JSON field equality, evaluated in SQLite before rows reach JS. */
 export type KvJsonFieldEquals = { field: string; value: string | number | boolean };
 
-function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
-  sql: string;
-  params: (string | number | boolean)[];
-} {
-  const parts: string[] = [];
-  const params: (string | number | boolean)[] = [];
+function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): KvJsonFieldFilter[] {
+  const out: KvJsonFieldFilter[] = [];
   for (const filter of filters ?? []) {
     // JSON path quoting has no escape for these characters.
     if (/["\\]/.test(filter.field)) {
@@ -14150,14 +10629,9 @@ function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
     // float parser) while the bound JS number is a double, so SQL could drop
     // a row that JS `===` matches. Other numbers are left to the caller.
     if (typeof filter.value === "number" && !Number.isSafeInteger(filter.value)) continue;
-    // json_valid guards the corrupt rows decodeKvRow tolerates: json_extract
-    // would abort the whole query on one of them.
-    parts.push(
-      "AND (CASE WHEN value_type = 'json' AND json_valid(value) THEN json_extract(value, ?) END) = ?",
-    );
-    params.push(`$."${filter.field}"`, filter.value);
+    out.push({ path: `$."${filter.field}"`, value: filter.value });
   }
-  return { sql: parts.join(" "), params };
+  return out;
 }
 
 /**
@@ -14191,26 +10665,21 @@ export async function listKv(
 ): Promise<KvEntry[]> {
   const now = Date.now();
   const upper = opts.prefix === undefined ? null : kvPrefixUpperBound(opts.prefix);
-  const prefix =
+  const range: KvKeyRange =
     opts.keyAfter === undefined
       ? kvPrefixCondition(opts.prefix)
       : opts.keyThrough !== undefined
-        ? { sql: "AND key > ? AND key <= ?", params: [opts.keyAfter, opts.keyThrough] }
+        ? { after: opts.keyAfter, through: opts.keyThrough }
         : upper === null
-          ? { sql: "AND key > ?", params: [opts.keyAfter] }
-          : { sql: "AND key > ? AND key < ?", params: [opts.keyAfter, upper] };
-  const json = kvJsonFieldConditions(opts.jsonFieldEquals);
-  const rows = await getDbClient().query<KvRow>(
-    `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
-         FROM kv_entries
-        WHERE namespace = ?
-          AND (expires_at IS NULL OR expires_at > ?)
-          ${prefix.sql}
-          ${json.sql}
-        ORDER BY key
-        LIMIT ? OFFSET ?`,
-    [namespace, now, ...prefix.params, ...json.params, opts.limit, opts.offset],
-  );
+          ? { after: opts.keyAfter }
+          : { after: opts.keyAfter, before: upper };
+  const rows = (await getStorage().repos.kv.listLiveEntries(namespace, {
+    nowMs: now,
+    range,
+    jsonFieldEquals: kvJsonFieldConditions(opts.jsonFieldEquals),
+    limit: opts.limit,
+    offset: opts.offset,
+  })) as KvRow[];
   return rows.map(decodeKvRow);
 }
 
@@ -14220,59 +10689,14 @@ export async function listKv(
  */
 export async function countKv(namespace: string, opts: { prefix?: string }): Promise<number> {
   const now = Date.now();
-  const prefix = kvPrefixCondition(opts.prefix);
-  const row = await getDbClient().get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM kv_entries
-        WHERE namespace = ?
-          AND (expires_at IS NULL OR expires_at > ?)
-          ${prefix.sql}`,
-    [namespace, now, ...prefix.params],
+  return await getStorage().repos.kv.countLiveEntries(
+    namespace,
+    now,
+    kvPrefixCondition(opts.prefix),
   );
-  return row?.n ?? 0;
 }
 
 // ─── Script Runs ────────────────────────────────────────────────────────────
-
-type ScriptRunRow = {
-  objectScriptId: string | null;
-  objectId: string | null;
-  objectMethod: string | null;
-  id: string;
-  agentId: string;
-  scriptName: string | null;
-  source: string;
-  storedSource?: string | null;
-  args: string;
-  kind: string;
-  status: string;
-  pid: number | null;
-  startedAt: string;
-  finishedAt: string | null;
-  output: string | null;
-  error: string | null;
-  last_heartbeat_at: string | null;
-  idempotencyKey: string | null;
-  requestedByUserId: string | null;
-  sourceTaskId: string | null;
-  created_by: string | null;
-  updated_by: string | null;
-};
-
-type ScriptRunListRow = Pick<
-  ScriptRunRow,
-  | "id"
-  | "agentId"
-  | "scriptName"
-  | "kind"
-  | "status"
-  | "pid"
-  | "startedAt"
-  | "finishedAt"
-  | "error"
-  | "last_heartbeat_at"
-  | "idempotencyKey"
-  | "requestedByUserId"
->;
 
 function parseJsonColumn(value: string | null): unknown | undefined {
   if (value === null) return undefined;
@@ -14307,6 +10731,9 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
 
 function rowToScriptRunListItem(row: ScriptRunListRow): ScriptRunListItem {
   return {
+    objectScriptId: row.objectScriptId ?? undefined,
+    objectId: row.objectId == null ? undefined : scrubSecrets(row.objectId),
+    objectMethod: row.objectMethod ?? undefined,
     id: row.id,
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,
@@ -14334,41 +10761,33 @@ export async function createScriptRun(data: {
   createdBy?: string;
   updatedBy?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
-  const client = getDbClient();
-  return client.transaction(async () => {
+  const storage = getStorage();
+  return storage.transaction(async () => {
     if (data.idempotencyKey) {
-      const existing = await client.get<ScriptRunRow>(
-        `${SCRIPT_RUN_SELECT} WHERE r.idempotencyKey = ?`,
-        [data.idempotencyKey],
+      const existing = await storage.repos.scripts.findScriptRunByIdempotencyKey(
+        data.idempotencyKey,
       );
       if (existing) return { run: rowToScriptRun(existing), existing: true };
     }
 
     const sourceHash = await storeScriptRunSource(data.source);
-    const row = await client.get<ScriptRunRow>(
-      `INSERT INTO script_runs
-        (id, agentId, scriptName, source, sourceHash, args, idempotencyKey, requestedByUserId, sourceTaskId,
-         created_by, updated_by, startedAt)
-       VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-      [
-        data.id,
-        data.agentId,
-        data.scriptName ?? null,
-        sourceHash,
-        // Sealed, not scrubbed: this is the run's execution input. The supervisor
-        // launches (and relaunches after a restart or pause) from it, so a
-        // redacted value would change what the script receives.
-        sealJson(data.args ?? null),
-        data.idempotencyKey ?? null,
-        data.requestedByUserId ?? null,
-        data.sourceTaskId ?? null,
-        data.createdBy ?? null,
-        data.updatedBy ?? data.createdBy ?? null,
-        // ISO like finishedAt and the inline path, not the column's datetime('now') default.
-        new Date().toISOString(),
-      ],
-    );
+    const row = await storage.repos.scripts.insertScriptRun({
+      id: data.id,
+      agentId: data.agentId,
+      scriptName: data.scriptName ?? null,
+      sourceHash,
+      // Sealed, not scrubbed: this is the run's execution input. The supervisor
+      // launches (and relaunches after a restart or pause) from it, so a
+      // redacted value would change what the script receives.
+      args: sealJson(data.args ?? null),
+      idempotencyKey: data.idempotencyKey ?? null,
+      requestedByUserId: data.requestedByUserId ?? null,
+      sourceTaskId: data.sourceTaskId ?? null,
+      created_by: data.createdBy ?? null,
+      updated_by: data.updatedBy ?? data.createdBy ?? null,
+      // ISO like finishedAt and the inline path, not the column's datetime('now') default.
+      startedAt: new Date().toISOString(),
+    });
     if (!row) throw new Error("Failed to create script run");
     return { run: rowToScriptRun({ ...row, storedSource: data.source }), existing: false };
   });
@@ -14401,140 +10820,66 @@ export async function recordInlineScriptRun(data: {
   const args = scrubJsonValue(data.args ?? null);
   const output = data.output === undefined ? null : scrubJsonValue(data.output);
   const provenance = getCurrentRunProvenance();
-  const client = getDbClient();
-  return client.transaction(async () => {
+  const storage = getStorage();
+  return storage.transaction(async () => {
     const sourceHash = await storeScriptRunSource(data.source);
-    const row = await client.get<ScriptRunRow>(
-      `INSERT INTO script_runs
-        (id, agentId, scriptName, source, sourceHash, args, kind, status, output, error,
-         startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId,
-         sourceStepId, parentScriptRunId, objectScriptId, objectId, objectMethod)
-       VALUES (?, ?, ?, '', ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
-      [
-        data.id,
-        data.agentId,
-        data.scriptName ?? null,
-        sourceHash,
-        args,
-        data.status,
-        output,
-        data.error ?? null,
-        data.startedAt,
-        data.finishedAt,
-        data.requestedByUserId ?? null,
-        data.createdBy ?? null,
-        data.createdBy ?? null,
-        data.apiEndpointId ?? null,
-        // A run called through another script run's token (a nested
-        // ctx.swarm.script_run) records that run and its workflow step.
-        provenance?.sourceStepId ?? null,
-        provenance?.sourceScriptRunId ?? null,
-        data.objectScriptId ?? null,
-        data.objectId ?? null,
-        data.objectMethod ?? null,
-      ],
-    );
+    const row = await storage.repos.scripts.insertInlineScriptRun({
+      id: data.id,
+      agentId: data.agentId,
+      scriptName: data.scriptName ?? null,
+      sourceHash,
+      args,
+      status: data.status,
+      output,
+      error: data.error ?? null,
+      startedAt: data.startedAt,
+      finishedAt: data.finishedAt,
+      requestedByUserId: data.requestedByUserId ?? null,
+      created_by: data.createdBy ?? null,
+      updated_by: data.createdBy ?? null,
+      apiEndpointId: data.apiEndpointId ?? null,
+      // A run called through another script run's token (a nested
+      // ctx.swarm.script_run) records that run and its workflow step.
+      sourceStepId: provenance?.sourceStepId ?? null,
+      parentScriptRunId: provenance?.sourceScriptRunId ?? null,
+      objectScriptId: data.objectScriptId ?? null,
+      objectId: data.objectId ?? null,
+      objectMethod: data.objectMethod ?? null,
+    });
     if (!row) throw new Error("Failed to record inline script run");
     return rowToScriptRun({ ...row, storedSource: data.source });
   });
 }
 
 export async function getScriptRun(id: string): Promise<ScriptRun | null> {
-  const row = await getDbClient().get<ScriptRunRow>(`${SCRIPT_RUN_SELECT} WHERE r.id = ?`, [id]);
+  const row = await getStorage().repos.scripts.findScriptRun(id);
   return row ? rowToScriptRun(row) : null;
 }
 
 export async function getScriptRunByIdempotencyKey(
   idempotencyKey: string,
 ): Promise<ScriptRun | null> {
-  const row = await getDbClient().get<ScriptRunRow>(
-    `${SCRIPT_RUN_SELECT} WHERE r.idempotencyKey = ?`,
-    [idempotencyKey],
-  );
+  const row = await getStorage().repos.scripts.findScriptRunByIdempotencyKey(idempotencyKey);
   return row ? rowToScriptRun(row) : null;
 }
 
-export async function listScriptRuns(opts?: {
-  status?: ScriptRunStatus;
-  agentId?: string;
-  scriptName?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<ScriptRunListItem[]> {
-  const conditions: string[] = [];
-  const params: Array<string | number> = [];
-  if (opts?.status) {
-    conditions.push("status = ?");
-    params.push(opts.status);
-  }
-  if (opts?.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts?.scriptName) {
-    conditions.push("scriptName = ?");
-    params.push(opts.scriptName);
-  }
-
-  const limit = opts?.limit ?? 50;
-  const offset = opts?.offset ?? 0;
-  params.push(limit, offset);
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = await getDbClient().query<ScriptRunListRow>(
-    `SELECT
-        id,
-        agentId,
-        scriptName,
-        kind,
-        status,
-        pid,
-        startedAt,
-        finishedAt,
-        error,
-        last_heartbeat_at,
-        idempotencyKey,
-        requestedByUserId
-       FROM script_runs ${where}
-       ORDER BY startedAt DESC
-       LIMIT ? OFFSET ?`,
-    params,
+export async function listScriptRuns(
+  opts?: ScriptRunFilter & { limit?: number; offset?: number },
+): Promise<ScriptRunListItem[]> {
+  const rows = await getStorage().repos.scripts.listScriptRuns(
+    opts ?? {},
+    opts?.limit ?? 50,
+    opts?.offset ?? 0,
   );
   return rows.map(rowToScriptRunListItem);
 }
 
-export async function countScriptRuns(opts?: {
-  status?: ScriptRunStatus;
-  agentId?: string;
-  scriptName?: string;
-}): Promise<number> {
-  const conditions: string[] = [];
-  const params: string[] = [];
-  if (opts?.status) {
-    conditions.push("status = ?");
-    params.push(opts.status);
-  }
-  if (opts?.agentId) {
-    conditions.push("agentId = ?");
-    params.push(opts.agentId);
-  }
-  if (opts?.scriptName) {
-    conditions.push("scriptName = ?");
-    params.push(opts.scriptName);
-  }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM script_runs ${where}`,
-    params,
-  );
-  return row?.count ?? 0;
+export async function countScriptRuns(opts?: ScriptRunFilter): Promise<number> {
+  return await getStorage().repos.scripts.countScriptRuns(opts ?? {});
 }
 
 export async function countActiveScriptRuns(): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')",
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.scripts.countActiveScriptRuns();
 }
 
 export type ScriptRunPatch = Partial<{
@@ -14547,51 +10892,33 @@ export type ScriptRunPatch = Partial<{
   updatedBy: string | null;
 }>;
 
-function scriptRunUpdateSets(patch: ScriptRunPatch): {
-  sets: string[];
-  vals: Array<string | number | null>;
-} {
-  const sets: string[] = [];
-  const vals: Array<string | number | null> = [];
-  if (patch.status !== undefined) {
-    sets.push("status = ?");
-    vals.push(patch.status);
-  }
-  if (patch.pid !== undefined) {
-    sets.push("pid = ?");
-    vals.push(patch.pid);
-  }
-  if (patch.finishedAt !== undefined) {
-    sets.push("finishedAt = ?");
-    vals.push(patch.finishedAt);
-  }
-  // Every script_runs UPDATE builds its SET list here, so this is the
-  // chokepoint for the output and error columns. Output is a record of the
-  // finished run (nothing re-reads it as input), so redaction is safe.
-  if ("output" in patch) {
-    sets.push("output = ?");
-    vals.push(patch.output === undefined ? null : scrubJsonValue(patch.output));
-  }
-  if (patch.error !== undefined) {
-    sets.push("error = ?");
-    vals.push(patch.error === null ? null : scrubSecrets(patch.error));
-  }
-  if (patch.lastHeartbeatAt !== undefined) {
-    sets.push("last_heartbeat_at = ?");
-    vals.push(patch.lastHeartbeatAt);
-  }
-  if (patch.updatedBy !== undefined) {
-    sets.push("updated_by = ?");
-    vals.push(patch.updatedBy);
-  }
-  return { sets, vals };
+function scriptRunUpdateSets(patch: ScriptRunPatch): ScriptRunColumnUpdate {
+  return {
+    status: patch.status,
+    pid: patch.pid,
+    finishedAt: patch.finishedAt,
+    // Every script_runs UPDATE builds its SET list here, so this is the
+    // chokepoint for the output and error columns. Output is a record of the
+    // finished run (nothing re-reads it as input), so redaction is safe.
+    output:
+      "output" in patch
+        ? patch.output === undefined
+          ? null
+          : scrubJsonValue(patch.output)
+        : undefined,
+    error:
+      patch.error === undefined
+        ? undefined
+        : patch.error === null
+          ? null
+          : scrubSecrets(patch.error),
+    last_heartbeat_at: patch.lastHeartbeatAt,
+    updated_by: patch.updatedBy,
+  };
 }
 
 export async function updateScriptRun(id: string, patch: ScriptRunPatch): Promise<void> {
-  const { sets, vals } = scriptRunUpdateSets(patch);
-  if (sets.length === 0) return;
-  vals.push(id);
-  await getDbClient().run(`UPDATE script_runs SET ${sets.join(", ")} WHERE id = ?`, vals);
+  await getStorage().repos.scripts.updateScriptRun(id, scriptRunUpdateSets(patch));
 }
 
 /**
@@ -14609,11 +10936,7 @@ export async function updateScriptRunIfNotTerminal(
   id: string,
   patch: ScriptRunPatch,
 ): Promise<boolean> {
-  return await updateScriptRunGuarded(
-    id,
-    patch,
-    "status NOT IN ('completed', 'failed', 'cancelled', 'aborted_limit')",
-  );
+  return await updateScriptRunGuarded(id, patch, "not-terminal");
 }
 
 /**
@@ -14626,48 +10949,25 @@ export async function updateScriptRunIfRunning(
   id: string,
   patch: ScriptRunPatch,
 ): Promise<boolean> {
-  return await updateScriptRunGuarded(id, patch, "status = 'running'");
+  return await updateScriptRunGuarded(id, patch, "running");
 }
 
 async function updateScriptRunGuarded(
   id: string,
   patch: ScriptRunPatch,
-  predicate: string,
+  guard: "not-terminal" | "running",
 ): Promise<boolean> {
-  const { sets, vals } = scriptRunUpdateSets(patch);
-  if (sets.length === 0) return false;
-  vals.push(id);
-  const result = await getDbClient().run(
-    `UPDATE script_runs SET ${sets.join(", ")} WHERE id = ? AND ${predicate}`,
-    vals,
+  return (
+    (await getStorage().repos.scripts.updateScriptRun(id, scriptRunUpdateSets(patch), guard)) > 0
   );
-  return result.changes > 0;
 }
 
 export async function getRunningScriptRuns(): Promise<ScriptRun[]> {
-  const rows = await getDbClient().query<ScriptRunRow>(
-    `${SCRIPT_RUN_SELECT} WHERE r.status IN ('running', 'paused')`,
-  );
+  const rows = await getStorage().repos.scripts.listActiveScriptRuns();
   return rows.map(rowToScriptRun);
 }
 
 // ─── Script Run Journal ─────────────────────────────────────────────────────
-
-type ScriptRunJournalRow = {
-  id: string;
-  runId: string;
-  stepKey: string;
-  stepType: string;
-  config: string;
-  status: string;
-  result: string | null;
-  error: string | null;
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  created_by: string | null;
-  updated_by: string | null;
-};
 
 function rowToScriptRunJournalEntry(
   row: ScriptRunJournalRow,
@@ -14697,10 +10997,7 @@ export async function getScriptRunJournalStep(
   runId: string,
   stepKey: string,
 ): Promise<ScriptRunJournalEntry | null> {
-  const row = await getDbClient().get<ScriptRunJournalRow>(
-    "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
-    [runId, stepKey],
-  );
+  const row = await getStorage().repos.scripts.findScriptRunJournalStep(runId, stepKey);
   return row ? rowToScriptRunJournalEntry(row, "replay") : null;
 }
 
@@ -14718,44 +11015,28 @@ export async function upsertScriptRunJournalStep(data: {
   // redacted. `result` is sealed instead: the harness replays it verbatim as
   // the step's return value on resume, so redaction would change what later
   // steps see.
-  await getDbClient().run(
-    `INSERT OR IGNORE INTO script_run_journal
-      (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [
-      crypto.randomUUID(),
-      data.runId,
-      data.stepKey,
-      data.stepType,
-      scrubJsonValue(data.config ?? {}),
-      data.status,
-      data.result !== undefined ? sealJson(data.result) : null,
-      data.error ?? null,
-      data.durationMs ?? null,
-    ],
-  );
+  await getStorage().repos.scripts.insertScriptRunJournalStep({
+    id: crypto.randomUUID(),
+    runId: data.runId,
+    stepKey: data.stepKey,
+    stepType: data.stepType,
+    config: scrubJsonValue(data.config ?? {}),
+    status: data.status,
+    result: data.result !== undefined ? sealJson(data.result) : null,
+    error: data.error ?? null,
+    durationMs: data.durationMs ?? null,
+  });
 }
 
 export async function listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalEntry[]> {
-  const rows = await getDbClient().query<ScriptRunJournalRow>(
-    "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
-    [runId],
-  );
+  const rows = await getStorage().repos.scripts.listScriptRunJournalSteps(runId);
   return rows.map((row) => rowToScriptRunJournalEntry(row));
 }
 
 export async function countScriptRunJournalSteps(runId: string): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ?",
-    [runId],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.scripts.countScriptRunJournalSteps(runId);
 }
 
 export async function countScriptRunJournalAgentTaskSteps(runId: string): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ? AND stepType = 'agent-task'",
-    [runId],
-  );
-  return row?.count ?? 0;
+  return await getStorage().repos.scripts.countScriptRunJournalSteps(runId, "agent-task");
 }

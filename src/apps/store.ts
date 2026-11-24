@@ -1,5 +1,6 @@
 import { defaultAssetKey } from "../assets/key";
-import { getDbClient, literalPrefixPattern } from "../be/db";
+import { literalPrefixPattern } from "../be/db";
+import { getStorage } from "../be/storage";
 import type { AppIcon } from "../types";
 import { AppIconSchema } from "../types";
 import type { AppDefinition, AppValidationIssue } from "./definition";
@@ -9,6 +10,8 @@ import {
   stampAppDefinition,
   upgradeAppDefinition,
 } from "./format-upgrades";
+
+const repo = () => getStorage().repos.pages;
 
 interface AppDbRow {
   id: string;
@@ -108,29 +111,20 @@ export async function createApp(input: {
 }): Promise<AppRecord> {
   const id = input.id ?? crypto.randomUUID();
   const now = nextTimestamp();
-  const row = await getDbClient().get<AppDbRow>(
-    `INSERT INTO apps (id, name, description, definition, created_at, updated_at, "key")
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     RETURNING id, name, description, definition, created_at, updated_at`,
-    [
-      id,
-      input.name,
-      input.description ?? null,
-      encodeDefinition(input.definition),
-      now,
-      now,
-      defaultAssetKey("app", id),
-    ],
-  );
+  const row = await repo().insertApp({
+    id,
+    name: input.name,
+    description: input.description ?? null,
+    definition: encodeDefinition(input.definition),
+    now,
+    key: defaultAssetKey("app", id),
+  });
   if (!row) throw new Error("Failed to create app");
   return decodeApp(row);
 }
 
 export async function getApp(id: string): Promise<AppRecord | null> {
-  const row = await getDbClient().get<AppDbRow>(
-    `SELECT id, name, description, definition, created_at, updated_at FROM apps WHERE id = ?`,
-    [id],
-  );
+  const row = await repo().findApp(id);
   return row ? decodeApp(row) : null;
 }
 
@@ -153,23 +147,10 @@ export async function listApps(filters?: {
   q?: string;
   limit?: number;
 }): Promise<Array<Omit<AppRecord, "definition"> & { icon?: AppIcon }>> {
-  const params: (string | number)[] = [];
-  let where = "";
-  if (filters?.q) {
-    const pattern = `%${literalPrefixPattern(filters.q)}`;
-    where = ` WHERE name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'`;
-    params.push(pattern, pattern);
-  }
-  let limit = "";
-  if (filters?.limit !== undefined) {
-    limit = " LIMIT ?";
-    params.push(filters.limit);
-  }
-  const rows = await getDbClient().query<AppDbRow>(
-    `SELECT id, name, description, definition, created_at, updated_at
-     FROM apps${where} ORDER BY created_at DESC, id${limit}`,
-    params,
-  );
+  const rows = await repo().listApps({
+    pattern: filters?.q ? `%${literalPrefixPattern(filters.q)}` : undefined,
+    limit: filters?.limit,
+  });
   return rows.map((row) => {
     const icon = extractIcon(row.definition);
     return {
@@ -184,10 +165,7 @@ export async function listApps(filters?: {
 }
 
 export async function listAppRecords(): Promise<AppRecord[]> {
-  const rows = await getDbClient().query<AppDbRow>(
-    `SELECT id, name, description, definition, created_at, updated_at
-     FROM apps ORDER BY created_at ASC, id ASC`,
-  );
+  const rows = await repo().listAllApps();
   return rows.map(decodeApp);
 }
 
@@ -198,22 +176,20 @@ export async function updateApp(
   const existing = await getApp(id);
   if (!existing) return null;
   const updatedAt = nextTimestamp(existing.updatedAt);
-  const row = await getDbClient().get<AppDbRow>(
-    `UPDATE apps
-     SET name = ?, description = ?, definition = ?, updated_at = ?
-     WHERE id = ?
-     RETURNING id, name, description, definition, created_at, updated_at`,
-    [
-      patch.name ?? existing.name,
+  const row = await repo().updateApp(id, {
+    name: patch.name ?? existing.name,
+    description:
       patch.description === undefined ? (existing.description ?? null) : patch.description,
-      encodeDefinition(patch.definition ?? existing.definition),
-      updatedAt,
-      id,
-    ],
-  );
+    definition: encodeDefinition(patch.definition ?? existing.definition),
+    updatedAt,
+  });
   return row ? decodeApp(row) : null;
 }
 
 export async function deleteApp(id: string): Promise<boolean> {
-  return (await getDbClient().run("DELETE FROM apps WHERE id = ?", [id])).changes > 0;
+  const storage = getStorage();
+  return storage.transaction(async () => {
+    await storage.repos.pages.deleteAppFavorites(id);
+    return (await storage.repos.pages.deleteApp(id)) > 0;
+  });
 }

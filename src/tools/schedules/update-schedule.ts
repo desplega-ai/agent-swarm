@@ -12,7 +12,11 @@ import {
   isExtensionAgent,
   updateScheduledTask,
 } from "@/be/db";
-import { modelProfileRefError, scheduleProfileUpdate } from "@/be/db/model-profiles";
+import {
+  modelGroupRefError,
+  modelProfileRefError,
+  scheduleProfileUpdate,
+} from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import {
   changesScheduleTarget,
@@ -89,7 +93,7 @@ export const updateScheduleInputSchema = z.object({
   modelTier: ModelTierSchema.nullable()
     .optional()
     .describe(
-      'Deprecated: pass profile "<harness>-<tier>" instead (same model). Portable model tier for tasks created by this schedule, resolved at claim time through the seeded <harness>-<tier> profile. Set to null to clear.',
+      'Deprecated: pass modelGroup "<tier>" (the group of that tier) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule, resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile. Set to null to clear.',
     ),
   profile: z
     .string()
@@ -99,6 +103,15 @@ export const updateScheduleInputSchema = z.object({
     .optional()
     .describe(
       "Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear.",
+    ),
+  modelGroup: z
+    .string()
+    .trim()
+    .min(1)
+    .nullable()
+    .optional()
+    .describe(
+      "Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile: setting a group clears them, and setting any of them clears the group. Set to null to clear.",
     ),
   allowCustomModel: z
     .boolean()
@@ -129,6 +142,7 @@ const scheduleDataShape = {
   model: z.string().optional(),
   modelTier: ModelTierSchema.optional(),
   profile: z.string().optional(),
+  modelGroup: z.string().optional(),
   scheduleType: z.string().optional(),
   targetType: ScheduledTaskTargetTypeSchema.optional(),
   workflowId: z.string().optional(),
@@ -176,6 +190,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         model,
         modelTier,
         profile,
+        modelGroup,
         allowCustomModel,
       },
       requestInfo,
@@ -327,6 +342,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           targetAgentId !== undefined && targetAgentId !== schedule.targetAgentId;
         const profileUpdate = await scheduleProfileUpdate(schedule, {
           profile,
+          modelGroup,
           model,
           modelTier,
           targetAgentId,
@@ -347,7 +363,12 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           if (modelTier !== undefined || normalizedModel.modelTier) {
             updateData.modelTier = normalizedModel.modelTier ?? null;
           }
-        } else if (agentChanged && schedule.model && !profileUpdate.fields.profile) {
+        } else if (
+          agentChanged &&
+          schedule.model &&
+          !profileUpdate.fields.profile &&
+          !profileUpdate.fields.modelGroup
+        ) {
           // Harness only: the stored id already passed the catalog check when it was written.
           const modelError = await explicitModelErrorForAgent({
             model: schedule.model,
@@ -438,7 +459,12 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           },
         );
       } catch (error) {
-        // The profile was deleted between scheduleProfileUpdate and the write.
+        // The profile or group was deleted between scheduleProfileUpdate and the write.
+        if (modelGroupRefError(error)) {
+          return toolErr(`Unknown model group "${modelGroup}".`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
+        }
         if (modelProfileRefError(error) === "missing") {
           return toolErr(`Unknown model profile "${profile}".`, {
             data: { yourAgentId: requestInfo.agentId },

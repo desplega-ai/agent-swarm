@@ -7,7 +7,7 @@
  * Mirrors the memory boot-reembed pattern (src/be/memory/boot-reembed.ts).
  */
 
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import type { ScriptScope } from "@/types";
 import { embeddingProvider, embedScript } from "./embeddings";
 
@@ -53,17 +53,9 @@ export async function runBootReembedScripts(): Promise<void> {
   const provider = embeddingProvider();
   const expectedBytes = provider.dimensions * Float32Array.BYTES_PER_ELEMENT;
 
-  const missing = await getDbClient().query<ScriptRow>(
-    `SELECT s.* FROM scripts s
-     LEFT JOIN script_embeddings e ON e.scriptId = s.id
-     WHERE s.isScratch = 0 AND e.scriptId IS NULL`,
-  );
-
-  const wrongDim = await getDbClient().query<ScriptRow>(
-    `SELECT s.* FROM scripts s
-     JOIN script_embeddings e ON e.scriptId = s.id
-     WHERE s.isScratch = 0 AND length(e.embedding) != ${expectedBytes}`,
-  );
+  const scripts = getStorage().repos.scripts;
+  const missing = (await scripts.listScriptsMissingEmbedding()) as ScriptRow[];
+  const wrongDim = (await scripts.listScriptsWithEmbeddingSizeNot(expectedBytes)) as ScriptRow[];
 
   if (missing.length === 0 && wrongDim.length === 0) {
     return;
@@ -103,13 +95,7 @@ export async function runBootReembedScripts(): Promise<void> {
     }
   }
 
-  const afterWrongDim =
-    (
-      await getDbClient().get<{ count: number }>(
-        `SELECT COUNT(*) as count FROM script_embeddings
-         WHERE length(embedding) != ${expectedBytes}`,
-      )
-    )?.count ?? 0;
+  const afterWrongDim = await scripts.countEmbeddingsWithSizeNot(expectedBytes);
 
   console.log(
     `[boot-reembed-scripts] complete: embedded=${embedded} failed=${failed} remaining_wrong_dim=${afterWrongDim}`,

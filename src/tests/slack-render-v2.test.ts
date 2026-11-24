@@ -91,6 +91,7 @@ let startStreamFailuresRemaining = 0;
 // A `chat.update` that answers with a Slack verdict other than 404 — the
 // permanent, non-retryable class (`cant_update_message`, `channel_not_found`).
 let rejectedUpdateTs: string | undefined;
+let rejectedDeleteTs: string | undefined;
 let rejectedUpdateCode = "cant_update_message";
 let rejectedUpdateMessages: string[] = [];
 // A `chat.stopStream` that answers with a Slack API verdict (e.g. the
@@ -299,6 +300,12 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     message.text = String(payload.text ?? "");
     return { ok: true };
   }
+  if (method === "chat.delete") {
+    if (rejectedDeleteTs === payload.ts) throw { data: { error: "cant_delete_message" } };
+    const key = remoteKey(String(payload.channel), String(payload.ts));
+    if (!remoteMessages.delete(key)) throw { data: { error: "message_not_found" } };
+    return { ok: true };
+  }
   if (method === "auth.test") return { ok: true, team_id: "T_TEST" };
   return { ok: true };
 });
@@ -353,6 +360,7 @@ beforeEach(async () => {
   missingMessageTs = undefined;
   updateFailuresRemaining = 0;
   rejectedUpdateTs = undefined;
+  rejectedDeleteTs = undefined;
   rejectedUpdateCode = "cant_update_message";
   rejectedUpdateMessages = [];
   rejectedStopTs = undefined;
@@ -2089,13 +2097,55 @@ describe("Slack renderer v2", () => {
       expect(blocks.map((block) => block.elements.map((element) => element.text))).toEqual([
         ["Sources: <https://example.com/a|[1]> Cited"],
         ["General sources: <https://example.com/b|[2]> Whole answer"],
-        ["📎 <https://example.com/report.md|report.md>"],
+        ["Links: 🌐 <https://example.com/report.md|report.md>"],
         [expect.stringContaining(ask.id.slice(0, 8))],
       ]);
     } finally {
       if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
       else process.env.AGENT_FS_LIVE_URL = originalHost;
     }
+  });
+
+  test("outcome cards link bare URLs in the answer and show each URL once", async () => {
+    const lead = await createAgent({ name: "Magic Link Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_MAGIC_LINKS");
+    const ask = await createTaskExtended("Magic links", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await upsertTaskCitations(ask.id, [
+      { index: 1, kind: "url", ref: "https://github.com/o/r/pull/42", label: "The PR" },
+    ]);
+    // The cited PR is the primary attachment: it shows as a source only.
+    await insertTaskAttachment({
+      taskId: ask.id,
+      agentId: lead.id,
+      kind: "url",
+      name: "PR",
+      url: "https://github.com/o/r/pull/42/",
+      isPrimary: true,
+    });
+    await completeTask(
+      ask.id,
+      "Merged [citation:1]. Report: https://docs.example.test/a/b/report.md. Keep `https://code.example.test/x`, [docs](https://docs.example.test/d) and <https://slack.example.test/s|s>.",
+    );
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(
+      "✅ Merged <https://github.com/o/r/pull/42|[1]>. Report: <https://docs.example.test/a/b/report.md|docs.example.test/…/report.md>. Keep `https://code.example.test/x`, [docs](https://docs.example.test/d) and <https://slack.example.test/s|s>.",
+    );
+    const stopped = calls.find((call) => call.method === "chat.stopStream");
+    const blocks = stopped?.payload.blocks as { type: string; elements: { text: string }[] }[];
+    expect(blocks.map((block) => block.elements.map((element) => element.text))).toEqual([
+      ["Sources: <https://github.com/o/r/pull/42|[1]> The PR"],
+      [expect.stringContaining(ask.id.slice(0, 8))],
+    ]);
   });
 
   test("the postMessage fallback keeps captions out of the notification text", async () => {
@@ -2221,19 +2271,19 @@ describe("Slack renderer v2", () => {
       label: "plain ASCII positive control",
       attachment: { kind: "agent-fs", name: "report.txt", path: "/reports/report.txt" },
       expected:
-        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/report.txt|report.txt>",
+        "Links: 📄 <https://files.example.test/file/~/org-1/drive-1/reports/report.txt|report.txt>",
     },
     {
       label: "raw path spaces and parentheses",
       attachment: { kind: "agent-fs", name: "final report", path: "/shared reports/final (v1).md" },
       expected:
-        "📎 <https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20(v1).md|final report>",
+        "Links: 📄 <https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20(v1).md|final report>",
     },
     {
       label: "already encoded positive control",
       attachment: { kind: "agent-fs", name: "report", path: "/reports/final%20%28v1%29.md" },
       expected:
-        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md|report>",
+        "Links: 📄 <https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md|report>",
     },
     {
       label: "label delimiters, backslashes, and whitespace",
@@ -2242,12 +2292,12 @@ describe("Slack renderer v2", () => {
         name: " \t[report] <final> & (copy)\\\r\n\t two  ",
         url: "https://example.test/report",
       },
-      expected: "📎 <https://example.test/report|[report] &lt;final&gt; &amp; (copy)\\ two>",
+      expected: "Links: 🌐 <https://example.test/report|[report] &lt;final&gt; &amp; (copy)\\ two>",
     },
     {
       label: "URL positive control with an IPv6 host",
       attachment: { kind: "url", name: "report", url: "http://[::1]/report.txt?q=a%20b&x=1#part" },
-      expected: "📎 <http://[::1]/report.txt?q=a%20b&x=1#part|report>",
+      expected: "Links: 🌐 <http://[::1]/report.txt?q=a%20b&x=1#part|report>",
     },
     {
       label: "URL delimiters with existing escapes and query parameters",
@@ -2257,7 +2307,7 @@ describe("Slack renderer v2", () => {
         url: "https://example.test/a%20b) [c]<(d)>|\\file?q=one two&x=1#part",
       },
       expected:
-        "📎 <https://example.test/a%20b)%20[c]%3C(d)%3E%7C%5Cfile?q=one%20two&x=1#part|report>",
+        "Links: 🌐 <https://example.test/a%20b)%20[c]%3C(d)%3E%7C%5Cfile?q=one%20two&x=1#part|report>",
     },
     {
       label: "non-HTTP fallback stays omitted",
@@ -2310,7 +2360,9 @@ describe("Slack renderer v2", () => {
       const captions = (stopped?.payload.blocks as { type: string; elements: { text: string }[] }[])
         .filter((block) => block.type === "context")
         .map((block) => block.elements.map((element) => element.text).join(" "));
-      expect(captions.filter((text) => text.startsWith("📎"))).toEqual(expected ? [expected] : []);
+      expect(captions.filter((text) => text.startsWith("Links:"))).toEqual(
+        expected ? [expected] : [],
+      );
     } finally {
       if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
       else process.env.AGENT_FS_LIVE_URL = originalHost;
@@ -2629,10 +2681,53 @@ describe("Slack renderer v2", () => {
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 
-  test("collapses the outcome card to a minimal form when the agent already replied", async () => {
+  test("posts no outcome card when the agent already replied, and still settles the reaction", async () => {
     const lead = await createAgent({ name: "Reply Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_SENT");
+    const triggerTs = `${slackAddressSequence}.2`;
     const ask = await createTaskExtended("ask with an inline reply", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await markTaskSlackReplySent(ask.id);
+    await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+    expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false);
+    expect(JSON.stringify(calls)).not.toContain("PRIVATE OUTPUT");
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
+    });
+    const card = await getSlackOutcomeMessage(ask.id);
+    expect(card?.finalizedAt).toBeUndefined();
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(card?.deliveryLastError).toStartWith("slack_reply_sent:");
+
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+  });
+
+  test.each([
+    { status: "failed", expected: "❌ **Failed:** build broke" },
+    { status: "cancelled", expected: "🚫 **Cancelled:** stopped by the requester" },
+  ] as const)("still posts the $status card after a slack-reply", async ({ status, expected }) => {
+    const lead = await createAgent({ name: `Reply ${status} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(`C_RENDER_REPLY_${status.toUpperCase()}`);
+    const ask = await createTaskExtended(`ask that ends ${status} after a reply`, {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -2641,6 +2736,39 @@ describe("Slack renderer v2", () => {
     });
     await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
+    await markTaskSlackReplySent(ask.id);
+    if (status === "failed") await failTask(ask.id, "build broke");
+    else await cancelTask(ask.id, "stopped by the requester");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(expected);
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+  });
+
+  test("keeps the minimal card when the agent replied but the task has an output attachment", async () => {
+    const lead = await createAgent({ name: "Reply Attachment Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_ATTACHMENT");
+    const ask = await createTaskExtended("ask with an inline reply and a file", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await insertTaskAttachment({
+      taskId: ask.id,
+      agentId: lead.id,
+      kind: "url",
+      name: "report.md",
+      url: "https://example.com/report.md",
+      isPrimary: true,
+    });
     await markTaskSlackReplySent(ask.id);
     await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
     calls.length = 0;
@@ -2654,19 +2782,9 @@ describe("Slack renderer v2", () => {
       username: getAgentDisplayName(lead),
       icon_emoji: getAgentEmoji(lead),
     });
-    expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
     const stopped = calls.find((call) => call.method === "chat.stopStream")!;
-    const completedAsk = (await getTaskById(ask.id))!;
-    const duration = formatV2Duration(
-      new Date(completedAsk.createdAt),
-      new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
-    );
-    expect(stopped.payload.blocks).toEqual([
-      {
-        type: "context",
-        elements: [{ type: "mrkdwn", text: `${duration} · ${lead.name} · ${getTaskLink(ask.id)}` }],
-      },
-    ]);
+    expect(JSON.stringify(stopped.payload.blocks)).toContain("https://example.com/report.md");
+    expect(JSON.stringify(calls)).not.toContain("PRIVATE OUTPUT");
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
   });
 
@@ -2788,7 +2906,6 @@ describe("Slack renderer v2", () => {
     await completeTask(ask.id, "Checking back today at 18:38", {
       addTags: ["deferred"],
       deferredAt: new Date().toISOString(),
-      // 03:00 UTC is 04:00 in Europe/Madrid (CET).
       deferredUntil: "2030-01-15T03:00:00.000Z",
     });
     await backdateLastUpdated([ask.id], 20);
@@ -2796,7 +2913,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳ Checking back 01-15 04:00");
+    expect(opening?.payload.markdown_text).toBe("⏳ Checking back 01-15 03:00 UTC");
     const card = await getSlackOutcomeMessage(ask.id);
     expect(card?.finalizedAt).toBeTruthy();
     expect(card?.deferralResolvedAt).toBeUndefined();
@@ -3004,10 +3121,9 @@ describe("Slack renderer v2", () => {
     calls.length = 0;
     await processSlackRenderV2();
     const card = await getSlackOutcomeMessage(ask.id);
-    // The event-based card names who it waits on and its ceiling in Europe/Madrid (CEST).
     const opening = calls.find((call) => call.method === "chat.startStream");
     expect(opening?.payload.markdown_text).toBe(
-      "⏳ Waiting on Researcher · resumes by 07-15 18:38",
+      "⏳ Waiting on Researcher · resumes by 07-15 16:38 UTC",
     );
     expect(JSON.stringify(calls)).not.toContain("at the latest");
 
@@ -3154,7 +3270,7 @@ describe("Slack renderer v2", () => {
    * Sets up a deferral card whose wake-up has already settled, so the next
    * tick is the one that tries to rewrite the card in place.
    */
-  async function resolvableDeferralCard(label: string) {
+  async function resolvableDeferralCard(label: string, { slackReply = false } = {}) {
     const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress(label);
     const ask = await createTaskExtended("answer when the build is done", {
@@ -3186,9 +3302,47 @@ describe("Slack renderer v2", () => {
     });
     const wake = await createStandaloneScheduleTask(schedule);
     await startTask(wake.id);
+    if (slackReply) await markTaskSlackReplySent(wake.id);
     await completeTask(wake.id, "The build passed.");
     return { askId: ask.id, wakeId: wake.id, ts: card!.ts };
   }
+
+  test("a deferral card whose wake-up answered with slack-reply is deleted, not rewritten", async () => {
+    const card = await resolvableDeferralCard("C_DEFER_REPLIED", { slackReply: true });
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    expect(calls).toContainEqual({
+      method: "chat.delete",
+      payload: { channel: expect.any(String), ts: card.ts },
+    });
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card.ts),
+    ).toHaveLength(0);
+    const resolved = await getSlackOutcomeMessage(card.askId);
+    expect(resolved?.deferralResolvedAt).toBeTruthy();
+    expect(resolved?.deferralAbandonedAt).toBeUndefined();
+    // The reply is the answer: the wake-up posts no card of its own either.
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect(await getSlackOutcomeMessage(card.wakeId)).toBeNull();
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.delete")).toHaveLength(0);
+  });
+
+  test("a replied deferral card that Slack will not delete is rewritten instead", async () => {
+    const card = await resolvableDeferralCard("C_DEFER_NO_DELETE", { slackReply: true });
+    rejectedDeleteTs = card.ts;
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const rewrite = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === card.ts,
+    );
+    expect(String(rewrite?.payload.text)).toEndWith("completed");
+    expect((await getSlackOutcomeMessage(card.askId))?.deferralResolvedAt).toBeTruthy();
+  });
 
   test("a deferral card Slack refuses for good stops being retried", async () => {
     const card = await resolvableDeferralCard("C_DEFER_REJECTED");
@@ -3736,8 +3890,10 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
     });
     await startTask(ask.id);
 
+    // A worker-owned follow-up isolates the child-card filter: a Lead
+    // follow-up gets its own outcome card (e2e slack-lead-follow-up-card).
     const followUp = await createTaskExtended("[Thread follow-up] wrap up", {
-      agentId: lead.id,
+      agentId: worker.id,
       source: "system",
       taskType: "follow-up",
       parentTaskId: ask.id,
@@ -5540,5 +5696,128 @@ describe("Slack outcome window across closures, deliveries and wakes", () => {
     expect(await getSlackOutcomeMessage(wake.id)).toBeNull();
     expect(await getSlackOutcomeMessage(ask.id)).toBeNull();
     expect(streamTexts()).toHaveLength(0);
+  });
+});
+
+describe("quiet Lead threads (SLACK_RENDER_V2_QUIET_LEAD_THREADS)", () => {
+  beforeEach(() => {
+    process.env.SLACK_RENDER_V2_QUIET_LEAD_THREADS = "true";
+  });
+  afterEach(() => {
+    delete process.env.SLACK_RENDER_V2_QUIET_LEAD_THREADS;
+  });
+
+  async function leadAsk(label: string) {
+    const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(label);
+    const triggerTs = `${slackAddressSequence}.2`;
+    const ask = await createTaskExtended("answer when the review is in", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    return { lead, ask, channelId, threadTs, triggerTs };
+  }
+
+  test("a Lead deferral posts no waiting card, and its wake-up still answers", async () => {
+    const { lead, ask, channelId, triggerTs } = await leadAsk("C_QUIET_DEFER");
+    await completeTask(ask.id, "Waiting on Reviewer — or today at 18:38 at the latest", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect((await getSlackOutcomeMessage(ask.id))?.deliveryAbandonedAt).toBeTruthy();
+    const doneReaction = {
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
+    };
+    expect(calls).not.toContainEqual(doneReaction);
+
+    const schedule = await createScheduledTask({
+      name: "quiet-wake",
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    await completeTask(wake.id, "The review passed.");
+    calls.length = 0;
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const streams = calls.filter((call) => call.method === "chat.startStream");
+    expect(streams.map((call) => call.payload.markdown_text)).toEqual(["✅ The review passed."]);
+    expect(calls).toContainEqual(doneReaction);
+  });
+
+  test("a Lead follow-up that ends without a reply posts no card; a failed one still does", async () => {
+    const { lead, ask, channelId, threadTs } = await leadAsk("C_QUIET_FOLLOW_UP");
+    await completeTask(ask.id, "Asked two workers.");
+    await processSlackRenderV2();
+    calls.length = 0;
+
+    const followUps = [];
+    for (const status of ["completed", "failed"] as const) {
+      const followUp = await createTaskExtended(`[Follow-up] ${status}`, {
+        agentId: lead.id,
+        source: "system",
+        taskType: "follow-up",
+        parentTaskId: ask.id,
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        followUpConfig: { disabled: true },
+      });
+      await startTask(followUp.id);
+      if (status === "completed") {
+        await completeTask(followUp.id, "I posted nothing in Slack: one worker is still running.");
+      } else {
+        await failTask(followUp.id, "Could not read the worker result.");
+      }
+      followUps.push(followUp);
+    }
+    await processSlackRenderV2();
+
+    const streams = calls.filter((call) => call.method === "chat.startStream");
+    expect(streams.map((call) => call.payload.markdown_text)).toEqual([
+      "❌ **Failed:** Could not read the worker result.",
+    ]);
+    expect((await getSlackOutcomeMessage(followUps[0]!.id))?.deliveryAbandonedAt).toBeTruthy();
+  });
+
+  test("a Lead resume that answers without a reply still posts its card", async () => {
+    const { lead, ask, channelId, threadTs } = await leadAsk("C_QUIET_RESUME");
+    await failTask(ask.id, "The worker restarted.");
+    await processSlackRenderV2();
+    calls.length = 0;
+
+    const resume = await createTaskExtended("[Resume] answer when the review is in", {
+      agentId: lead.id,
+      source: "system",
+      taskType: "resume",
+      parentTaskId: ask.id,
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      followUpConfig: { disabled: true },
+    });
+    await startTask(resume.id);
+    await completeTask(resume.id, "The review passed.");
+    await processSlackRenderV2();
+
+    const streams = calls.filter((call) => call.method === "chat.startStream");
+    expect(streams.map((call) => call.payload.markdown_text)).toEqual(["✅ The review passed."]);
   });
 });

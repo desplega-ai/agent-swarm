@@ -85,10 +85,16 @@ function useActiveHeading(viewer: HTMLElement | null, headings: readonly Outline
  * scrolls the viewer to the heading (smooth unless reduced motion). During a
  * review (`?diff=`), a click closes the review first.
  */
-export function OutlineList({ onNavigate }: { onNavigate?: () => void }) {
+export function OutlineList({
+  onNavigate,
+  preview,
+}: {
+  onNavigate?: () => void;
+  preview?: { viewer: HTMLElement | null; headings: readonly OutlineHeading[] };
+}) {
   const layout = useCombLayout();
-  const viewer = layout?.viewer ?? null;
-  const headings = layout?.headings ?? NO_HEADINGS;
+  const viewer = preview?.viewer ?? layout?.viewer ?? null;
+  const headings = preview?.headings ?? layout?.headings ?? NO_HEADINGS;
   const active = useActiveHeading(viewer, headings);
   const reduceMotion = useReducedMotion() ?? false;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -111,9 +117,16 @@ export function OutlineList({ onNavigate }: { onNavigate?: () => void }) {
   useEffect(() => setPicked(null), [headings]);
 
   const scrollTo = (line: number) => {
-    headingElements(viewer)
-      .get(line)
-      ?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+    const heading = headingElements(viewer).get(line);
+    const behavior = reduceMotion ? "auto" : "smooth";
+    if (preview && viewer && heading) {
+      viewer.scrollBy({
+        top: heading.getBoundingClientRect().top - viewer.getBoundingClientRect().top - 16,
+        behavior,
+      });
+    } else {
+      heading?.scrollIntoView({ block: "start", behavior });
+    }
   };
 
   // After the review closes, the file renders again: scroll to the heading as
@@ -143,7 +156,7 @@ export function OutlineList({ onNavigate }: { onNavigate?: () => void }) {
 
   const go = (heading: OutlineHeading, index: number) => {
     setPicked(index);
-    if (searchParams.has(DIFF_PARAM)) {
+    if (!preview && searchParams.has(DIFF_PARAM)) {
       setSearchParams((params) => {
         const next = new URLSearchParams(params);
         next.delete(DIFF_PARAM);

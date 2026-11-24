@@ -134,18 +134,22 @@
       "excluded": [
         {
           "value": "draft",
+          "transient": true,
           "reason": "transient: a draft is promoted to pending or unassigned when its attachment batch settles, before the suite reads the table"
         },
         {
           "value": "reviewing",
+          "transient": true,
           "reason": "transient: an offered task is reviewing only between claim-for-review and accept or decline inside one poll"
         },
         {
           "value": "resume",
+          "transient": true,
           "reason": "transient: set by crash recovery for the duration of one resume dispatch, which the heartbeat sweep (disabled here) drives"
         },
         {
           "value": "unassigned",
+          "transient": true,
           "reason": "transient once a lead exists: a pool task is assigned to the lead at creation, and mcp-surface asserts the unassigned listing before claiming it"
         }
       ]
@@ -167,10 +171,6 @@
       "universe": ["pending", "running", "waiting", "completed", "failed", "skipped", "cancelled"],
       "excluded": [
         {
-          "value": "running",
-          "reason": "transient: instant executors finish inside the request; async ones move to waiting"
-        },
-        {
           "value": "skipped",
           "reason": "no engine path writes a skipped step: only a cooldown-skipped run carries skipped (src/workflows/engine.ts), and foreach-join reads the step value defensively"
         }
@@ -189,7 +189,7 @@
     },
     {
       "name": "script-run-step-types",
-      "query": "SELECT DISTINCT stepType AS value FROM script_run_journal",
+      "query": "SELECT DISTINCT \"stepType\" AS value FROM script_run_journal",
       "universe": ["raw-llm", "agent-task", "swarm-script"],
       "excluded": []
     },
@@ -207,7 +207,7 @@
     },
     {
       "name": "script-fs-modes",
-      "query": "SELECT DISTINCT fsMode AS value FROM scripts",
+      "query": "SELECT DISTINCT \"fsMode\" AS value FROM scripts",
       "universe": ["none", "workspace-rw"],
       "excluded": [
         {
@@ -224,6 +224,49 @@
     }
   ],
   "flows": {
+    "storage-engine-parity": {
+      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
+      "scenarios": [
+        "upgrade-base-db",
+        "tasks-historical-values",
+        "storage-recovery",
+        "data-copy",
+        "data-copy-later-release",
+        "data-copy-refused-rows",
+        "divergence-fulltext-search",
+        "divergence-vector-search",
+        "divergence-like-case",
+        "divergence-seeded-schedule-sql",
+        "divergence-text-order",
+        "divergence-concurrent-schedule-claim",
+        "stress-poll-claim",
+        "stress-task-finish",
+        "stress-task-create",
+        "stress-token-touch",
+        "divergence-tracker-dedup",
+        "divergence-retention",
+        "divergence-db-query-denial",
+        "divergence-list-order",
+        "divergence-timestamps",
+        "divergence-values",
+        "divergence-error-mapping",
+        "trigger-asset-keys",
+        "trigger-model-profiles",
+        "trigger-session-maintenance",
+        "trigger-fts-sync",
+        "trigger-chat-relay",
+        "trigger-immutability",
+        "trigger-rbac-default-role",
+        "trigger-cascades",
+        "postgres-chain-layouts",
+        "postgres-password-env",
+        "postgres-dead-connections"
+      ]
+    },
+    "live-task-claim": {
+      "description": "A task claimed by a worker with a live, heartbeating session stays in_progress until the run ends",
+      "scenarios": ["task-live-claim", "task-started-after-commit"]
+    },
     "caller-scoped-writes": {
       "description": "Agent tokens write only their own task session, re-embed needs a lead, script-apis takes only id-shaped endpoint ids",
       "scenarios": ["core-caller-scoped-writes"]
@@ -266,7 +309,13 @@
     },
     "app-engine": {
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
-      "scenarios": ["knowledge-apps", "knowledge-apps-large-model", "knowledge-apps-limits", "knowledge-apps-primitives"]
+      "scenarios": [
+        "knowledge-apps",
+        "knowledge-apps-large-model",
+        "knowledge-apps-limits",
+        "knowledge-apps-primitives",
+        "knowledge-apps-session-thread-files"
+      ]
     },
     "asset-namespaces": {
       "description": "move pages, apps, scripts, task chains and provider files between namespaces, list and audit; an operator-key dashboard writes only its logged-in user's personal keys",
@@ -281,13 +330,17 @@
         "audit-attribution-skills"
       ]
     },
+    "repo-exec-config-write": {
+      "description": "a non-lead agent token may not change a repo's url, clonePath or hooks or create one with hooks enabled (HTTP and MCP), the lead, operator and shared-key worker still may, and a url or clonePath that starts with - is refused",
+      "scenarios": ["repo-exec-config-write"]
+    },
     "requester-hint": {
       "description": "a body requestedByUserId on steering, script runs and script step tasks is kept for the operator and lead agents and dropped for a non-lead agent, as on POST /api/tasks",
       "scenarios": ["requester-hint"]
     },
     "budget-refusal": {
-      "description": "A zero agent or user budget refuses claims and lifting it lets the task run",
-      "scenarios": ["core-budgets"]
+      "description": "A zero agent or user budget refuses claims and lifting it lets the task run; a fallback pool claim checks its own requester's budget",
+      "scenarios": ["core-budgets", "budget-pool-fallback"]
     },
     "chat-sdk-tools": {
       "description": "Chat tool discovery, channel registration, task access, disabled adapters, input validation, Telegram messages through a loopback mock, and the Rocket.Chat webhook and REST round trip.",
@@ -299,7 +352,7 @@
     },
     "config-store": {
       "description": "swarm_config scopes, secrets, precedence, validation and reload through HTTP and the config tools.",
-      "scenarios": ["platform-config", "platform-lead-tools"]
+      "scenarios": ["platform-config", "platform-lead-tools", "secrets-backup-data-dir"]
     },
     "platform-config-key-guards": {
       "description": "Config writes store values only: no file write from envPath, process-control keys stay out of the API env, reserved executable path key",
@@ -359,6 +412,10 @@
       "description": "Onboarding state transitions and the embeddings probe that saves and restores configuration.",
       "scenarios": ["platform-onboarding"]
     },
+    "github-provider-emulated": {
+      "description": "Against @emulators/github: a maintainer's mention in an issue comment and a PR body become tasks through signed App webhooks, an outsider's mention and a mention-free issue do not, the minted installation token writes as the App bot, and a real merge wakes a vcs.pr.merged waiter",
+      "scenarios": ["github-emulate-flows"]
+    },
     "github-app-worker-tokens": {
       "description": "POST /api/github/installation-token with a repo: only an owner listed in the deployment-only GITHUB_APP_REPO_OWNERS gets its repo's own installation, and only for a repo registered on the configured GitHub host; a worker-registered repo of an unlisted owner gets the fixed installation, a spoofed host or unregistered repo is 403, an installation of an unlisted account is 502, and the owner list cannot be stored in swarm_config",
       "scenarios": ["github-installation-token-repos"]
@@ -379,6 +436,10 @@
       "description": "KV store over HTTP and MCP: namespaces, types, TTL, views, authorization, and the 24 hour MCP overflow spill.",
       "scenarios": ["script-kv"]
     },
+    "linear-provider-emulated": {
+      "description": "Against @emulators/linear: OAuth consent, actor=app install, code exchange, refresh and revoke; delegating a Todo issue creates a task and acknowledges the AgentSession, a Backlog issue is gated, completion ends the session with the output, and Canceled cancels the task; LINEAR_URL and LINEAR_API_URL cannot be stored in swarm_config",
+      "scenarios": ["linear-emulate-flows"]
+    },
     "mcp-server-lifecycle": {
       "description": "MCP server definitions created over HTTP and MCP tools, installed per agent, OAuth client pre-registered, deleted.",
       "scenarios": ["platform-mcp-servers", "platform-mcp-server-tools"]
@@ -391,21 +452,29 @@
       "description": "store, search (fts/vec), get with links, edit with versions, rate with the explicit-self guard, delete by ACL",
       "scenarios": ["knowledge-memory"]
     },
+    "memory-search-demotion": {
+      "description": "search and list with a query keep returning memories when one has a net-negative rating (beta > alpha), on every engine",
+      "scenarios": ["memory-demotion-search"]
+    },
     "mention-wakeup": {
       "description": "post-message with a mention produces an unread_mentions poll trigger",
       "scenarios": ["core-messaging"]
     },
     "metric-dashboards": {
-      "description": "Metric definition lifecycle, versions, run, create_metric upsert",
-      "scenarios": ["core-telemetry"]
+      "description": "Metric definition lifecycle, versions, run, create_metric upsert; the seeded starter dashboard and the UI template run on the engine",
+      "scenarios": ["core-telemetry", "metrics-starter-dashboard"]
     },
     "model-catalog-and-pricing": {
       "description": "Model profiles, catalog overlay, harness support, refresh and the append-only price book with audit rows",
       "scenarios": ["platformb-models"]
     },
     "model-groups": {
-      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards",
-      "scenarios": ["platformb-model-groups"]
+      "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards; groups resolve at create, claim, pool and fallback hops",
+      "scenarios": ["platformb-model-groups", "model-group-resolution"]
+    },
+    "codex-structured-output": {
+      "description": "A real codex worker against the mock Responses API: the task outputSchema reaches the request in strict mode, a prose turn gets one reprompt that completes or fails the task, and a task without a schema sends none",
+      "scenarios": ["codex-structured-output"]
     },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
@@ -419,13 +488,25 @@
       "description": "Refresh lock acquire, contention, wrong-owner release, expiry takeover",
       "scenarios": ["platform-oauth-locks"]
     },
+    "codex-oauth-slot-store": {
+      "description": "A non-lead worker token persists and quarantines a refreshed codex_oauth_<slot> only while holding its refresh lock, and PUT /api/config still refuses it",
+      "scenarios": ["platform-codex-oauth-slot-store"]
+    },
     "page-publishing": {
-      "description": "create page, serve public/authed/password, version history, feedback task, delete",
-      "scenarios": ["knowledge-pages"]
+      "description": "create page, serve public/authed/password, version history, feedback task, delete, and a dashboard launch that acts as the picked user",
+      "scenarios": ["knowledge-pages", "knowledge-page-dashboard-user"]
     },
     "org-design-system": {
       "description": "set, decline and read the org design system over HTTP and MCP, and pages restyled with its tokens",
       "scenarios": ["design-system"]
+    },
+    "otel-log-export": {
+      "description": "OTEL_EXPORT_API_LOGS mirrors API console output to an OTLP/HTTP collector through the SDK-registered LoggerProvider, with exported request spans as the reachability control",
+      "scenarios": ["platform-otel-log-export"]
+    },
+    "otel-db-statements": {
+      "description": "The storage StatementObserver exports agentswarm.db.statement.duration with engine, operation and table labels, a statement span under its request span with no parameter values (OTEL_TRACE_DB_STATEMENTS), and the Postgres transaction outcome counter",
+      "scenarios": ["platform-otel-db-statements"]
     },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
@@ -443,9 +524,13 @@
       "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
       "scenarios": ["knowledge-prompt-templates"]
     },
+    "request-body-json": {
+      "description": "A request body that is not valid JSON gets 400 with the shared error envelope on the route factory's routes, the JSON-RPC parse error on MCP, and 400 on a signed Linear webhook.",
+      "scenarios": ["http-malformed-json", "linear-emulate-flows"]
+    },
     "provider-webhooks": {
-      "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore.",
-      "scenarios": ["platform-webhooks"]
+      "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore. Linear, Jira, workflow, GitHub, AgentMail and Kapso receivers refuse a body over 5 MiB.",
+      "scenarios": ["platform-webhooks", "webhook-body-limit"]
     },
     "realtime-room-state": {
       "description": "room reset/change/decode over HTTP, MCP, WebSocket and workflow wait",
@@ -480,8 +565,12 @@
       "scenarios": ["platform-secret-egress"]
     },
     "script-inline-run": {
-      "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
-      "scenarios": ["script-inline-run"]
+      "description": "Inline (args, ctx) runs return their results, auto-save a scratch script only on success, record each run, and persist idempotent output to KV. Concurrent runs of the same new source share one scratch script and one initial version.",
+      "scenarios": ["script-inline-run", "script-parallel-inline-runs"]
+    },
+    "script-tool-usage": {
+      "description": "The seeded tool-usage script counts tool_use lines from session_logs, filters by the task owner's agent, and binds every argument as a SQL parameter.",
+      "scenarios": ["script-tool-usage"]
     },
     "script-input-handling": {
       "description": "The quickjs bundler accepts only stdlib, swarm-sdk and zod imports (other imports fail the build), and the seeded memory-eval script validates its stored history and escapes it inside the dashboard script.",
@@ -492,12 +581,17 @@
       "scenarios": ["script-limits"]
     },
     "script-retry": {
-      "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), and a ctx.swarm call that retries a real 429 from the API.",
-      "scenarios": ["script-retry-helper", "script-retry-fetch", "script-retry-bridge"]
+      "description": "Retries inside a script run on both executors: ctx.stdlib.retry, method-aware ctx.stdlib.fetch against a flaky loopback upstream (Retry-After, idempotency key), a ctx.swarm call that retries a real 429 from the API, and ctx.swarm plus the script-run tool reaching the API over loopback while MCP_BASE_URL is closed.",
+      "scenarios": [
+        "script-retry-helper",
+        "script-retry-fetch",
+        "script-retry-bridge",
+        "script-api-loopback"
+      ]
     },
     "script-runs-durable": {
-      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list.",
-      "scenarios": ["script-runs-durable", "script-run-storage"]
+      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
+      "scenarios": ["script-runs-durable", "script-run-storage", "script-runs-executor-setting"]
     },
     "script-sandbox-identity": {
       "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
@@ -537,7 +631,7 @@
     },
     "slack-agent-tools": {
       "description": "Lead and worker Slack tools against the Slack mock, including task-scoped read, reply, upload, download and leave-thread, and a slack-reply json-render card",
-      "scenarios": ["platformb-slack-tools", "slack-reply-card"]
+      "scenarios": ["platformb-slack-tools", "slack-reply-card", "slack-reply-footer-toggle"]
     },
     "slack-file-download-bounds": {
       "description": "Slack file downloads stay inside the download directory and send the bot token only to Slack file hosts",
@@ -557,7 +651,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -570,8 +664,10 @@
         "slack-relay-restart",
         "slack-task-output-citations",
         "slack-task-tree-toggle",
+        "slack-stop-button",
         "slack-task-output-ui-spec",
-        "slack-pre-task-create-block"
+        "slack-pre-task-create-block",
+        "slack-cancelled-task"
       ]
     },
     "slack-deferrals": {
@@ -580,19 +676,22 @@
         "slack-defer-eta-legacy",
         "slack-defer-eta-v2",
         "slack-defer-wake-v2",
-        "slack-redefer"
+        "slack-redefer",
+        "slack-defer-wake-reply-v2"
       ]
     },
     "slack-delegation": {
-      "description": "Delegated child results, failed and late children, the flag-off repro, Lead follow-up and resume cards, merged follow-up cards, and the flag state shard 4 starts from",
+      "description": "Delegated child results, failed and late children, the flag-off repro, Lead follow-up and resume cards, merged follow-up cards, one card per fix across a coder and its reviewer, and the flag state shard 4 starts from",
       "scenarios": [
         "slack-delegation-flag-off-repro",
         "slack-lead-follow-up-card",
         "slack-follow-up-card-merge",
+        "slack-thread-one-card",
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
-        "slack-delegation-band-entry"
+        "slack-delegation-band-entry",
+        "slack-quiet-lead-threads"
       ]
     },
     "slack-http-native": {
@@ -607,8 +706,8 @@
       ]
     },
     "slack-inbound-gates": {
-      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, and reserved action ids in agent blocks",
-      "scenarios": ["slack-inbound-gates"]
+      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, reserved action ids in agent blocks, and SLACK_WORKFLOW_BOT_IDS bot posts that start workflows but never tasks",
+      "scenarios": ["slack-inbound-gates", "slack-workflow-bot-ids"]
     },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
@@ -656,7 +755,11 @@
     },
     "poll-concurrent-claim": {
       "description": "Six workers poll at once for three pool tasks over several rounds: each task goes to exactly one worker and its row shows that worker in_progress",
-      "scenarios": ["poll-concurrent-claim"]
+      "scenarios": ["poll-concurrent-claim", "poll-rescan-locked"]
+    },
+    "task-create-idempotency": {
+      "description": "POST /api/tasks with an Idempotency-Key: a retry and a three-way race on one key return one task, a different body under the key is a 409, unkeyed creates stay separate, a malformed key is a 400",
+      "scenarios": ["task-create-idempotency"]
     },
     "task-lifecycle-http": {
       "description": "Register a worker, assign a task, poll it, store progress, finish it, filter and search it over HTTP with the DB row checked",
@@ -707,11 +810,12 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs", "authz-workflow-env"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, event subscriber isolation, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
+      "description": "Idempotency keys, trigger schema, event subscriber isolation, GitHub and Jira event triggers with match filters and redelivery dedupe, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
         "workflow-retry-deadline",
         "workflow-event-subscriber-isolation",
+        "workflow-github-jira-event-triggers",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
         "workflow-webhook-hmac-sha1",
@@ -719,13 +823,18 @@
       ]
     },
     "workflow-engine-nodes": {
-      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction",
+      "description": "Every executor type runs to a terminal state: instant chain, async fan-out (wait, agent-task, foreach, sub-workflow, human-in-the-loop), SystemOne decision and extraction; code-match and string wait filters run outside the API realm and read only config interpolation sources; swarm-script and sub-workflow nodes act as the creator only when the pinned definition was last saved by the creator, a lead or a person",
       "scenarios": [
         "workflow-engine-instant-nodes",
         "workflow-engine-async-nodes",
         "workflow-wait-event-loop",
         "workflow-engine-system-one",
-        "workflow-script-node"
+        "workflow-script-node",
+        "workflow-predicate-sandbox",
+        "workflow-predicate-compat",
+        "workflow-script-node-executor-setting",
+        "workflow-executable-config-sources",
+        "workflow-edited-script-principal"
       ]
     },
     "workflow-savings": {
@@ -744,12 +853,16 @@
       "description": "An agent-bound token acts only as its own agent for a script endpoint's run-as agent, a manual schedule run and indexed memory; the lead token and the shared key keep their access",
       "scenarios": ["route-caller-identity"]
     },
+    "llm-emulator-backend": {
+      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429, and task auto-titling lands a title from a streamed set_title tool call",
+      "scenarios": ["llm-emulate-ai"]
+    },
     "post-onboarding-checklist": {
       "description": "Checklist defaults, member ownership, admin status changes and custom completion",
       "scenarios": ["platform-checklist"]
     },
     "outbound-url-guards": {
-      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, and discovered OAuth endpoints are validated",
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, and discovered OAuth endpoints are validated",
       "scenarios": ["platform-outbound-url-guards"]
     },
     "cli": {

@@ -11,6 +11,7 @@ import {
 } from "../linear/outbound";
 import { taskSessionMap } from "../linear/sync";
 import { workflowEventBus } from "../workflows/event-bus";
+import { waitUntil } from "./workflow-wait";
 
 const TEST_DB_PATH = "./test-linear-outbound-sync.sqlite";
 
@@ -48,6 +49,44 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
+// The bus fires outbound handlers without awaiting them, so each test waits on a real
+// effect instead of a clock. task.progress and task.created post before their first
+// await, so their calls are already recorded when emit returns.
+
+/** The task.completed/failed handlers end by writing lastSyncOrigin "swarm" to the row. */
+async function waitForSwarmSync(swarmId: string): Promise<void> {
+  await waitUntil(
+    async () => (await getTrackerSync("linear", "task", swarmId))?.lastSyncOrigin === "swarm",
+    () => `tracker_sync for ${swarmId} never reached lastSyncOrigin "swarm"`,
+  );
+}
+
+/**
+ * An absence has nothing to poll. Emit a mapped sentinel task after the case under test:
+ * its handler runs the same awaits, started later, so once its sync write lands the earlier
+ * handler is past every point where it could have commented. Returns the sentinel issue id.
+ */
+async function emitSentinelAndWait(): Promise<string> {
+  const swarmId = `outbound-sentinel-${crypto.randomUUID()}`;
+  const externalId = `LIN-${swarmId}`;
+  await createTrackerSync({
+    provider: "linear",
+    entityType: "task",
+    swarmId,
+    externalId,
+    syncDirection: "bidirectional",
+  });
+  workflowEventBus.emit("task.completed", { taskId: swarmId, output: "sentinel" });
+  await waitForSwarmSync(swarmId);
+  return externalId;
+}
+
+function commentedIssueIds(): string[] {
+  return mockCreateComment.mock.calls.map(
+    (call) => ((call as unknown[])[0] as { issueId: string }).issueId,
+  );
+}
+
 describe("Linear Outbound Sync", () => {
   beforeEach(() => {
     mockCreateComment.mockClear();
@@ -78,8 +117,7 @@ describe("Linear Outbound Sync", () => {
       output: "All done!",
     });
 
-    // Allow async handler to run
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForSwarmSync("outbound-task-completed");
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
@@ -111,7 +149,7 @@ describe("Linear Outbound Sync", () => {
       });
 
       workflowEventBus.emit("task.completed", { taskId: task.id, output: "All done!" });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForSwarmSync(task.id);
 
       expect(mockCreateComment).toHaveBeenCalledTimes(1);
       const arg = (mockCreateComment.mock.calls[0] as unknown[])[0] as { body: string };
@@ -135,7 +173,7 @@ describe("Linear Outbound Sync", () => {
       failureReason: "Build error in module X",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForSwarmSync("outbound-task-failed");
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
@@ -158,7 +196,7 @@ describe("Linear Outbound Sync", () => {
     const output = `## Answer\n\n${"x".repeat(5000)}`;
 
     workflowEventBus.emit("task.completed", { taskId, output });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForSwarmSync(taskId);
 
     expect(mockEndAgentSession).toHaveBeenCalledTimes(1);
     expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
@@ -182,7 +220,7 @@ describe("Linear Outbound Sync", () => {
     taskSessionMap.set(taskId, "session-failed");
 
     workflowEventBus.emit("task.failed", { taskId, failureReason: "tsc:check failed" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForSwarmSync(taskId);
 
     expect(mockEndAgentSession).toHaveBeenCalledTimes(1);
     expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
@@ -205,7 +243,7 @@ describe("Linear Outbound Sync", () => {
     taskSessionMap.set(taskId, "session-empty");
 
     workflowEventBus.emit("task.completed", { taskId, output: "  " });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForSwarmSync(taskId);
 
     expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
       "session-empty",
@@ -261,9 +299,9 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const sentinel = await emitSentinelAndWait();
 
-    expect(mockCreateComment).not.toHaveBeenCalled();
+    expect(commentedIssueIds()).toEqual([sentinel]);
   });
 
   test("loop prevention: skips if lastSyncOrigin is external and recent", async () => {
@@ -286,9 +324,9 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const sentinel = await emitSentinelAndWait();
 
-    expect(mockCreateComment).not.toHaveBeenCalled();
+    expect(commentedIssueIds()).toEqual([sentinel]);
   });
 
   test("allows sync when lastSyncOrigin is external but old", async () => {
@@ -311,7 +349,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForSwarmSync("outbound-task-old-external");
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
   });
@@ -335,7 +373,11 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The row already reads "swarm", so wait for the comment itself.
+    await waitUntil(
+      () => mockCreateComment.mock.calls.length > 0,
+      () => "the swarm-origin task was never commented",
+    );
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
   });
@@ -348,8 +390,6 @@ describe("Linear Outbound Sync", () => {
       taskId,
       progress: "📋 Reviewing task details",
     });
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Posts as `action` so the update renders as a structured card in Linear's AgentSession
     // panel. Linear's spec requires BOTH `action` AND `parameter` for action-type activities;
@@ -376,8 +416,6 @@ describe("Linear Outbound Sync", () => {
     const longProgress = "x".repeat(5000);
     workflowEventBus.emit("task.progress", { taskId, progress: longProgress });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
     expect(mockPostAgentSessionAction).toHaveBeenCalledTimes(1);
     const args = mockPostAgentSessionAction.mock.calls[0] as unknown[];
     expect((args[2] as string).length).toBe(2000);
@@ -389,8 +427,6 @@ describe("Linear Outbound Sync", () => {
       progress: "should be dropped",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
     expect(mockPostAgentSessionThought).not.toHaveBeenCalled();
     expect(mockPostAgentSessionAction).not.toHaveBeenCalled();
   });
@@ -401,8 +437,6 @@ describe("Linear Outbound Sync", () => {
     workflowEventBus.emit("task.progress", {
       taskId: "outbound-task-progress-empty",
     });
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockPostAgentSessionThought).not.toHaveBeenCalled();
     expect(mockPostAgentSessionAction).not.toHaveBeenCalled();
@@ -416,8 +450,6 @@ describe("Linear Outbound Sync", () => {
       taskId,
       source: "linear",
     });
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockPostAgentSessionAction).toHaveBeenCalledTimes(1);
     expect(mockPostAgentSessionThought).not.toHaveBeenCalled();
@@ -446,8 +478,10 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // A listener left attached would comment on the teardown task and run the sentinel twice.
+    initLinearOutboundSync();
+    const sentinel = await emitSentinelAndWait();
 
-    expect(mockCreateComment).not.toHaveBeenCalled();
+    expect(commentedIssueIds()).toEqual([sentinel]);
   });
 });

@@ -1248,7 +1248,8 @@ describe("getTaskContextPrompt: repository section", () => {
     expect(result).toContain("### Repository Guidelines (MANDATORY)");
     expect(result).toContain("`bun run lint`");
     expect(result).toContain("`bun run tsc:check`");
-    expect(result).toContain("Auto-merge: Not allowed (default)");
+    expect(result).toContain("Agent hand-merge: not allowed (default)");
+    expect(result).not.toContain("Swarm auto-merge");
     expect(result).toContain("CI green");
     expect(result).toContain("Flag any new env var without docs");
     expect(result).toContain("Do NOT push code with failing checks.");
@@ -1275,7 +1276,40 @@ describe("getTaskContextPrompt: repository section", () => {
       },
     });
     expect(result).toContain("### Repository Guidelines (MANDATORY)");
-    expect(result).toContain("Auto-merge: Allowed");
+    expect(result).toContain("Agent hand-merge: allowed");
+  });
+
+  test("swarm auto-merge on points at the live record and guide, not the threshold", async () => {
+    const autoMerge = {
+      enabled: true,
+      threshold: 87,
+      baseScores: {},
+      maxLines: {},
+      riskyPaths: ["migrations/**"],
+      classes: ["docs"],
+    };
+    const render = (enabled: boolean) =>
+      getTaskContextPrompt({
+        ...minimalArgs,
+        repoContext: {
+          clonePath: CLONE_PATH,
+          guidelines: {
+            prChecks: [],
+            mergeChecks: [],
+            allowMerge: false,
+            review: [],
+            mergePolicy: { autoMerge: { ...autoMerge, enabled } },
+          },
+        },
+      });
+    const on = await render(true);
+    expect(on).toContain("Agent hand-merge: not allowed (default)");
+    expect(on).toContain("- Swarm auto-merge: on.");
+    expect(on).toContain("`mergePolicy.autoMerge` (`get-repos`)");
+    expect(on).toContain("https://docs.agent-swarm.dev/docs/guides/repo-merge-policy");
+    expect(on).not.toContain("87");
+    expect(on).not.toContain("migrations/**");
+    expect(await render(false)).toContain("- Swarm auto-merge: off");
   });
 
   test("a remote worker keeps the guidelines but loses the clone sentence", async () => {
@@ -1597,7 +1631,7 @@ describe("getBasePromptWithParts", () => {
   describe("template overrides", () => {
     const soulOnly: BasePromptArgs = { ...minimalArgs, soulMd: "ZZ" };
     const overrides = (bodies: Record<string, string>) =>
-      configureDbResolver((eventType) => {
+      configureDbResolver(async (eventType) => {
         const body = bodies[eventType];
         return body === undefined ? null : { template: { id: eventType, body, scope: "global" } };
       });

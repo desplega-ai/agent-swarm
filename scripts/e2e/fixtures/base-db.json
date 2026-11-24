@@ -1,0 +1,12 @@
+{
+  "commit": "99d7de13a9a3f10db1bbb08d36072e7563d9190d",
+  "note": "Made by make-base-db.ts. secretsKey is a throwaway test key for BASE_FIXTURE_SECRET only.",
+  "secretsKey": "R4gzGOTvkokxD+3N8eg6uB+vxJ6kaMrOzyxbe6eKeBo=",
+  "agentId": "ee12f0d0-7319-4feb-af32-e9523ba021f0",
+  "taskId": "af439417-5266-4454-97a1-7902c0fdb121",
+  "scheduleId": "728405e5-6d01-4700-8071-3a2bb13c85a5",
+  "config": {
+    "BASE_FIXTURE_PLAIN": "plain-value",
+    "BASE_FIXTURE_SECRET": "secret-value"
+  }
+}

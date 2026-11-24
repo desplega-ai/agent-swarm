@@ -6,6 +6,7 @@ This guide covers all deployment options for Agent Swarm.
 
 - [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes) — API ingress, dashboard access, and CORS diagnostics
 - [Docker Compose (Recommended)](#docker-compose-recommended)
+- [Postgres storage engine (optional)](#postgres-storage-engine-optional)
 - [Docker Worker](#docker-worker)
 - [Server Deployment (systemd)](#server-deployment-systemd)
 - [Graceful Shutdown & Task Resume](#graceful-shutdown--task-resume)
@@ -55,6 +56,8 @@ API_KEY=your-secret-api-key
 HARNESS_PROVIDER=claude
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Or configure another provider below
 AGENT_SWARM_VERSION=1.150.0                # Pin a release. Blank tracks `:latest` — see Step 4
+MINIO_ROOT_USER=agentfs                    # MinIO login, also agent-fs's storage key
+MINIO_ROOT_PASSWORD=                       # Run `openssl rand -hex 24` and paste here
 
 # ---- Optional ----
 GITHUB_TOKEN=your-github-token             # For git operations inside agents
@@ -131,7 +134,7 @@ All services in the docker-compose files include `platform: linux/amd64` to avoi
 
 The example `docker-compose.yml` sets up:
 
-- **API service** (port 3013) — MCP HTTP server with SQLite database
+- **API service** (port 3013) — MCP HTTP server with SQLite database (or Postgres, see [Postgres storage engine](#postgres-storage-engine-optional))
 - **12 agent services: 1 lead and 11 workers covering all 11 official templates**, each bootstrapped via `TEMPLATE_ID`:
   - **1 lead** — Coordinator that delegates tasks to workers
   - **2 coders** — Worker replicas that execute coding tasks
@@ -199,6 +202,24 @@ docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
 
 > **Note:** The API volume is `swarm_api_data`, mounted at `/app/data`. Installs created before that change mount `swarm_api` at `/app` — substitute that name and use `-v swarm_api:/old` with `cp -a /old/data/.`. See [Migrating from the `/app` mount](#migrating-from-the-app-mount).
 
+### Postgres storage engine (optional)
+
+The API runs on SQLite by default. Set `DATABASE_URL` to a `postgres://` URL to run it on Postgres 16 with pgvector instead. Nothing changes for an install that does not set it.
+
+```bash
+# .env
+POSTGRES_PASSWORD=<strong password>
+docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml --env-file .env up -d
+```
+
+- One API process per database on both engines. A second API on the same Postgres database stops with a clear error.
+- Keep the `swarm_api_data` volume: it holds the encryption key file and the page-session secret.
+- `db-query` needs a restricted reader role and `DATABASE_QUERY_URL`; without it the tool is off on Postgres.
+- Back up Postgres with your provider or `pg_dump`. Litestream is for SQLite only.
+- Move an existing SQLite database with `agent-swarm db-copy --from <file> --to <url>`.
+
+Setup, the reader role, the cutover procedure and the limits: [runbooks/postgres.md](./runbooks/postgres.md). Helm: `database.url` or `database.existingSecret` ([Kubernetes guide](https://docs.agent-swarm.dev/docs/guides/kubernetes)).
+
 ### Database retention
 
 **New installs start with retention on.** On the boot that creates the database, the server stores `SESSION_LOG_RETENTION_DAYS=30`, `SCRIPT_RUNS_RETENTION_DAYS=30`, `EVENTS_RETENTION_DAYS=90`, `AGENT_LOG_RETENTION_DAYS=90` and `CONTEXT_VERSIONS_KEEP_LATEST=100` as global config rows, and rows past those limits are permanently deleted. Delete a key in Settings → Configuration to turn its sweep off; the server never stores it again. To start without a default, set the key in the environment before the first boot: `0` keeps the sweep off, and a valid value applies as is. An install that already exists is not changed on upgrade, and the next paragraph describes it. `WORKFLOW_RUNS_RETENTION_DAYS` is not stored on that boot.
@@ -258,16 +279,16 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.327)
+# Override the pinned Claude Code version (default: 2.1.331)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.327`
-- `PI_CODING_AGENT_VERSION=1.5.2`
-- `CODEX_VERSION=0.170.0`
-- `OPENCODE_VERSION=2.3.2` (installs `@opencode/cli` and `@opencode/sdk`)
+- `CLAUDE_CODE_VERSION=2.1.331`
+- `PI_CODING_AGENT_VERSION=1.6.0`
+- `CODEX_VERSION=0.172.0`
+- `OPENCODE_VERSION=2.4.1` (installs `@opencode/cli` and `@opencode/sdk`)
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -279,7 +300,7 @@ The worker image also now bundles the Ubuntu runtime libraries Playwright's Chro
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
-Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout.
+Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout. For Husky, the helper runs `npm install --ignore-scripts`, then the repo's local `husky` for version 9 and later or `husky install` for earlier versions. Only the lead, the operator key or a dashboard user may change a repo's `url`, `clonePath` or `hooks`.
 
 The entrypoint also sets a system `init.templateDir` whose `pre-push` shim reaches clones outside the registered clone path (for example a `mktemp -d` checkout). The shim runs prek only when prek is installed, the checkout has a `prek.toml` or `.pre-commit-config.yaml`, and `origin` is an auto-cloned repo registered with hooks enabled. Otherwise it exits 0. `install-repo-hooks.sh` replaces the shim with prek's own hook.
 
@@ -527,7 +548,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.33. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.37. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 

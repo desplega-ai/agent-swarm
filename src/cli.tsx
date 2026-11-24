@@ -6,6 +6,7 @@ import { Box, render, Text, useApp } from "ink";
 import type { ComponentType } from "react";
 import { createElement, useEffect, useState } from "react";
 import pkg from "../package.json";
+import { dbCopyHelp } from "./commands/db-copy-help.ts";
 import { getApiKey, setApiKey } from "./utils/api-key.ts";
 import { installConsoleScrub } from "./utils/console-scrub.ts";
 
@@ -329,6 +330,7 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: `  ${binName} rbac bootstrap`,
   },
+  "db-copy": dbCopyHelp(binName ?? "agent-swarm"),
   "codex-login": {
     usage: `${binName} codex-login [options]`,
     description:
@@ -461,6 +463,7 @@ function printHelp(command?: string) {
     ["x", "Execute external command routes"],
     ["scripts", "Reusable scripts maintenance"],
     ["rbac", "RBAC role management (bootstrap)"],
+    ["db-copy", "Copy a SQLite database into an empty Postgres database"],
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
@@ -741,15 +744,16 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
 } else if (args.command === "version") {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
-} else if ((args.command === "onboard" || args.command === "controller") && !process.versions.bun) {
+} else if (
+  (args.command === "onboard" || args.command === "controller" || args.command === "db-copy") &&
+  !process.versions.bun
+) {
   // The published bin uses Node, but these commands require Bun APIs.
   const { spawnSync } = await import("node:child_process");
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      args.command === "onboard"
-        ? "Onboarding requires Bun. Install Bun from https://bun.sh, then retry this command."
-        : "Controller requires Bun. Install Bun from https://bun.sh, then retry this command.",
+      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : "db-copy"} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
     );
   }
   process.exit(result.status ?? 1);
@@ -799,6 +803,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   }
   const { runRbacCliCommand } = await import("./be/rbac-roles");
   await runRbacCliCommand(rbacArgs);
+} else if (args.command === "db-copy") {
+  const copyArgs = process.argv.slice(process.argv.indexOf("db-copy") + 1);
+  const { runDataCopyCommand } = await import("./be/data-copy-command");
+  process.exit(await runDataCopyCommand(copyArgs));
 } else if (args.command === "codex-login") {
   const { runCodexLogin } = await import("./commands/codex-login");
   const codexLoginArgs = process.argv.slice(process.argv.indexOf("codex-login") + 1);

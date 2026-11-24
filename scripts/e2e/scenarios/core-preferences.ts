@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { asUser, createUser } from "./core-helpers";
@@ -27,15 +28,17 @@ async function favorites(ctx: ScenarioContext, userId: string) {
     "An operator favorite must not name a user",
   );
   expect(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_favorites WHERE itemId = ?", [itemId])
-      ?.n === 1,
+    ctx.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM user_favorites WHERE "itemId" = ${itemId}`,
+    )?.n === 1,
     "user_favorites lacks the favorite",
   );
   response = await put(true);
   expectStatus(response, [200], "favoriting twice");
   expect(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM user_favorites WHERE itemId = ?", [itemId])
-      ?.n === 1,
+    ctx.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM user_favorites WHERE "itemId" = ${itemId}`,
+    )?.n === 1,
     "A repeated favorite duplicated the row",
   );
 
@@ -117,6 +120,43 @@ async function favorites(ctx: ScenarioContext, userId: string) {
     }),
     [401],
     "favorite without credentials",
+  );
+}
+
+/** A starred app lists first-class on `/api/apps` for its owner only, and deleting the app drops the star. */
+async function appFavorites(ctx: ScenarioContext, userId: string) {
+  let response = await ctx.api("POST", "/api/apps", {
+    body: {
+      name: `E2E favorite app ${ctx.nonce}`,
+      definition: {
+        models: {},
+        pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+        defaultPage: "main",
+      },
+    },
+  });
+  expectStatus(response, [201], "create the app fixture");
+  const appId = String(asRecord(asRecord(response.json).app).id);
+  const listed = async (headers: Record<string, string> = {}) => {
+    const list = await ctx.api("GET", "/api/apps", { headers });
+    expectStatus(list, [200], "list apps");
+    return asRecords(list.json, "apps").find((app) => app.id === appId);
+  };
+
+  response = await ctx.api("PUT", "/api/favorites", {
+    headers: asUser(userId),
+    body: { itemType: "app", itemId: appId, favorite: true },
+  });
+  expectStatus(response, [200], "user stars an app");
+  expect((await listed(asUser(userId)))?.favorite === true, "The starred app is not flagged");
+  expect((await listed())?.favorite === false, "The operator list leaked the user's app star");
+
+  expectStatus(await ctx.api("DELETE", `/api/apps/${appId}`), [200], "delete the app");
+  expect(
+    ctx.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM user_favorites WHERE "itemType" = 'app' AND "itemId" = ${appId}`,
+    )?.n === 0,
+    "Deleting the app left its star behind",
   );
 }
 
@@ -264,6 +304,7 @@ export const corePreferences: Scenario = {
   async run(ctx) {
     const userId = await createUser(ctx, "preferences");
     await favorites(ctx, userId);
+    await appFavorites(ctx, userId);
     await inboxState(ctx, userId);
     await taskTemplates(ctx);
   },

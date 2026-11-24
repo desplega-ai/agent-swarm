@@ -1,15 +1,6 @@
+import { resolveRequesterTimezone } from "../be/requester-timezone";
 import type { AgentTask } from "../types";
 import { formatDeferralDateTime } from "../utils/deferral-time";
-
-// shortcut: one timezone for every channel post; switch to the requester's
-// `users.timezone` once Slack ingest stores it for most people.
-const CHANNEL_TZ = "Europe/Madrid";
-
-/** "04:00", "tomorrow 04:00" or "11-20 04:00", in `CHANNEL_TZ`. */
-function channelResumeTime(iso: string, now: Date): string {
-  const { date, time } = formatDeferralDateTime(new Date(iso), now, CHANNEL_TZ);
-  return date === "today" ? time : `${date} ${time}`;
-}
 
 /**
  * Legacy deferral output, written before `defer-task` started storing the
@@ -34,19 +25,16 @@ const EVENT_DEFERRAL_CARD = new RegExp(`^Waiting on ([^\\n]+?) — or ${WHEN} at
 /**
  * The Slack-facing form of a task's stored output.
  *
- * A deferral's stored card (`Checking back today at 18:38`, `Waiting on
- * Researcher — or today at 18:38 at the latest`) renders its time in the
- * requester's timezone, or UTC when they have none. Slack re-renders it from
- * `deferredUntil` in `CHANNEL_TZ`: `Checking back at 18:38` / `Waiting on
- * Researcher · resumes by 18:38`. Rows without `deferredUntil` (deferred
- * before it existed, or the legacy notice with the agent's internal handoff
- * note and a raw schedule UUID link) read `Checking back later` /
- * `Waiting on Researcher`.
+ * Re-render an engine-authored deferral from its wake-up instant using the
+ * requester's current timezone. Older rows without an instant get a text-only card.
  */
-export function slackTaskOutput(
-  task: Pick<AgentTask, "output" | "tags" | "outputSchema" | "status" | "deferredUntil">,
+export async function slackTaskOutput(
+  task: Pick<
+    AgentTask,
+    "output" | "tags" | "outputSchema" | "status" | "deferredUntil" | "requestedByUserId"
+  >,
   now: Date = new Date(),
-): string | undefined {
+): Promise<string | undefined> {
   const output = task.output ?? undefined;
   if (
     !output ||
@@ -56,15 +44,21 @@ export function slackTaskOutput(
   ) {
     return output;
   }
-  const resumes = task.deferredUntil ? channelResumeTime(task.deferredUntil, now) : null;
-  // Only match the engine-authored card from defer-task, not continuation results.
-  if (LEGACY_DEFERRAL_NOTICE.test(output) || TIME_DEFERRAL_CARD.test(output)) {
-    if (!resumes) return "Checking back later";
-    return `Checking back ${resumes.includes(" ") ? "" : "at "}${resumes}`;
-  }
   const waitingOn = output.match(EVENT_DEFERRAL_CARD)?.[1];
-  if (!waitingOn) return output;
-  return resumes ? `Waiting on ${waitingOn} · resumes by ${resumes}` : `Waiting on ${waitingOn}`;
+  if (!waitingOn && !LEGACY_DEFERRAL_NOTICE.test(output) && !TIME_DEFERRAL_CARD.test(output)) {
+    return output;
+  }
+  if (!task.deferredUntil) return waitingOn ? `Waiting on ${waitingOn}` : "Checking back later";
+
+  const { tz, isFallback } = await resolveRequesterTimezone(
+    task.requestedByUserId,
+    process.env.SLACK_DEFAULT_TIMEZONE,
+  );
+  const { date, time } = formatDeferralDateTime(new Date(task.deferredUntil), now, tz, isFallback);
+  const resumes = date === "today" ? time : `${date} ${time}`;
+  return waitingOn
+    ? `Waiting on ${waitingOn} · resumes by ${resumes}`
+    : `Checking back ${date === "today" ? "at " : ""}${resumes}`;
 }
 
 /**

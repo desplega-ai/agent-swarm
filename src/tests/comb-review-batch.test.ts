@@ -844,16 +844,29 @@ describe("POST /api/comb/review-batches", () => {
     expect(COMB_NOTE_MAX).toBe(REVIEW_NOTE_MAX);
   });
 
-  test("creates the task, then answers 409 for the same comments", async () => {
+  test("keeps a follow-up on the parent agent and answers 409 on a repeat", async () => {
     const ids = [fake.add({ body: "@swarm a" }).id, fake.add({ body: "@swarm b" }).id];
 
-    const created = await postIds(ids);
+    const worker = await createAgent({ name: "review-author", status: "idle" });
+    await db.updateAgentProfile(worker.id, { capabilities: ["review"] });
+    const parent = await createTaskWithSiblingAwareness("Write a review", {
+      agentId: worker.id,
+      routingAffinity: { capabilities: ["review"] },
+    });
+    const input = { ...batch(ids, "/comb-qa/"), parentTaskId: parent.id };
+    const other = await createAgent({ name: "other-worker", status: "idle" });
+    expect((await post(input, { "X-Agent-ID": other.id })).status).toBe(403);
+    const created = await post(input);
     expect(created.status).toBe(201);
     const result = (await created.json()) as ReviewBatchResult;
     expect(result.sent).toEqual(ids);
-    expect((await getTaskById(result.taskId as string))?.task).toContain("Scope: /comb-qa/ (");
+    const child = await getTaskById(result.taskId as string);
+    expect(child?.task).toContain("Scope: /comb-qa/ (");
+    expect(child?.parentTaskId).toBe(parent.id);
+    expect(child?.agentId).toBe(worker.id);
+    expect(child?.routingAffinity?.capabilities).toEqual([]);
 
-    const again = await postIds(ids);
+    const again = await post(input);
     expect(again.status).toBe(409);
     expect(((await again.json()) as { skipped: unknown[] }).skipped).toEqual(
       ids.map((id) => ({ id, reason: "already-sent", taskId: result.taskId })),
@@ -997,7 +1010,7 @@ describe("POST /api/comb/review-batches", () => {
   test("answers 503 with the skipped list while a review template is disabled", async () => {
     const good = fake.add({ body: "@swarm a" }).id;
     const resolved = fake.add({ body: "@swarm b", resolved: true }).id;
-    upsertPromptTemplate({
+    await upsertPromptTemplate({
       eventType: "comb.review.batch",
       scope: "global",
       state: "skip_event",

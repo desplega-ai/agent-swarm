@@ -106,12 +106,21 @@ export type ProviderEvent =
       content: string;
       messageId?: string;
     }
-  | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
+  | {
+      type: "tool_start";
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+      /** The harness supplies the arguments for loop detection on tool_end. */
+      argsPending?: true;
+    }
   | {
       type: "tool_end";
       toolCallId: string;
       toolName: string;
       result: unknown;
+      /** Final arguments for a call whose tool_start marked argsPending. */
+      finalArgs?: unknown;
       /** The tool call failed. Set by adapters whose harness reports it; absent means unknown. */
       isError?: boolean;
     }
@@ -199,6 +208,12 @@ export interface ProviderSessionConfig {
    * records `skill.invoke` (`via: "prompt"`) from this callback.
    */
   onPromptSkill?: (skillName: string) => void;
+  /**
+   * The task's effective `outputSchema`. Codex constrains each turn's final
+   * message with it and re-prompts once when the session ends without a
+   * matching result; other adapters ignore it.
+   */
+  outputSchema?: Record<string, unknown>;
 }
 
 export type SteerDelivery = { mode: SteerMode; text: string };

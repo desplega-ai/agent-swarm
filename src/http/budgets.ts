@@ -14,10 +14,10 @@ import {
   deleteBudget,
   getBudget,
   getBudgets,
-  getDbClient,
   getRecentBudgetRefusalNotifications,
   upsertBudget,
 } from "../be/db";
+import { getStorage } from "../be/storage";
 import { BudgetRefusalNotificationSchema, BudgetSchema, BudgetScopeSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -101,6 +101,7 @@ const upsertBudgetRoute = route({
     200: { description: "Budget upserted", schema: BudgetSchema },
     400: { description: "Validation error" },
   },
+  rbac: { ungated: "spend controls: no verb covers them, so user roles need admin" },
 });
 
 const deleteBudgetRoute = route({
@@ -114,6 +115,7 @@ const deleteBudgetRoute = route({
     204: { description: "Budget deleted" },
     404: { description: "Budget not configured" },
   },
+  rbac: { ungated: "spend controls: no verb covers them, so user roles need admin" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -175,7 +177,7 @@ export async function handleBudgets(
 
     // One transaction so the audit log's `before` cannot be a stale read from
     // a concurrent budget write.
-    const { before, updated } = await getDbClient().transaction(async () => ({
+    const { before, updated } = await getStorage().transaction(async () => ({
       before: await getBudget(parsed.params.scope, scopeId),
       updated: await upsertBudget(parsed.params.scope, scopeId, parsed.body.dailyBudgetUsd),
     }));
@@ -201,7 +203,7 @@ export async function handleBudgets(
     const scopeId = parsed.params.scopeId === "_global" ? "" : parsed.params.scopeId;
 
     // Same rationale as the upsert route above.
-    const { before, deleted } = await getDbClient().transaction(async () => ({
+    const { before, deleted } = await getStorage().transaction(async () => ({
       before: await getBudget(parsed.params.scope, scopeId),
       deleted: await deleteBudget(parsed.params.scope, scopeId),
     }));

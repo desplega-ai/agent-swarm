@@ -197,7 +197,7 @@ jobs:
           RUN_SHA: ${{ steps.context.outputs.sha }}
         run: |
           set -euo pipefail
-          npm i -g @desplega.ai/agent-fs@0.18.33
+          npm i -g @desplega.ai/agent-fs@0.18.37
           node --experimental-strip-types reporter/publish-artifacts.ts \
             --results all-results \
             --prefix "e2e/desplega-ai__agent-swarm/$RUN_TARGET/$RUN_SHA" \
@@ -241,9 +241,13 @@ jobs:
             gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<packages/ui-e2e/comment.md)"
           fi
 
+      # Not on pull_request: each shard payload takes 50-105 s to post, so the ingest made a PR's
+      # Report 8-13 min, and a PR row only feeds the tracker page's PR coverage list. merge_group
+      # (main's run) and the nightly still ingest: their failures open the incidents that start
+      # the ui-e2e-incident-triage workflow.
       - name: Ingest into the UI E2E tracker
         continue-on-error: true
-        if: steps.context.outputs.same_repo == 'true'
+        if: steps.context.outputs.same_repo == 'true' && github.event_name != 'pull_request'
         env:
           UI_E2E_INGEST_URL: ${{ secrets.UI_E2E_INGEST_URL }}
           UI_E2E_INGEST_BEARER: ${{ secrets.UI_E2E_INGEST_BEARER }}

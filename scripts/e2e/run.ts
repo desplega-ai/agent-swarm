@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type SimulatedAgent, type SimulatedAgentOptions, startSimulatedAgent } from "./agent-sim";
-import { calledCliCommands, cleanupCliTemp, setCliCoverageDir } from "./cli";
+import {
+  type CliResult,
+  calledCliCommands,
+  cleanupCliTemp,
+  runCli,
+  setCliCoverageDir,
+} from "./cli";
 import {
   type CoverageManifest,
   coverageFrom,
@@ -11,7 +17,7 @@ import {
   fetchUniverse,
   loadManifest,
 } from "./coverage";
-import { openReadOnlyDb, type ReadOnlyDb } from "./db";
+import { type DbFixture, openReadOnlyDb, type ReadOnlyDb } from "./db";
 import { runHarnessLeg, stopHarnessChildren } from "./harness";
 import {
   type ApiClient,
@@ -48,7 +54,18 @@ import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
 import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
-import { repoRoot, restartSut, type Sut, startSut, stopSut, tailLog } from "./sut";
+import {
+  copySutKey,
+  repoRoot,
+  restartSut,
+  type Sut,
+  startFixtureSut,
+  startSut,
+  stopSut,
+  stopSutProcess,
+  sutDbTarget,
+  tailLog,
+} from "./sut";
 
 export type ScenarioContext = {
   api: ApiClient;
@@ -67,15 +84,89 @@ export type ScenarioContext = {
   startAgent: (options?: SimulatedAgentOptions) => Promise<SimulatedAgent>;
   /** Count a request made outside `ctx.api` (raw fetch, WebSocket, SSE) toward coverage. */
   recordHttpCall: typeof recordHttpCall;
+  /** Read a manifest state surface while the scenario holds a transient state. */
+  captureStateSurface: (name: string) => void;
   /** The environment the SUT booted with (ports for stand-ins, feature flags). Read-only. */
   sutEnv: Readonly<Record<string, string>>;
   /** The SUT's stdout/stderr so far (current process only). Compare lengths to read what a step added. */
   sutLog: () => Promise<string>;
   log: (message: string) => void;
-  markThread: (label: string, channel: string, ts: string) => void;
+  /**
+   * Mark a Slack thread for the visuals renderer (`--visuals`). `journal` is the `file` of a
+   * `slackJournal()` result, for a thread on a mock the scenario started itself. Default:
+   * the journal of the run's Socket Mode mock.
+   */
+  markThread: (label: string, channel: string, ts: string, journal?: string) => void;
+  /**
+   * A journal for a Slack mock that the scenario starts itself: start the mock with `path`
+   * as its `dataFile` and pass `file` to `markThread`. Undefined without `--visuals`, and
+   * on a rerun (a rerun keeps no thread marks).
+   */
+  slackJournal: () => SlackJournal | undefined;
   /** `env` adds variables to the restarted process only; the next restart drops them. */
   restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
+  /**
+   * Boot a second API on a named fixture or a prepared SQLite image (Slack off).
+   * The main SUT keeps running. Call `stop` when done; the runner stops it otherwise.
+   * `env` adds variables to this API only.
+   */
+  startFixtureSut: (
+    fixture: string | DbFixture,
+    env?: Record<string, string>,
+  ) => Promise<FixtureSut>;
+  /**
+   * The data copy of decision D11 (check 20), whatever engine the run uses: boot a new
+   * source API on a SQLite file. `copy()` stops it, runs `agent-swarm db-copy` into a new
+   * Postgres database (needs E2E_POSTGRES_URL) and boots a target API on the copy with
+   * the source's encryption key. The runner stops both otherwise. `env` adds variables to
+   * both APIs (for example `ctx.llm.env`, so memories get embeddings).
+   */
+  startDataCopy: (options?: { env?: Record<string, string> }) => Promise<DataCopyPair>;
   nonce: string;
+};
+export type DataCopyPair = {
+  source: ApiClient;
+  /**
+   * `beforeCopy` runs after the source API stopped and before the copy that the target
+   * boots on: a scenario can change the SQLite file as a deployment would leave it, and
+   * run copies that must be refused (`runCopy`) into the same empty target database.
+   * `args` are more `db-copy` options for the copy that the target boots on.
+   */
+  copy: (step?: {
+    args?: string[];
+    beforeCopy?: (at: {
+      sourcePath: string;
+      targetUrl: string;
+      runCopy: () => Promise<CliResult>;
+    }) => Promise<void>;
+  }) => Promise<{
+    cli: CliResult;
+    target: ApiClient;
+    /** The same copy again into the target database, while the target API holds it. */
+    recopy: () => Promise<CliResult>;
+    /** The source SQLite file (its API is stopped) and the target database URL. */
+    sourcePath: string;
+    targetUrl: string;
+    /** Read-only handles on the source file and on the copy. */
+    sourceDb: ReadOnlyDb;
+    targetDb: ReadOnlyDb;
+    /**
+     * Stop the target API and start it again on the copy, as a later start or a later
+     * release does. `env` applies to that process only.
+     */
+    restartTarget: (env?: Record<string, string>) => Promise<void>;
+    /** The output of the target API process that runs now (each start has its own). */
+    targetLog: () => Promise<string>;
+  }>;
+  stop: () => Promise<void>;
+};
+export type SlackJournal = { file: string; path: string };
+export type FixtureSut = {
+  api: ApiClient;
+  db: ReadOnlyDb;
+  /** The fixture's companion JSON (ids and values it holds). */
+  meta: Record<string, unknown>;
+  stop: () => Promise<void>;
 };
 export type Scenario = {
   name: string;
@@ -104,9 +195,17 @@ export type Scenario = {
   run: (ctx: ScenarioContext) => Promise<void>;
 };
 
-type BaseContext = Omit<ScenarioContext, "markThread">;
+type BaseContext = Omit<ScenarioContext, "markThread" | "slackJournal">;
 
-type ThreadMark = { scenario: string; label: string; channel: string; ts: string };
+/** Journals of the Slack mocks that scenarios start themselves (see `slackJournal`). */
+const EXTRA_JOURNAL_PREFIX = "slack-http-journal-";
+type ThreadMark = {
+  scenario: string;
+  label: string;
+  channel: string;
+  ts: string;
+  journal?: string;
+};
 
 const MANIFEST_PATH = `${import.meta.dir}/coverage-manifest.json`;
 
@@ -188,10 +287,37 @@ async function cleanup(keep: boolean): Promise<void> {
   await cleanupCliTemp(keep);
 }
 
-async function bootStack(
-  options: Options,
-  journalPath?: string,
-): Promise<{ stack: Stack; sut: Sut; db: ReadOnlyDb; ctx: BaseContext }> {
+/** A SUT that ignores --tx-replay would pass every scenario without replay: refuse that. */
+async function assertSutReplaysTransactions(logPath: string): Promise<void> {
+  const log = await Bun.file(logPath).text();
+  if (!log.includes("[storage] tx-replay on:")) {
+    throw new Error(
+      `--tx-replay: the API never reported replay mode in ${logPath}; it is not replaying transactions`,
+    );
+  }
+}
+
+/** A SUT that ignores DATABASE_URL would pass every scenario on the default engine: refuse that. */
+function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
+  // The runner applies the migration chain before the SUT starts (the db-query
+  // reader role needs the tables), so a migrated schema proves nothing: the boot
+  // seeds the SUT writes do.
+  let seeded: unknown;
+  try {
+    seeded = db.get("SELECT 1 AS present FROM seed_state LIMIT 1");
+  } catch (error) {
+    throw new Error(
+      `--engine ${engine}: the per-run database has no seed_state table (${errorMessage(error)}); the API is not using DATABASE_URL`,
+    );
+  }
+  if (!seeded) {
+    throw new Error(
+      `--engine ${engine}: the API wrote no boot seed into the per-run database; it is not using DATABASE_URL`,
+    );
+  }
+}
+
+async function bootStack(options: Options, manifest: CoverageManifest, journalPath?: string) {
   const stack: Stack = {};
   stacks.add(stack);
   try {
@@ -204,6 +330,7 @@ async function bootStack(
       { ...slack.mock.env, ...llm.env },
       options.sutEnv,
       options.coverageDir,
+      options.engine,
     );
     stack.sut = sut;
     try {
@@ -214,12 +341,15 @@ async function bootStack(
         `Slack socket mode never connected: ${errorMessage(error)}\nLast 40 lines of ${sut.logPath}:\n${await tailLog(sut.logPath, 40)}`,
       );
     }
-    const db = openReadOnlyDb(sut.dbPath);
+    const db = openReadOnlyDb(sutDbTarget(sut));
     stack.db = db;
+    if (options.engine !== "sqlite") assertSutUsesDatabase(db, options.engine);
+    if (options.txReplay) await assertSutReplaysTransactions(sut.logPath);
     const api = createApiClient(sut.baseUrl, sut.apiKey);
     const connectMcp = createMcpConnector(sut.baseUrl, sut.apiKey);
     const nonce = randomBytes(6).toString("hex");
     await probeToolUniverse(api, connectMcp, nonce);
+    const captured = new Map<string, Set<string>>();
     const ctx: BaseContext = {
       api,
       connectMcp,
@@ -234,10 +364,96 @@ async function bootStack(
         return agent;
       },
       recordHttpCall,
+      captureStateSurface(name) {
+        if (!options.strict && !options.shard) return;
+        const spec = manifest.stateSurfaces.find((surface) => surface.name === name);
+        if (!spec) throw new Error(`Unknown coverage state surface: ${name}`);
+        captured.set(spec.query, readStateValues(db, spec.query, captured.get(spec.query)));
+      },
       sutEnv: sut.env,
       async sutLog() {
         sut.flushLog();
         return Bun.file(sut.logPath).text();
+      },
+      async startFixtureSut(source, env = {}) {
+        const fixtureStack: Stack = {};
+        stacks.add(fixtureStack);
+        const { sut: fixtureSut, fixture } = await startFixtureSut(
+          options.keep,
+          source,
+          { ...options.sutEnv, ...env },
+          options.engine,
+        );
+        fixtureStack.sut = fixtureSut;
+        const fixtureDb = openReadOnlyDb(sutDbTarget(fixtureSut));
+        fixtureStack.db = fixtureDb;
+        return {
+          api: createApiClient(fixtureSut.baseUrl, fixtureSut.apiKey),
+          db: fixtureDb,
+          meta: fixture.meta,
+          stop: () => stopStack(fixtureStack, options.keep),
+        };
+      },
+      async startDataCopy(copyOptions = {}) {
+        const sourceStack: Stack = {};
+        const targetStack: Stack = {};
+        stacks.add(sourceStack);
+        const pairEnv = { SLACK_DISABLE: "true", ...copyOptions.env };
+        const source = await startSut(options.keep, pairEnv, options.sutEnv, undefined, "sqlite");
+        sourceStack.sut = source;
+        const copyCli = (databaseUrl: string, args: string[] = []) =>
+          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl, ...args], {
+            env: { DESPLEGA_TELEMETRY_ENV: "test" },
+            timeoutMs: 300_000,
+          });
+        return {
+          source: createApiClient(source.baseUrl, source.apiKey),
+          async copy(step = {}) {
+            await stopSutProcess(source);
+            stacks.add(targetStack);
+            let cli: CliResult | undefined;
+            const target = await startSut(
+              options.keep,
+              pairEnv,
+              options.sutEnv,
+              undefined,
+              "postgres",
+              async (prepared) => {
+                await copySutKey(source, prepared);
+                const targetUrl = prepared.databaseUrl ?? "";
+                await step.beforeCopy?.({
+                  sourcePath: source.dbPath,
+                  targetUrl,
+                  runCopy: () => copyCli(targetUrl),
+                });
+                cli = await copyCli(targetUrl, step.args);
+              },
+            );
+            targetStack.sut = target;
+            if (!cli) throw new Error("db-copy did not run");
+            // stopStack closes both handles before it deletes the databases.
+            sourceStack.db = openReadOnlyDb(sutDbTarget(source));
+            targetStack.db = openReadOnlyDb(sutDbTarget(target));
+            return {
+              cli,
+              target: createApiClient(target.baseUrl, target.apiKey),
+              recopy: () => copyCli(target.databaseUrl ?? ""),
+              sourcePath: source.dbPath,
+              targetUrl: target.databaseUrl ?? "",
+              sourceDb: sourceStack.db,
+              targetDb: targetStack.db,
+              restartTarget: (env) => restartSut(target, env),
+              async targetLog() {
+                target.flushLog();
+                return Bun.file(target.logPath).text();
+              },
+            };
+          },
+          async stop() {
+            await stopStack(targetStack, options.keep);
+            await stopStack(sourceStack, options.keep);
+          },
+        };
       },
       async restartSut(options) {
         const connectionCalls = slack.mock.apiCalls("apps.connections.open").length;
@@ -258,7 +474,7 @@ async function bootStack(
       log: console.log,
       nonce,
     };
-    return { stack, sut, db, ctx };
+    return { stack, sut, db, ctx, observe: () => observe(db, manifest, captured) };
   } catch (error) {
     await stopStack(stack, options.keep);
     throw error;
@@ -270,8 +486,9 @@ async function runInStack(
   scenario: Scenario,
   ctx: BaseContext,
   markThread: ScenarioContext["markThread"],
+  slackJournal: ScenarioContext["slackJournal"] = () => undefined,
 ): Promise<ScenarioResult> {
-  const result = await runScenario(scenario, { ...ctx, markThread });
+  const result = await runScenario(scenario, { ...ctx, markThread, slackJournal });
   await stopActiveAgents();
   ctx.llm.reset();
   return result;
@@ -288,17 +505,28 @@ async function printLogTails(sut: Sut): Promise<void> {
 /** Coverage that the final DB read may no longer show: a rerun's DB is gone once it stops, and the main DB is read after the reruns. */
 type RerunObservations = { nodeTypes: Set<string>; stateValues: Map<string, Set<string>> };
 
-function observe(db: ReadOnlyDb, manifest: CoverageManifest): RerunObservations {
+function readStateValues(
+  db: ReadOnlyDb,
+  query: string,
+  captured?: ReadonlySet<string>,
+): Set<string> {
+  const seen = new Set(captured);
+  for (const row of db.query<{ value: unknown }>(query)) seen.add(String(row.value));
+  return seen;
+}
+
+function observe(
+  db: ReadOnlyDb,
+  manifest: CoverageManifest,
+  captured: ReadonlyMap<string, Set<string>>,
+): RerunObservations {
   const stateValues = new Map<string, Set<string>>();
   for (const spec of manifest.stateSurfaces) {
-    stateValues.set(
-      spec.query,
-      new Set(db.query<{ value: unknown }>(spec.query).map((row) => String(row.value))),
-    );
+    stateValues.set(spec.query, readStateValues(db, spec.query, captured.get(spec.query)));
   }
   const nodeTypes = new Set(
     db
-      .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+      .query<{ nodeType: string }>('SELECT DISTINCT "nodeType" FROM workflow_run_steps')
       .map((row) => row.nodeType),
   );
   return { nodeTypes, stateValues };
@@ -327,7 +555,7 @@ async function rerunScenario(
     console.log(
       `RERUN ${scenario.name} on a fresh API and DB${replay.length > 0 ? ` after ${replay.join(", ")}` : ""}`,
     );
-    booted = await bootStack(options);
+    booted = await bootStack(options, manifest);
     for (const prerequisite of plan.slice(0, -1)) {
       const result = await runInStack(prerequisite, booted.ctx, noThreads);
       if (result.status !== "pass") {
@@ -338,9 +566,9 @@ async function rerunScenario(
     }
     truncateHttpCalls(callMark);
     restoreMcpTools(toolMark);
-    const before = observe(booted.db, manifest);
+    const before = booted.observe();
     const rerun = await runInStack(scenario, booted.ctx, noThreads);
-    const after = observe(booted.db, manifest);
+    const after = booted.observe();
     // Only what the rerun itself added, never what the replay produced.
     for (const type of after.nodeTypes) {
       if (!before.nodeTypes.has(type)) observed.nodeTypes.add(type);
@@ -398,15 +626,19 @@ async function main(): Promise<number> {
   const journalPath = visualsDir ? `${visualsDir}/slack-journal.jsonl` : undefined;
   if (visualsDir && journalPath) {
     await Bun.$`mkdir -p ${visualsDir}`.quiet();
-    await Bun.file(journalPath)
-      .delete()
-      .catch(() => {});
+    // A mock replays a journal that is already there, so a reused directory starts clean.
+    const stale = [...new Bun.Glob(`${EXTRA_JOURNAL_PREFIX}*.jsonl`).scanSync(visualsDir)];
+    for (const path of [journalPath, ...stale.map((file) => `${visualsDir}/${file}`)]) {
+      await Bun.file(path)
+        .delete()
+        .catch(() => {});
+    }
   }
   // A fresh directory: the report unions every lcov in it, and stale ones would count.
   if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
   // CLI children write their lcov next to the API's, so rule 3 sees CLI lines too.
   setCliCoverageDir(options.coverageDir);
-  const { sut, db, ctx } = await bootStack(options, journalPath);
+  const { sut, db, ctx, observe: observeMain } = await bootStack(options, manifest, journalPath);
   const api = ctx.api;
   const scenarioResults: ScenarioResult[] = [];
   const threadMarks: ThreadMark[] = [];
@@ -415,12 +647,26 @@ async function main(): Promise<number> {
     if (options.skip.has(scenario.name)) continue;
     if (options.group && !scenario.groups?.includes(options.group)) continue;
     if (options.shard && bandOf(scenario.order) !== options.shard.index) continue;
-    const result = await runInStack(scenario, ctx, (label, channel, ts) => {
-      if (!/^[a-z0-9-]+$/.test(label)) {
-        throw new Error(`Invalid visual thread label: ${label}`);
-      }
-      threadMarks.push({ scenario: scenario.name, label, channel, ts });
-    });
+    // One journal file per extra mock, named after the scenario: the name does not depend
+    // on which other scenarios ran.
+    let extraJournals = 0;
+    const slackJournal = (): SlackJournal | undefined => {
+      if (!visualsDir) return undefined;
+      extraJournals += 1;
+      const file = `${EXTRA_JOURNAL_PREFIX}${scenario.name}-${extraJournals}.jsonl`;
+      return { file, path: `${visualsDir}/${file}` };
+    };
+    const result = await runInStack(
+      scenario,
+      ctx,
+      (label, channel, ts, journal) => {
+        if (!/^[a-z0-9-]+$/.test(label)) {
+          throw new Error(`Invalid visual thread label: ${label}`);
+        }
+        threadMarks.push({ scenario: scenario.name, label, channel, ts, journal });
+      },
+      slackJournal,
+    );
     scenarioResults.push(result);
     printScenario(result);
   }
@@ -429,7 +675,7 @@ async function main(): Promise<number> {
   // A failure reruns once, alone, on a fresh API: a pass there is `flaky`, not a failure.
   // Seeded with the main DB as the scenarios left it: a rerun or harness leg keeps the API up
   // past the 5 s boot sweep, which fails the `in_progress` tasks the strict gate needs.
-  const rerunObserved = observe(db, manifest);
+  const rerunObserved = observeMain();
   const byName = new Map(scenarios.map((scenario) => [scenario.name, scenario]));
   for (const [index, first] of scenarioResults.entries()) {
     if (first.status !== "fail") continue;
@@ -477,7 +723,7 @@ async function main(): Promise<number> {
       nodeTypes: [
         ...new Set([
           ...db
-            .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+            .query<{ nodeType: string }>('SELECT DISTINCT "nodeType" FROM workflow_run_steps')
             .map((row) => row.nodeType),
           ...rerunObserved.nodeTypes,
         ]),
@@ -488,12 +734,7 @@ async function main(): Promise<number> {
       stateValues: Object.fromEntries(
         manifest.stateSurfaces.map((spec) => [
           spec.query,
-          [
-            ...new Set([
-              ...db.query<{ value: unknown }>(spec.query).map((row) => String(row.value)),
-              ...(rerunObserved.stateValues.get(spec.query) ?? []),
-            ]),
-          ],
+          [...readStateValues(db, spec.query, rerunObserved.stateValues.get(spec.query))],
         ]),
       ),
     };
@@ -540,7 +781,8 @@ async function main(): Promise<number> {
             error: scenario.error ?? null,
             threads: threadMarks
               .filter((thread) => thread.scenario === scenario.name)
-              .map(({ label, channel, ts }) => ({ label, channel, ts })),
+              // `journal` is left out of the JSON when the thread is on the run's Socket mock.
+              .map(({ label, channel, ts, journal }) => ({ label, channel, ts, journal })),
           })),
         },
         null,

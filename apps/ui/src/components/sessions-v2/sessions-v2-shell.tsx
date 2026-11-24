@@ -188,8 +188,8 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
    * pane (the split starts if there is none), so the session stays in view
    * next to it. The keys stay with the pane the link is in.
    */
-  const openAsset = (target: LinkPreviewTarget, from: PaneIndex) => {
-    url.openSession(assetTabId(target), { pane: from === 0 ? 1 : 0 });
+  const openAsset = (target: LinkPreviewTarget, from: PaneIndex, tab: string) => {
+    url.openSession(assetTabId(target, tab), { pane: from === 0 ? 1 : 0 });
   };
   const [pickingSplit, setPickingSplit] = useState(false);
   const guide = useFirstRunGuide();
@@ -259,7 +259,7 @@ export function SessionsV2Shell({ onViewChange }: SessionsV2ShellProps) {
         renderSession(tab, pane)
       );
     return (
-      <LinkPreviewOpener open={(target) => openAsset(target, pane)}>
+      <LinkPreviewOpener open={(target) => openAsset(target, pane, tab)}>
         {draft}
         {body}
       </LinkPreviewOpener>

@@ -40,7 +40,7 @@ export type QuickJSJob = {
 };
 
 // Set while a ctx.swarm or ctx.mcp host call runs. Those calls go to the swarm
-// API (mcpBaseUrl) with the host bearer; the egress guard trusts that origin
+// API (sdkBaseUrl) with the host bearer; the egress guard trusts that origin
 // only inside this scope; a direct script fetch of it follows the policy.
 const swarmHostCalls = new AsyncLocalStorage<true>();
 

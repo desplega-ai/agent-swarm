@@ -1004,6 +1004,7 @@ export interface paths {
                                 };
                                 createdAt: string;
                                 updatedAt: string;
+                                favorite: boolean;
                             }[];
                         };
                     };
@@ -2465,6 +2466,11 @@ export interface paths {
                             total: number;
                             truncated: boolean;
                             rowLimit: number | null;
+                            /**
+                             * @description SQL dialect of the storage engine that ran the query
+                             * @enum {string}
+                             */
+                            dialect: "sqlite" | "postgres";
                         };
                     };
                 };
@@ -6124,6 +6130,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/codex-oauth/slots/{slot}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Persist refreshed Codex OAuth credentials for a pool slot
+         * @description Writes the global secret codex_oauth_<slot>. The caller must hold the slot's refresh lock (lockOwner). Open to registered agents so a worker can persist the tokens it just rotated; no other config key is writable here.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slot: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot> */
+                        lockOwner: string;
+                        credentials: {
+                            access: string;
+                            refresh: string;
+                            expires: number;
+                            accountId: string;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Credentials stored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            slot: number;
+                            key: string;
+                        };
+                    };
+                };
+                /** @description Caller is not the operator or a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller does not hold the slot's refresh lock */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Quarantine a Codex OAuth pool slot after a failed persist
+         * @description Deletes the global secret codex_oauth_<slot> so no caller replays a consumed refresh token. The caller must hold the slot's refresh lock (lockOwner).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slot: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot> */
+                        lockOwner: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Slot quarantined (deleted is false when no row existed) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            slot: number;
+                            key: string;
+                            deleted: boolean;
+                        };
+                    };
+                };
+                /** @description Caller is not the operator or a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller does not hold the slot's refresh lock */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/comb/review-batches": {
         parameters: {
             query?: never;
@@ -6134,8 +6269,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Send agent-fs comments to the swarm as one lead task
-         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         * Send agent-fs comments to the swarm as one task
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates one task. An optional parentTaskId attaches it as a follow-up for the parent’s agent. Without a parent assignee it routes to the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
          */
         post: {
             parameters: {
@@ -6147,6 +6282,8 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        /** Format: uuid */
+                        parentTaskId?: string;
                         orgId: string;
                         driveId: string;
                         commentIds: string[];
@@ -8505,7 +8642,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                     itemIds?: string;
                 };
                 header?: never;
@@ -8549,7 +8686,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -8565,7 +8702,7 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
@@ -11136,6 +11273,15 @@ export interface paths {
                 };
                 /** @description Missing query or agent ID */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Memory search failed (never sent as an empty result list) */
+                500: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14831,6 +14977,7 @@ export interface paths {
                                     live_url: string;
                                     org_id: string | null;
                                     drive_id: string | null;
+                                    review_follow_ups: boolean;
                                     service_user_id: string | null;
                                 };
                             };
@@ -16151,6 +16298,7 @@ export interface paths {
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 profile?: string;
                                 resolvedProfile?: string;
+                                modelGroup?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
@@ -16206,7 +16354,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one task (a replay returns that task as it is now); a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire. */
+                    "Idempotency-Key"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -16244,6 +16395,7 @@ export interface paths {
                         /** @enum {string} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                         profile?: string;
+                        modelGroup?: string;
                         draft?: boolean;
                     };
                 };
@@ -16258,7 +16410,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -16267,8 +16419,26 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment */
+                /** @description Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Idempotency-Key was already used for a different request */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The task created under this Idempotency-Key was deleted */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -17118,6 +17288,7 @@ export interface paths {
                                 resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 profile?: string;
                                 resolvedProfile?: string;
+                                modelGroup?: string;
                                 /** @enum {string} */
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | "fx";
                                 requestedByUserId?: string;
@@ -18343,7 +18514,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Launch a page session (issues HttpOnly cookie) */
+        /**
+         * Launch a page session (issues HttpOnly cookie)
+         * @description The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -19856,7 +20030,7 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
-                /** @description Only the lead, the operator or a user can change allowMerge or mergePolicy */
+                /** @description Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -20009,7 +20183,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy */
+                /** @description Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -20780,6 +20954,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -20848,6 +21023,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -20912,6 +21088,7 @@ export interface paths {
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
                         profile?: string;
+                        modelGroup?: string;
                         allowCustomModel?: boolean;
                         /** @enum {string} */
                         scheduleType?: "recurring" | "one_time";
@@ -20979,6 +21156,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -21103,6 +21281,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -21227,6 +21406,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -21299,6 +21479,7 @@ export interface paths {
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
                         profile?: string | null;
+                        modelGroup?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -21363,6 +21544,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -21503,6 +21685,7 @@ export interface paths {
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
                         profile?: string | null;
+                        modelGroup?: string | null;
                         allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
@@ -21567,6 +21750,7 @@ export interface paths {
                             /** @enum {string} */
                             modelTier?: "smol" | "regular" | "smart" | "ultra";
                             profile?: string;
+                            modelGroup?: string;
                             /**
                              * @default recurring
                              * @enum {string}
@@ -26724,6 +26908,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -26790,6 +26975,7 @@ export interface paths {
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
                                 profile?: string;
+                                modelGroup?: string;
                                 /**
                                  * @default recurring
                                  * @enum {string}
@@ -27572,6 +27758,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Jira webhook handler not configured */
                 503: {
                     headers: {
@@ -28053,8 +28248,26 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Signed body is not valid JSON */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Invalid signature */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 5 MiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30484,6 +30697,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description GitHub integration not configured */
                 503: {
                     headers: {
@@ -30739,6 +30961,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description AgentMail integration not configured or inbound archive unavailable */
                 503: {
                     headers: {
@@ -30791,6 +31022,15 @@ export interface paths {
                 };
                 /** @description Invalid signature */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Body exceeds 5 MiB */
+                413: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -30953,7 +31193,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks or server-emitted events */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -31032,7 +31272,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Event name is reserved for provider webhooks */
+                /** @description Event name is reserved for provider webhooks or server-emitted events */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -31223,7 +31463,20 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                            /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                            match?: {
+                                /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                                repo?: string;
+                                /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                                project?: string;
+                                /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                                label?: string;
+                                /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                                assignee?: string;
+                                /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                                status?: string;
+                            };
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -31452,7 +31705,20 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                            /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                            match?: {
+                                /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                                repo?: string;
+                                /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                                project?: string;
+                                /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                                label?: string;
+                                /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                                assignee?: string;
+                                /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                                status?: string;
+                            };
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -32342,6 +32608,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Body exceeds 5 MiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -32798,6 +33073,7 @@ export interface components {
             resolvedEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
             profile?: string;
             resolvedProfile?: string;
+            modelGroup?: string;
             fallbackHops?: {
                 from: string;
                 profile: string;
@@ -32946,6 +33222,7 @@ export interface components {
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
             opencodeGo?: components["schemas"]["AgentOpencodeGoStatus"];
+            piModelIds?: string[];
             acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
@@ -33344,7 +33621,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path" | "key" | "session" | "hidden-key" | "app";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
@@ -33593,7 +33870,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "task_ui_script_action_failed" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_model_group_resolved" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_follow_up_gate_shadow" | "task_citation_check_refused" | "task_ui_spec_check_refused" | "task_ui_script_action_failed" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -33720,7 +33997,7 @@ export interface components {
             createdAt: string;
             lastUpdatedAt: string;
         };
-        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
+        /** @description Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled. */
         RepoHooks: {
             /** @default false */
             enabled: boolean;
@@ -34303,7 +34580,20 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                match?: {
+                    /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                    repo?: string;
+                    /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                    project?: string;
+                    /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                    label?: string;
+                    /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                    assignee?: string;
+                    /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                    status?: string;
+                };
             })[];
             cooldown?: {
                 hours?: number;
@@ -34582,7 +34872,20 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                match?: {
+                    /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                    repo?: string;
+                    /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                    project?: string;
+                    /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                    label?: string;
+                    /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                    assignee?: string;
+                    /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                    status?: string;
+                };
             })[];
             cooldown?: {
                 hours?: number;
@@ -37068,6 +37371,8 @@ export interface operations {
                 status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit";
                 agentId?: string;
                 scriptName?: string;
+                objectScriptId?: string;
+                objectId?: string;
                 limit?: number;
                 offset?: number | null;
             };
@@ -38111,6 +38416,8 @@ export interface operations {
                             updatedBy: string | null;
                             createdAt: string;
                             updatedAt: string;
+                            /** @enum {string} */
+                            kind: "function" | "durable";
                         }[];
                     };
                 };

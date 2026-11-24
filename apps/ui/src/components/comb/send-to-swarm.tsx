@@ -38,6 +38,12 @@ import { selectionState } from "@/lib/comb/bulk";
 import { commentCombPath, lineRangeLabel } from "@/lib/comb/comments";
 import type { DrivePath } from "@/lib/comb/paths";
 
+interface ReviewDestination {
+  id: string;
+  kind: "session" | "task";
+  title: string;
+}
+
 type Drive = { orgId: string; driveId: string };
 
 const NO_IDS: ReadonlySet<string> = new Set();
@@ -173,7 +179,9 @@ export function SendBatchButton({
   drive,
   scopePath,
   threads,
+  destination,
 }: {
+  destination?: ReviewDestination;
   drive: Drive;
   /** The file path the batch is sent from. */
   scopePath: string;
@@ -185,6 +193,7 @@ export function SendBatchButton({
     [threads, serviceUserId],
   );
   const [open, setOpen] = useState(false);
+  const label = destination ? `Send to ${destination.kind}` : "Send to swarm";
 
   return (
     <>
@@ -193,15 +202,19 @@ export function SendBatchButton({
           <TooltipTrigger asChild>
             <Button
               size="sm"
-              aria-label={`Send to swarm (${eligible.length})`}
+              aria-label={`${label} (${eligible.length})`}
               className="shrink-0"
               onClick={() => setOpen(true)}
             >
               <Send />
-              Send to swarm
+              {label}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Send the open comments to the lead as one task</TooltipContent>
+          <TooltipContent>
+            {destination
+              ? `Follow up on ${destination.title}`
+              : "Send the open comments to the lead as one task"}
+          </TooltipContent>
         </Tooltip>
       ) : null}
       {/* Stays mounted while the list refreshes under it. */}
@@ -209,6 +222,7 @@ export function SendBatchButton({
         <SendBatchDialog
           drive={drive}
           scopePath={scopePath}
+          destination={destination}
           threads={eligible}
           showPaths={false}
           onClose={() => setOpen(false)}
@@ -224,6 +238,7 @@ export function SendBatchDialog({
   threads,
   showPaths,
   dismissal,
+  destination,
   onSent,
   onClose,
 }: {
@@ -238,6 +253,7 @@ export function SendBatchDialog({
    * list apart, with Restore), and dismissed comments are never sent.
    */
   dismissal?: DismissedSends;
+  destination?: ReviewDestination;
   /** After a send that landed, with the ids the swarm took, before `onClose`. */
   onSent?: (sent: string[]) => void;
   onClose: () => void;
@@ -358,10 +374,12 @@ export function SendBatchDialog({
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Send to swarm</DialogTitle>
+          <DialogTitle>{destination ? `Send to ${destination.kind}` : "Send to swarm"}</DialogTitle>
           <DialogDescription>
-            The lead gets one task with the checked comments. Each comment gets a reply with the
-            task link.
+            {destination
+              ? `Create one follow-up in “${destination.title}” with the checked comments.`
+              : "The lead gets one task with the checked comments."}{" "}
+            Each comment gets a reply with the task link.
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-80 overflow-y-auto rounded-lg border border-border">
@@ -462,7 +480,7 @@ export function SendBatchDialog({
         ) : null}
         <div className="flex flex-col gap-1.5">
           <label htmlFor={noteId} className="text-xs font-medium text-muted-foreground">
-            Note for the lead (optional)
+            {destination ? "Follow-up instructions (optional)" : "Note for the lead (optional)"}
           </label>
           <Textarea
             id={noteId}
@@ -501,6 +519,7 @@ export function SendBatchDialog({
                   commentIds: selected.map((thread) => thread.id),
                   scopePath,
                   note: batchNote(note),
+                  parentTaskId: destination?.id,
                 },
                 {
                   onSuccess: (result) => {

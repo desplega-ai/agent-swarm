@@ -176,6 +176,7 @@ The authenticated user MCP exposes only task content and model controls. It assi
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | string | No | Reasoning effort for this task: `off`, `low`, `medium`, `high`, `xhigh`, or `max` when the selected model and harness support it (`codex`, `cursor`, `opencode`, `pi`). |
 | `profile` | string | No | Model profile name (see `list-model-profiles`): a named harness + model + effort, applied when the task is claimed. Must run on the assignee's harness. Exclusive with `model` and `modelTier`; a set `effort` still wins over the profile's. |
+| `modelGroup` | string | No | Model group name (`GET /api/model-groups`): an ordered list of profiles that may span harnesses. The claiming agent runs the first member on its harness that passes the profile check; a provider error hops to the next one. With `agentId`, one member must run on that agent. Exclusive with `model`, `modelTier` and `profile`. |
 | `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
 | `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
@@ -579,6 +580,13 @@ Every widget query must be `SELECT`/`WITH` only. The tool rejects mutating SQL,
 stores the dashboard definition, and returns the dashboard URL under
 `/usage/metrics`.
 
+A `{{key:since}}` range of seconds, minutes or hours binds an ISO 8601 instant.
+On SQLite, a table whose timestamp column defaults to `datetime('now')` (for
+example the workflow tables) stores `YYYY-MM-DD HH:MM:SS` text, which compares
+below that ISO text, so such a widget undercounts the rows of the range's first
+day. Day, month and year ranges, and tables the app writes in ISO (tasks, session
+costs), count right on both engines.
+
 ## Task Pool Tools
 
 ### task-action
@@ -599,6 +607,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list; without it an unknown model id is rejected (only used with `create` action) |
 | `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or `max` when supported (`codex`, `cursor`, `opencode`, `pi`) |
 | `profile` | string | No | Model profile name for the created pool task (see `list-model-profiles`); only workers on its harness claim it. Exclusive with `model` and `modelTier` (only used with `create` action) |
+| `modelGroup` | string | No | Model group name for the created pool task; only workers where a member runs claim it. Exclusive with `model`, `modelTier` and `profile` (only used with `create` action) |
 | `requiredCapabilities` | array | No | Capabilities required for routing the newly created task |
 | `leadOnly` | boolean | No | Structured authorization constraint for a newly created privileged task. Only Lead agents may claim it. |
 
@@ -664,7 +673,7 @@ Compare two versions of a context file. Shows a unified diff.
 
 ### create-schedule / list-schedules / update-schedule / patch-schedule / delete-schedule / run-schedule-now
 
-Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support both a concrete `model` override and a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`) that is passed through to the tasks they create. A `model` the model catalog does not list is rejected unless `allowCustomModel: true` is set.
+Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support a concrete `model` override, a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`), a `profile` and a `modelGroup`, passed through to the tasks they create. A `model` the model catalog does not list is rejected unless `allowCustomModel: true` is set.
 
 Schedules accept a logical asset `key`; tasks they create inherit that namespace. `list-schedules` supports exact `key` and subtree `keyPrefix` filters, while `update-schedule` and `patch-schedule` can move a schedule by updating its key.
 
@@ -895,7 +904,7 @@ Set `theme` to a preset id, or pass `themeTokens`, to restyle the whole page. `t
 | `themeTokens` | object | No | Token overrides: `light` and `dark` maps of token names to values, or `format: "css"` with a `css` variable block. Stored normalized. Names outside the token contract come back in `ignoredTokens`. `null` clears them |
 | `designVersion` | number | No | `2` (the default for new pages) uses the design system. `1` keeps the old head. An upsert that omits it keeps the stored value |
 
-Returns the page id, an `app_url` (`${APP_URL}/pages/:id` — opens in the SPA), and an `api_url` (`${MCP_BASE_URL}/p/:id` — direct HTML render or JSON 302→SPA). Append `?mode=full` to the app URL for a maximized chrome-light view. The returned `version` is a monotonic edit counter (`MAX(page_versions.version) + 1`).
+Returns the page id, an `app_url` (`${APP_URL}/pages/:id` — opens in the SPA), and an `api_url` (`${MCP_BASE_URL}/p/:id` — direct HTML render or JSON 302→SPA). Append `?mode=full` to the app URL for a maximized chrome-light view, or `?mode=chromeless` for the page alone with no title bar. The returned `version` is a monotonic edit counter (`MAX(page_versions.version) + 1`).
 
 ### delete-page
 
@@ -1252,6 +1261,7 @@ with `script-upsert`.
 | `scope` | string | No | Optional scope for named script resolution |
 | `fsMode` | string | No | Filesystem mode (`none` only in v1) |
 | `executor` | `native` \| `quickjs` | No | Executor override for this run. When omitted, named scripts use their saved executor, else `SCRIPT_EXECUTOR` |
+| `object` | object | No | `{ id, method }`: call this object ID and method on the named global `DurableObject` script. See [Durable objects](/docs/guides/scripts-runtime#durable-objects) |
 
 ### script-upsert
 
@@ -1262,7 +1272,7 @@ the generated `.d.ts` and rejects on diagnostics.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `source` | string | Yes | TypeScript source with a default export function |
+| `source` | string | Yes | TypeScript source with a default export function. A global script can instead `export default class X extends DurableObject<State>` (import `DurableObject` from `"swarm-sdk"`) |
 | `description` | string | No | Human-readable script description |
 | `intent` | string | No | Why this script exists |
 | `executor` | `native` \| `quickjs` | No | Per-script executor override. Null or omitted inherits `SCRIPT_EXECUTOR` |
@@ -1562,7 +1572,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 ### update-repo
 
-Update a repo's configuration including guidelines (`prChecks`, `mergeChecks`, `allowMerge`, `review`, and the per-repo `mergePolicy` record: `autoMerge`, `agentsMayMerge`, `notify`). Only the lead can change `allowMerge` or `mergePolicy`: resend their current values to edit other guidelines. See [Repo merge policy](/docs/guides/repo-merge-policy).
+Update a repo's configuration including guidelines (`prChecks`, `mergeChecks`, `allowMerge`, `review`, and the per-repo `mergePolicy` record: `autoMerge`, `agentsMayMerge`, `notify`). Only the lead can change `allowMerge` or `mergePolicy`: resend their current values to edit other guidelines. A non-lead agent on an agent session token also cannot change `url`, `clonePath` or `hooks`. A `url` or `clonePath` that starts with `-` is refused. See [Repo merge policy](/docs/guides/repo-merge-policy).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

@@ -156,6 +156,16 @@ export default function ScriptRunDetailPage() {
       {run.scriptName}
     </Link>
   ) : null;
+  // A durable object call: link to that object on the script's Objects tab.
+  const objectLink =
+    run.objectScriptId && run.objectId ? (
+      <Link
+        to={`/scripts/${run.objectScriptId}?tab=objects&object=${encodeURIComponent(run.objectId)}`}
+        className="font-mono text-sm text-foreground underline-offset-2 transition-colors hover:underline"
+      >
+        {run.objectId}.{run.objectMethod ?? "?"}()
+      </Link>
+    ) : null;
   const stepsLabel =
     journal.length > 0
       ? `${journal.length} steps · ${counts.scripts} script${counts.scripts === 1 ? "" : "s"} · ${counts.llm} llm · ${counts.tasks} task${counts.tasks === 1 ? "" : "s"}`
@@ -181,7 +191,7 @@ export default function ScriptRunDetailPage() {
           </>
         }
         badges={[
-          <ScriptRunKindBadge key="kind" kind={run.kind} />,
+          <ScriptRunKindBadge key="kind" kind={run.kind} object={!!run.objectId} />,
           <Badge key="started" variant="outline" size="tag" className="font-mono">
             {formatSmartTime(run.startedAt)}
           </Badge>,
@@ -224,6 +234,7 @@ export default function ScriptRunDetailPage() {
         facts={[
           { label: "Agent", value: <AgentLink agentId={run.agentId} />, summary: undefined },
           ...(scriptLink ? [{ label: "Script", value: scriptLink }] : []),
+          ...(objectLink ? [{ label: "Object", value: objectLink }] : []),
           {
             label: "Started",
             value: <span className="font-mono text-xs">{formatSmartTime(run.startedAt)}</span>,

@@ -557,7 +557,8 @@ export async function runSessionSummaryFromStdin(): Promise<void> {
  */
 export async function handleHook(): Promise<void> {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  const mcpConfig = await loadHookMcpConfig(projectDir);
+  // HOOK_WORKSPACE_DIR lets tests keep a worker's real /workspace/.mcp.json out of the hook.
+  const mcpConfig = await loadHookMcpConfig(projectDir, process.env.HOOK_WORKSPACE_DIR);
 
   let msg: HookMessage;
   try {

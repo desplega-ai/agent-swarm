@@ -18,8 +18,9 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
-import { getDbClient, upsertKv } from "../be/db";
+import { upsertKv } from "../be/db";
 import { bindLoopPath } from "../be/event-loop-lag";
+import { getStorage } from "../be/storage";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "../kv-view";
 import { withSpan } from "../otel";
@@ -391,7 +392,7 @@ const modelTierDeprecatedNudge = (r: SwarmToolResult): string | undefined => {
     typeof note.suggestedProfile === "string"
       ? note.suggestedProfile
       : `<harness>-${String(note.tier)}`;
-  return `modelTier is deprecated: pass profile "${profile}" (same model).`;
+  return `modelTier is deprecated: pass modelGroup "${String(note.tier)}" (the tier's group) or profile "${profile}" (same model).`;
 };
 
 /**
@@ -1144,13 +1145,10 @@ async function refuseWriteForTerminalTask(
 ): Promise<SwarmToolResult | undefined> {
   if (requestInfo.callOrigin !== "mcp" || !requestInfo.sourceTaskId) return undefined;
   if (annotations?.readOnlyHint === true || TERMINAL_TASK_EXEMPT_TOOLS.has(name)) return undefined;
-  const row = await getDbClient().get<{ status: string }>(
-    "SELECT status FROM agent_tasks WHERE id = ?",
-    [requestInfo.sourceTaskId],
-  );
-  if (!row || !isTerminalTaskStatus(row.status)) return undefined;
+  const status = await getStorage().repos.tasks.findTaskStatus(requestInfo.sourceTaskId);
+  if (!status || !isTerminalTaskStatus(status)) return undefined;
   return toolErr(
-    `Task ${requestInfo.sourceTaskId} is ${row.status}, so this session can no longer call ${name}. Stop working on it.`,
+    `Task ${requestInfo.sourceTaskId} is ${status}, so this session can no longer call ${name}. Stop working on it.`,
     {
       details:
         "Only store-progress and read-only tools still work for a finished task. Any new work belongs to a new task.",

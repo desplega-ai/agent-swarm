@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite";
+import type { AssetKeyAuditData, AssetKeyTable } from "@desplega/storage";
 import { isCanonicalAssetKey, parseAssetKey } from "../assets/key";
+import { getStorage } from "./storage";
+import { existingUserIdsSync, readAssetKeyAuditDataSync } from "./storage-root";
 
 export type AssetKeyAuditSeverity = "fatal" | "warning";
 export type AssetKeyAuditCode =
@@ -28,18 +31,18 @@ export type AssetKeyAuditResult = {
 
 type KeyRow = { id: string; key: string | null };
 
-const KEY_TABLES = [
-  { entityType: "task", sql: 'SELECT id, "key" as key FROM agent_tasks' },
-  { entityType: "workflow", sql: 'SELECT id, "key" as key FROM workflows' },
-  { entityType: "schedule", sql: 'SELECT id, "key" as key FROM scheduled_tasks' },
-  { entityType: "page", sql: 'SELECT id, "key" as key FROM pages' },
-  { entityType: "app", sql: 'SELECT id, "key" as key FROM apps' },
-  { entityType: "script", sql: 'SELECT id, "key" as key FROM scripts' },
-  { entityType: "file", sql: 'SELECT id, "key" as key FROM asset_key_mappings' },
-] as const;
+const ENTITY_TYPES: Record<AssetKeyTable, AssetKeyAuditIssue["entityType"]> = {
+  agent_tasks: "task",
+  workflows: "workflow",
+  scheduled_tasks: "schedule",
+  pages: "page",
+  apps: "app",
+  scripts: "script",
+  asset_key_mappings: "file",
+};
 
 function auditKeyRow(
-  db: Database,
+  existingUsers: ReadonlySet<string>,
   entityType: AssetKeyAuditIssue["entityType"],
   row: KeyRow,
 ): AssetKeyAuditIssue[] {
@@ -68,12 +71,7 @@ function auditKeyRow(
 
   const parsed = parseAssetKey(row.key);
   if (parsed.root === "personal") {
-    const user = db
-      .prepare<{ present: number }, [string]>(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
-      )
-      .get(parsed.userId);
-    if (!user?.present) {
+    if (!existingUsers.has(parsed.userId)) {
       return [
         {
           severity: "warning",
@@ -88,49 +86,47 @@ function auditKeyRow(
   return [];
 }
 
-type AttachmentMappingAuditRow = {
-  attachment_id: string;
-  mapping_id: string | null;
-};
+/** User ids that personal-namespace keys name, for one existence lookup. */
+function personalUserIds(data: AssetKeyAuditData): string[] {
+  const ids: string[] = [];
+  for (const { rows } of data.keyRows) {
+    for (const row of rows) {
+      if (!row.key || !isCanonicalAssetKey(row.key)) continue;
+      const parsed = parseAssetKey(row.key);
+      if (parsed.root === "personal") ids.push(parsed.userId);
+    }
+  }
+  return ids;
+}
 
-type MappingSourceAuditRow = {
-  mapping_id: string;
-  source_entity_id: string;
-  attachment_id: string | null;
-  task_key: string | null;
-  mapping_key: string;
-  tuple_matches: number;
-};
-
+/** The audit over a database handle on the synchronous SQLite start path. */
 export function auditAssetKeys(db: Database): AssetKeyAuditResult {
+  const data = readAssetKeyAuditDataSync(db);
+  return evaluateAssetKeyAudit(data, existingUserIdsSync(db, personalUserIds(data)));
+}
+
+/** The audit through the storage repositories (any engine). */
+export async function auditAssetKeysAsync(): Promise<AssetKeyAuditResult> {
+  const assets = getStorage().repos.assets;
+  const data = await assets.readAssetKeyAuditData();
+  return evaluateAssetKeyAudit(data, await assets.existingUserIds(personalUserIds(data)));
+}
+
+function evaluateAssetKeyAudit(
+  data: AssetKeyAuditData,
+  existingUsers: ReadonlySet<string>,
+): AssetKeyAuditResult {
   const issues: AssetKeyAuditIssue[] = [];
   let checked = 0;
 
-  for (const table of KEY_TABLES) {
-    const rows = db.prepare<KeyRow, []>(table.sql).all();
+  for (const { table, rows } of data.keyRows) {
     checked += rows.length;
-    for (const row of rows) issues.push(...auditKeyRow(db, table.entityType, row));
+    for (const row of rows as KeyRow[]) {
+      issues.push(...auditKeyRow(existingUsers, ENTITY_TYPES[table], row));
+    }
   }
 
-  const attachmentMappings = db
-    .prepare<AttachmentMappingAuditRow, []>(
-      `SELECT
-         a.id AS attachment_id,
-         m.id AS mapping_id
-       FROM task_attachments a
-       JOIN agent_tasks t ON t.id = a.task_id
-       LEFT JOIN asset_key_mappings m
-         ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-        AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-        AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-        AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-       WHERE a.kind = 'agent-fs'
-         AND COALESCE(NULLIF(a.provider_key, ''), a.path) IS NOT NULL`,
-    )
-    .all();
-  // One file has one mapping, which follows its source attachment (checked below). Other
-  // tasks may attach the same file from any namespace, and a mapping detached from its
-  // deleted source keeps its own namespace, so neither is drift.
+  const { attachmentMappings, sourcedMappings } = data;
   for (const row of attachmentMappings) {
     if (!row.mapping_id) {
       issues.push({
@@ -143,26 +139,6 @@ export function auditAssetKeys(db: Database): AssetKeyAuditResult {
     }
   }
 
-  const sourcedMappings = db
-    .prepare<MappingSourceAuditRow, []>(
-      `SELECT
-         m.id AS mapping_id,
-         m.source_entity_id,
-         a.id AS attachment_id,
-         t."key" AS task_key,
-         m."key" AS mapping_key,
-         CASE WHEN a.id IS NOT NULL
-           AND m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
-           AND m.provider_org_id = COALESCE(a.agent_fs_org_id, '')
-           AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
-           AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
-         THEN 1 ELSE 0 END AS tuple_matches
-       FROM asset_key_mappings m
-       LEFT JOIN task_attachments a ON a.id = m.source_entity_id
-       LEFT JOIN agent_tasks t ON t.id = a.task_id
-       WHERE m.source_entity_type = 'task-attachment'`,
-    )
-    .all();
   for (const row of sourcedMappings) {
     if (!row.attachment_id || row.tuple_matches !== 1 || row.task_key !== row.mapping_key) {
       issues.push({
@@ -188,7 +164,15 @@ export function auditAssetKeys(db: Database): AssetKeyAuditResult {
 }
 
 export function enforceAssetKeyStartupAudit(db: Database): AssetKeyAuditResult {
-  const result = auditAssetKeys(db);
+  return enforceStartupAuditResult(auditAssetKeys(db));
+}
+
+/** The startup audit through the storage repositories (the Postgres start). */
+export async function enforceAssetKeyStartupAuditAsync(): Promise<AssetKeyAuditResult> {
+  return enforceStartupAuditResult(await auditAssetKeysAsync());
+}
+
+function enforceStartupAuditResult(result: AssetKeyAuditResult): AssetKeyAuditResult {
   if (result.warningCount > 0) {
     console.warn(`[asset-keys] Startup audit found ${result.warningCount} repairable warning(s)`);
   }

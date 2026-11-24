@@ -27,6 +27,10 @@ console.debug = () => {};
 console.warn = () => {};
 
 const db = new Database(dbPath, { create: true });
+// Default rollback journal + FULL sync fsyncs several times per migration
+// (264 of them); a loaded CI disk turned that into a 35 s child timeout. The
+// fixture checks migration-directory resolution, not durability.
+db.run("PRAGMA synchronous = OFF;");
 try {
   runMigrations(db);
   const row = db

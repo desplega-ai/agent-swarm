@@ -18,6 +18,9 @@ COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
 COPY packages/model-routing/package.json ./packages/model-routing/package.json
+COPY packages/storage/package.json ./packages/storage/package.json
+COPY packages/storage-sqlite/package.json ./packages/storage-sqlite/package.json
+COPY packages/storage-postgres/package.json ./packages/storage-postgres/package.json
 # Retry transient extraction failures with a clean dependency tree.
 RUN for attempt in 1 2 3; do \
         bun install --frozen-lockfile && break; \
@@ -26,6 +29,9 @@ RUN for attempt in 1 2 3; do \
     done
 COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
+COPY packages/storage/ ./packages/storage/
+COPY packages/storage-sqlite/ ./packages/storage-sqlite/
+COPY packages/storage-postgres/ ./packages/storage-postgres/
 
 # Copy source files
 COPY src/ ./src/
@@ -101,10 +107,12 @@ RUN mkdir -p script-types/node_modules && cd node_modules && \
       | tar --null -cf - -T - \
       | tar -xf - -C /build/script-types/node_modules
 
-# Compile HTTP server to standalone binary
-# The quickjs executor's worker thread, the sheet engine's worker and the memory search read worker are separate entrypoints inside the binary.
-RUN bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts \
-      ./src/be/primitives/sheets/engine-worker.ts ./src/be/memory/search-read-worker.ts \
+# Compile the API to a standalone binary. src/api-entry.ts boots the HTTP server
+# (src/http.ts), or runs `db-copy` without the API when the first argument is `db-copy`.
+# The quickjs executor's worker thread and the sheet engine's worker are separate entrypoints inside the binary.
+# (The SQLite memory search read worker starts from a Blob URL and needs none.)
+RUN bun build ./src/api-entry.ts ./src/scripts-runtime/executors/quickjs-worker.ts \
+      ./src/be/primitives/sheets/engine-worker.ts \
       --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 
 # Stage 2: Minimal runtime image
@@ -137,6 +145,9 @@ COPY package.json ./
 
 # Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
 COPY src/be/migrations/*.sql /app/migrations/
+# The Postgres chain (SQL, parts and the JSON metadata) is resolved as
+# $MIGRATIONS_DIR/postgres by src/be/storage-root.ts.
+COPY src/be/migrations/postgres/ /app/migrations/postgres/
 
 # Copy vendored models.dev pricing snapshot so the compiled binary can seed
 # pricing rows from a real filesystem path at runtime.

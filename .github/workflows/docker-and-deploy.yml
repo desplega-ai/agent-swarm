@@ -1092,7 +1092,9 @@ jobs:
 
   publish-npm:
     runs-on: ubuntu-latest
-    needs: [detect-version-change]
+    # `agent-swarm onboard` pins AGENT_SWARM_VERSION to the package version, so
+    # the CLI must not reach npm before the API and worker images carry that tag.
+    needs: [detect-version-change, merge-server, merge-worker]
     if: needs.detect-version-change.outputs.version_changed == 'true'
     permissions:
       id-token: write

@@ -1,7 +1,7 @@
 /**
  * Canonical API-side identity surface — the only path that mutates identity
  * tables. Every mutating helper wraps row mutation + event emission in a
- * single `getDbClient().transaction()` so the invariant "every identity
+ * single `getStorage().transaction()` so the invariant "every identity
  * mutation has a matching event row" (Q9) holds even on partial failures.
  *
  * This module is API-side ONLY. The DB-boundary checker (`scripts/check-db-boundary.sh`)
@@ -20,15 +20,50 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import type { IdentityEventRow, UserRow } from "@desplega/storage";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import type { ScriptRunProvenance } from "../utils/request-auth-context";
 import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { randomChars } from "../utils/short-id";
-import { getDbClient } from "./db";
-import type { DbExecutor } from "./db-client";
+import { getStorage } from "./storage";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
+
+const usersRepo = () => getStorage().repos.users;
+const sessionsRepo = () => getStorage().repos.sessions;
+
+/**
+ * A token's `lastUsedAt` is written at most once per this interval. Every
+ * authenticated request used to update its token row. Parallel requests with
+ * one token (a script that makes SDK calls at the same time) then all wrote the
+ * same row, and on Postgres (SERIALIZABLE) most of those writes failed with
+ * 40001 and ran again. `lastUsedAt` is the time of a use at most this long
+ * before the last use. Token validation (revocation, expiry) still reads the
+ * row on every request.
+ */
+const TOKEN_TOUCH_INTERVAL_MS = 60_000;
+const TOKEN_TOUCH_MAX_ENTRIES = 10_000;
+/** Token key (`<table>:<id>`) to the time this process last wrote its `lastUsedAt`. */
+const tokenTouchedAt = new Map<string, number>();
+
+/**
+ * Whether this request must write the token's `lastUsedAt`. The API is the one
+ * process that writes the database, so this in-memory record sees every use.
+ * It marks the token at once, so concurrent requests of one token write once.
+ */
+function tokenTouchDue(key: string, nowMs: number): boolean {
+  const last = tokenTouchedAt.get(key);
+  if (last !== undefined && nowMs - last < TOKEN_TOUCH_INTERVAL_MS) return false;
+  if (tokenTouchedAt.size >= TOKEN_TOUCH_MAX_ENTRIES) {
+    for (const [k, at] of tokenTouchedAt) {
+      if (nowMs - at >= TOKEN_TOUCH_INTERVAL_MS) tokenTouchedAt.delete(k);
+    }
+    if (tokenTouchedAt.size >= TOKEN_TOUCH_MAX_ENTRIES) tokenTouchedAt.clear();
+  }
+  tokenTouchedAt.set(key, nowMs);
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,24 +88,6 @@ export type IdentityActor = {
 function actorString(actor: IdentityActor): string {
   return `${actor.kind}:${actor.id}`;
 }
-
-/** Internal row shape — superset of `User` plus columns added in migration 064. */
-type UserRow = {
-  id: string;
-  name: string;
-  email: string | null;
-  role: string | null;
-  notes: string | null;
-  emailAliases: string | null;
-  preferredChannel: string | null;
-  timezone: string | null;
-  metadata: string | null;
-  dailyBudgetUsd: number | null;
-  status: string;
-  mergedIntoUserId: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
 
 function rowToUser(row: UserRow): User {
   return {
@@ -97,7 +114,7 @@ function rowToUser(row: UserRow): User {
 
 /** Single SELECT by primary key. */
 export async function findUserById(id: string): Promise<User | null> {
-  const row = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+  const row = await usersRepo().findUserById(id);
   return row ? rowToUser(row) : null;
 }
 
@@ -110,9 +127,7 @@ export async function findUserById(id: string): Promise<User | null> {
  */
 async function followMergedUser(row: UserRow): Promise<User | null> {
   if (!row.mergedIntoUserId) return rowToUser(row);
-  const target = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [
-    row.mergedIntoUserId,
-  ]);
+  const target = await usersRepo().findUserById(row.mergedIntoUserId);
   return target ? rowToUser(target) : null;
 }
 
@@ -121,12 +136,7 @@ async function followMergedUser(row: UserRow): Promise<User | null> {
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
  */
 export async function findUserByExternalId(kind: string, externalId: string): Promise<User | null> {
-  const row = await getDbClient().get<UserRow>(
-    `SELECT u.* FROM users u
-       INNER JOIN user_external_ids x ON x.userId = u.id
-       WHERE x.kind = ? AND x.externalId = ?`,
-    [kind, externalId],
-  );
+  const row = await usersRepo().findUserByExternalId(kind, externalId);
   return row ? followMergedUser(row) : null;
 }
 
@@ -140,22 +150,15 @@ export async function findUserByExternalId(kind: string, externalId: string): Pr
  */
 export async function findUserByEmail(email: string): Promise<User | null> {
   const lower = email.toLowerCase();
-  const db = getDbClient();
 
   // Primary email (case-insensitive). A merge source keeps its primary email
   // until the job deletes it, while the target already holds it as an alias,
   // so the source row must not win here.
-  const primary = await db.get<UserRow>(
-    "SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND mergedIntoUserId IS NULL",
-    [email],
-  );
+  const primary = await usersRepo().findUserByPrimaryEmail(email);
   if (primary) return rowToUser(primary);
 
   // Alias array
-  const aliasRows = await db.query<UserRow>(
-    `SELECT * FROM users
-     WHERE emailAliases IS NOT NULL AND emailAliases != '[]' AND mergedIntoUserId IS NULL`,
-  );
+  const aliasRows = await usersRepo().listUsersWithEmailAliases();
   for (const r of aliasRows) {
     const aliases: string[] = r.emailAliases ? (JSON.parse(r.emailAliases) as string[]) : [];
     if (aliases.some((a) => a.toLowerCase() === lower)) {
@@ -175,21 +178,14 @@ export async function findUserByEmail(email: string): Promise<User | null> {
 export async function findUsersByName(name: string): Promise<User[]> {
   const trimmed = name.trim();
   if (!trimmed) return [];
-  const client = getDbClient();
 
   // A merge source (mergedIntoUserId set) is on its way out; its target is
   // found by its own name.
-  const exact = await client.query<UserRow>(
-    "SELECT * FROM users WHERE LOWER(name) = LOWER(?) AND mergedIntoUserId IS NULL",
-    [trimmed],
-  );
+  const exact = await usersRepo().listUsersByName(trimmed);
   if (exact.length > 0) return exact.map(rowToUser);
 
   const firstToken = trimmed.split(/\s+/)[0] ?? trimmed;
-  const prefixed = await client.query<UserRow>(
-    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%' AND mergedIntoUserId IS NULL",
-    [firstToken],
-  );
+  const prefixed = await usersRepo().listUsersByNamePrefix(firstToken);
   return prefixed.map(rowToUser);
 }
 
@@ -200,10 +196,7 @@ export async function findUsersByName(name: string): Promise<User[]> {
 export async function getUserIdentities(
   userId: string,
 ): Promise<Array<{ kind: string; externalId: string }>> {
-  return getDbClient().query<{ kind: string; externalId: string }>(
-    "SELECT kind, externalId FROM user_external_ids WHERE userId = ? ORDER BY kind, externalId",
-    [userId],
-  );
+  return usersRepo().listExternalIds(userId);
 }
 
 /**
@@ -218,16 +211,6 @@ export type IdentityEvent = {
   actor: string;
   before: unknown | null;
   after: unknown | null;
-  createdAt: string;
-};
-
-type IdentityEventRow = {
-  id: string;
-  userId: string;
-  eventType: string;
-  actor: string;
-  beforeJson: string | null;
-  afterJson: string | null;
   createdAt: string;
 };
 
@@ -255,27 +238,10 @@ export async function listUserEvents(
 ): Promise<IdentityEvent[]> {
   const limit = Math.max(0, Math.min(opts.limit ?? 50, 200));
   if (limit === 0) return [];
-  const before = opts.before;
-  const client = getDbClient();
-  if (before) {
-    const rows = await client.query<IdentityEventRow>(
-      `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
-           FROM user_identity_events
-          WHERE userId = ? AND createdAt < ?
-          ORDER BY createdAt DESC, rowid DESC
-          LIMIT ?`,
-      [userId, before, limit],
-    );
-    return rows.map(rowToEvent);
-  }
-  const rows = await client.query<IdentityEventRow>(
-    `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
-         FROM user_identity_events
-        WHERE userId = ?
-        ORDER BY createdAt DESC, rowid DESC
-        LIMIT ?`,
-    [userId, limit],
-  );
+  const rows = await usersRepo().listIdentityEvents(userId, {
+    before: opts.before ? opts.before : null,
+    limit,
+  });
   return rows.map(rowToEvent);
 }
 
@@ -293,8 +259,6 @@ export type UserTokenSummary = {
   revokedAt: string | null;
 };
 
-type UserTokenRow = UserTokenSummary;
-
 /**
  * List a user's MCP tokens (without the hash). Used to render the People
  * page token panel — the mint/revoke endpoints + UI dialog ship with the
@@ -302,13 +266,7 @@ type UserTokenRow = UserTokenSummary;
  * can include token summaries.
  */
 export async function listUserTokens(userId: string): Promise<UserTokenSummary[]> {
-  return getDbClient().query<UserTokenRow>(
-    `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
-         FROM user_tokens
-        WHERE userId = ? AND expiresAt IS NULL
-        ORDER BY createdAt DESC`,
-    [userId],
-  );
+  return usersRepo().listUserTokens(userId);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,19 +297,15 @@ export async function recordIdentityEvent(
   before: unknown | null,
   after: unknown | null,
 ): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO user_identity_events (id, userId, eventType, actor, beforeJson, afterJson, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      randomUUID().replace(/-/g, ""),
-      userId,
-      eventType,
-      actorString(actor),
-      before == null ? null : JSON.stringify(before),
-      after == null ? null : JSON.stringify(after),
-      new Date().toISOString(),
-    ],
-  );
+  await usersRepo().insertIdentityEvent({
+    id: randomUUID().replace(/-/g, ""),
+    userId,
+    eventType,
+    actor: actorString(actor),
+    beforeJson: before == null ? null : JSON.stringify(before),
+    afterJson: after == null ? null : JSON.stringify(after),
+    createdAt: new Date().toISOString(),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +320,7 @@ export async function recordIdentityEvent(
  * - Otherwise create a new row with `name` from hints (or the email
  *   local-part) and emit `identity_added` with the new row in `afterJson`.
  *
- * Only the create branch is wrapped in `getDbClient().transaction()` so the
+ * Only the create branch is wrapped in `getStorage().transaction()` so the
  * new row + its event land together; the `findUserByEmail` read and the
  * `auto_merge` event above it run outside any transaction.
  */
@@ -385,32 +339,44 @@ export async function findOrCreateUserByEmail(
   const now = new Date().toISOString();
   const name = hints.name?.trim() || email.split("@")[0] || email;
 
-  const created = await getDbClient().transaction(async (tx) => {
-    await tx.run(
-      `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-      [
-        id,
-        name,
-        email,
-        hints.role ?? null,
-        hints.notes ?? null,
-        "[]",
-        hints.preferredChannel ?? "slack",
-        null,
-        now,
-        now,
-      ],
-    );
-    const row = await tx.get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
+  const storage = getStorage();
+  const created = await storage.transaction(async () => {
+    const row = await usersRepo().insertUser({
+      id,
+      name,
+      email,
+      role: hints.role ?? null,
+      notes: hints.notes ?? null,
+      emailAliases: "[]",
+      preferredChannel: hints.preferredChannel ?? "slack",
+      timezone: null,
+      metadata: null,
+      dailyBudgetUsd: null,
+      status: "active",
+      avatar: null,
+      now,
+    });
     if (!row) throw new Error("Failed to create user");
     await recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
   });
   // The org's email domain may come from this user (debounced, post-commit).
-  getDbClient().afterCommit(scheduleOrgDomainRecompute);
+  storage.afterCommit(scheduleOrgDomainRecompute);
 
   return { user: created, created: true };
+}
+
+/**
+ * Mark `sourceId` as merged into `targetId`: from then on identity lookups
+ * resolve to the target and the source can no longer authenticate.
+ */
+export async function markUserMergedInto(sourceId: string, targetId: string): Promise<void> {
+  await usersRepo().markUserMergedInto(sourceId, targetId, new Date().toISOString());
+}
+
+/** A profile lookup can finish after a manual edit. Test the stored value in the write. */
+export async function fillMissingUserTimezone(id: string, timezone: string): Promise<void> {
+  await usersRepo().fillMissingTimezone(id, timezone, new Date().toISOString());
 }
 
 // ---------------------------------------------------------------------------
@@ -430,12 +396,8 @@ export async function linkIdentity(
   externalId: string,
   actor: IdentityActor,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run("INSERT INTO user_external_ids (userId, kind, externalId) VALUES (?, ?, ?)", [
-      userId,
-      kind,
-      externalId,
-    ]);
+  await getStorage().transaction(async () => {
+    await usersRepo().insertExternalId(userId, kind, externalId);
     await recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
   });
 }
@@ -451,12 +413,8 @@ export async function unlinkIdentity(
   externalId: string,
   actor: IdentityActor,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    await tx.run("DELETE FROM user_external_ids WHERE userId = ? AND kind = ? AND externalId = ?", [
-      userId,
-      kind,
-      externalId,
-    ]);
+  await getStorage().transaction(async () => {
+    await usersRepo().deleteExternalId(userId, kind, externalId);
     await recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
   });
 }
@@ -495,12 +453,16 @@ export async function mintToken(
   const preview = plaintext.slice(-4);
   const now = new Date().toISOString();
 
-  await getDbClient().transaction(async (tx) => {
-    await tx.run(
-      `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [tokenId, userId, label, hash, preview, now],
-    );
+  await getStorage().transaction(async () => {
+    await usersRepo().insertUserToken({
+      id: tokenId,
+      userId,
+      label,
+      tokenHash: hash,
+      tokenPreview: preview,
+      createdAt: now,
+      expiresAt: null,
+    });
     await recordIdentityEvent(userId, "token_minted", actor, null, {
       tokenId,
       label,
@@ -526,27 +488,21 @@ export async function mintUserScriptRunToken(
   const plaintext = `${TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const now = new Date();
-  await getDbClient().run(
-    `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt, expiresAt)
-     VALUES (?, ?, 'script-run', ?, ?, ?, ?)`,
-    [
-      tokenId,
-      userId,
-      sha256Hex(plaintext),
-      plaintext.slice(-4),
-      now.toISOString(),
-      new Date(now.getTime() + ttlMs).toISOString(),
-    ],
-  );
+  await usersRepo().insertUserToken({
+    id: tokenId,
+    userId,
+    label: "script-run",
+    tokenHash: sha256Hex(plaintext),
+    tokenPreview: plaintext.slice(-4),
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+  });
   return { tokenId, plaintext };
 }
 
 /** Revoke a token minted by `mintUserScriptRunToken`. No-op if already revoked. */
 export async function revokeUserScriptRunToken(tokenId: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE user_tokens SET revokedAt = ? WHERE id = ? AND expiresAt IS NOT NULL AND revokedAt IS NULL",
-    [new Date().toISOString(), tokenId],
-  );
+  await usersRepo().revokeExpiringUserToken(tokenId, new Date().toISOString());
 }
 
 /**
@@ -554,18 +510,12 @@ export async function revokeUserScriptRunToken(tokenId: string): Promise<void> {
  * `token_revoked`. Subsequent `resolveUserByToken(plaintext)` returns null.
  */
 export async function revokeToken(tokenId: string, actor: IdentityActor): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    const row = await tx.get<{ userId: string; label: string | null; tokenPreview: string }>(
-      "SELECT userId, label, tokenPreview FROM user_tokens WHERE id = ?",
-      [tokenId],
-    );
+  await getStorage().transaction(async () => {
+    const row = await usersRepo().findUserTokenSummary(tokenId);
     if (!row) {
       throw new Error(`Token not found: ${tokenId}`);
     }
-    await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [
-      new Date().toISOString(),
-      tokenId,
-    ]);
+    await usersRepo().setUserTokenRevoked(tokenId, new Date().toISOString());
     await recordIdentityEvent(
       row.userId,
       "token_revoked",
@@ -585,14 +535,11 @@ export async function revokeAllUserCredentials(
   userId: string,
   actor: IdentityActor,
 ): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
+  await getStorage().transaction(async () => {
     const now = new Date().toISOString();
-    const live = await tx.query<{ id: string; label: string | null; tokenPreview: string }>(
-      "SELECT id, label, tokenPreview FROM user_tokens WHERE userId = ? AND revokedAt IS NULL",
-      [userId],
-    );
+    const live = await usersRepo().listUnrevokedUserTokens(userId);
     for (const token of live) {
-      await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [now, token.id]);
+      await usersRepo().setUserTokenRevoked(token.id, now);
       await recordIdentityEvent(
         userId,
         "token_revoked",
@@ -601,17 +548,14 @@ export async function revokeAllUserCredentials(
         null,
       );
     }
-    await tx.run("UPDATE connector_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL", [
-      now,
-      userId,
-    ]);
+    await usersRepo().spendUnusedConnectorCodes(userId, now);
   });
 }
 
 /**
  * Resolve a plaintext token to its owning user. Returns null if the token
- * is unknown or revoked. On a successful hit, updates `lastUsedAt` so the
- * People page can surface "last seen".
+ * is unknown or revoked. On a successful hit, updates `lastUsedAt` (at most
+ * once per minute) so the People page can surface "last seen".
  */
 export async function resolveUserByToken(plaintext: string): Promise<User | null> {
   return (await resolveUserToken(plaintext))?.user ?? null;
@@ -622,26 +566,21 @@ export async function resolveUserToken(
   plaintext: string,
 ): Promise<{ user: User | null; tokenId: string } | null> {
   const hash = sha256Hex(plaintext);
-  const client = getDbClient();
 
-  const row = await client.get<{
-    id: string;
-    userId: string;
-    revokedAt: string | null;
-    expiresAt: string | null;
-  }>("SELECT id, userId, revokedAt, expiresAt FROM user_tokens WHERE tokenHash = ?", [hash]);
+  const row = await usersRepo().findUserTokenByHash(hash);
   if (!row || row.revokedAt !== null) return null;
   if (row.expiresAt !== null && Date.parse(row.expiresAt) <= Date.now()) return null;
 
-  // Best-effort lastUsedAt update — never let a failure here leak to the
-  // caller and block a successful token resolution.
-  try {
-    await client.run("UPDATE user_tokens SET lastUsedAt = ? WHERE id = ?", [
-      new Date().toISOString(),
-      row.id,
-    ]);
-  } catch {
-    // Never let a `lastUsedAt` update failure leak to the caller.
+  // Best-effort lastUsedAt update, at most once per TOKEN_TOUCH_INTERVAL_MS.
+  // Never let a failure here leak to the caller and block a successful token
+  // resolution.
+  const nowMs = Date.now();
+  if (tokenTouchDue(`user:${row.id}`, nowMs)) {
+    try {
+      await usersRepo().touchUserToken(row.id, new Date(nowMs).toISOString());
+    } catch {
+      // Never let a `lastUsedAt` update failure leak to the caller.
+    }
   }
 
   return { user: await findUserById(row.userId), tokenId: row.id };
@@ -653,12 +592,7 @@ export async function resolveUserToken(
  * write lock.
  */
 export async function isLiveUserToken(tokenId: string, userId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ found: number }>(
-    `SELECT 1 AS found FROM user_tokens
-      WHERE id = ? AND userId = ? AND revokedAt IS NULL AND (expiresAt IS NULL OR expiresAt > ?)`,
-    [tokenId, userId, new Date().toISOString()],
-  );
-  return row != null;
+  return usersRepo().isLiveUserToken(tokenId, userId, new Date().toISOString());
 }
 
 // ---------------------------------------------------------------------------
@@ -692,27 +626,23 @@ export async function mintSessionToken(
   parent?: { tokenId: string; runtimeId: string | null },
 ): Promise<{ tokenId: string; plaintext: string }> {
   if (parent) {
-    return await getDbClient().transaction(async (client) => {
+    return await getStorage().transaction(async () => {
       // A runtime parent is matched by its runtime; an agent parent has no
       // binding but its agent, so it is matched by the empty binding columns.
-      const row = await client.get<{ expiresAt: string }>(
-        parent.runtimeId
-          ? `SELECT expiresAt FROM session_tokens WHERE id = ? AND agentId = ? AND runtimeId = ?
-             AND revokedAt IS NULL AND expiresAt > ?`
-          : `SELECT expiresAt FROM session_tokens WHERE id = ? AND agentId = ? AND ${AGENT_TOKEN_BINDING}
-             AND revokedAt IS NULL AND expiresAt > ?`,
-        parent.runtimeId
-          ? [parent.tokenId, agentId, parent.runtimeId, new Date().toISOString()]
-          : [parent.tokenId, agentId, new Date().toISOString()],
+      const parentExpiresAt = await sessionsRepo().findLiveParentTokenExpiry(
+        parent.tokenId,
+        agentId,
+        parent.runtimeId,
+        new Date().toISOString(),
       );
-      if (!row) throw new InvalidRuntimeTokenError();
+      if (parentExpiresAt === null) throw new InvalidRuntimeTokenError();
       return await insertSessionToken(
         agentId,
         taskId,
         null,
         ttlMs,
         parent.runtimeId,
-        row.expiresAt,
+        parentExpiresAt,
         null,
         parent.runtimeId ? null : parent.tokenId,
       );
@@ -768,27 +698,20 @@ export async function mintScriptRunToken(
     provenance.objectChain !== undefined ||
     provenance.depth !== undefined
   ) {
-    await getDbClient().run(
-      "UPDATE session_tokens SET sourceStepId = ?, sourceScriptRunId = ?, objectChain = ?, depth = ? WHERE id = ?",
-      [
-        provenance.sourceStepId ?? null,
-        provenance.sourceScriptRunId ?? null,
+    await sessionsRepo().setSessionTokenProvenance(token.tokenId, {
+      sourceStepId: provenance.sourceStepId ?? null,
+      sourceScriptRunId: provenance.sourceScriptRunId ?? null,
+      objectChain:
         provenance.objectChain === undefined ? null : JSON.stringify(provenance.objectChain),
-        provenance.depth ?? 0,
-        token.tokenId,
-      ],
-    );
+      depth: provenance.depth ?? 0,
+    });
   }
   return token;
 }
 
 /** Whether a session token was minted by `mintScriptRunToken`. */
 export async function isScriptRunToken(tokenId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ scriptRun: number }>(
-    "SELECT scriptRun FROM session_tokens WHERE id = ?",
-    [tokenId],
-  );
-  return row?.scriptRun === 1;
+  return (await sessionsRepo().findSessionTokenScriptRun(tokenId)) === 1;
 }
 
 export async function insertSessionToken(
@@ -811,78 +734,55 @@ export async function insertSessionToken(
     Math.min(now.getTime() + ttlMs, expiresAtCeiling ? Date.parse(expiresAtCeiling) : Infinity),
   ).toISOString();
 
-  await getDbClient().run(
-    `INSERT INTO session_tokens
-     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt, controllerId, parentTokenId, scriptRun)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      tokenId,
-      hash,
-      preview,
-      agentId,
-      taskId,
-      runtimeId,
-      parentRuntimeId,
-      expiresAt,
-      now.toISOString(),
-      controllerId,
-      parentTokenId,
-      scriptRun ? 1 : 0,
-    ],
-  );
+  await sessionsRepo().insertSessionToken({
+    id: tokenId,
+    tokenHash: hash,
+    tokenPreview: preview,
+    agentId,
+    taskId,
+    runtimeId,
+    parentRuntimeId,
+    expiresAt,
+    createdAt: now.toISOString(),
+    controllerId,
+    parentTokenId,
+    scriptRun,
+  });
 
   return { tokenId, plaintext };
 }
 
 /** Revoke a session token by id. No-op if already revoked. */
 export async function revokeSessionToken(tokenId: string): Promise<void> {
-  await getDbClient().transaction(async (client) => {
-    const row = await client.get<{ runtimeId: string | null }>(
-      "SELECT runtimeId FROM session_tokens WHERE id = ?",
-      [tokenId],
-    );
+  await getStorage().transaction(async () => {
+    const row = await sessionsRepo().findSessionTokenRuntime(tokenId);
     if (row?.runtimeId) {
       await revokeRuntimeTokensForRuntime(row.runtimeId);
     } else {
-      await revokeTokensWithChildren(client, [tokenId]);
+      await revokeTokensWithChildren([tokenId]);
     }
   });
 }
 
 /** Revoke tokens and the child task tokens an agent token minted. */
-async function revokeTokensWithChildren(client: DbExecutor, tokenIds: string[]) {
+async function revokeTokensWithChildren(tokenIds: string[]) {
   if (tokenIds.length === 0) return;
-  const placeholders = tokenIds.map(() => "?").join(", ");
-  const children = await client.query<{ id: string }>(
-    `SELECT id FROM session_tokens WHERE parentTokenId IN (${placeholders})`,
-    tokenIds,
-  );
-  const ids = [...tokenIds, ...children.map((row) => row.id)];
-  await client.run(
-    `UPDATE session_tokens SET revokedAt = ?
-     WHERE id IN (${ids.map(() => "?").join(", ")}) AND revokedAt IS NULL`,
-    [new Date().toISOString(), ...ids],
-  );
-  getDbClient().afterCommit(() => {
+  const children = await sessionsRepo().listChildSessionTokenIds(tokenIds);
+  const ids = [...tokenIds, ...children];
+  await sessionsRepo().revokeSessionTokens(ids, new Date().toISOString());
+  getStorage().afterCommit(() => {
     for (const id of tokenIds) unregisterVolatileSecret(`agent-token:${id}`);
     closeSessionTokenConnections(ids);
   });
 }
 
 export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<void> {
-  await getDbClient().transaction(async (client) => {
-    const rows = await client.query<{ id: string }>(
-      "SELECT id FROM session_tokens WHERE runtimeId = ? OR parentRuntimeId = ?",
-      [runtimeId, runtimeId],
-    );
-    await client.run(
-      `UPDATE session_tokens SET revokedAt = ?
-       WHERE (runtimeId = ? OR parentRuntimeId = ?) AND revokedAt IS NULL`,
-      [new Date().toISOString(), runtimeId, runtimeId],
-    );
-    getDbClient().afterCommit(() => {
+  await getStorage().transaction(async () => {
+    const ids = await sessionsRepo().listRuntimeSessionTokenIds(runtimeId);
+    await sessionsRepo().revokeRuntimeSessionTokens(runtimeId, new Date().toISOString());
+    getStorage().afterCommit(() => {
       unregisterVolatileSecret(`runtime:${runtimeId}`);
-      closeSessionTokenConnections(rows.map((row) => row.id));
+      closeSessionTokenConnections(ids);
     });
   });
 }
@@ -891,14 +791,12 @@ export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<
 // Agent tokens (long-lived, one agent, no runtime)
 // ---------------------------------------------------------------------------
 
-/**
- * SQL predicate for an agent (worker) token: bound to its agent and nothing
- * else. `scriptRun = 0` excludes a script run's ephemeral token, which shares
- * the same all-null binding shape but has its own lifecycle (see migration 233
- * and `mintScriptRunToken`).
+/*
+ * An agent (worker) token is bound to its agent and nothing else. A script
+ * run's ephemeral token shares the same all-null binding shape but has its own
+ * lifecycle (see migration 233 and `mintScriptRunToken`): the sessions
+ * repository's agent-token reads (its `AGENT_TOKEN_BINDING`) leave it out.
  */
-const AGENT_TOKEN_BINDING =
-  "taskId IS NULL AND runtimeId IS NULL AND controllerId IS NULL AND parentRuntimeId IS NULL AND scriptRun = 0";
 
 /** Stored expiry of a token that does not expire. `expiresAt` is NOT NULL. */
 export const AGENT_TOKEN_NO_EXPIRY = "9999-12-31T23:59:59.999Z";
@@ -931,13 +829,8 @@ function publicExpiry(expiresAt: string): string | null {
   return expiresAt === AGENT_TOKEN_NO_EXPIRY ? null : expiresAt;
 }
 
-async function activeAgentTokenIds(client: DbExecutor, agentId: string) {
-  const rows = await client.query<{ id: string }>(
-    `SELECT id FROM session_tokens WHERE agentId = ? AND ${AGENT_TOKEN_BINDING}
-     AND revokedAt IS NULL AND expiresAt > ?`,
-    [agentId, new Date().toISOString()],
-  );
-  return rows.map((row) => row.id);
+async function activeAgentTokenIds(agentId: string) {
+  return await sessionsRepo().listActiveAgentTokenIds(agentId, new Date().toISOString());
 }
 
 async function insertAgentToken(
@@ -955,7 +848,7 @@ async function insertAgentToken(
     null,
     expiresAt,
   );
-  getDbClient().afterCommit(() =>
+  getStorage().afterCommit(() =>
     registerVolatileSecret(token.plaintext, `agent-token:${token.tokenId}`),
   );
   return { ...token, expiresAt: publicExpiry(expiresAt) };
@@ -970,8 +863,8 @@ export async function mintAgentToken(
   agentId: string,
   ttlMs: number | null = AGENT_TOKEN_DEFAULT_TTL_MS,
 ): Promise<AgentTokenCredential> {
-  return await getDbClient().transaction(async (client) => {
-    if ((await activeAgentTokenIds(client, agentId)).length > 0) {
+  return await getStorage().transaction(async () => {
+    if ((await activeAgentTokenIds(agentId)).length > 0) {
       throw new AgentTokenExistsError();
     }
     return await insertAgentToken(agentId, ttlMs);
@@ -989,25 +882,20 @@ export async function rotateAgentToken(
   graceMs: number,
   ttlMs: number | null = AGENT_TOKEN_DEFAULT_TTL_MS,
 ): Promise<(AgentTokenCredential & { previousExpiresAt: string }) | null> {
-  return await getDbClient().transaction(async (client) => {
-    const previous = await activeAgentTokenIds(client, agentId);
+  return await getStorage().transaction(async () => {
+    const previous = await activeAgentTokenIds(agentId);
     if (previous.length === 0) return null;
     const previousExpiresAt = new Date(Date.now() + graceMs).toISOString();
-    const placeholders = previous.map(() => "?").join(", ");
-    await client.run(
-      `UPDATE session_tokens SET expiresAt = ?
-       WHERE (id IN (${placeholders}) OR parentTokenId IN (${placeholders})) AND expiresAt > ?`,
-      [previousExpiresAt, ...previous, ...previous, previousExpiresAt],
-    );
+    await sessionsRepo().expireSessionTokensWithChildren(previous, previousExpiresAt);
     return { ...(await insertAgentToken(agentId, ttlMs)), previousExpiresAt };
   });
 }
 
 /** Revoke every active agent token of `agentId` and their child task tokens. */
 export async function revokeAgentTokens(agentId: string): Promise<number> {
-  return await getDbClient().transaction(async (client) => {
-    const ids = await activeAgentTokenIds(client, agentId);
-    await revokeTokensWithChildren(client, ids);
+  return await getStorage().transaction(async () => {
+    const ids = await activeAgentTokenIds(agentId);
+    await revokeTokensWithChildren(ids);
     return ids.length;
   });
 }
@@ -1018,23 +906,17 @@ export async function revokeAgentTokens(agentId: string): Promise<number> {
  * controller, not the agent, and stay. Joins the caller's transaction.
  */
 export async function revokeAllAgentSessionTokens(agentId: string): Promise<number> {
-  return await getDbClient().transaction(async (client) => {
-    const rows = await client.query<{ id: string }>(
-      "SELECT id FROM session_tokens WHERE agentId = ? AND controllerId IS NULL AND revokedAt IS NULL",
-      [agentId],
-    );
-    await revokeTokensWithChildren(
-      client,
-      rows.map((row) => row.id),
-    );
-    return rows.length;
+  return await getStorage().transaction(async () => {
+    const ids = await sessionsRepo().listUnrevokedAgentSessionTokenIds(agentId);
+    await revokeTokensWithChildren(ids);
+    return ids.length;
   });
 }
 
 /**
  * Resolve a plaintext `aseph_` token to its principal. Returns null when the
  * token is unknown, revoked, or past its expiry. On a hit, touches `lastUsedAt`
- * best-effort unless `touch` is false.
+ * best-effort (at most once per minute) unless `touch` is false.
  */
 export async function resolveBySessionToken(
   plaintext: string,
@@ -1071,27 +953,7 @@ export async function resolveSessionToken(
 > {
   if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const hash = sha256Hex(plaintext);
-  const client = getDbClient();
-
-  const row = await client.get<{
-    id: string;
-    agentId: string;
-    taskId: string | null;
-    runtimeId: string | null;
-    controllerId: string | null;
-    placement: string | null;
-    expiresAt: string;
-    revokedAt: string | null;
-    sourceStepId: string | null;
-    sourceScriptRunId: string | null;
-    objectChain: string | null;
-    depth: number;
-  }>(
-    `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
-     s.sourceStepId, s.sourceScriptRunId, s.objectChain, s.depth, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
-     WHERE s.tokenHash = ?`,
-    [hash],
-  );
+  const row = await sessionsRepo().findSessionTokenByHash(hash);
   if (!row || row.revokedAt !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
 
@@ -1106,12 +968,10 @@ export async function resolveSessionToken(
       : null;
   }
 
-  if (options.touch !== false) {
+  const nowMs = Date.now();
+  if (options.touch !== false && tokenTouchDue(`session:${row.id}`, nowMs)) {
     try {
-      await client.run("UPDATE session_tokens SET lastUsedAt = ? WHERE id = ?", [
-        new Date().toISOString(),
-        row.id,
-      ]);
+      await sessionsRepo().touchSessionToken(row.id, new Date(nowMs).toISOString());
     } catch {
       // best-effort
     }

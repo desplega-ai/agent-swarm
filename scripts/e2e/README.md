@@ -38,12 +38,12 @@ This file is the authoring guide.
 | `quarantine.ts`, `quarantine.json` | Quarantined scenarios: they run and report but cannot fail the run. Ships empty. |
 | `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`, the server default is 10 s), and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
 | `slack.ts` | `@desplega.ai/slack-mock` lifecycle (Socket Mode, started before the SUT). |
-| `slack-http.ts` | A second `SlackMock` in HTTP delivery mode (signed requests, no socket), `postSigned` for forged or replayed requests, and `recordDeliveries` for route coverage. `scenarios/slack-http-helpers.ts` flips the SUT onto the Chat SDK Slack adapter around it. |
+| `slack-http.ts` | A second `SlackMock` in HTTP delivery mode (signed requests, no socket), `postSigned` for forged or replayed requests, and `recordDeliveries` for route coverage. `scenarios/slack-http-helpers.ts` flips the SUT onto the Chat SDK Slack adapter around it. With `--visuals`, the Chat SDK mock writes its own journal, so its threads render too. |
 | `mocks/llm.ts` | Mock inference host: OpenAI chat + responses + embeddings, SystemOne decisions and extraction. |
 | `agent-sim.ts` | Simulated agent: polls `/api/poll` and settles tasks over HTTP. |
 | `http.ts` | `ctx.api` client, assertions (`expect`, `expectStatus`, `asRecord`, `asRecords`, `asString`), call recorder with latency. |
 | `mcp.ts` | `ctx.connectMcp(agentId)` over Streamable HTTP, tool-call recorder. |
-| `db.ts` | The only file allowed to import `bun:sqlite`. Read-only. |
+| `db.ts` | Owns `bun:sqlite`. Provides read-only assertions and prepares offline fixtures. |
 | `coverage.ts` | Route, tool and node-type coverage, manifest exclusions, flows, latency, the strict contract. |
 | `coverage-manifest.json` | Deliberate exclusions with reasons, pinned flows. |
 | `report.ts` | CLI options, result JSON and Markdown summary. |
@@ -82,8 +82,9 @@ Rules, enforced by the registry, the boundary check, or review:
    exports no scenario goes in `NON_SCENARIO_FILES` in `scenarios/registry.ts`.
 2. **Black box only.** Import from `../http`, `../mcp`, `../run`, `../report`, Bun and node
    builtins. Never from `src/`, `apps/`, `packages/`. `bun:sqlite` belongs to `db.ts`.
-3. **Seed through the API.** `ctx.db` is read-only and exists for assertions
-   (`SELECT ... FROM ...`). A write throws.
+3. **Seed through the API.** Use the read-only `ctx.db` for assertions. For state the API
+   cannot create, prepare a separate database fixture before boot. For example, the metrics
+   scenario gives `ctx.startFixtureSut` a fixture with historical task timestamps.
 4. **Assert the documented contract.** Check the status code `openapi.json` declares, the
    response shape, and the persisted effect. A `2xx` with no shape check is a smoke test,
    not coverage. Negative paths (401, 403, 404, 400 on bad input) are part of the contract.
@@ -136,6 +137,7 @@ routes only it would have reached uncovered, so the strict gate can still name t
 | 400-499 | scripts: scripts, script runs, connections, kv, db-query, internal script-run routes |
 | 500-599 | knowledge: memory, skills, prompt templates, pages, assets, apps, rooms |
 | 600-699 | platform: users, invites, keys, oauth, mcp servers, config, integrations, webhooks, repos, trackers, models, pricing, extensions, runtime, fs |
+| 9000-9499 | storage-engine parity: upgrade from a base-commit database, divergence, trigger and stress scenarios |
 | 9000+ | Reserved for ordering-sensitive tail scenarios |
 
 ### Shards
@@ -167,9 +169,11 @@ shard 4 runs in the state it had inside shard 3. Two rules follow:
 | `ctx.recordHttpCall(method, path, status)` | Count a raw `fetch`, WebSocket upgrade or SSE request toward route coverage. |
 | `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
 | `ctx.restartSut({ env })` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. `env` adds variables to that one process (a test-only crash point); the next restart drops them. |
+| `ctx.startDataCopy({ env })` | A second API on a new SQLite file (`source`). `copy()` stops it, runs `agent-swarm db-copy` into a new Postgres database and boots an API on the copy (`target`). It also returns read-only `sourceDb` and `targetDb`, `restartTarget(env)` (a later start of the API on the copy, for example with `POSTGRES_MIGRATIONS_DIR` set to a later chain) and `targetLog()`. Needs `E2E_POSTGRES_URL` on both engines. See `data-copy` and `data-copy-later-release`. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
 | `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
-| `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. |
+| `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. A scenario that proves a visible Slack change joins a visuals group (`groups: ["visuals-v2"]`, `"visuals-legacy"`) and marks each thread a reviewer must see: the Slack Visuals PR comment and the PR's `## Before / after` frames come from those marks. On the Chat SDK mock, use `flip.ctx.markThread` (that mock has its own journal). Mark the thread root, with a label that matches `^[a-z0-9-]+$`. |
+| `ctx.slackJournal` | With `--visuals`, a journal file for a Slack mock that the scenario starts itself: `path` is the mock's `dataFile`, `file` is the fourth argument of `ctx.markThread`. Undefined otherwise. |
 
 ### Mocked edges
 
@@ -184,6 +188,8 @@ shard 4 runs in the state it had inside shard 3. Two rules follow:
 | Chat SDK Slack | Built-in Slack off (`SLACK_DISABLE`), `CHAT_SDK_ADAPTERS.slack` in webhook mode, and the env `CHAT_SDK_API_URL_OVERRIDES.slack` port the scenario binds a second `SlackMock` to | The mock posts signed events, commands and `block_actions` to `/api/integrations/chat/slack/webhook`. `enableChatSdkSlack` flips and its `undo` restores Socket Mode. |
 | Chat SDK Telegram | `CHAT_SDK_ENABLED=true`, deployment env `CHAT_SDK_API_URL_OVERRIDES`, and adapter config with fake credentials | `platform-chat-sdk` starts a loopback Telegram API. It checks tool discovery, permissions, channel mappings, messages, and thread history. |
 | Chat SDK Rocket.Chat | `CHAT_SDK_API_URL_OVERRIDES.rocketchat` set at boot, adapter config with fake credentials | `platform-chat-sdk-rocketchat` starts a loopback Rocket.Chat REST API. It checks config validation, the webhook token, a mention becoming a chat task, the unmapped sender list, and a `chat-post` reply. |
+| GitHub (provider flows) | `github-emulate-flows` starts `@emulators/github` (the `emulate` devDependency) and restarts the SUT with `GITHUB_API_URL` = its origin plus App credentials | A stateful GitHub: repos, issues, PRs, merges, App installation tokens, and HMAC-signed App webhooks sent to `/api/github/webhook`. No reactions, GraphQL, repository rules or combined commit status: those calls get 404. |
+| Linear (provider flows) | `linear-emulate-flows` starts `@emulators/linear` and restarts the SUT with `LINEAR_URL` and `LINEAR_API_URL` = its origin (deployment env only, reserved in config) | A stateful Linear GraphQL API, OAuth (consent, token, refresh, revoke) and signed webhooks sent to `/api/trackers/linear/webhook`. `User.organization` is missing, so the OAuth callback's app-user capture fails. |
 | GitHub, GitLab, Linear, Jira, AgentMail, Kapso | Disabled (`*_DISABLE=true`) | Their routes answer the disabled or bad-signature contract. Cover that contract and say so in the manifest only when a route cannot be reached at all. |
 
 `CLOUDFLARE_API_BASE_URL` is reserved for tests and cannot be stored in config.
@@ -206,9 +212,13 @@ After the scenarios, `coverage.ts`:
    that is covered anyway is **stale**; one that matches nothing is **dead**. Both fail strict.
 4. Reads every `stateSurfaces` entry: one read-only `SELECT ... AS value` on the SUT database
    (task statuses, workflow run and step statuses, script run statuses, script step types,
-   script scopes, fs modes, executors). Every value in the declared universe must have been
+   script scopes, fs modes, executors). A scenario can call `ctx.captureStateSurface(name)`
+   to run the same query while a transient state is held. The report includes both reads.
+   Every value in the declared universe must have been
    produced unless excluded with a reason; a value in the database that the universe does not
-   list is a new engine state and fails strict until it is declared.
+   list is a new engine state and fails strict until it is declared. A state exclusion marked
+   `"transient": true` (a state the engine leaves within one heartbeat or poll) is never
+   stale: a final read, or a scenario rerun on a fresh database, may catch it by chance.
 5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the
    registry must belong to at least one flow.
 6. Runs `bun run src/cli.tsx help` for the CLI command universe and counts the commands

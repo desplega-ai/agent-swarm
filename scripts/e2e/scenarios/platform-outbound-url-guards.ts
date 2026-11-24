@@ -1,6 +1,15 @@
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
-import { cleanupStack, jsonResponse, type MockRequest, startMockServer } from "./platform-helpers";
+import {
+  cleanupStack,
+  deleteConfig,
+  jsonResponse,
+  type MockRequest,
+  putConfig,
+  registerAgent,
+  reloadConfig,
+  startMockServer,
+} from "./platform-helpers";
 
 // Outbound URLs that a caller or a remote document supplies:
 //   - An OpenAPI spec URL is fetched through the DNS-checking guard. Under NODE_ENV=test the
@@ -9,6 +18,8 @@ import { cleanupStack, jsonResponse, type MockRequest, startMockServer } from ".
 //     ALLOW_PRIVATE_NETWORK_URLS=true keeps the self-hosted opt-in.
 //   - The onboarding embeddings probe uses the same guard for a caller-supplied endpoint, with
 //     the same three postures.
+//   - Memory embeddings use it for an EMBEDDING_API_BASE_URL stored through config. The
+//     deployment environment's own value is exempt, so a bundled private endpoint keeps working.
 //   - MCP OAuth discovery refuses an authorization-server document whose endpoints are not
 //     http(s) URLs, so /authorize-url can never hand the browser a script URL.
 
@@ -47,7 +58,10 @@ export const platformOutboundUrlGuards: Scenario = {
     const discovery = { authorizationEndpoint: "javascript:alert(document.domain)//" };
     const oauth = startMockServer((request: MockRequest) => {
       if (request.path === "/.well-known/oauth-protected-resource") {
-        return jsonResponse({ resource: `${oauth.origin}/mcp`, authorization_servers: [oauth.origin] });
+        return jsonResponse({
+          resource: `${oauth.origin}/mcp`,
+          authorization_servers: [oauth.origin],
+        });
       }
       if (request.path === "/.well-known/oauth-authorization-server") {
         return jsonResponse({
@@ -167,6 +181,43 @@ export const platformOutboundUrlGuards: Scenario = {
           asRecord(refusedProbe.json).error === ENDPOINT_NOT_ALLOWED &&
           embeddingConnections === embeddingsBefore,
         `the embeddings probe must refuse a name that does not resolve to a public address: ${refusedProbe.text.slice(0, 300)}`,
+      );
+
+      // A base URL stored through config is checked when memory embeds; the deployment
+      // environment's own loopback URL (the mock LLM) is exempt and still embeds.
+      const memoryAgent = await registerAgent(ctx, "url-guard-memory");
+      const searchMemory = async (label: string) => {
+        const response = await ctx.api("POST", "/api/memory/search", {
+          agentId: memoryAgent,
+          body: { query: `outbound guard ${label} ${ctx.nonce}` },
+        });
+        expectStatus(response, [200], `memory search ${label}`);
+      };
+      const stored = await putConfig(ctx, {
+        key: "EMBEDDING_API_BASE_URL",
+        value: `${embeddingsOrigin}/v1`,
+      });
+      const storedId = String(stored.id);
+      let storedDeleted = false;
+      cleanup.add("delete the stored embedding base URL", async () => {
+        if (!storedDeleted) await deleteConfig(ctx, storedId);
+        await reloadConfig(ctx);
+      });
+      await reloadConfig(ctx);
+      const storedBefore = embeddingConnections;
+      await searchMemory("stored");
+      expect(
+        embeddingConnections === storedBefore,
+        "memory embedding must not connect to a private base URL stored through config",
+      );
+      await deleteConfig(ctx, storedId);
+      storedDeleted = true;
+      await reloadConfig(ctx);
+      const deploymentBefore = ctx.llm.requestsTo("/embeddings").length;
+      await searchMemory("deployment");
+      expect(
+        ctx.llm.requestsTo("/embeddings").length > deploymentBefore,
+        "memory embedding must still reach the deployment environment's private base URL",
       );
 
       // The self-hosted opt-in still reaches a private spec server and embeddings endpoint.

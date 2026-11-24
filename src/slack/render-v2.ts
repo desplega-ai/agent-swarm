@@ -46,13 +46,17 @@ import {
 import { getTaskCitations } from "../be/task-citations";
 import { getTaskUiSpec } from "../be/task-ui-spec";
 import { slackContextKey } from "../tasks/context-key";
-import type { AgentTask, TaskAttachment } from "../types";
+import type { AgentTask } from "../types";
 import { taskUiSpecSlackBlocks } from "../ui-spec/slack";
 import { ensure } from "../utils/business-use";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
-import { renderTaskCitations, taskCitationSourceGroups } from "../utils/task-citations";
+import {
+  renderTaskCitations,
+  taskCitationSourceGroups,
+  taskCitationUrls,
+} from "../utils/task-citations";
 import { TASK_UI_SPEC_UPDATED_EVENT } from "../utils/task-ui-spec";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
@@ -62,6 +66,7 @@ import {
   type SlackReactionChoice,
 } from "./ack";
 import { getSlackApp } from "./app";
+import { slackAskAncestorId, slackAskOf } from "./ask-chain";
 import {
   buildCaptionBlock,
   getTaskLink,
@@ -71,7 +76,8 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
-import { getChannelExternality } from "./external-channel";
+import { isSlackReplyFooterEnabled } from "./config";
+import { getChannelBlockReason } from "./external-channel";
 import {
   completedStatusIcon,
   iconPrefix,
@@ -80,6 +86,14 @@ import {
   type SlackReactionEvent,
 } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentSlackIcon } from "./responses";
+import {
+  describeLink,
+  linkifyBareUrls,
+  linkKey,
+  outputLinks,
+  reviewedTaskDeliverables,
+  slackLink,
+} from "./reviewed-deliverables";
 import {
   _resetSlackSessionStatusForTests,
   beginSlackStatusTick,
@@ -141,6 +155,11 @@ export function isSlackRenderV2Enabled(): boolean {
 
 export function isSlackDelegationEnabled(): boolean {
   return isEnvFlagEnabled("SLACK_RENDER_V2_DELEGATION", false);
+}
+
+/** Lead threads post the Lead's replies, not its waiting cards or unreplied follow-up results. */
+export function isSlackQuietLeadThreadsEnabled(): boolean {
+  return isEnvFlagEnabled("SLACK_RENDER_V2_QUIET_LEAD_THREADS", false);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -561,6 +580,18 @@ function normalizeV2Text(value: string): string {
 }
 
 /**
+ * True when the work last to end in a settled thread was cancelled, even if the
+ * ask itself finished first and only its delegated work was stopped. A tie with
+ * any other outcome, or a task with no finish time, reads as not stopped.
+ */
+function endedByCancel(tasks: AgentTask[]): boolean {
+  if (tasks.some((task) => !task.finishedAt)) return false;
+  const ends = tasks.map((task) => Date.parse(task.finishedAt!));
+  const last = Math.max(...ends);
+  return tasks.every((task, index) => ends[index] !== last || task.status === "cancelled");
+}
+
+/**
  * The tree's first line, replacing the old constant "🧵 worked for <duration>".
  * A timed-out ask closure outranks a stalled member outranks plain activity —
  * each of those states implies a non-terminal member is still sitting there,
@@ -580,6 +611,7 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
     return `🧵 🔄 working — ${duration}`;
   // A parked deferral is stored `completed`, but the ask is not answered yet.
   if (tasks.some((task) => isAwaitingWake(task, tasks))) return `🧵 ⏳ waiting — ${duration}`;
+  if (endedByCancel(tasks)) return `🧵 🚫 stopped — ${duration}`;
   const hasFailure = tasks.some((task) => task.status === "failed");
   return hasFailure
     ? `🧵 ❌ done with failures — ${duration}`
@@ -1126,11 +1158,11 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   // work resumes in a wake-up task. Rendering it ✅ told the thread the ask
   // was answered when it was only parked.
   if (isDeferred) {
-    return withStatusLead("⏳", outcomeText(slackTaskOutput(task), "Deferred."));
+    return withStatusLead("⏳", outcomeText(await slackTaskOutput(task), "Deferred."));
   }
   return withStatusLead(
     completedStatusIcon(),
-    outcomeText(slackTaskOutput(task), "Task completed."),
+    outcomeText(await slackTaskOutput(task), "Task completed."),
   );
 }
 
@@ -1166,12 +1198,12 @@ export async function childOutcomeContent(
   if (isDeferredTask(task)) {
     return withStatusLead(
       `↳ ⏳ ${agentName} — deferred:`,
-      outcomeText(slackTaskOutput(task), "Deferred."),
+      outcomeText(await slackTaskOutput(task), "Deferred."),
     );
   }
   return withStatusLead(
     `↳ ${iconPrefix(completedStatusIcon())}${agentName} — result:`,
-    outcomeText(slackTaskOutput(task), "Task completed."),
+    outcomeText(await slackTaskOutput(task), "Task completed."),
   );
 }
 
@@ -1190,25 +1222,10 @@ async function isSlackContinuation(task: AgentTask): Promise<boolean> {
 
 /** Lead review tasks the engine creates when a worker finishes or a session resumes. */
 const SLACK_LEAD_FOLLOW_UP_TYPES = new Set(["follow-up", "resume"]);
-/** Guards the ancestor walk against a corrupt parent cycle or a pathological chain. */
-const SLACK_ANCESTOR_WALK_LIMIT = 50;
 
-/** True when `task`'s parent chain holds a task a person started in Slack. */
-async function hasSlackAskAncestor(
-  task: AgentTask,
-  threadTasks: readonly AgentTask[],
-): Promise<boolean> {
-  const byId = new Map(threadTasks.map((candidate) => [candidate.id, candidate]));
-  const seen = new Set<string>([task.id]);
-  let parentId = task.parentTaskId;
-  while (parentId && !seen.has(parentId) && seen.size <= SLACK_ANCESTOR_WALK_LIMIT) {
-    seen.add(parentId);
-    const parent = byId.get(parentId) ?? (await getTaskById(parentId));
-    if (!parent) return false;
-    if (parent.source === "slack") return true;
-    parentId = parent.parentTaskId;
-  }
-  return false;
+/** True for a Lead review task the engine created (a worker completion or a session resume). */
+function isLeadFollowUpTask(task: AgentTask): boolean {
+  return task.source === "system" && SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "");
 }
 
 /**
@@ -1216,7 +1233,7 @@ async function hasSlackAskAncestor(
  * started in Slack is "eligible": its output is the answer the thread waits
  * for, so it gets an outcome card like the ask did. Before this, the thread
  * stayed silent until someone asked "status?". A Lead follow-up with Slack
- * context but no Slack ask in its parent chain is an "orphan": it posts
+ * context but no Slack ask in its parent or dispatch chain is an "orphan": it posts
  * nothing, and its card is settled so the thread does not wait on it.
  */
 async function classifyLeadFollowUp(
@@ -1233,14 +1250,14 @@ async function classifyLeadFollowUp(
   ) {
     return "none";
   }
-  return (await hasSlackAskAncestor(task, threadTasks)) ? "eligible" : "orphan";
+  return (await slackAskAncestorId(task, threadTasks)) ? "eligible" : "orphan";
 }
 
 /**
- * Settles a Lead follow-up's card as abandoned without posting anything, so
+ * Settles a task's card as abandoned without posting anything, so
  * slackThreadHasOutcomeWork stops counting it and the thread can close.
  */
-async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): Promise<void> {
+async function settleOutcomeWithoutCard(task: AgentTask, reason: string): Promise<void> {
   if (!task.slackChannelId || !task.slackThreadTs) return;
   // A bound card is a stream Slack already holds; it keeps its own bounded
   // recovery. A pending one has no bound message, so it is settled here.
@@ -1262,10 +1279,10 @@ async function settleLeadFollowUpWithoutCard(task: AgentTask, reason: string): P
  * Gates a new outcome card for a Lead follow-up; every other task passes.
  * No card when the Lead already answered with `slack-reply` (it would repeat
  * that answer), also when it attributed that reply to the task the follow-up
- * reviews, when the delegation child pass owns the card, or when Slack
- * does not confirm the channel is internal: a Slack Connect channel is a
- * customer's, and posting there needs a person's explicit yes. An external
- * verdict settles the card as abandoned so the thread can close.
+ * reviews, when the delegation child pass owns the card, or when
+ * SLACK_BLOCK_EXTERNAL_CHANNELS blocks the channel. A Slack Connect channel
+ * follows the same policy as the ask's own card: with the flag off, both post.
+ * An external verdict settles the card as abandoned so the thread can close.
  */
 async function mayPostLeadFollowUpCard(
   task: AgentTask,
@@ -1279,7 +1296,7 @@ async function mayPostLeadFollowUpCard(
   if ((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent) {
     // A reservation left by a failed delivery would keep the thread open.
     if (await getSlackOutcomeMessage(task.id)) {
-      await settleLeadFollowUpWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
+      await settleOutcomeWithoutCard(task, "slack_reply_sent: Lead follow-up not posted");
     }
     return false;
   }
@@ -1302,7 +1319,7 @@ async function mayPostLeadFollowUpCard(
     // reply. A reply under the ask or a sibling's task does not count: in a
     // fan-out, every sibling follow-up shares those. The reconcile SQL counts
     // this task as outcome work until its card is settled, so always settle it.
-    await settleLeadFollowUpWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
+    await settleOutcomeWithoutCard(task, "agent_reply_in_thread: Lead follow-up not posted");
     return false;
   }
   const askId = ownerAskId.get(task.id);
@@ -1315,15 +1332,45 @@ async function mayPostLeadFollowUpCard(
   ) {
     return false;
   }
-  const app = getSlackApp();
-  if (!app || !task.slackChannelId || !task.slackThreadTs) return false;
-  const externality = await getChannelExternality(app.client, task.slackChannelId);
-  if (externality === "external") {
-    // "unknown" is not settled: it retries on the next tick.
-    await settleLeadFollowUpWithoutCard(task, "external_channel: Lead follow-up not posted");
+  if (
+    isSlackQuietLeadThreadsEnabled() &&
+    task.taskType === "follow-up" &&
+    task.status === "completed" &&
+    !isDeferredTask(task)
+  ) {
+    // A follow-up's output is a note when the Lead did not reply; a resume's output may be the only answer.
+    await settleOutcomeWithoutCard(task, "quiet_lead_threads: Lead follow-up not posted");
     return false;
   }
-  return externality === "internal";
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.slackThreadTs) return false;
+  const blockReason = await getChannelBlockReason(app.client, task.slackChannelId);
+  if (blockReason === "external") {
+    // "unverified" is not settled: it retries on the next tick.
+    await settleOutcomeWithoutCard(task, "external_channel: Lead follow-up not posted");
+    return false;
+  }
+  return blockReason === null;
+}
+
+/**
+ * True when the task's card would only say "<agent> completed": the agent
+ * already answered with `slack-reply`, the task did not defer, and the card
+ * has no ui-spec card, sources or links to add. That card notifies the
+ * person and tells them nothing, so it is not posted, as for a Lead follow-up.
+ */
+async function cardOnlyRepeatsSlackReply(task: AgentTask): Promise<boolean> {
+  if (task.status !== "completed" || isDeferredTask(task)) return false;
+  if (!((await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent)) return false;
+  if (await outcomeUiSpec(task)) return false;
+  const content = await outcomeContent(task, true);
+  return (await outcomeCaptionBlocks(task, content)).length === 0;
+}
+
+/** A Lead deferral that, with quiet Lead threads on, posts no ⏳ card. */
+async function isQuietLeadDeferral(task: AgentTask): Promise<boolean> {
+  if (!isSlackQuietLeadThreadsEnabled() || !isDeferredTask(task) || !task.agentId) return false;
+  return !!(await getAgentById(task.agentId))?.isLead;
 }
 
 /**
@@ -1395,7 +1442,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
       continue;
     }
     const raw = outcomeText(
-      member.status === "failed" ? member.failureReason : slackTaskOutput(member),
+      member.status === "failed" ? member.failureReason : await slackTaskOutput(member),
       "",
     );
     const digest =
@@ -1500,20 +1547,8 @@ async function recordSlackDelivery(
   });
 }
 
-function attachmentCaption(attachments: TaskAttachment[]): string | undefined {
-  const attachment = attachments.find((item) => item.isPrimary) ?? attachments[0];
-  if (!attachment) return undefined;
-  const url = taskAttachmentDisplayUrl(attachment);
-  if (!/^https?:\/\//.test(url)) return undefined;
-  const label = attachment.name
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  // Keep the mrkdwn link destination intact without changing existing URL escapes.
-  const destination = url.replace(/[\s\\<>|]/g, encodeURIComponent);
-  return `📎 <${destination}|${label}>`;
+function linkCaption(url: string, name: string, icon: string): string | undefined {
+  return /^https?:\/\//.test(url) ? `${icon} ${slackLink(url, name)}` : undefined;
 }
 
 /** The task's own card: its Slack blocks and the text that stands in for them. */
@@ -1571,17 +1606,44 @@ function withUiSpecFallbackText(
 
 /**
  * Secondary metadata for an outcome card, as captions (`context` blocks)
- * under the answer: cited sources, general sources, then the primary
- * attachment. `content` is the unrendered answer, whose `[citation:N]`
- * markers decide which sources count as cited.
+ * under the answer: cited sources, general sources, then "Links:" with the
+ * primary attachment and a Lead review's worker deliverables. `content` is
+ * the unrendered answer, whose `[citation:N]` markers decide which sources
+ * count as cited. A URL shows once: a link in the answer or in a source is
+ * not listed under "Links:" again.
  */
 async function outcomeCaptionBlocks(task: AgentTask, content: string): Promise<unknown[]> {
   const moreUrl = getTaskUrl(task.id);
-  const sources = taskCitationSourceGroups(content, await getTaskCitations(task.id)).map((group) =>
+  const citations = await getTaskCitations(task.id);
+  const sources = taskCitationSourceGroups(content, citations).map((group) =>
     buildCaptionBlock(group.items, { heading: group.heading, moreUrl }),
   );
-  const attachment = attachmentCaption(await getSlackOutputAttachments(task.id));
-  return [...sources, attachment ? buildCaptionBlock([attachment]) : undefined].filter(Boolean);
+  const seen = [...outputLinks(content), ...taskCitationUrls(citations)];
+  const attachments = await getSlackOutputAttachments(task.id);
+  const primary = attachments.find((item) => item.isPrimary) ?? attachments[0];
+  const ownUrl = primary ? taskAttachmentDisplayUrl(primary) : undefined;
+  const ownShown = !!ownUrl && !new Set(seen.map(linkKey)).has(linkKey(ownUrl));
+  // A Lead review card also lists the reviewed worker's deliverables.
+  const reviewed = await reviewedTaskDeliverables(
+    task,
+    ownUrl ? [...seen, ownUrl] : seen,
+    getSlackApp()?.client,
+  );
+  const links = [
+    ...(primary && ownUrl && ownShown ? [{ url: ownUrl, ...describeLink(ownUrl, primary) }] : []),
+    ...reviewed.links,
+  ];
+  const items = links
+    .map((link) => linkCaption(link.url, link.label, link.icon))
+    .filter((item): item is string => !!item);
+  if (reviewed.omitted > 0) {
+    const more = `+${reviewed.omitted} more`;
+    items.push(reviewed.moreUrl ? `<${reviewed.moreUrl}|${more}>` : more);
+  }
+  return [
+    ...sources,
+    items.length > 0 ? buildCaptionBlock(items, { heading: "Links" }) : undefined,
+  ].filter(Boolean);
 }
 
 type MarkdownFence = { character: "`" | "~"; length: number };
@@ -1635,7 +1697,7 @@ function safeMarkdownBoundary(markdown: string, maxLength: number): number {
 /** The answer as Markdown, with citation markers resolved and no sources appended. */
 async function outcomePresentation(task: AgentTask, content: string): Promise<string> {
   const body = normalizeV2Text(
-    renderTaskCitations(content, await getTaskCitations(task.id), "slack", false),
+    renderTaskCitations(linkifyBareUrls(content), await getTaskCitations(task.id), "slack", false),
   );
   if (body.length <= MAX_OUTCOME_MARKDOWN_LENGTH) return body;
 
@@ -1667,7 +1729,7 @@ async function outcomeFooter(
   duration: string,
 ): Promise<unknown[]> {
   const task = members[0];
-  if (!task) return [];
+  if (!task || !isSlackReplyFooterEnabled()) return [];
   const memberIds = new Set(members.map((member) => member.id));
   const descendants = [
     ...new Map(
@@ -1947,11 +2009,6 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
   return true;
 }
 
-/** How long after a card's last change a Lead follow-up may still merge into it. */
-const SLACK_CARD_MERGE_WINDOW_MS = 2 * 60_000;
-/** Most task answers one merged card shows. */
-const SLACK_CARD_GROUP_MAX_SECTIONS = 5;
-
 /** True when Slack timestamp `a` is later than `b`. Avoids float rounding of the microseconds. */
 function isSlackTsAfter(a: string, b: string): boolean {
   const key = (ts: string) => {
@@ -1994,18 +2051,29 @@ async function outcomeGroupMembers(
 }
 
 /**
- * The text and blocks of a merged card: each task's answer, in order and
- * separated by a blank line, then each task's captions, then one footer for
- * all of them. A card from a script action (ui spec) shows its fallback text.
- * Null when the text does not fit one markdown block.
+ * The text and blocks of a merged card: the answers it shows, in order and
+ * separated by a blank line, then their captions, then one footer for the
+ * answers shown. A newer Lead follow-up supersedes an older one, so the
+ * card shows the ask's own answer (when the card started with it) and the
+ * newest follow-up only. A card from a script action (ui spec) shows its
+ * fallback text. Null when the text does not fit one markdown block.
  */
 async function renderOutcomeGroup(
   members: readonly AgentTask[],
   tasks: AgentTask[],
 ): Promise<{ text: string; blocks: unknown[] } | null> {
+  // A reverse loop, not findLast: the extension-types bundle targets ES2022.
+  let newestFollowUp: AgentTask | undefined;
+  for (let i = members.length - 1; i >= 0 && !newestFollowUp; i--) {
+    const member = members[i];
+    if (member && isLeadFollowUpTask(member)) newestFollowUp = member;
+  }
+  const shown = members.filter(
+    (member) => !isLeadFollowUpTask(member) || member === newestFollowUp,
+  );
   const sections: string[] = [];
   const captions: unknown[] = [];
-  for (const member of members) {
+  for (const member of shown) {
     const slackReplySent = (await getTaskById(member.id))?.slackReplySent ?? member.slackReplySent;
     const content = await outcomeContent(member, slackReplySent);
     const presentation = await outcomePresentation(member, content);
@@ -2016,10 +2084,11 @@ async function renderOutcomeGroup(
   const text = sections.join("\n\n");
   if (!text || text.length > MAX_OUTCOME_MARKDOWN_LENGTH) return null;
   const now = new Date();
-  const start = Math.min(...members.map((member) => Date.parse(member.createdAt)));
-  const end = Math.max(...members.map((member) => terminalEnd(member, now).getTime()));
+  // The footer covers the answers shown, so a superseded follow-up drops out of it too.
+  const start = Math.min(...shown.map((member) => Date.parse(member.createdAt)));
+  const end = Math.max(...shown.map((member) => terminalEnd(member, now).getTime()));
   const footer = await outcomeFooter(
-    members,
+    shown,
     tasks,
     formatV2Duration(new Date(start), new Date(end)),
   );
@@ -2047,14 +2116,16 @@ async function updateOutcomeGroupCard(
 
 /**
  * Merges a Lead follow-up's answer into the previous card in the thread, so
- * back-to-back results read as one message and send one notification. The
- * edit sends no notification, so the merge is only allowed when all of these
- * are true:
+ * one ask keeps one live card: the newest follow-up replaces the older one's
+ * answer (see renderOutcomeGroup), however long the worker took. The edit
+ * sends no notification, so the merge is only allowed when all of these are
+ * true:
  * - the task is a completed Lead follow-up or resume that did not defer,
  * - the newest card in the thread is from the same agent, completed, not a
  *   deferral, conclusion or delegation child card,
- * - that card changed at most SLACK_CARD_MERGE_WINDOW_MS ago,
- * - no message (a person's or a bot's) came after that card,
+ * - both answer the same Slack ask,
+ * - no message (a person's or a bot's) came after that card, so the card is
+ *   still the last thing in the thread,
  * - neither task has a ui-spec card, and the merged text fits one card.
  *
  * Returns false, with nothing changed, when the merge does not apply or the
@@ -2079,8 +2150,6 @@ async function mergeLeadFollowUpCard(
   try {
     const host = await getLatestSlackOutcomeGroupHost(channelId, threadTs);
     if (!host || host.conclusionKind) return false;
-    if (host.mergedTaskIds.length + 2 > SLACK_CARD_GROUP_MAX_SECTIONS) return false;
-    if (Date.now() - Date.parse(host.lastSectionAt) > SLACK_CARD_MERGE_WINDOW_MS) return false;
     const existing = await outcomeGroupMembers(host, tasks);
     const hostTask = existing[0];
     if (
@@ -2096,6 +2165,8 @@ async function mergeLeadFollowUpCard(
     ) {
       return false;
     }
+    const ask = await slackAskOf(task, tasks);
+    if (!ask || ask !== (await slackAskOf(hostTask, tasks))) return false;
     if (await slackThreadHasMessageAfter(app.client, channelId, threadTs, host.ts)) return false;
     group = host;
     members = [...existing, task];
@@ -2228,6 +2299,32 @@ export function slackErrorSummary(error: unknown): string {
   return detail.messages.length ? `${head}: ${detail.messages.join(" | ")}` : head;
 }
 
+/**
+ * Deletes a ⏳ deferral card whose wake-up answered with `slack-reply`.
+ * Rewritten, the card would only say "<agent> completed" above that reply.
+ * A card with a ui-spec card, sources or links is rewritten as before.
+ * Returns false, with the card untouched, when it is not deleted.
+ */
+async function removeDeferralCardAnsweredByReply(
+  client: WebClient,
+  card: SlackMessageRecord,
+  wake: AgentTask,
+): Promise<boolean> {
+  if (!(await cardOnlyRepeatsSlackReply(wake))) return false;
+  try {
+    await callSlackWithRetry(client, "chat.delete", { channel: card.channelId, ts: card.ts });
+  } catch (error) {
+    if (slackErrorCode(error) === "message_not_found") return true;
+    console.warn(
+      `[Slack] Could not delete answered deferral card ${card.id}; rewriting it instead:`,
+      slackErrorSummary(error),
+    );
+    return false;
+  }
+  console.log(`[Slack] Deleted deferral card ${card.id}: its wake-up answered in the thread`);
+  return true;
+}
+
 // Everything else reaching the catch has no Slack verdict attached (a socket
 // reset, a DNS blip, a local read that threw), so it is worth retrying — but
 // only a bounded number of times. Without a ceiling a card that fails for a
@@ -2241,7 +2338,8 @@ const deferralRefreshAttempts = new Map<string, number>();
  * Runs after the tree loop and independently of it: resolution needs only
  * the retained outcome `ts`, so it must not be skipped when the thread has
  * no other pending render work. Re-defers update the same card; the final
- * result marks it resolved (`deferral_resolved_at`).
+ * result marks it resolved (`deferral_resolved_at`). A final result that was
+ * already sent with `slack-reply` deletes the card instead.
  *
  * The marker is also burned when Slack refuses the rewrite for good, and when
  * an unclassifiable failure has used up its attempts — a card that can never
@@ -2256,14 +2354,16 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
     try {
       const wake = await getTaskById(wakeTaskId);
       if (!wake) continue;
-      const content = await resolvedDeferralContent(wake);
-      await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
-        callSlackWithRetry(app.client, "chat.update", {
-          channel: card.channelId,
-          ts: card.ts,
-          ...content.build(withCard),
-        }),
-      );
+      if (!(await removeDeferralCardAnsweredByReply(app.client, card, wake))) {
+        const content = await resolvedDeferralContent(wake);
+        await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
+          callSlackWithRetry(app.client, "chat.update", {
+            channel: card.channelId,
+            ts: card.ts,
+            ...content.build(withCard),
+          }),
+        );
+      }
       if (isDeferredTask(wake)) {
         await updateSlackMessageRecord(card.id, {});
       } else {
@@ -2441,7 +2541,7 @@ async function processSlackThread(
       !endedBefore(task, outcomeWindow.finishedAfter)
     ) {
       // The reconcile SQL cannot walk the parent chain, so it counts this one.
-      await settleLeadFollowUpWithoutCard(task, "no_slack_ask: Lead follow-up not posted");
+      await settleOutcomeWithoutCard(task, "no_slack_ask: Lead follow-up not posted");
       continue;
     }
     if (!(await taskNeedsDirectOutcome(task, activatedAt, leadFollowUp))) continue;
@@ -2472,6 +2572,16 @@ async function processSlackThread(
       }
       // An in-flight card keeps its bounded retries; only a new card is refused.
       if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
+      if ((!card || isPendingSlackMessage(card)) && (await cardOnlyRepeatsSlackReply(task))) {
+        await settleOutcomeWithoutCard(task, "slack_reply_sent: completed card not posted");
+        await finalizeTerminalSlackReactions([task]);
+        continue;
+      }
+      if ((!card || isPendingSlackMessage(card)) && (await isQuietLeadDeferral(task))) {
+        // The tree shows the wait; the ask keeps 👀 until a wake-up answers.
+        await settleOutcomeWithoutCard(task, "quiet_lead_threads: deferral card not posted");
+        continue;
+      }
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
         if (!card && (await mergeLeadFollowUpCard(task, tasks, statusTick.budget))) {

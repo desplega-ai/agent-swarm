@@ -22,6 +22,17 @@ type InventoryEntry = {
  */
 const EXPECTED_INVENTORY: InventoryEntry[] = [
   {
+    file: "src/comb/review-batch.ts",
+    owner: "sendReviewBatch",
+    syntax: "PropertyAssignment",
+    count: 1,
+    kind: "producer",
+    dispatchProof: {
+      file: "src/tests/comb-review-batch.test.ts",
+      text: "keeps a follow-up on the parent agent and answers 409 on a repeat",
+    },
+  },
+  {
     file: "src/http/tasks.ts",
     owner: "handleTasks",
     syntax: "PropertyAssignment",
@@ -58,7 +69,9 @@ const EXPECTED_INVENTORY: InventoryEntry[] = [
     file: "src/be/db.ts",
     owner: "createTaskExtended",
     syntax: "PropertyAssignment",
-    count: 1,
+    // The consumer, plus the insert-row field the tasks repository writes (the
+    // INSERT moved into the repository in the Postgres storage work).
+    count: 2,
     kind: "consumer",
   },
   {

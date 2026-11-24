@@ -227,6 +227,32 @@ export async function resolveBitbucketSender(
 }
 
 /**
+ * Whether a sender may open a lead task with a mention or by adding the bot as
+ * a reviewer, both of which anyone able to open a PR or comment can do.
+ * Accepted: a linked swarm user, or an `account_id` (or `uuid`) listed in
+ * BITBUCKET_ALLOWED_SENDERS (comma-separated).
+ */
+function isTrustedBitbucketSender(
+  account: BitbucketAccount | undefined,
+  requestedByUserId: string | undefined,
+): boolean {
+  if (requestedByUserId) return true;
+  const allowed = (process.env.BITBUCKET_ALLOWED_SENDERS ?? "")
+    .split(",")
+    .map((id) => id.trim().toLowerCase())
+    .filter(Boolean);
+  return [account?.account_id, account?.uuid].some(
+    (id) => !!id && allowed.includes(id.trim().toLowerCase()),
+  );
+}
+
+function logUntrustedSender(eventType: string, account: BitbucketAccount, repo: string) {
+  console.log(
+    `[Bitbucket] Skipped ${eventType} by ${account.display_name} on ${repo}: sender is not a linked user or an allowed sender`,
+  );
+}
+
+/**
  * Render a Bitbucket account for agent-visible text: the resolved canonical
  * name or the explicit UNKNOWN sentinel.
  */
@@ -312,13 +338,17 @@ export async function handlePullRequestCreated(body: unknown): Promise<HandlerRe
       "pull_request",
       `PR #${pr.id}: ${pr.title}`,
     );
+    if (!isTrustedBitbucketSender(author, requestedByUserId)) {
+      logUntrustedSender("pull_request", author, repo);
+      return { created: false };
+    }
 
     const context = pr.description ? extractMentionContext(pr.description, botAccountId) : "";
     // A mention is the explicit ask; the reviewer template is for a bare review request.
     const templateId = mentioned
       ? "bitbucket.pull_request.opened"
       : "bitbucket.pull_request.review_requested";
-    const result = resolveTemplate(templateId, {
+    const result = await resolveTemplate(templateId, {
       pr_id: pr.id,
       pr_title: pr.title,
       repo,
@@ -374,6 +404,10 @@ export async function handlePullRequestCommentCreated(body: unknown): Promise<Ha
       "pull_request_comment",
       comment.content.raw,
     );
+    if (!isTrustedBitbucketSender(author, requestedByUserId)) {
+      logUntrustedSender("pull_request_comment", author, repo);
+      return { created: false };
+    }
 
     const existingTask = await findTaskByVcs(repo, pr.id, "bitbucket");
     const existingTaskNote = existingTask
@@ -385,7 +419,7 @@ export async function handlePullRequestCommentCreated(body: unknown): Promise<Ha
       ? `File: ${comment.inline.path}${line != null ? `:${line}` : ""}\n`
       : "";
 
-    const result = resolveTemplate("bitbucket.comment.mentioned", {
+    const result = await resolveTemplate("bitbucket.comment.mentioned", {
       pr_id: pr.id,
       pr_title: pr.title,
       username: await renderBitbucketIdentity(author),

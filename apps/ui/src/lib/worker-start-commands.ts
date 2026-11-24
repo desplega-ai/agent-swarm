@@ -18,6 +18,7 @@
  * waits until its login appears in swarm_config (docker-entrypoint.sh).
  */
 import type { ProviderName } from "@/api/types";
+import { shellQuote } from "./shell-quote";
 
 const DOCS = "https://docs.agent-swarm.dev/docs/guides";
 
@@ -49,6 +50,9 @@ export const WORKER_HARNESSES: { value: ProviderName; loginDocs: string }[] = [
 /** The documented default, for an API URL that a container cannot reach as is. */
 const DOCKER_MCP_BASE_URL = "http://host.docker.internal:3013";
 
+/** A release tag that is safe to put in an image reference or a `--version` flag. */
+const VERSION_TAG = /^v?[0-9A-Za-z._-]{1,64}$/;
+
 /** The dashboard's API URL as a container sees it: localhost means the host machine. */
 function containerApiUrl(apiUrl: string): string {
   try {
@@ -69,23 +73,26 @@ export function workerStartCommand(
   context: { apiUrl: string; version?: string },
 ): string {
   if (target === "compose") return `HARNESS_PROVIDER=${harness} docker compose up -d`;
+  // An unexpected version falls back to the default tag.
+  const version =
+    context.version && VERSION_TAG.test(context.version) ? context.version : undefined;
   if (target === "docker") {
     const image = "ghcr.io/desplega-ai/agent-swarm-worker";
     return [
       "docker run --rm -it \\",
       `  -e HARNESS_PROVIDER=${harness} \\`,
-      `  -e MCP_BASE_URL=${containerApiUrl(context.apiUrl)} \\`,
+      `  -e MCP_BASE_URL=${shellQuote(containerApiUrl(context.apiUrl))} \\`,
       "  -e API_KEY=your-api-key \\",
       "  -v ./logs:/logs \\",
       "  -v ./work:/workspace \\",
-      `  ${context.version ? `${image}:${context.version}` : image}`,
+      `  ${version ? `${image}:${version}` : image}`,
     ].join("\n");
   }
   return [
     "helm upgrade swarm oci://ghcr.io/desplega-ai/charts/agent-swarm \\",
     "  --namespace agent-swarm \\",
     "  --values swarm-values.yaml \\",
-    ...(context.version ? [`  --version ${context.version} \\`] : []),
+    ...(version ? [`  --version ${version} \\`] : []),
     `  --set pools.coder.harnessProvider=${harness}`,
   ].join("\n");
 }

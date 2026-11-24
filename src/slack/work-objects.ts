@@ -50,7 +50,7 @@ async function getDetails(event: DetailsEvent, client: WebClient): Promise<Detai
   if (task.slackChannelId !== event.channel) return { error: { status: "restricted" } };
 
   const agent = task.agentId ? await getAgentById(task.agentId) : null;
-  const prose = slackTaskOutput(task) || task.failureReason || task.progress;
+  const prose = (await slackTaskOutput(task)) || task.failureReason || task.progress;
   // The card text joins the prose before truncate(), so the 2800 cap still holds.
   const result = prose ? await withUiSpecFallback(task.id, prose) : prose;
   return {

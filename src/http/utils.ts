@@ -344,6 +344,17 @@ export class RequestBodyTooLargeError extends Error {
   }
 }
 
+/**
+ * The request body is not valid JSON (`parseBody`). The `route()` factory
+ * answers it with 400. The message does not quote the body.
+ */
+export class RequestBodyParseError extends Error {
+  constructor() {
+    super("Request body is not valid JSON");
+    this.name = "RequestBodyParseError";
+  }
+}
+
 function requestContentLength(req: IncomingMessage): number | undefined {
   const raw = req.headers["content-length"];
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -353,7 +364,8 @@ function requestContentLength(req: IncomingMessage): number | undefined {
 }
 
 /**
- * Parse a JSON request body with an optional byte cap.
+ * Parse a JSON request body with an optional byte cap. A body that is not
+ * valid JSON rejects with `RequestBodyParseError`.
  *
  * On overflow, the request keeps draining while the caller receives the
  * rejection. This preserves keep-alive connections for the next request.
@@ -413,8 +425,8 @@ export async function parseBody<T = unknown>(
       }
       try {
         resolve(JSON.parse(raw) as T);
-      } catch (error) {
-        reject(error);
+      } catch {
+        reject(new RequestBodyParseError());
       }
     };
 
@@ -476,6 +488,37 @@ export function enforceContentLengthCap(
     return BODY_TOO_LARGE;
   }
   return null;
+}
+
+/** Body cap for public webhook receivers that read the raw body before their own check. */
+export const WEBHOOK_MAX_BODY_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Read a public webhook's raw body as a string, bounded by `maxBytes`. A body
+ * over the cap, declared or streamed, gets `413` and `null` back; the rest of
+ * the stream is drained without buffering so the connection stays usable.
+ */
+export async function readWebhookBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+  maxBytes = WEBHOOK_MAX_BODY_BYTES,
+): Promise<string | null> {
+  if (enforceContentLengthCap(req, res, maxBytes) === BODY_TOO_LARGE) return null;
+  const chunks: Buffer[] = [];
+  let receivedBytes = 0;
+  let tooLarge = false;
+  for await (const chunk of req) {
+    if (tooLarge) continue;
+    receivedBytes += (chunk as Buffer).byteLength;
+    if (receivedBytes > maxBytes) {
+      tooLarge = true;
+      chunks.length = 0;
+      jsonError(res, `Payload too large (max ${maxBytes} bytes)`, 413);
+      continue;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  return tooLarge ? null : Buffer.concat(chunks).toString();
 }
 
 /** Send JSON response */

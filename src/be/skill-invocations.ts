@@ -1,5 +1,6 @@
-import type { DbExecutor } from "./db-client";
+import type { ResolvedSkillRow } from "@desplega/storage";
 import { estimateTokens } from "./memory/key-browser";
+import { getStorage } from "./storage";
 
 /**
  * Persists a `skill.invoke` event as a `skill_invocations` row and, when the
@@ -22,9 +23,8 @@ function stringField(data: Record<string, unknown> | undefined, key: string): st
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** `chars` is the content length, so the content itself never leaves SQLite. */
-type ResolvedSkill = { id: string; name: string; version: number; chars: number };
-const RESOLVED_COLUMNS = "id, name, version, length(content) AS chars";
+/** `chars` is the content length, so the content itself never leaves the database. */
+type ResolvedSkill = ResolvedSkillRow;
 
 /**
  * The skills row an invocation refers to. An id wins. A name follows
@@ -32,26 +32,18 @@ const RESOLVED_COLUMNS = "id, name, version, length(content) AS chars";
  * global. Anything else (another agent's personal skill, a harness-native
  * skill the swarm does not manage) stays unresolved.
  */
-async function resolveSkill(
-  db: DbExecutor,
-  input: { skillId?: string; skillName?: string; agentId?: string },
-): Promise<ResolvedSkill | null> {
+async function resolveSkill(input: {
+  skillId?: string;
+  skillName?: string;
+  agentId?: string;
+}): Promise<ResolvedSkill | null> {
+  const skills = getStorage().repos.skills;
   if (input.skillId) {
-    const byId = await db.get<ResolvedSkill>(
-      `SELECT ${RESOLVED_COLUMNS} FROM skills WHERE id = ?`,
-      [input.skillId],
-    );
+    const byId = await skills.findResolvedSkillById(input.skillId);
     if (byId) return byId;
   }
   if (!input.skillName) return null;
-  return db.get<ResolvedSkill>(
-    `SELECT ${RESOLVED_COLUMNS} FROM skills
-      WHERE name = ?
-        AND ((scope = 'agent' AND ownerAgentId = ?) OR scope IN ('swarm', 'global'))
-      ORDER BY CASE scope WHEN 'agent' THEN 0 WHEN 'swarm' THEN 1 ELSE 2 END
-      LIMIT 1`,
-    [input.skillName, input.agentId ?? null],
-  );
+  return skills.findResolvedSkillByName(input.skillName, input.agentId ?? null);
 }
 
 /**
@@ -61,44 +53,38 @@ async function resolveSkill(
  * of the same skill in the same session never counts twice.
  */
 export async function recordSkillInvocation(
-  db: DbExecutor,
+  // The repository calls below join the caller's transaction (or run alone
+  // outside one).
   input: SkillInvokeEventInput,
   eventId: string,
 ): Promise<boolean> {
   if (input.event !== "skill.invoke") return false;
 
   const reportedName = stringField(input.data, "skillName");
-  const skill = await resolveSkill(db, {
+  const skill = await resolveSkill({
     skillId: stringField(input.data, "skillId"),
     skillName: reportedName,
     agentId: input.agentId,
   });
   const now = new Date().toISOString();
 
-  const inserted = await db.run(
-    `INSERT OR IGNORE INTO skill_invocations
-       (id, skillId, skillName, skillVersion, tokenCount, agentId, taskId, sessionId, harness, via, eventId, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      crypto.randomUUID(),
-      skill?.id ?? null,
-      skill?.name ?? reportedName ?? null,
-      skill?.version ?? null,
-      skill ? estimateTokens(skill.chars) : null,
-      input.agentId ?? null,
-      input.taskId ?? null,
-      input.sessionId ?? null,
-      stringField(input.data, "harness") ?? null,
-      stringField(input.data, "via") ?? null,
-      eventId,
-      now,
-    ],
-  );
-  if (inserted.changes === 0 || !skill) return false;
+  const skills = getStorage().repos.skills;
+  const inserted = await skills.insertSkillInvocation({
+    id: crypto.randomUUID(),
+    skillId: skill?.id ?? null,
+    skillName: skill?.name ?? reportedName ?? null,
+    skillVersion: skill?.version ?? null,
+    tokenCount: skill ? estimateTokens(skill.chars) : null,
+    agentId: input.agentId ?? null,
+    taskId: input.taskId ?? null,
+    sessionId: input.sessionId ?? null,
+    harness: stringField(input.data, "harness") ?? null,
+    via: stringField(input.data, "via") ?? null,
+    eventId,
+    createdAt: now,
+  });
+  if (!inserted || !skill) return false;
 
-  await db.run(
-    "UPDATE skills SET invocationCount = invocationCount + 1, lastInvokedAt = ? WHERE id = ?",
-    [now, skill.id],
-  );
+  await skills.bumpInvocationCount(skill.id, now);
   return true;
 }

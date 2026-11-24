@@ -86,3 +86,77 @@ test("starring a sessions group in its title row stays on after a reload", async
 
   await clean.assertClean();
 });
+
+test("starring an app in the list sorts it first, filters and searches like Pages", async ({
+  page,
+  api,
+  seed,
+  swarm,
+  clean,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const definition = {
+    models: {},
+    pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+    defaultPage: "main",
+  };
+  // "zz" sorts the starred app last by name, so first place proves the star sort.
+  const starred = (
+    await api.post<{ app: { id: string } }>("/api/apps", { name: "e2e zz starred app", definition })
+  ).app;
+  const plain = (
+    await api.post<{ app: { id: string } }>("/api/apps", { name: "e2e plain app", definition })
+  ).app;
+  const appFavorites = async () => {
+    const response = await fetch(`${swarm.apiUrl}/api/favorites?itemType=app`, {
+      headers: { Authorization: `Bearer ${swarm.apiKey}`, "X-Swarm-User-Id": seed!.user.id },
+    });
+    return ((await response.json()) as FavoriteIds).favoriteIds;
+  };
+  const row = (name: string) => page.getByRole("row").filter({ hasText: name });
+
+  try {
+    await page.goto("/apps");
+    await row("e2e zz starred app").getByRole("button", { name: "Add favorite" }).click();
+
+    // The star toggles; it does not open the app.
+    await expect(
+      row("e2e zz starred app").getByRole("button", { name: "Remove favorite" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL("/apps");
+    await expect.poll(appFavorites).toContain(starred.id);
+
+    // Starred apps list first.
+    await page.reload();
+    // Rows reuse DOM nodes, so read the first data row by aria-rowindex (the header is 1).
+    await expect(page.locator('[role="row"][aria-rowindex="2"]').first()).toContainText(
+      "e2e zz starred app",
+    );
+
+    // Favorites only hides the unstarred app; search narrows by name.
+    await page.goto("/apps?favorites=true");
+    await expect(row("e2e zz starred app")).toBeVisible();
+    await expect(row("e2e plain app")).toHaveCount(0);
+    await page.goto("/apps?search=plain");
+    await expect(row("e2e plain app")).toBeVisible();
+    await expect(row("e2e zz starred app")).toHaveCount(0);
+
+    // The view toggle is a query param too: it survives a reload and back restores the table.
+    await page.goto("/apps?search=plain&view=table");
+    await page.getByRole("radio", { name: "Tiles" }).click();
+    await expect(page).toHaveURL(/[?&]view=tiles/);
+    await expect(page).toHaveURL(/[?&]search=plain/);
+    await page.reload();
+    await expect(page.getByRole("link", { name: "e2e plain app" })).toBeVisible();
+    await expect(row("e2e plain app")).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(/[?&]view=table/);
+    await expect(row("e2e plain app")).toBeVisible();
+
+    await clean.assertClean();
+  } finally {
+    // Deleting the app also drops its star, which leaves the worker's state as found.
+    await api.delete(`/api/apps/${starred.id}`);
+    await api.delete(`/api/apps/${plain.id}`);
+  }
+});

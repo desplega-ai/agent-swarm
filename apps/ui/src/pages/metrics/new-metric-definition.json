@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "refreshSeconds": 60,
+  "layout": {
+    "columns": 2
+  },
+  "variables": [
+    {
+      "key": "rangeModifier",
+      "label": "Time range",
+      "type": "select",
+      "defaultValue": "-30 days",
+      "options": [
+        {
+          "label": "Last 7 days",
+          "value": "-7 days"
+        },
+        {
+          "label": "Last 30 days",
+          "value": "-30 days"
+        },
+        {
+          "label": "Last 90 days",
+          "value": "-90 days"
+        }
+      ]
+    },
+    {
+      "key": "userFilter",
+      "label": "Requester user ID",
+      "type": "text",
+      "defaultValue": ""
+    },
+    {
+      "key": "agentFilter",
+      "label": "Agent ID",
+      "type": "text",
+      "defaultValue": ""
+    }
+  ],
+  "widgets": [
+    {
+      "id": "task-statuses",
+      "title": "Task statuses",
+      "description": "Tasks grouped by current status.",
+      "query": {
+        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE \"createdAt\" >= $1 AND ($2 = '' OR COALESCE(\"requestedByUserId\", '') = $2) AND ($3 = '' OR COALESCE(\"agentId\", '') = $3) GROUP BY status ORDER BY tasks DESC",
+        "params": ["{{rangeModifier:since}}", "{{userFilter}}", "{{agentFilter}}"],
+        "maxRows": 100
+      },
+      "viz": {
+        "type": "bar",
+        "x": "status",
+        "y": "tasks",
+        "format": "integer",
+        "columns": [
+          {
+            "key": "status",
+            "label": "Status"
+          },
+          {
+            "key": "tasks",
+            "label": "Tasks",
+            "format": "integer"
+          }
+        ]
+      }
+    }
+  ]
+}

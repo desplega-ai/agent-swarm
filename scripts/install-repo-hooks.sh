@@ -51,8 +51,24 @@ fi
 
 if [ -d "$repo_dir/.husky" ]; then
   if command -v npm >/dev/null 2>&1; then
-    if (cd "$repo_dir" && npm install); then
-      echo "    Ran npm install for Husky setup"
+    # --ignore-scripts: no dependency or repo lifecycle script runs. The repo's `prepare`
+    # script is what normally runs husky, so run husky's install step explicitly.
+    if (cd "$repo_dir" && npm install --ignore-scripts); then
+      echo "    Ran npm install --ignore-scripts for Husky setup"
+      if [ -x "$repo_dir/node_modules/.bin/husky" ]; then
+        husky_args=(install)
+        husky_version=$(cd "$repo_dir" && node -p 'require("./node_modules/husky/package.json").version' 2>/dev/null)
+        if [ "${husky_version%%.*}" -ge 9 ] 2>/dev/null; then
+          husky_args=()
+        fi
+        if (cd "$repo_dir" && ./node_modules/.bin/husky "${husky_args[@]}"); then
+          echo "    Installed Husky hooks"
+        else
+          warn "husky install failed for ${repo_name}"
+        fi
+      else
+        warn "husky is not a dependency of ${repo_name}; cannot install Husky hooks"
+      fi
     else
       warn "npm install failed for Husky setup in ${repo_name}"
     fi

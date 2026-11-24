@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.13.5",
+    "version": "2.14.5",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -466,6 +466,9 @@
             "type": "string"
           },
           "resolvedProfile": {
+            "type": "string"
+          },
+          "modelGroup": {
             "type": "string"
           },
           "fallbackHops": {
@@ -1040,6 +1043,12 @@
           },
           "opencodeGo": {
             "$ref": "#/components/schemas/AgentOpencodeGoStatus"
+          },
+          "piModelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "acp": {
             "$ref": "#/components/schemas/AgentAcpStatus"
@@ -2705,7 +2714,8 @@
               "agent-fs-path",
               "key",
               "session",
-              "hidden-key"
+              "hidden-key",
+              "app"
             ]
           },
           "itemId": {
@@ -3734,6 +3744,7 @@
               "task_dispatch_rejected_affinity",
               "task_authorization_rejected",
               "task_recovery_authorization",
+              "task_model_group_resolved",
               "task_dependency_repointed",
               "task_released",
               "task_deferred_wait_woke",
@@ -4292,7 +4303,7 @@
             "default": false
           }
         },
-        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
+        "description": "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled."
       },
       "RepoGuidelines": {
         "type": [
@@ -6367,8 +6378,52 @@
                       "enum": [
                         "slack.message",
                         "azure-devops.work_item.assigned",
-                        "azure-devops.work_item.commented"
+                        "azure-devops.work_item.commented",
+                        "github.pull_request.opened",
+                        "github.pull_request.ready_for_review",
+                        "github.pull_request.synchronize",
+                        "github.pull_request.closed",
+                        "github.issue.opened",
+                        "github.issue.assigned",
+                        "github.issue.labeled",
+                        "github.issue_comment.created",
+                        "github.check_suite.completed",
+                        "jira.issue.assigned",
+                        "jira.issue.commented",
+                        "jira.issue.transitioned"
                       ]
+                    },
+                    "match": {
+                      "type": "object",
+                      "properties": {
+                        "repo": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                        },
+                        "project": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira project key (payload `project`). Compared case-insensitively."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                        },
+                        "assignee": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                        },
+                        "status": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                     }
                   },
                   "required": [
@@ -7249,8 +7304,52 @@
                       "enum": [
                         "slack.message",
                         "azure-devops.work_item.assigned",
-                        "azure-devops.work_item.commented"
+                        "azure-devops.work_item.commented",
+                        "github.pull_request.opened",
+                        "github.pull_request.ready_for_review",
+                        "github.pull_request.synchronize",
+                        "github.pull_request.closed",
+                        "github.issue.opened",
+                        "github.issue.assigned",
+                        "github.issue.labeled",
+                        "github.issue_comment.created",
+                        "github.check_suite.completed",
+                        "jira.issue.assigned",
+                        "jira.issue.commented",
+                        "jira.issue.transitioned"
                       ]
+                    },
+                    "match": {
+                      "type": "object",
+                      "properties": {
+                        "repo": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                        },
+                        "project": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira project key (payload `project`). Compared case-insensitively."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                        },
+                        "assignee": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                        },
+                        "status": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                     }
                   },
                   "required": [
@@ -9208,13 +9307,17 @@
                           },
                           "updatedAt": {
                             "type": "string"
+                          },
+                          "favorite": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
                           "id",
                           "name",
                           "createdAt",
-                          "updatedAt"
+                          "updatedAt",
+                          "favorite"
                         ]
                       }
                     }
@@ -12345,6 +12448,14 @@
                         "number",
                         "null"
                       ]
+                    },
+                    "dialect": {
+                      "type": "string",
+                      "enum": [
+                        "sqlite",
+                        "postgres"
+                      ],
+                      "description": "SQL dialect of the storage engine that ran the query"
                     }
                   },
                   "required": [
@@ -12353,7 +12464,8 @@
                     "elapsed",
                     "total",
                     "truncated",
-                    "rowLimit"
+                    "rowLimit",
+                    "dialect"
                   ]
                 }
               }
@@ -19913,10 +20025,222 @@
         }
       }
     },
+    "/api/codex-oauth/slots/{slot}/credentials": {
+      "put": {
+        "summary": "Persist refreshed Codex OAuth credentials for a pool slot",
+        "description": "Writes the global secret codex_oauth_<slot>. The caller must hold the slot's refresh lock (lockOwner). Open to registered agents so a worker can persist the tokens it just rotated; no other config key is writable here.",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "slot",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lockOwner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot>"
+                  },
+                  "credentials": {
+                    "type": "object",
+                    "properties": {
+                      "access": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "refresh": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "expires": {
+                        "type": "number"
+                      },
+                      "accountId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "access",
+                      "refresh",
+                      "expires",
+                      "accountId"
+                    ]
+                  }
+                },
+                "required": [
+                  "lockOwner",
+                  "credentials"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credentials stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "key"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not the operator or a registered agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Caller does not hold the slot's refresh lock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Quarantine a Codex OAuth pool slot after a failed persist",
+        "description": "Deletes the global secret codex_oauth_<slot> so no caller replays a consumed refresh token. The caller must hold the slot's refresh lock (lockOwner).",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "slot",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lockOwner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot>"
+                  }
+                },
+                "required": [
+                  "lockOwner"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slot quarantined (deleted is false when no row existed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "key",
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not the operator or a registered agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Caller does not hold the slot's refresh lock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/comb/review-batches": {
       "post": {
-        "summary": "Send agent-fs comments to the swarm as one lead task",
-        "description": "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
+        "summary": "Send agent-fs comments to the swarm as one task",
+        "description": "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates one task. An optional parentTaskId attaches it as a follow-up for the parent’s agent. Without a parent assignee it routes to the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
         "tags": [
           "Comb"
         ],
@@ -19931,6 +20255,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "parentTaskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "orgId": {
                     "type": "string",
                     "minLength": 1
@@ -25724,7 +26052,8 @@
                 "agent-fs-path",
                 "key",
                 "session",
-                "hidden-key"
+                "hidden-key",
+                "app"
               ]
             },
             "required": false,
@@ -25806,7 +26135,8 @@
                       "agent-fs-path",
                       "key",
                       "session",
-                      "hidden-key"
+                      "hidden-key",
+                      "app"
                     ]
                   },
                   "itemId": {
@@ -25846,7 +26176,8 @@
                         "agent-fs-path",
                         "key",
                         "session",
-                        "hidden-key"
+                        "hidden-key",
+                        "app"
                       ]
                     },
                     "itemId": {
@@ -29514,6 +29845,16 @@
           },
           "400": {
             "description": "Missing query or agent ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory search failed (never sent as an empty result list)",
             "content": {
               "application/json": {
                 "schema": {
@@ -36694,6 +37035,9 @@
                                 "null"
                               ]
                             },
+                            "review_follow_ups": {
+                              "type": "boolean"
+                            },
                             "service_user_id": {
                               "type": [
                                 "string",
@@ -36708,6 +37052,7 @@
                             "live_url",
                             "org_id",
                             "drive_id",
+                            "review_follow_ups",
                             "service_user_id"
                           ]
                         }
@@ -40007,6 +40352,9 @@
                               "resolvedProfile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "provider": {
                                 "type": "string",
                                 "enum": [
@@ -40193,6 +40541,19 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[\\x21-\\x7E]{1,255}$",
+              "description": "Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one task (a replay returns that task as it is now); a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire."
+            },
+            "required": false,
+            "description": "Optional client-generated key, 1-255 visible ASCII characters (a UUID works). The first request the server accepts under a key creates one task (a replay returns that task as it is now); a retry with the same key and an equivalent body gets that request's status and body back (with `Idempotent-Replayed: true`) and changes nothing. The key is scoped to the caller's identity and this operation; it is not a credential. The same key with a different body is a 409. A request rejected before it is accepted (validation, auth, not found, disabled) does not use up the key. Accepted keys do not expire.",
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -40322,6 +40683,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "modelGroup": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "draft": {
                     "type": "boolean"
                   }
@@ -40345,7 +40710,7 @@
             }
           },
           "400": {
-            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, or agentId/offeredTo targets an extension identity",
+            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), a `vcsRepo` that is not exactly one registered repo, agentId/offeredTo targets an extension identity, or a malformed Idempotency-Key",
             "content": {
               "application/json": {
                 "schema": {
@@ -40355,7 +40720,27 @@
             }
           },
           "403": {
-            "description": "Parent/session access denied, unauthorized chat-thread binding, or routing requirements reject the assignment",
+            "description": "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key was already used for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The task created under this Idempotency-Key was deleted",
             "content": {
               "application/json": {
                 "schema": {
@@ -41694,6 +42079,9 @@
                             "type": "string"
                           },
                           "resolvedProfile": {
+                            "type": "string"
+                          },
+                          "modelGroup": {
                             "type": "string"
                           },
                           "provider": {
@@ -43838,6 +44226,7 @@
     "/api/pages/{id}/launch": {
       "post": {
         "summary": "Launch a page session (issues HttpOnly cookie)",
+        "description": "The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.",
         "tags": [
           "Pages"
         ],
@@ -46408,7 +46797,7 @@
             }
           },
           "403": {
-            "description": "Only the lead, the operator or a user can change allowMerge or mergePolicy",
+            "description": "Only the lead, the operator or a user can change allowMerge, mergePolicy, url, clonePath or hooks",
             "content": {
               "application/json": {
                 "schema": {
@@ -46659,7 +47048,7 @@
             }
           },
           "403": {
-            "description": "Only the lead, the operator or a user can turn allowMerge on or set a mergePolicy",
+            "description": "Only the lead, the operator or a user can turn allowMerge on, set a mergePolicy or enable hooks",
             "content": {
               "application/json": {
                 "schema": {
@@ -47911,6 +48300,9 @@
                   "profile": {
                     "type": "string"
                   },
+                  "modelGroup": {
+                    "type": "string"
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -48093,6 +48485,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -48466,6 +48861,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -48662,6 +49060,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
@@ -48903,6 +49304,9 @@
                           ]
                         },
                         "profile": {
+                          "type": "string"
+                        },
+                        "modelGroup": {
                           "type": "string"
                         },
                         "scheduleType": {
@@ -49161,6 +49565,9 @@
                     "profile": {
                       "type": "string"
                     },
+                    "modelGroup": {
+                      "type": "string"
+                    },
                     "scheduleType": {
                       "type": "string",
                       "enum": [
@@ -49360,6 +49767,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -49544,6 +49957,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -49776,6 +50192,12 @@
                       "null"
                     ]
                   },
+                  "modelGroup": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "allowCustomModel": {
                     "type": "boolean"
                   },
@@ -49960,6 +50382,9 @@
                       ]
                     },
                     "profile": {
+                      "type": "string"
+                    },
+                    "modelGroup": {
                       "type": "string"
                     },
                     "scheduleType": {
@@ -55589,6 +56014,22 @@
             },
             "required": false,
             "name": "scriptName",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "objectScriptId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "objectId",
             "in": "query"
           },
           {
@@ -65438,6 +65879,13 @@
                           },
                           "updatedAt": {
                             "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "function",
+                              "durable"
+                            ]
                           }
                         },
                         "required": [
@@ -65453,7 +65901,8 @@
                           "fsMode",
                           "createdByAgentId",
                           "createdAt",
-                          "updatedAt"
+                          "updatedAt",
+                          "kind"
                         ]
                       }
                     }
@@ -67742,6 +68191,9 @@
                               "profile": {
                                 "type": "string"
                               },
+                              "modelGroup": {
+                                "type": "string"
+                              },
                               "scheduleType": {
                                 "type": "string",
                                 "enum": [
@@ -67930,6 +68382,9 @@
                                 ]
                               },
                               "profile": {
+                                "type": "string"
+                              },
+                              "modelGroup": {
                                 "type": "string"
                               },
                               "scheduleType": {
@@ -69170,6 +69625,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "Jira webhook handler not configured",
             "content": {
@@ -69744,8 +70209,28 @@
               }
             }
           },
+          "400": {
+            "description": "Signed body is not valid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -74460,6 +74945,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "GitHub integration not configured",
             "content": {
@@ -74737,6 +75232,16 @@
               }
             }
           },
+          "413": {
+            "description": "Body exceeds 5 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "AgentMail integration not configured or inbound archive unavailable",
             "content": {
@@ -74792,6 +75297,16 @@
           },
           "401": {
             "description": "Invalid signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {
@@ -74974,7 +75489,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -75067,7 +75582,7 @@
             }
           },
           "403": {
-            "description": "Event name is reserved for provider webhooks",
+            "description": "Event name is reserved for provider webhooks or server-emitted events",
             "content": {
               "application/json": {
                 "schema": {
@@ -75632,8 +76147,52 @@
                               "enum": [
                                 "slack.message",
                                 "azure-devops.work_item.assigned",
-                                "azure-devops.work_item.commented"
+                                "azure-devops.work_item.commented",
+                                "github.pull_request.opened",
+                                "github.pull_request.ready_for_review",
+                                "github.pull_request.synchronize",
+                                "github.pull_request.closed",
+                                "github.issue.opened",
+                                "github.issue.assigned",
+                                "github.issue.labeled",
+                                "github.issue_comment.created",
+                                "github.check_suite.completed",
+                                "jira.issue.assigned",
+                                "jira.issue.commented",
+                                "jira.issue.transitioned"
                               ]
+                            },
+                            "match": {
+                              "type": "object",
+                              "properties": {
+                                "repo": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                                },
+                                "project": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira project key (payload `project`). Compared case-insensitively."
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                                },
+                                "assignee": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                             }
                           },
                           "required": [
@@ -76177,8 +76736,52 @@
                               "enum": [
                                 "slack.message",
                                 "azure-devops.work_item.assigned",
-                                "azure-devops.work_item.commented"
+                                "azure-devops.work_item.commented",
+                                "github.pull_request.opened",
+                                "github.pull_request.ready_for_review",
+                                "github.pull_request.synchronize",
+                                "github.pull_request.closed",
+                                "github.issue.opened",
+                                "github.issue.assigned",
+                                "github.issue.labeled",
+                                "github.issue_comment.created",
+                                "github.check_suite.completed",
+                                "jira.issue.assigned",
+                                "jira.issue.commented",
+                                "jira.issue.transitioned"
                               ]
+                            },
+                            "match": {
+                              "type": "object",
+                              "properties": {
+                                "repo": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                                },
+                                "project": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira project key (payload `project`). Compared case-insensitively."
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                                },
+                                "assignee": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                             }
                           },
                           "required": [
@@ -77520,6 +78123,16 @@
           },
           "404": {
             "description": "Workflow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 5 MiB",
             "content": {
               "application/json": {
                 "schema": {

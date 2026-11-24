@@ -1179,3 +1179,99 @@ Every config keeps its verdict and distinct-state count from the #3215 table abo
 `src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
 `workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
 `workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`.
+
+## Sync with #3349 (`main` @ `50c105563`)
+
+#3349 moves the step watchdog into `runWithNodeDeadline` (`node-timeout.ts:55-69`) and calls it
+from `runClaimedStep`, the foreach item driver and the retry poller. The poller's `P5` now gets
+the same deadline as `XRun`: on expiry the race rejects into the poller's catch and takes the
+fenced `P7`. The model's `P5` already picks `fail` nondeterministically, and an attempt that hangs
+is a `P5` that never fires, so no guard, ordering or write path changes and the `.tla` and `.cfg`
+files are unchanged. Before #3349 a hung retry held the run (`P4`'s hold) until its executor
+returned; the model never forced `P5` to fire, so that liveness gap was not checked either way.
+ACTIONS.md re-pins the `XRun` and `P5` rows and every `engine.ts` line after the old race (-5) and
+`retry-poller.ts` line after its imports (+1).
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`. #3349's e2e scenario
+`workflow-retry-deadline` passes.
+
+## Sync with #3476 (`main` @ `34c2c1b7d`)
+
+#3476 widens the executable-source interpolation guard from `script` bodies to `code-match` code
+and string `wait` filters (`EXECUTABLE_SOURCE_FIELDS`). A disallowed or unresolved token still
+fails the step with no retry policy before `executor.run`, through the same fenced
+`checkpointStepFailure` in `runClaimedStep`, the foreach item driver and the retry poller; only the
+error text now names the node type's field. The model does not distinguish node types, so the
+existing `XFail` / `P7` with a spent budget already covers every such node, and the `.tla` and
+`.cfg` files are unchanged. ACTIONS.md notes the guard on the `XFail` row and re-pins the
+`runClaimedStep` lines (`engine.ts:1020-1272`), which were one line short since the #3349 sync.
+
+Every config keeps its verdict and distinct-state count from the #3215 table above (tla2tools
+2026.11.06, BFS, `-workers 4 -deadlock`, `-workers 8` for `Probe-join-retry-sweep.cfg`).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2`: 121 pass / 0 fail / 0 `test.failing`. #3476's e2e scenario
+`workflow-executable-config-sources` passes.
+
+## Sync with #3485, #3494 and #3562 (`main` @ `514621abb`)
+
+#3494 decides a run's principal from the pinned definition inside the run-creation transaction and
+stores it as one more column of the same INSERT, so `IStart` is unchanged. The `swarm-script` and
+`sub-workflow` executors now refuse with a failed result, before any side effect, when that
+principal is refused (a creator-owned workflow last edited by another non-lead agent). For
+`sub-workflow` the refusal sits next to the existing pre-start refusals (depth, recursion, a missing
+or disabled child workflow), after the read of the attempt's child and before the child start. The
+model had no such branch: `ChildStart` with no child always started one. It now may also go to the
+fenced `XFail` when `"fail"` is in `BranchOutcomes`. That is redundant on a first call (`XRun` / `P5`
+already pick `fail`) and new on a re-claimed row (`XChild`) whose first call crashed before the
+refusal. `Probe-child-run-refusal.cfg` (new) is `Probe-child-run-crash.cfg` with
+`BranchOutcomes = {"async", "fail"}` and holds. Only `Probe-child-run-unreadable.cfg` has both
+`ChildRunResume` and `"fail"`; it keeps its CX14 verdict.
+
+#3485 makes the approval resume route on the stored request bound to the step instead of the event
+payload; approval steps are a node kind the model does not have, so no action changes.
+
+#3562 adds Postgres as a second storage engine. No modelled guard, ordering or write path changes.
+Every guarded statement the model encodes (the step fence, the waiting park, the retry claim and
+drop, the due-retry scan with its run-status filter, the stuck-run and settled-child scans, the
+lineage walk, the attempt check of a child-run insert) moved verbatim into the shared workflows
+repository (`packages/storage/src/repositories/workflows.ts`), with dialect copies of the scans that
+read `rowid`; some list queries gained an explicit insertion-order `ORDER BY`, which no guard reads.
+Every transaction now goes through `getStorage().transaction`. On SQLite it is the same FIFO-locked
+`BEGIN IMMEDIATE` client, moved to `packages/storage-sqlite`. A callback may now run more than once
+(a Postgres serialization retry, the test-only `--tx-replay`), and the process-local marks a claim
+sets inside it (`executingSteps`, the successor hold) are given back on each rolled-back attempt
+(`onAttemptRollback`), so a committed attempt is still one atomic action and a rolled-back one
+leaves no state. The model checks the SQLite engine. On Postgres the database serializes the row
+writes, but the process-local reads inside a transaction (`hasOwedSuccessors`, `executingSteps`)
+are not part of that serialization; the model assumes them atomic with the transaction, as on
+SQLite.
+
+ACTIONS.md notes all three, re-pins every `src/workflows` line on `main`, and points the moved SQL
+at the repositories.
+
+Re-run with tla2tools 2026.11.19, BFS, `-workers 4 -deadlock` (`-workers 8` for
+`Probe-join-retry-sweep.cfg`). Every config keeps its verdict, and every config that holds keeps
+its distinct-state count (distinct states at a violation vary with worker scheduling).
+`src/tests/workflow-tla-races.test.ts` + `workflow-sub-workflow` + `workflow-cascade-cancel` +
+`workflow-agent-task-retry` + `workflow-finalization-races` + `workflow-parallel-park` +
+`workflow-retry-v2` + `workflow-hitl-routing` + `workflow-replay` + `workflow-definition-pinning`:
+168 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 30,581 | 23 |
+| `Long.cfg` | `JoinWaitsForBranches` violated (CX8) | 2,234,071 | 27 |
+| `Fix-CX1` .. `Fix-CX7`, `Fix-CX11`, `Fix-CX13` | all hold | unchanged | - |
+| `Ctl-*`, calibration | same verdicts | - | - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 7,825,516 / 1,085,531 | - / 39 |
+| `Probe-child-run-crash.cfg` / control | holds / #2364 bug found | 10,704 / 547 | - / 18 |
+| `Probe-child-run-refusal.cfg` (new) | holds | 16,395 | - |
+| `Probe-child-run-unreadable.cfg` | CX14 found | 1,497 | 19 |
+| `Probe-orphan-sweep.cfg` | CX15 found | 7,186 | 36 |
+| `Probe-join-retry-sweep.cfg` | CX18 found | 17,844,527 | 42 |
+| other `Probe-*` | same verdicts; the holding ones keep their counts | - | - |

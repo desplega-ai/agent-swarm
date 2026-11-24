@@ -1,4 +1,5 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { callTool, expectToolOk } from "./platformb-helpers";
@@ -25,6 +26,29 @@ import {
 const GENERAL = "C0GENERAL0";
 
 type DelegatedAsk = { leadId: string; threadTs: string; askTaskId: string; followUpId: string };
+type WorkerAttachment =
+  | { kind: "url"; url: string; name: string }
+  | { kind: "page"; pageId: string; name: string };
+type WorkerResult = { output: string; attachments: WorkerAttachment[] };
+
+/**
+ * How many times `needle` appears in the captions (context blocks) of the
+ * thread's messages that contain `anchor`. The answer itself is not counted:
+ * a card carries it both as text and in its blocks.
+ */
+function captionOccurrences(
+  ctx: ScenarioContext,
+  channel: string,
+  threadTs: string,
+  anchor: string,
+  needle: string,
+): number {
+  return threadMessages(ctx, channel, threadTs, anchor)
+    .flatMap((message) => (message.blocks ?? []) as { type?: string }[])
+    .filter((block) => block.type === "context")
+    .map((block) => JSON.stringify(block).split(needle).length - 1)
+    .reduce((total, count) => total + count, 0);
+}
 
 function threadMessages(
   ctx: ScenarioContext,
@@ -49,8 +73,7 @@ async function expectFinalizedCard(
   type CardRow = { thread_ts: string; finalized_at: string | null };
   const read = () =>
     ctx.db.get<CardRow>(
-      "SELECT thread_ts, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-      [taskId],
+      sql`SELECT thread_ts, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${taskId}`,
     );
   // The message lands in Slack at chat.startStream; finalized_at is written
   // only after stopStream, the status clear and the permalink read. Wait for it.
@@ -65,9 +88,16 @@ async function expectFinalizedCard(
   );
 }
 
+/** The prompt the Lead reads for follow-up `taskId`. */
+function followUpPrompt(ctx: ScenarioContext, taskId: string): string {
+  return ctx.db.get<{ task: string }>(sql`SELECT task FROM agent_tasks WHERE id = ${taskId}`)?.task ?? "";
+}
+
 /** Lets `leadId` hold several tasks at once, through agent re-registration. */
 async function allowSeveralTasks(ctx: ScenarioContext, leadId: string): Promise<void> {
-  const name = ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [leadId])?.name;
+  const name = ctx.db.get<{ name: string }>(
+    sql`SELECT name FROM agents WHERE id = ${leadId}`,
+  )?.name;
   expectStatus(
     await ctx.api("POST", "/api/agents", {
       agentId: leadId,
@@ -79,15 +109,29 @@ async function allowSeveralTasks(ctx: ScenarioContext, leadId: string): Promise<
 }
 
 /** Ask in channel id `channel`, delegate to a worker, finish both, and claim the Lead's follow-up. */
+/**
+ * Two Slack users of this scenario only, in turn. Slack inbound takes 10 messages per user per
+ * minute (`checkRateLimit` in src/slack/handlers.ts) and drops the next one with no reply. This
+ * scenario posts 10 asks in under a minute: as the shared `alice`, the asks of the scenarios
+ * before it counted too, and the last ask never became a task.
+ */
+function askerPool(ctx: ScenarioContext): () => string {
+  const ids = ["carol", "dave"].map((name) => ctx.slack.addUser({ name }).id);
+  let asks = 0;
+  return () => ids[asks++ % ids.length] as string;
+}
+
 async function delegatedAsk(
   ctx: ScenarioContext,
+  user: string,
   channel: string,
   workerId: string,
   label: string,
+  workerResult?: WorkerResult,
 ): Promise<DelegatedAsk> {
   const message = await ctx.slack.postMessage({
     channel,
-    user: "alice",
+    user,
     text: `<@${ctx.slack.bot.userId}> ${label}: get a specialist on it and report back`,
   });
   ctx.markThread(`lead-follow-up-${label}`, channel, message.ts);
@@ -107,10 +151,27 @@ async function delegatedAsk(
   );
   expect(askCard, `The ${label} ask's own outcome card never posted in ${channel}`);
 
-  await finish(ctx, workerId, childId, {
-    status: "completed",
-    output: `${label} worker result ${ctx.nonce}`,
-  });
+  if (workerResult) {
+    // store-progress, not the finish route: only it records attachments.
+    const workerConn = await ctx.connectMcp(workerId);
+    try {
+      expectToolOk(
+        await callTool(workerConn, "store-progress", {
+          taskId: childId,
+          status: "completed",
+          ...workerResult,
+        }),
+        `complete the ${label} worker task with deliverables`,
+      );
+    } finally {
+      await workerConn.close();
+    }
+  } else {
+    await finish(ctx, workerId, childId, {
+      status: "completed",
+      output: `${label} worker result ${ctx.nonce}`,
+    });
+  }
   const followUpId = await findWorkerFollowUp(ctx, leadId, childId);
   await claim(ctx, leadId, followUpId);
   return { leadId, threadTs: message.ts, askTaskId, followUpId };
@@ -124,19 +185,94 @@ export const slackLeadFollowUpCard: Scenario = {
     await enableSlackRenderV2Only(ctx);
     await registerLead(ctx, "e2e-lead-follow-up-card");
     const workerId = await registerWorker(ctx, "e2e-specialist-follow-up-card");
+    const asker = askerPool(ctx);
 
-    // 1. The follow-up's output posts once in the ask's thread.
-    const posted = await delegatedAsk(ctx, GENERAL, workerId, "posted");
-    const postedOutput = `follow-up review posted ${ctx.nonce}`;
-    await finish(ctx, posted.leadId, posted.followUpId, {
-      status: "completed",
-      output: postedOutput,
+    // 1. The follow-up's output posts once in the ask's thread, with the
+    // worker's deliverables under it: worker cards do not post while
+    // delegation is off, so this card is the only place people see them. A
+    // link the Lead's answer already carries is not repeated.
+    const reportUrl = `https://docs.example.test/report-${ctx.nonce}`;
+    const prUrl = `https://github.com/example/repo-${ctx.nonce}/pull/42`;
+    const quotedUrl = `https://docs.example.test/quoted-${ctx.nonce}`;
+    const fileUrl = `https://app.example.test/file/~/org/drive/reports/summary-${ctx.nonce}.md`;
+    const videoUrl = `https://cdn.example.test/demo-${ctx.nonce}.mp4`;
+    const postedShareUrl = `https://live.agent-fs.dev/share/posted${ctx.nonce}`;
+    const pageId = crypto.randomUUID();
+    const posted = await delegatedAsk(ctx, asker(), GENERAL, workerId, "posted", {
+      output: `posted worker result ${ctx.nonce}: opened ${prUrl}. Notes at ${quotedUrl}. File ${fileUrl}, demo ${videoUrl}, share ${postedShareUrl}`,
+      attachments: [
+        { kind: "url", url: reportUrl, name: `report ${ctx.nonce}` },
+        { kind: "page", pageId, name: "Review notes" },
+      ],
     });
+    // The Lead cites the worker's PR and attaches the worker's report: each
+    // URL still shows once on the card. A bare URL in the answer becomes a
+    // short `<url|label>` link; one in a code span stays as written.
+    const postedOutput = `follow-up review posted ${ctx.nonce}`;
+    const codeUrl = `https://docs.example.test/code-${ctx.nonce}`;
+    const leadConn = await ctx.connectMcp(posted.leadId);
+    try {
+      expectToolOk(
+        await callTool(leadConn, "store-progress", {
+          taskId: posted.followUpId,
+          status: "completed",
+          output: `${postedOutput}. Merged the PR [citation:1]. Notes: ${quotedUrl}. Repro: \`${codeUrl}\``,
+          citations: [{ index: 1, kind: "url", ref: prUrl, label: "Merged PR" }],
+          attachments: [{ kind: "url", url: reportUrl, name: `report ${ctx.nonce}` }],
+        }),
+        "complete the Lead review with a citation and an attachment",
+      );
+    } finally {
+      await leadConn.close();
+    }
     const landed = await pollUntil(
       () => threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).length > 0,
       30_000,
     );
     expect(landed, "The Lead follow-up's outcome card never posted in the ask's thread");
+    const deliverables = await pollUntil(
+      () =>
+        captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, reportUrl) === 1 &&
+        captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, prUrl) === 1,
+      15_000,
+    );
+    expect(
+      deliverables,
+      `The follow-up card does not list the worker's attachment and output link once each: ${JSON.stringify(threadMessages(ctx, GENERAL, posted.threadTs, postedOutput))}`,
+    );
+    // Each link is a short label with a type icon under a "Links:" heading.
+    for (const needle of [
+      `Links: 🌐 <${reportUrl}|report ${ctx.nonce}>`,
+      `/pages/${pageId}|Review notes>`,
+      "📃 <http",
+      `Sources: <${prUrl}|[1]> Merged PR`,
+      `📄 <${fileUrl}|summary-${ctx.nonce}.md>`,
+      `🎬 <${videoUrl}|demo-${ctx.nonce}.mp4>`,
+      `🔗 <${postedShareUrl}|Shared file>`,
+    ]) {
+      const shown = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, needle);
+      expect(
+        shown === 1,
+        `The follow-up card shows ${JSON.stringify(needle)} ${shown} times, expected 1`,
+      );
+    }
+    // A cited link stays a source: it is not listed again under "Links:".
+    const prAsLink = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, "🔀");
+    expect(prAsLink === 0, `The cited PR is also listed under "Links:" ${prAsLink} times`);
+    const quoted = captionOccurrences(ctx, GENERAL, posted.threadTs, postedOutput, quotedUrl);
+    expect(
+      quoted === 0,
+      `A link already in the Lead's answer is repeated ${quoted} times in captions`,
+    );
+    const answer = JSON.stringify(
+      threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).map((message) => message.text),
+    );
+    expect(
+      answer.includes(`<${quotedUrl}|docs.example.test/quoted-`) &&
+        answer.includes(`\`${codeUrl}\``) &&
+        !answer.includes(`<${codeUrl}`),
+      `The answer does not link its bare URL and keep its code span as written: ${answer}`,
+    );
     // Watch several ticks: the card must not repeat.
     await pollUntil(() => false, slackAbsenceWindowMs(ctx));
     const copies = threadMessages(ctx, GENERAL, posted.threadTs, postedOutput).length;
@@ -175,8 +311,7 @@ export const slackLeadFollowUpCard: Scenario = {
     const pinnedSettled = await pollUntil(
       () =>
         ctx.db.get<{ delivery_abandoned_at: string | null }>(
-          "SELECT delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-          [pinnedFollowUpId],
+          sql`SELECT delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${pinnedFollowUpId}`,
         )?.delivery_abandoned_at != null,
       30_000,
     );
@@ -185,11 +320,111 @@ export const slackLeadFollowUpCard: Scenario = {
       threadMessages(ctx, GENERAL, posted.threadTs, pinnedOutput).length === 0,
       "A Lead follow-up with no Slack ask in its parent chain posted a card",
     );
+    // The Lead learns this while it reviews, not after its answer was dropped.
+    const pinnedPrompt = followUpPrompt(ctx, pinnedFollowUpId);
+    expect(
+      pinnedPrompt.includes("Result card NOT posted: no_slack_ask") &&
+        pinnedPrompt.includes("slack-reply"),
+      `The pinned follow-up's prompt does not say its card will not post: ${pinnedPrompt}`,
+    );
+
+    // 1c. A worker the Lead dispatched from a Slack ask, with parentTaskId set
+    // to an older non-Slack task for context, posts its follow-up card: the ask
+    // is on the dispatch edge only. Before the fix the walk followed only
+    // parentTaskId, settled this card as no_slack_ask and the thread got nothing.
+    const older = await ctx.api("POST", "/api/tasks", {
+      body: {
+        task: `older non-Slack task ${ctx.nonce}`,
+        routingReason: "human_pinned",
+        agentId: workerId,
+        source: "api",
+      },
+    });
+    expectStatus(older, [201], "create the older non-Slack context task");
+    const olderId = String(asRecord(older.json).id);
+    await claim(ctx, workerId, olderId);
+    await finish(ctx, workerId, olderId, { status: "completed", output: "older work done" });
+    // Its own follow-up would be the Lead's next poll; clear it first.
+    const olderFollowUpId = await findWorkerFollowUp(ctx, posted.leadId, olderId);
+    await claim(ctx, posted.leadId, olderFollowUpId);
+    await finish(ctx, posted.leadId, olderFollowUpId, { status: "completed", output: "noted" });
+    const dispatchMessage = await ctx.slack.postMessage({
+      channel: GENERAL,
+      user: asker(),
+      text: `<@${ctx.slack.bot.userId}> dispatched: reuse the earlier work and report back`,
+    });
+    ctx.markThread("lead-follow-up-dispatched", GENERAL, dispatchMessage.ts);
+    const dispatchAsk = await findSlackTask(ctx, dispatchMessage.ts);
+    const dispatchAskId = String(dispatchAsk.id);
+    const dispatchLeadId = String(dispatchAsk.agentId);
+    await claim(ctx, dispatchLeadId, dispatchAskId);
+    const askConn = await ctx.connectMcp(dispatchLeadId, {
+      headers: { "X-Source-Task-ID": dispatchAskId },
+    });
+    let dispatchedId = "";
+    try {
+      const sent = expectToolOk(
+        await callTool(askConn, "send-task", {
+          agentId: workerId,
+          task: `dispatched worker task ${ctx.nonce}`,
+          parentTaskId: olderId,
+          routingReason: "skill",
+          routingNote: "e2e: parentTaskId points at an older task for context",
+          slackChannelId: GENERAL,
+          slackThreadTs: dispatchMessage.ts,
+        }),
+        "send-task from the Slack ask with an older parentTaskId",
+      );
+      dispatchedId = String(asRecord(sent.data.task).id);
+    } finally {
+      await askConn.close();
+    }
+    const dispatched = ctx.db.get<{ parentTaskId: string; dispatchedByTaskId: string }>(
+      sql`SELECT "parentTaskId", "dispatchedByTaskId" FROM agent_tasks WHERE id = ${dispatchedId}`,
+    );
+    expect(
+      dispatched?.parentTaskId === olderId && dispatched.dispatchedByTaskId === dispatchAskId,
+      `The dispatched worker task does not carry both edges: ${JSON.stringify(dispatched)}`,
+    );
+    await finish(ctx, dispatchLeadId, dispatchAskId, {
+      status: "completed",
+      output: `dispatched ask answer ${ctx.nonce}`,
+    });
+    await claim(ctx, workerId, dispatchedId);
+    await finish(ctx, workerId, dispatchedId, {
+      status: "completed",
+      output: "dispatched worker done",
+    });
+    const dispatchedFollowUpId = await findWorkerFollowUp(ctx, dispatchLeadId, dispatchedId);
+    const dispatchedPrompt = followUpPrompt(ctx, dispatchedFollowUpId);
+    expect(
+      !dispatchedPrompt.includes("Result card NOT posted"),
+      `The dispatched follow-up's prompt says its card will not post: ${dispatchedPrompt}`,
+    );
+    await claim(ctx, dispatchLeadId, dispatchedFollowUpId);
+    const dispatchedOutput = `dispatched follow-up review ${ctx.nonce}`;
+    await finish(ctx, dispatchLeadId, dispatchedFollowUpId, {
+      status: "completed",
+      output: dispatchedOutput,
+    });
+    const dispatchedLanded = await pollUntil(
+      () => threadMessages(ctx, GENERAL, dispatchMessage.ts, dispatchedOutput).length > 0,
+      30_000,
+    );
+    expect(
+      dispatchedLanded,
+      `The dispatched follow-up's card never posted: ${JSON.stringify(
+        ctx.db.get(
+          sql`SELECT delivery_last_error FROM slack_messages WHERE kind = 'outcome' AND task_id = ${dispatchedFollowUpId}`,
+        ),
+      )}`,
+    );
+    await expectFinalizedCard(ctx, dispatchedFollowUpId, dispatchMessage.ts, "dispatched follow-up");
 
     // 2. A graceful-shutdown resume of the ask posts its output the same way.
     const resumeAsk = await ctx.slack.postMessage({
       channel: GENERAL,
-      user: "alice",
+      user: asker(),
       text: `<@${ctx.slack.bot.userId}> resume: answer after a restart`,
     });
     ctx.markThread("lead-follow-up-resume", GENERAL, resumeAsk.ts);
@@ -203,8 +438,7 @@ export const slackLeadFollowUpCard: Scenario = {
     expectStatus(superseded, [200], "supersede the Slack ask on graceful shutdown");
     const resumeId = String(asRecord(superseded.json).resumeTaskId);
     const resume = ctx.db.get<{ source: string; taskType: string; slackThreadTs: string }>(
-      "SELECT source, taskType, slackThreadTs FROM agent_tasks WHERE id = ?",
-      [resumeId],
+      sql`SELECT source, "taskType", "slackThreadTs" FROM agent_tasks WHERE id = ${resumeId}`,
     );
     expect(
       resume?.source === "system" &&
@@ -238,8 +472,7 @@ export const slackLeadFollowUpCard: Scenario = {
     type FollowUpRow = { id: string; agentId: string; slackChannelId: string | null };
     const readPlain = () =>
       ctx.db.get<FollowUpRow>(
-        "SELECT id, agentId, slackChannelId FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'follow-up'",
-        [plainId],
+        sql`SELECT id, "agentId", "slackChannelId" FROM agent_tasks WHERE "parentTaskId" = ${plainId} AND "taskType" = 'follow-up'`,
       );
     await pollUntil(() => readPlain() !== null, 15_000);
     const plain = readPlain();
@@ -254,12 +487,12 @@ export const slackLeadFollowUpCard: Scenario = {
     );
     expect(!plainPosted, "A follow-up with no Slack context posted to Slack");
     expect(
-      !ctx.db.get("SELECT 1 FROM slack_messages WHERE task_id = ?", [plain.id]),
+      !ctx.db.get(sql`SELECT 1 FROM slack_messages WHERE task_id = ${plain.id}`),
       "A follow-up with no Slack context got a slack_messages row",
     );
 
     // 4. No card when the Lead already answered with slack-reply.
-    const replied = await delegatedAsk(ctx, GENERAL, workerId, "replied");
+    const replied = await delegatedAsk(ctx, asker(), GENERAL, workerId, "replied");
     const replyText = `follow-up hand reply ${ctx.nonce}`;
     const conn = await ctx.connectMcp(replied.leadId);
     try {
@@ -288,7 +521,7 @@ export const slackLeadFollowUpCard: Scenario = {
     // reviewed task's id, so slackReplySent stayed 0 on the follow-up and its
     // card repeated the reply. The worker sends the follow-up as the source
     // task (X-Source-Task-Id), so slack-reply marks the follow-up too.
-    const misattributed = await delegatedAsk(ctx, GENERAL, workerId, "misattributed");
+    const misattributed = await delegatedAsk(ctx, asker(), GENERAL, workerId, "misattributed");
     const misattributedReply = `follow-up reply on the ask task ${ctx.nonce}`;
     const misConn = await ctx.connectMcp(misattributed.leadId, {
       headers: { "X-Source-Task-Id": misattributed.followUpId },
@@ -305,8 +538,7 @@ export const slackLeadFollowUpCard: Scenario = {
       await misConn.close();
     }
     const sourceMarked = ctx.db.get<{ slackReplySent: number }>(
-      "SELECT slackReplySent FROM agent_tasks WHERE id = ?",
-      [misattributed.followUpId],
+      sql`SELECT "slackReplySent" FROM agent_tasks WHERE id = ${misattributed.followUpId}`,
     );
     expect(
       sourceMarked?.slackReplySent === 1,
@@ -340,11 +572,11 @@ export const slackLeadFollowUpCard: Scenario = {
     // count: the follow-up still posts its card. A person mentions the bot in
     // the thread while the follow-up runs, and the Lead (now allowed several
     // tasks at once) answers that new task with slack-reply.
-    const concurrent = await delegatedAsk(ctx, GENERAL, workerId, "concurrent");
+    const concurrent = await delegatedAsk(ctx, asker(), GENERAL, workerId, "concurrent");
     await allowSeveralTasks(ctx, concurrent.leadId);
     const mention = await ctx.slack.postMessage({
       channel: GENERAL,
-      user: "alice",
+      user: asker(),
       thread_ts: concurrent.threadTs,
       text: `<@${ctx.slack.bot.userId}> concurrent: one more question`,
     });
@@ -390,7 +622,7 @@ export const slackLeadFollowUpCard: Scenario = {
     // and still posts its card. B's own card is suppressed.
     const fanAsk = await ctx.slack.postMessage({
       channel: GENERAL,
-      user: "alice",
+      user: asker(),
       text: `<@${ctx.slack.bot.userId}> fan-out: get two specialists on it`,
     });
     ctx.markThread("lead-follow-up-fan-out", GENERAL, fanAsk.ts);
@@ -444,50 +676,101 @@ export const slackLeadFollowUpCard: Scenario = {
     const postedB = threadMessages(ctx, GENERAL, fanAsk.ts, outputB).length;
     expect(postedB === 0, "Follow-up B posted a card after its own slack-reply");
 
-    // 5. No card in a Slack Connect channel. The mock always reports channels
-    // as internal, so one injected conversations.info answer marks this fresh
-    // channel external; the API caches that verdict for 10 minutes.
+    // 5. A Slack Connect channel gets the follow-up card too, like the ask's
+    // own card, while SLACK_BLOCK_EXTERNAL_CHANNELS is off (the default).
+    // Regression: the follow-up gate refused every Slack Connect channel
+    // whatever the flag said and settled the card as abandoned, so a
+    // delegated answer never reached the customer thread. The mock always
+    // reports channels as internal, so one injected conversations.info answer
+    // marks this fresh channel external for any code that asks.
     const externalId = `C0EXT${ctx.nonce.slice(0, 5).toUpperCase()}`;
     const alice = ctx.slack.user("alice").id;
+    const externalAsker = asker();
     ctx.slack.addChannel({
       id: externalId,
       name: `ext-${ctx.nonce.toLowerCase()}`,
-      members: [alice],
+      members: [alice, externalAsker],
     });
-    const external = await delegatedAsk(ctx, externalId, workerId, "external");
+    // Only a public share link the worker made reaches a Slack Connect
+    // thread; its app file link and internal attachment do not. A `/share/`
+    // path on a host that does not serve agent-fs shares is dropped too:
+    // worker output is free text. The SUT leaves AGENT_FS_LIVE_URL unset, so
+    // the default live host serves the shares.
+    const shareUrl = `https://live.agent-fs.dev/share/tok${ctx.nonce}`;
+    const spoofedShareUrl = `https://internal.example.test/share/tok${ctx.nonce}`;
+    const appFileUrl = `https://app.example.test/file/~/org/drive/notes-${ctx.nonce}.md`;
+    const internalUrl = `https://docs.example.test/internal-${ctx.nonce}`;
+    const external = await delegatedAsk(ctx, externalAsker, externalId, workerId, "external", {
+      output: `external worker result ${ctx.nonce}: public ${shareUrl}, app ${appFileUrl}, other ${spoofedShareUrl}`,
+      attachments: [{ kind: "url", url: internalUrl, name: `internal ${ctx.nonce}` }],
+    });
+    // A message after the ask's card stops a merge into it: as in production,
+    // where the follow-up ended past the merge window, it posts its own card.
+    await ctx.slack.postMessage({
+      channel: externalId,
+      user: "alice",
+      thread_ts: external.threadTs,
+      text: `<@${ctx.slack.user("bob").id}> side note ${ctx.nonce}`,
+    });
     const faultCode = "e2e_ext_shared";
     ctx.slack.injectFault({
       method: "conversations.info",
       error: faultCode,
       extra: { ok: true, channel: { id: externalId, is_ext_shared: true } },
     });
-    const externalOutput = `follow-up review external ${ctx.nonce}`;
-    await finish(ctx, external.leadId, external.followUpId, {
-      status: "completed",
-      output: externalOutput,
-    });
-    const leaked = await pollUntil(
-      () => threadMessages(ctx, externalId, external.threadTs, externalOutput).length > 0,
-      slackAbsenceWindowMs(ctx),
-    );
-    expect(!leaked, "The Lead follow-up posted its card into a Slack Connect channel");
-    // Control: the gate asked Slack about this channel and got the external answer.
-    const consulted = ctx.slack
-      .apiCalls("conversations.info")
-      .some((call) => call.args.channel === externalId && call.error === faultCode);
-    expect(consulted, `The external-channel gate never classified ${externalId} via Slack`);
-    // The skipped card is settled, so the thread stops owing outcome work.
-    const settled = ctx.db.get<{
-      delivery_abandoned_at: string | null;
-      finalized_at: string | null;
-    }>(
-      "SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-      [external.followUpId],
-    );
-    expect(
-      settled?.delivery_abandoned_at != null && settled.finalized_at === null,
-      `The external follow-up's card is not settled as abandoned: ${JSON.stringify(settled)}`,
-    );
+    try {
+      const externalOutput = `follow-up review external ${ctx.nonce}`;
+      await finish(ctx, external.leadId, external.followUpId, {
+        status: "completed",
+        output: externalOutput,
+      });
+      const delivered = await pollUntil(
+        () => threadMessages(ctx, externalId, external.threadTs, externalOutput).length > 0,
+        30_000,
+      );
+      expect(delivered, "The Lead follow-up's card never reached the Slack Connect thread");
+      await expectFinalizedCard(ctx, external.followUpId, external.threadTs, "external follow-up");
+      const count = (url: string) =>
+        captionOccurrences(ctx, externalId, external.threadTs, externalOutput, url);
+      expect(
+        count(shareUrl) === 1 &&
+          count(appFileUrl) === 0 &&
+          count(internalUrl) === 0 &&
+          count(spoofedShareUrl) === 0,
+        `The Slack Connect card must list only the share link: share=${count(shareUrl)} app=${count(appFileUrl)} internal=${count(internalUrl)} spoofed=${count(spoofedShareUrl)}`,
+      );
+      const shareLabel = `Links: 🔗 <${shareUrl}|Shared file>`;
+      expect(
+        count(shareLabel) === 1,
+        `The Slack Connect card does not label the share link as ${JSON.stringify(shareLabel)}`,
+      );
+      const card = ctx.db.get<{ ts: string; delivery_abandoned_at: string | null }>(
+        sql`SELECT ts, delivery_abandoned_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${external.followUpId}`,
+      );
+      expect(
+        card !== null &&
+          !card.ts.startsWith("pending:") &&
+          !card.ts.startsWith("merged:") &&
+          card.delivery_abandoned_at === null,
+        `The external follow-up's card is not its own delivered message: ${JSON.stringify(card)}`,
+      );
+    } finally {
+      // With the flag off nothing asks Slack about the channel, so the fault
+      // may still be armed. Spend it here: it answers for any channel.
+      const spent = () =>
+        ctx.slack.apiCalls("conversations.info").some((call) => call.error === faultCode);
+      if (!spent()) {
+        await fetch(`${ctx.slack.apiUrl}conversations.info`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${ctx.slack.bot.token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ channel: externalId }),
+        });
+      }
+      expect(spent(), "The injected conversations.info answer is still armed");
+    }
 
     // 6. Recovery of a reservation whose delivery failed. A restart drops the
     // retry backoff, so both cards are retried from the persisted row. The one
@@ -510,8 +793,7 @@ export const slackLeadFollowUpCard: Scenario = {
       const failed = await pollUntil(
         () =>
           (ctx.db.get<{ delivery_attempts: number }>(
-            "SELECT delivery_attempts FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-            [ask.followUpId],
+            sql`SELECT delivery_attempts FROM slack_messages WHERE kind = 'outcome' AND task_id = ${ask.followUpId}`,
           )?.delivery_attempts ?? 0) > 0,
         15_000,
       );
@@ -521,9 +803,9 @@ export const slackLeadFollowUpCard: Scenario = {
     const suppressedOutput = `follow-up review suppressed ${ctx.nonce}`;
     // The Lead holds one task at a time, so each follow-up finishes before the
     // next ask. Both land inside the 30s retry backoff.
-    const recovered = await delegatedAsk(ctx, GENERAL, workerId, "recovered");
+    const recovered = await delegatedAsk(ctx, asker(), GENERAL, workerId, "recovered");
     await failDelivery(recovered, recoveredOutput);
-    const suppressed = await delegatedAsk(ctx, GENERAL, workerId, "suppressed");
+    const suppressed = await delegatedAsk(ctx, asker(), GENERAL, workerId, "suppressed");
     await failDelivery(suppressed, suppressedOutput);
     const lateReply = `late hand reply ${ctx.nonce}`;
     const lateConn = await ctx.connectMcp(suppressed.leadId);
@@ -561,8 +843,7 @@ export const slackLeadFollowUpCard: Scenario = {
     type CardRow = { delivery_abandoned_at: string | null; finalized_at: string | null };
     const suppressedCard = () =>
       ctx.db.get<CardRow>(
-        "SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-        [suppressed.followUpId],
+        sql`SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${suppressed.followUpId}`,
       );
     await pollUntil(() => {
       const card = suppressedCard();

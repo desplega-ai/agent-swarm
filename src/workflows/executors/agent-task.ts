@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { modelProfileRefError, taskProfileError } from "../../be/db/model-profiles";
+import {
+  modelGroupRefError,
+  modelProfileRefError,
+  taskProfileError,
+} from "../../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../../be/model-validation";
 import { applyPreTaskCreate } from "../../extensions/apply-task-create";
 import { workflowContextKey } from "../../tasks/context-key";
@@ -37,6 +41,8 @@ export const AgentTaskConfigSchema = z.object({
   effort: ReasoningEffortSchema.optional(),
   /** Model profile name (see list-model-profiles). Exclusive with model/modelTier; checked against `agentId` at run. */
   profile: z.string().min(1).optional(),
+  /** Model group name (GET /api/model-groups). Exclusive with model/modelTier/profile; with `agentId`, a member must run there. */
+  modelGroup: z.string().min(1).optional(),
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
@@ -114,6 +120,7 @@ export class AgentTaskExecutor extends BaseExecutor<
       profile: config.profile,
       model: config.model,
       modelTier: config.modelTier,
+      modelGroup: config.modelGroup,
       agentId: config.agentId,
       vcsRepo: effectiveVcsRepo,
     });
@@ -142,6 +149,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         ...splitLegacyModelAlias({ model: config.model, modelTier: config.modelTier }),
         effort: config.effort,
         profile: config.profile?.trim() || undefined,
+        modelGroup: config.modelGroup?.trim() || undefined,
         parentTaskId: config.parentTaskId,
         requestedByUserId: config.requestedByUserId ?? meta.requestedByUserId,
         outputSchema: config.outputSchema,
@@ -163,7 +171,10 @@ export class AgentTaskExecutor extends BaseExecutor<
     try {
       task = await db.createTaskExtended(preCreate.description, preCreate.options);
     } catch (error) {
-      // The profile was deleted between taskProfileError and the insert.
+      // The profile or group was deleted between taskProfileError and the insert.
+      if (modelGroupRefError(error)) {
+        return { status: "failed", error: `Unknown model group "${config.modelGroup}".` };
+      }
       if (modelProfileRefError(error) !== "missing") throw error;
       return { status: "failed", error: `Unknown model profile "${config.profile}".` };
     }

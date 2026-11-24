@@ -10,6 +10,7 @@ import {
   getLatestActiveTaskInThread,
   getLogsByTaskId,
   getSteeringMessagesForTask,
+  getUserById,
   initDb,
   startTask,
 } from "../be/db";
@@ -248,7 +249,10 @@ describe("Slack thread steering", () => {
           info: async ({ user }: { user: string }) => {
             infoUsers.push(user);
             return {
-              user: { profile: user === "U_TARAS_STEER" ? { email: taras.email } : {} },
+              user: {
+                tz: user === "U_OTHER_STEER" ? "Asia/Tokyo" : undefined,
+                profile: user === "U_TARAS_STEER" ? { email: taras.email } : {},
+              },
             };
           },
         },
@@ -290,7 +294,9 @@ describe("Slack thread steering", () => {
           senderLabel: label,
         });
       }
-      expect(infoUsers).toEqual(["U_TARAS_STEER", "U_UNKNOWN_STEER"]);
+      // The already-linked sender has no saved timezone and Slack withholds their email.
+      expect(infoUsers).toEqual(["U_TARAS_STEER", "U_OTHER_STEER", "U_UNKNOWN_STEER"]);
+      expect((await getUserById(other.id))?.timezone).toBe("Asia/Tokyo");
       expect(
         (await getLogsByTaskId(task.id)).filter((log) => log.newValue === "slack_reaction"),
       ).toHaveLength(5);

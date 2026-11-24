@@ -1,11 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isConstraintViolation } from "@desplega/storage";
 import { z } from "zod";
 import { AssetKeyAuthorizationError } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId, resolveHttpRequesterUserId } from "../be/audit-user";
 import {
   createWorkflow,
   deleteWorkflow,
-  getDbClient,
   getWorkflow,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
@@ -31,6 +31,7 @@ import {
   WORKFLOW_RUN_TREE_MAX_DEPTH,
   WorkflowRunTreeError,
 } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import {
   AssetKeySchema,
   AutomationIntegrationIdSchema,
@@ -71,7 +72,7 @@ import {
   replayAcceptedOperation,
 } from "./idempotency-key";
 import { route } from "./route-def";
-import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
+import { jsonError, parseBody, readWebhookBody, triggerSchemaErrorResponse } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
 
@@ -199,6 +200,10 @@ const createWorkflowRoute = route({
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow created under this Idempotency-Key was deleted" },
   },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const getWorkflowRoute = route({
@@ -255,6 +260,10 @@ const updateWorkflowRoute = route({
     403: { description: "Env var or secret input requires config.read.secrets" },
     404: { description: "Workflow not found" },
   },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const patchWorkflowRoute = route({
@@ -273,6 +282,10 @@ const patchWorkflowRoute = route({
     400: { description: "Invalid patch or resulting definition" },
     403: { description: "Stored env var or secret input requires config.read.secrets" },
     404: { description: "Workflow not found" },
+  },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -293,6 +306,10 @@ const patchWorkflowNodeRoute = route({
     403: { description: "Stored env var or secret input requires config.read.secrets" },
     404: { description: "Workflow or node not found" },
   },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const deleteWorkflowRoute = route({
@@ -305,6 +322,10 @@ const deleteWorkflowRoute = route({
   responses: {
     204: { description: "Workflow deleted" },
     404: { description: "Workflow not found" },
+  },
+  rbac: {
+    ungated:
+      "workflow definitions: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -338,6 +359,10 @@ const triggerWorkflowRoute = route({
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow triggered under this Idempotency-Key was deleted" },
   },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const validateTriggerRoute = route({
@@ -354,6 +379,10 @@ const validateTriggerRoute = route({
     },
     400: { description: "Payload failed validation; body matches the TriggerSchemaError contract" },
     404: { description: "Workflow not found" },
+  },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
   },
 });
 
@@ -441,6 +470,10 @@ const retryWorkflowRunRoute = route({
     400: { description: "Cannot retry" },
     404: { description: "Run not found" },
   },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const cancelWorkflowRunRoute = route({
@@ -456,6 +489,10 @@ const cancelWorkflowRunRoute = route({
     400: { description: "Cannot cancel" },
   },
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
+  },
 });
 
 const listExecutorTypesRoute = route({
@@ -516,6 +553,11 @@ const webhookTriggerRoute = route({
     201: { description: "Webhook processed", schema: z.object({ runId: z.string() }) },
     401: { description: "Invalid signature" },
     404: { description: "Workflow not found" },
+    413: { description: "Body exceeds 5 MiB" },
+  },
+  rbac: {
+    ungated:
+      "inbound workflow webhook: the workflow's webhook secret is the credential, no bearer principal",
   },
 });
 
@@ -584,11 +626,8 @@ export async function handleWorkflows(
     const workflowId = pathSegments[2]!;
 
     // Read raw body for HMAC verification
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
-    }
-    const rawBody = Buffer.concat(chunks).toString();
+    const rawBody = await readWebhookBody(req, res);
+    if (rawBody === null) return true;
 
     let result: Awaited<ReturnType<typeof handleWebhookTrigger>>;
     try {
@@ -777,7 +816,7 @@ export async function handleWorkflows(
     const warnings = await workflowSaveWarnings(parsed.body.definition, getExecutorRegistry());
     let saved: z.input<typeof WorkflowSaveResponseSchema>;
     try {
-      saved = await getDbClient().transaction(async () => {
+      saved = await getStorage().transaction(async () => {
         // Before the insert: a concurrent winner's workflow holds the same name.
         await assertWorkflowIdempotencyKeyUnused(claim);
         const workflow = await createWorkflow(data, "api");
@@ -791,7 +830,9 @@ export async function handleWorkflows(
       });
     } catch (err) {
       // A concurrent request with this key committed first; nothing of this one did.
-      if (err instanceof IdempotencyKeyTakenError) {
+      // On an engine with concurrent writers the loser can also fail on the
+      // winner's workflow name (a unique violation) before it sees the key.
+      if (err instanceof IdempotencyKeyTakenError || isConstraintViolation(err, "unique")) {
         if (await replayAcceptedOperation(res, claim, replayCreate)) return true;
       }
       throw err;

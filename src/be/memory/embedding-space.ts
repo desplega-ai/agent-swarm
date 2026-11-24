@@ -45,9 +45,14 @@
  */
 
 import { createHash } from "node:crypto";
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
-import { getEmbeddingProvider, getMemoryStore } from "./index";
+import {
+  embeddingEndpoint,
+  getEmbeddingProvider,
+  getMemoryStore,
+  setDeploymentEnvReader,
+} from "./index";
 import type { EmbeddingProvider } from "./types";
 
 export const EMBEDDING_SPACE_KEY = "embedding-space";
@@ -92,29 +97,14 @@ export type EmbeddingSpaceOptions = {
   afterBatch?: (info: { table: "memory" | "scripts"; ids: string[] }) => void | Promise<void>;
 };
 
-/**
- * Reads a key's deployment environment value, without stored config. Set by
- * the HTTP server at boot (http/core owns the env injection). Unset, no URL
- * counts as operator config, so every one gets the SSRF check.
- */
-let readDeploymentEnv: (key: string) => string | undefined = () => undefined;
-
-export function setDeploymentEnvReader(read: (key: string) => string | undefined): void {
-  readDeploymentEnv = read;
-}
+export { setDeploymentEnvReader };
 
 /** Checks the URL the provider sends to, in the SDK's precedence order. */
 function endpointAllowed(): boolean {
-  const key = process.env.EMBEDDING_API_BASE_URL
-    ? "EMBEDDING_API_BASE_URL"
-    : process.env.OPENAI_BASE_URL
-      ? "OPENAI_BASE_URL"
-      : null;
-  if (!key) return true;
-  const baseUrl = process.env[key] ?? "";
-  if (baseUrl === readDeploymentEnv(key)) return true;
+  const endpoint = embeddingEndpoint();
+  if (!endpoint || endpoint.fromDeployment) return true;
   try {
-    assertUrlSafe(baseUrl, publicEndpointSsrfOptions());
+    assertUrlSafe(endpoint.baseUrl, publicEndpointSsrfOptions());
     return true;
   } catch {
     return false;
@@ -122,27 +112,21 @@ function endpointAllowed(): boolean {
 }
 
 async function readState(key: string): Promise<string | null> {
-  const row = await getDbClient().get<{ seededHash: string }>(
-    "SELECT seededHash FROM seed_state WHERE kind = 'maintenance' AND key = ?",
-    [key],
-  );
-  return row?.seededHash ?? null;
+  return getStorage().repos.maintenance.getState(key);
 }
 
 async function writeState(key: string, value: string): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO seed_state (kind, key, seededHash, seededAt)
-     VALUES ('maintenance', ?, ?, datetime('now'))
-     ON CONFLICT (kind, key) DO UPDATE SET seededHash = excluded.seededHash, seededAt = datetime('now')`,
-    [key, value],
-  );
+  await getStorage().repos.maintenance.setState(key, value);
 }
 
+async function deleteState(key: string): Promise<void> {
+  await getStorage().repos.config.deleteSeedState("maintenance", key);
+}
+
+/** Both cursors. Callers run it inside their transaction. */
 async function deleteCursors(): Promise<void> {
-  await getDbClient().run("DELETE FROM seed_state WHERE kind = 'maintenance' AND key IN (?, ?)", [
-    embeddingSpaceCursorKey("memory"),
-    embeddingSpaceCursorKey("scripts"),
-  ]);
+  await deleteState(embeddingSpaceCursorKey("memory"));
+  await deleteState(embeddingSpaceCursorKey("scripts"));
 }
 
 const short = (fingerprint: string | null) => (fingerprint ? fingerprint.slice(0, 12) : "none");
@@ -164,7 +148,7 @@ async function reembedMemory(
   counts: Counts,
   opts: EmbeddingSpaceOptions,
 ): Promise<boolean> {
-  const client = getDbClient();
+  const storage = getStorage();
   const store = getMemoryStore();
   const cursorKey = embeddingSpaceCursorKey("memory");
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
@@ -172,10 +156,7 @@ async function reembedMemory(
   let batches = 0;
 
   for (;;) {
-    const rows = await client.query<{ id: string; content: string }>(
-      "SELECT id, content FROM agent_memory WHERE id > ? ORDER BY id ASC LIMIT ?",
-      [cursor, batchSize],
-    );
+    const rows = await storage.repos.memory.listContentAfter(cursor, batchSize);
     if (rows.length === 0) return true;
     // A config reload built a new provider: the run it queued takes over.
     if (getEmbeddingProvider() !== provider) return false;
@@ -194,19 +175,23 @@ async function reembedMemory(
     if (vectors.some((v) => !v) && !(await endpointWorks(provider))) return false;
 
     const lastId = rows[rows.length - 1]!.id;
-    await client.transaction(async () => {
+    const batch = await storage.transaction(async () => {
+      const tally = { done: 0, failed: 0 };
       for (let i = 0; i < rows.length; i++) {
         const vector = vectors[i];
         if (vector) {
           await store.updateEmbedding(rows[i]!.id, vector, provider.name);
-          counts.done++;
+          tally.done++;
         } else {
           await store.clearEmbedding(rows[i]!.id);
-          counts.failed++;
+          tally.failed++;
         }
       }
       await writeState(cursorKey, lastId);
+      return tally;
     });
+    counts.done += batch.done;
+    counts.failed += batch.failed;
     cursor = lastId;
 
     if (++batches % LOG_EVERY_BATCHES === 0) {
@@ -230,17 +215,17 @@ async function reembedScripts(
   type ScriptRow = import("../scripts/boot-reembed").ScriptRow;
   type ScriptEmbedding = import("../scripts/embeddings").ScriptEmbedding;
 
-  const client = getDbClient();
+  const storage = getStorage();
   const provider = embeddingProvider();
   const cursorKey = embeddingSpaceCursorKey("scripts");
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
   let cursor = (await readState(cursorKey)) ?? "";
 
   for (;;) {
-    const rows = await client.query<ScriptRow>(
-      "SELECT * FROM scripts WHERE isScratch = 0 AND id > ? ORDER BY id ASC LIMIT ?",
-      [cursor, batchSize],
-    );
+    const rows = (await storage.repos.scripts.listNonScratchScriptsAfter(
+      cursor,
+      batchSize,
+    )) as ScriptRow[];
     if (rows.length === 0) return true;
     if (getEmbeddingProvider() !== memoryProvider) return false;
 
@@ -261,20 +246,24 @@ async function reembedScripts(
     // Vectors and cursor commit together, so a crash never leaves a new
     // vector behind a cursor that still points before it.
     const lastId = rows[rows.length - 1]!.id;
-    await client.transaction(async () => {
+    const batch = await storage.transaction(async () => {
+      const tally = { done: 0, failed: 0 };
       for (const { id, result } of embedded) {
         if (result) {
           await writeScriptEmbedding(id, result);
-          counts.done++;
+          tally.done++;
         } else {
           // Rejected input: its old vector is in the old space. The missing-
           // embedding backfill retries it.
-          await client.run("DELETE FROM script_embeddings WHERE scriptId = ?", [id]);
-          counts.failed++;
+          await storage.repos.scripts.deleteScriptEmbedding(id);
+          tally.failed++;
         }
       }
       await writeState(cursorKey, lastId);
+      return tally;
     });
+    counts.done += batch.done;
+    counts.failed += batch.failed;
     cursor = lastId;
 
     await opts.afterBatch?.({ table: "scripts", ids: rows.map((r) => r.id) });
@@ -313,7 +302,7 @@ export async function reconcileEmbeddingSpace(
   }
 
   if (target !== current) {
-    await getDbClient().transaction(async () => {
+    await getStorage().transaction(async () => {
       await writeState(EMBEDDING_SPACE_TARGET_KEY, current);
       await deleteCursors();
     });
@@ -342,11 +331,9 @@ export async function reconcileEmbeddingSpace(
     return "interrupted";
   }
 
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     await writeState(EMBEDDING_SPACE_KEY, current);
-    await getDbClient().run("DELETE FROM seed_state WHERE kind = 'maintenance' AND key = ?", [
-      EMBEDDING_SPACE_TARGET_KEY,
-    ]);
+    await deleteState(EMBEDDING_SPACE_TARGET_KEY);
     await deleteCursors();
   });
   console.log(

@@ -241,7 +241,7 @@ describe("generateEnv with the agent-fs bundle flag", () => {
       const expected = await Bun.file(
         new URL(`./fixtures/onboard/${name}.env.txt`, import.meta.url),
       ).text();
-      expect(generateEnv(state)).toBe(expected);
+      expect(generateEnv(state, {}, "9.9.9-test")).toBe(expected);
     });
   }
 

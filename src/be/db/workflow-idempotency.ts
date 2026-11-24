@@ -1,6 +1,7 @@
+import type { WorkflowIdempotencyScopeKey } from "@desplega/storage";
 import { getCurrentRequestUserId } from "../../utils/request-auth-context";
 import { openSealedJson, sealJson } from "../sealed-json";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * Server-side `Idempotency-Key` records for workflow create and trigger.
@@ -50,14 +51,7 @@ export class IdempotencyKeyTakenError extends Error {
   }
 }
 
-type AcceptedRow = {
-  requestFingerprint: string;
-  responseStatus: number;
-  responseBody: string | null;
-  resourceDeletedAt: string | null;
-};
-
-function sha256(text: string): string {
+export function sha256(text: string): string {
   const hasher = new Bun.CryptoHasher("sha256");
   hasher.update(text);
   return hasher.digest("hex");
@@ -86,23 +80,27 @@ export function workflowRequestFingerprint(
   operation: WorkflowIdempotencyOperation,
   body: unknown,
 ): string {
+  return requestFingerprint(operation, body);
+}
+
+/** `workflowRequestFingerprint` for any operation name (`task.create`). */
+export function requestFingerprint(operation: string, body: unknown): string {
   return sha256(`${operation}\n${JSON.stringify(sortKeys(body ?? null))}`);
 }
 
-const SCOPE_WHERE = "principal = ? AND operation = ? AND targetId = ? AND keyHash = ?";
-
-function scopeParams(scope: WorkflowIdempotencyScope): string[] {
-  return [scope.principal, scope.operation, scope.targetId, sha256(scope.key)];
+function scopeKey(scope: WorkflowIdempotencyScope): WorkflowIdempotencyScopeKey {
+  return {
+    principal: scope.principal,
+    operation: scope.operation,
+    targetId: scope.targetId,
+    keyHash: sha256(scope.key),
+  };
 }
 
 export async function findAcceptedWorkflowOperation(
   scope: WorkflowIdempotencyScope,
 ): Promise<AcceptedWorkflowOperation | null> {
-  const row = await getDbClient().get<AcceptedRow>(
-    `SELECT requestFingerprint, responseStatus, responseBody, resourceDeletedAt
-       FROM workflow_idempotency_keys WHERE ${SCOPE_WHERE}`,
-    scopeParams(scope),
-  );
+  const row = await getStorage().repos.workflows.findIdempotencyRecord(scopeKey(scope));
   if (!row) return null;
   return {
     fingerprint: row.requestFingerprint,
@@ -121,10 +119,7 @@ export async function findAcceptedWorkflowOperation(
 export async function assertWorkflowIdempotencyKeyUnused(
   scope: WorkflowIdempotencyScope,
 ): Promise<void> {
-  const taken = await getDbClient().get(
-    `SELECT 1 FROM workflow_idempotency_keys WHERE ${SCOPE_WHERE}`,
-    scopeParams(scope),
-  );
+  const taken = await getStorage().repos.workflows.idempotencyRecordExists(scopeKey(scope));
   if (taken) throw new IdempotencyKeyTakenError();
 }
 
@@ -141,24 +136,17 @@ export async function recordAcceptedWorkflowOperation(
   await assertWorkflowIdempotencyKeyUnused(claim);
   const actor = getCurrentRequestUserId() ?? null;
   try {
-    await getDbClient().run(
-      `INSERT INTO workflow_idempotency_keys
-         (id, principal, operation, targetId, keyHash, requestFingerprint, workflowId, runId,
-          responseStatus, responseBody, createdAt, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        crypto.randomUUID(),
-        ...scopeParams(claim),
-        claim.fingerprint,
-        accepted.workflowId,
-        accepted.runId ?? null,
-        accepted.status,
-        sealJson(accepted.body),
-        new Date().toISOString(),
-        actor,
-        actor,
-      ],
-    );
+    await getStorage().repos.workflows.insertIdempotencyRecord({
+      id: crypto.randomUUID(),
+      ...scopeKey(claim),
+      requestFingerprint: claim.fingerprint,
+      workflowId: accepted.workflowId,
+      runId: accepted.runId ?? null,
+      responseStatus: accepted.status,
+      responseBody: sealJson(accepted.body),
+      createdAt: new Date().toISOString(),
+      actor,
+    });
   } catch (err) {
     if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
       throw new IdempotencyKeyTakenError();
@@ -174,10 +162,9 @@ export async function recordAcceptedWorkflowOperation(
  * triggering anything again. Runs in the delete's transaction.
  */
 export async function tombstoneWorkflowIdempotencyKeys(workflowId: string): Promise<void> {
-  await getDbClient().run(
-    `UPDATE workflow_idempotency_keys
-        SET responseBody = NULL, resourceDeletedAt = ?, updated_by = ?
-      WHERE workflowId = ? AND resourceDeletedAt IS NULL`,
-    [new Date().toISOString(), getCurrentRequestUserId() ?? null, workflowId],
+  await getStorage().repos.workflows.tombstoneIdempotencyRecords(
+    workflowId,
+    new Date().toISOString(),
+    getCurrentRequestUserId() ?? null,
   );
 }

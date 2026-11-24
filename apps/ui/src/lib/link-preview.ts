@@ -8,15 +8,27 @@
 import { combPathForLink } from "./comb/links";
 import type { DrivePath } from "./comb/paths";
 import { pageFrameQuery } from "./page-query";
-import { ASSET_TAB_PREFIX } from "./sessions-v2";
+import { ASSET_TAB_PREFIX, isSessionTab } from "./sessions-v2";
 import { parseSwarmLink, type SwarmLinkOrigins } from "./swarm-links";
+
+export interface ReviewOrigin {
+  kind: "task" | "session";
+  id: string;
+}
 
 export type LinkPreviewTarget =
   /**
    * `route` is the Comb route, with the link's `?comment=` deep link when it
    * has one; `href` is the link as written.
    */
-  | { kind: "file"; file: DrivePath; name: string; route: string; href: string }
+  | {
+      kind: "file";
+      file: DrivePath;
+      name: string;
+      route: string;
+      href: string;
+      origin?: ReviewOrigin;
+    }
   /**
    * `id` is the page id or slug, as the link names it. `query` is the link's
    * query minus the params the page route owns (`pageFrameQuery`), or "".
@@ -75,15 +87,21 @@ function fromBase64Url(value: string): string | null {
   }
 }
 
-/**
- * The sessions tab of a preview target (`isAssetTab`): `asset:task:<id>`
- * for a task, else `asset:link:<the link as written, in base64url>`. The
- * tab keeps the link, so a reload or a shared URL opens the same asset.
- */
-export function assetTabId(target: LinkPreviewTarget): string {
-  return target.kind === "task"
-    ? `${ASSET_TAB_PREFIX}task:${target.taskId}`
-    : `${ASSET_TAB_PREFIX}link:${toBase64Url(target.href)}`;
+/** Preserve the file’s originating conversation in shared URLs and restored tabs. */
+export function assetTabId(target: LinkPreviewTarget, fromTab?: string | null): string {
+  if (target.kind === "task") return `${ASSET_TAB_PREFIX}task:${target.taskId}`;
+  const href = toBase64Url(target.href);
+  if (target.kind === "file") {
+    const taskPrefix = `${ASSET_TAB_PREFIX}task:`;
+    let origin = target.origin;
+    if (fromTab?.startsWith(taskPrefix)) {
+      origin = { kind: "task", id: fromTab.slice(taskPrefix.length) };
+    } else if (fromTab && isSessionTab(fromTab)) {
+      origin = { kind: "session", id: fromTab };
+    }
+    if (origin?.id) return `${ASSET_TAB_PREFIX}review:${origin.kind}:${origin.id}:${href}`;
+  }
+  return `${ASSET_TAB_PREFIX}link:${href}`;
 }
 
 /** The preview target of an asset tab, or null when the id names none. */
@@ -93,6 +111,12 @@ export function assetTabTarget(tab: string, origins: SwarmLinkOrigins): LinkPrev
   if (rest.startsWith("task:")) {
     const taskId = rest.slice("task:".length);
     return taskId ? { kind: "task", taskId } : null;
+  }
+  if (rest.startsWith("review:")) {
+    const [, kind, id, encoded] = rest.split(":");
+    if ((kind !== "session" && kind !== "task") || !id || !encoded) return null;
+    const file = linkPreviewTarget(fromBase64Url(encoded), origins);
+    return file?.kind === "file" ? { ...file, origin: { kind, id } } : null;
   }
   if (!rest.startsWith("link:")) return null;
   return linkPreviewTarget(fromBase64Url(rest.slice("link:".length)), origins);

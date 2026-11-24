@@ -1,5 +1,6 @@
+import type { ScriptRunStatus } from "../../types";
 import { openSealedJson } from "../sealed-json";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
 
 /**
  * The exact args a run executes with, or `undefined` when the run has no row.
@@ -7,10 +8,7 @@ import { getDbClient } from "./runtime";
  * on `ScriptRun.args`.
  */
 export async function getScriptRunExecutionArgs(id: string): Promise<unknown> {
-  const row = await getDbClient().get<{ args: string }>(
-    "SELECT args FROM script_runs WHERE id = ?",
-    [id],
-  );
+  const row = await getStorage().repos.scripts.getScriptRunArgs(id);
   return row ? openSealedJson(row.args) : undefined;
 }
 
@@ -20,19 +18,24 @@ export type ScriptRunFollowUpGuard = "passed" | "same-work" | "loop-cap";
 export async function getScriptRunFollowUpGuard(
   runId: string,
 ): Promise<ScriptRunFollowUpGuard | null> {
-  const row = await getDbClient().get<{ followUpGuard: ScriptRunFollowUpGuard | null }>(
-    "SELECT followUpGuard FROM script_runs WHERE id = ?",
-    [runId],
-  );
-  return row?.followUpGuard ?? null;
+  const row = await getStorage().repos.scripts.getScriptRunFollowUpGuard(runId);
+  return (row?.followUpGuard as ScriptRunFollowUpGuard | null | undefined) ?? null;
 }
 
 export async function setScriptRunFollowUpGuard(
   runId: string,
   decision: ScriptRunFollowUpGuard,
 ): Promise<void> {
-  await getDbClient().run("UPDATE script_runs SET followUpGuard = ? WHERE id = ?", [
-    decision,
-    runId,
-  ]);
+  await getStorage().repos.scripts.setScriptRunFollowUpGuard(runId, decision);
 }
+
+/** Filters shared by the script-runs list and count queries. */
+export type ScriptRunFilter = {
+  status?: ScriptRunStatus;
+  agentId?: string;
+  scriptName?: string;
+  /** Object calls on this durable script (`script_runs.objectScriptId`). */
+  objectScriptId?: string;
+  /** Exact object id; pair it with `objectScriptId`. */
+  objectId?: string;
+};

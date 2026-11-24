@@ -8,7 +8,8 @@
  * account.
  */
 
-import { claimKv, deleteKv, getDbClient, getKv, getLeadAgent, upsertKv } from "../be/db";
+import { getStorage } from "@/be/storage";
+import { claimKv, deleteKv, getKv, getLeadAgent, upsertKv } from "../be/db";
 import { findUserById } from "../be/users";
 import {
   type AgentFsComment,
@@ -61,6 +62,7 @@ export interface RepairedComment {
 }
 
 export interface ReviewBatchInput {
+  parent?: { id: string; agentId?: string | null; agentCaller: boolean };
   orgId: string;
   driveId: string;
   commentIds: string[];
@@ -200,14 +202,18 @@ export async function sendReviewBatch(
           ...repairs.map((repair) => alreadySent(repair.id, repair.taskId)),
         ]);
       }
-      const lead = await getLeadAgent();
+      const parent = input.parent;
+      const lead = parent?.agentId ? null : await getLeadAgent();
       leadState = !lead ? "none" : lead.status === "offline" ? "offline" : "online";
       const task = await createTask(
         text,
         {
-          agentId: lead?.id ?? "",
-          routingReason: lead ? "skill" : undefined,
-          routingSource: lead ? "engine_default" : undefined,
+          agentId: parent?.agentId || lead?.id || "",
+          parentTaskId: parent?.id,
+          inheritParentOutputSchema: parent?.agentCaller,
+          routingAffinity: parent && !parent.agentCaller ? { capabilities: [] } : undefined,
+          routingReason: parent?.agentId ? "continuity" : lead ? "skill" : undefined,
+          routingSource: parent?.agentId || lead ? "engine_default" : undefined,
           source: "comb",
           taskType: "comb-review",
           tags: ["comb"],
@@ -254,7 +260,13 @@ export async function sendReviewBatch(
   }
   return taskId === null
     ? { taskId, sent: wonIds, skipped, repaired }
-    : { taskId, sent: wonIds, skipped, repaired, lead: leadState };
+    : {
+        taskId,
+        sent: wonIds,
+        skipped,
+        repaired,
+        lead: input.parent?.agentId ? undefined : leadState,
+      };
 }
 
 /** `items.map(fn)` with at most `limit` calls in flight. Results keep the input order. */
@@ -321,7 +333,7 @@ async function claimComments(
   candidates: CommentRead[],
   claim: string,
 ): Promise<{ won: CommentRead[]; lost: Array<{ id: string; entry: KvEntry | null }> }> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const won: CommentRead[] = [];
     const lost: Array<{ id: string; entry: KvEntry | null }> = [];
     for (const read of candidates) {
@@ -351,7 +363,7 @@ async function settleClaims(
 ): Promise<void> {
   const settled = await Promise.allSettled(
     ids.map((id) =>
-      getDbClient().transaction(async () => {
+      getStorage().transaction(async () => {
         const entry = await getKv(SENT_KV_NAMESPACE, id);
         if (entry && claimToken(entry) !== claim) return false;
         if (next) {
@@ -446,7 +458,7 @@ async function renderTaskText(
     const comment = (thread as AgentFsCommentThread).comment;
     const path = combPath(comment.path);
     const quote = comment.quote?.exact ?? comment.quotedContent;
-    const block = resolveTemplate("comb.review.comment", {
+    const block = await resolveTemplate("comb.review.comment", {
       comment_id: comment.id,
       author: comment.authorDisplayName
         ? `${oneLine(comment.authorDisplayName)} (agent-fs user ${comment.author})`
@@ -462,7 +474,7 @@ async function renderTaskText(
     blocks.push(block.text);
   }
   const scopePath = combPath(input.scopePath);
-  const batch = resolveTemplate("comb.review.batch", {
+  const batch = await resolveTemplate("comb.review.batch", {
     comment_count: reads.length,
     scope_path: scopePath,
     scope_url: combUrl(input, scopePath),

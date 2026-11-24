@@ -35,7 +35,7 @@ for (const width of [1280, 390]) {
         await page.route("**/api/onboarding", async (route) => {
           const request = route.request();
           if (request.method() === "GET" && !sent) {
-            const response = await route.fetch();
+            const response = await route.fetch({ maxRetries: 2 });
             const data = await response.json();
             data.state.firstTaskId = null;
             data.signals.firstTask = null;

@@ -50,6 +50,22 @@ export async function overlappingAxisLabels(page: Page) {
   });
 }
 
+/**
+ * Aborts requests that an embedded frame sends to another origin. `networkidle` also waits
+ * on child frames, and the /pages/:id iframe loads its scripts and fonts from public CDNs,
+ * so one stalled CDN fetch held the wait until the test timeout. The main frame keeps its
+ * own requests (fonts included), so page widths stay as a user sees them.
+ */
+async function abortCrossOriginFrameRequests(page: Page): Promise<void> {
+  await page.route("**/*", (route) => {
+    const request = route.request();
+    const frame = request.frame();
+    if (frame === page.mainFrame() || request.isNavigationRequest()) return route.continue();
+    if (new URL(request.url()).origin === new URL(frame.url()).origin) return route.continue();
+    return route.abort("blockedbyclient");
+  });
+}
+
 /** Registers one test per route: the page must not scroll sideways at this viewport. */
 export function defineOverflowSuite(name: (typeof VIEWPORTS)[number]["name"]) {
   const viewport = VIEWPORTS.find((candidate) => candidate.name === name)!;
@@ -61,8 +77,17 @@ export function defineOverflowSuite(name: (typeof VIEWPORTS)[number]["name"]) {
         test.skip(Boolean(route.skip), route.skip);
         const path = route.needs ? resolveRoute(route, seed!) : route.path;
         test.skip(path === null, "seed has no entity for this route");
-        await page.goto(path!);
-        await page.waitForLoadState("networkidle");
+        await abortCrossOriginFrameRequests(page);
+        if (route.needs === "page") {
+          // The viewer is ready independently of polling and the iframe's background requests.
+          await page.goto(path!, { waitUntil: "domcontentloaded" });
+          await expect(
+            page.frameLocator("main iframe").getByRole("heading", { name: "e2e public page" }),
+          ).toBeVisible();
+        } else {
+          await page.goto(path!);
+          await page.waitForLoadState("networkidle");
+        }
         await expect(page.locator("main").first()).toBeVisible();
         const { scrollWidth, innerWidth } = await horizontalOverflow(page);
         expect(scrollWidth, `${path} scrolls sideways at ${innerWidth}px`).toBeLessThanOrEqual(

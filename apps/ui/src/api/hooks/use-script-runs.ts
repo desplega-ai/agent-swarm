@@ -2,16 +2,22 @@ import { useQuery } from "@tanstack/react-query";
 import type { ScriptRunStatus } from "@/api/types";
 import { api } from "../client";
 
-export function useScriptRuns(filters?: {
-  status?: ScriptRunStatus | "all";
-  agentId?: string;
-  scriptName?: string;
-  limit?: number;
-  offset?: number;
-}) {
+export function useScriptRuns(
+  filters?: {
+    status?: ScriptRunStatus | "all";
+    agentId?: string;
+    scriptName?: string;
+    objectScriptId?: string;
+    objectId?: string;
+    limit?: number;
+    offset?: number;
+  },
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ["script-runs", filters],
     queryFn: () => api.fetchScriptRuns(filters),
+    enabled: options?.enabled ?? true,
   });
 }
 

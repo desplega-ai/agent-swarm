@@ -111,19 +111,25 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
       >
         {/* Header row - always visible */}
         <div className="w-full flex items-center gap-2 px-3 py-2">
-          {inGroup && itemKey ? (
-            <span className="text-sm font-medium font-mono truncate">{itemKey}</span>
-          ) : (
-            <>
-              <span className="text-sm font-medium truncate">{label}</span>
+          <button
+            type="button"
+            aria-pressed={isSelected}
+            className="flex min-w-0 items-center gap-2 rounded text-left focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {inGroup && itemKey ? (
+              <span className="text-sm font-medium font-mono truncate">{itemKey}</span>
+            ) : (
+              <>
+                <span className="text-sm font-medium truncate">{label}</span>
 
-              {itemKey && (
-                <span className="text-xs text-muted-foreground font-mono truncate">
-                  &middot; {itemKey}
-                </span>
-              )}
-            </>
-          )}
+                {itemKey && (
+                  <span className="text-xs text-muted-foreground font-mono truncate">
+                    &middot; {itemKey}
+                  </span>
+                )}
+              </>
+            )}
+          </button>
 
           <Badge
             variant="outline"
@@ -1201,7 +1207,7 @@ function CollapsibleOutput({ label, data }: { label: string; data: unknown }) {
 
 // --- Raw JSON Toggle ---
 
-function RawJsonToggle({ data }: { data: unknown }) {
+export function RawJsonToggle({ data }: { data: unknown }) {
   const [showRaw, setShowRaw] = useState(false);
 
   return (
@@ -1219,7 +1225,11 @@ function RawJsonToggle({ data }: { data: unknown }) {
       </button>
       {showRaw && (
         <pre className="mt-1 whitespace-pre-wrap text-xs font-mono leading-relaxed rounded-md bg-muted p-3 text-muted-foreground max-h-[300px] overflow-y-auto">
-          {typeof data === "string" ? data : JSON.stringify(data, null, 2)}
+          {data === undefined
+            ? "No output"
+            : typeof data === "string"
+              ? data
+              : JSON.stringify(data, null, 2)}
         </pre>
       )}
     </div>

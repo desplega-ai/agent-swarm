@@ -1,8 +1,9 @@
+import type { TaskUiSpecRow } from "@desplega/storage";
 import * as z from "zod";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type { TaskUiSpec } from "../utils/task-ui-spec";
-import { getDbClient } from "./db";
 import { scrubJsonValue } from "./scrub-json";
+import { getStorage } from "./storage";
 
 /** The stored task UI spec, as task and session payloads return it. */
 export const TaskUiSpecSchema = z.object({
@@ -29,12 +30,9 @@ export const TaskUiSpecSchema = z.object({
 
 export type TaskUiActionSurface = "slack" | "web";
 
-type TaskUiSpecRow = {
-  taskId: string;
-  spec: string;
-  actions: string | null;
-  fallbackText: string;
-};
+function tasksRepo() {
+  return getStorage().repos.tasks;
+}
 
 function rowToTaskUiSpec(row: TaskUiSpecRow): TaskUiSpec {
   const value: TaskUiSpec = { spec: JSON.parse(row.spec), fallbackText: row.fallbackText };
@@ -43,11 +41,7 @@ function rowToTaskUiSpec(row: TaskUiSpecRow): TaskUiSpec {
 }
 
 export async function getTaskUiSpec(taskId: string): Promise<TaskUiSpec | null> {
-  const row = await getDbClient().get<TaskUiSpecRow>(
-    `SELECT task_id AS taskId, spec, actions, fallback_text AS fallbackText
-    FROM task_ui_specs WHERE task_id = ?`,
-    [taskId],
-  );
+  const row = await tasksRepo().findTaskUiSpec(taskId);
   return row ? rowToTaskUiSpec(row) : null;
 }
 
@@ -65,11 +59,7 @@ export async function getTaskUiSpecsForTasks(
   const byTask = new Map<string, TaskUiSpec | null>(ids.map((id) => [id, null]));
   for (let i = 0; i < ids.length; i += TASK_ID_CHUNK) {
     const chunk = ids.slice(i, i + TASK_ID_CHUNK);
-    const rows = await getDbClient().query<TaskUiSpecRow>(
-      `SELECT task_id AS taskId, spec, actions, fallback_text AS fallbackText
-      FROM task_ui_specs WHERE task_id IN (${chunk.map(() => "?").join(",")})`,
-      chunk,
-    );
+    const rows = await tasksRepo().listTaskUiSpecs(chunk);
     for (const row of rows) byTask.set(row.taskId, rowToTaskUiSpec(row));
   }
   return byTask;
@@ -85,21 +75,13 @@ export async function upsertTaskUiSpec(
   value: TaskUiSpec,
   userId?: string,
 ): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO task_ui_specs (task_id, spec, actions, fallback_text, created_by, updated_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(task_id) DO UPDATE SET
-      spec=excluded.spec, actions=excluded.actions, fallback_text=excluded.fallback_text,
-      updated_by=excluded.updated_by, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-    [
-      taskId,
-      scrubJsonValue(value.spec),
-      value.actions === undefined ? null : scrubJsonValue(value.actions),
-      scrubSecrets(value.fallbackText),
-      userId ?? null,
-      userId ?? null,
-    ],
-  );
+  await tasksRepo().upsertTaskUiSpec({
+    taskId,
+    spec: scrubJsonValue(value.spec),
+    actions: value.actions === undefined ? null : scrubJsonValue(value.actions),
+    fallbackText: scrubSecrets(value.fallbackText),
+    userId: userId ?? null,
+  });
 }
 
 /**
@@ -119,13 +101,13 @@ export async function reserveTaskUiActionRun({
   slackUserId?: string | null;
   userId?: string | null;
 }): Promise<"reserved" | "exists"> {
-  const { changes } = await getDbClient().run(
-    `INSERT INTO task_ui_action_runs
-    (task_id, action_id, surface, slack_user_id, created_by, updated_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(task_id, action_id) DO NOTHING`,
-    [taskId, actionId, surface, slackUserId ?? null, userId ?? null, userId ?? null],
-  );
+  const changes = await tasksRepo().reserveTaskUiActionRun({
+    taskId,
+    actionId,
+    surface,
+    slackUserId: slackUserId ?? null,
+    userId: userId ?? null,
+  });
   return changes === 1 ? "reserved" : "exists";
 }
 
@@ -134,11 +116,7 @@ export async function reserveTaskUiActionRun({
  * run again. A finished run (with a result task) stays.
  */
 export async function releaseTaskUiActionRun(taskId: string, actionId: string): Promise<void> {
-  await getDbClient().run(
-    `DELETE FROM task_ui_action_runs
-    WHERE task_id = ? AND action_id = ? AND result_task_id IS NULL`,
-    [taskId, actionId],
-  );
+  await tasksRepo().releaseTaskUiActionRun(taskId, actionId);
 }
 
 export async function setTaskUiActionResult(
@@ -146,12 +124,7 @@ export async function setTaskUiActionResult(
   actionId: string,
   resultTaskId: string,
 ): Promise<void> {
-  await getDbClient().run(
-    `UPDATE task_ui_action_runs SET result_task_id = ?,
-      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE task_id = ? AND action_id = ?`,
-    [resultTaskId, taskId, actionId],
-  );
+  await tasksRepo().setTaskUiActionResult(taskId, actionId, resultTaskId);
 }
 
 export type TaskUiScriptActionLock =
@@ -187,36 +160,19 @@ export async function acquireTaskUiScriptActionRun({
   const now = new Date(nowMs).toISOString();
   const lockedUntil = new Date(nowMs + leaseMs).toISOString();
   const cooldownCutoff = new Date(nowMs - cooldownMs).toISOString();
-  const { changes } = await getDbClient().run(
-    `INSERT INTO task_ui_action_runs
-    (task_id, action_id, surface, slack_user_id, created_by, updated_by, locked_until)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(task_id, action_id) DO UPDATE SET
-      locked_until = excluded.locked_until, surface = excluded.surface,
-      slack_user_id = excluded.slack_user_id, updated_by = excluded.updated_by, updated_at = ?
-    WHERE task_ui_action_runs.result_task_id IS NULL
-      AND (task_ui_action_runs.locked_until IS NULL OR task_ui_action_runs.locked_until < ?)
-      AND (task_ui_action_runs.last_run_at IS NULL OR task_ui_action_runs.last_run_at < ?)`,
-    [
-      taskId,
-      actionId,
-      surface,
-      slackUserId ?? null,
-      userId ?? null,
-      userId ?? null,
-      lockedUntil,
-      now,
-      now,
-      cooldownCutoff,
-    ],
-  );
+  const changes = await tasksRepo().acquireTaskUiScriptActionRun({
+    taskId,
+    actionId,
+    surface,
+    slackUserId: slackUserId ?? null,
+    userId: userId ?? null,
+    lockedUntil,
+    now,
+    cooldownCutoff,
+  });
   if (changes === 1) return { status: "acquired" };
 
-  const row = await getDbClient().get<{ lockedUntil: string | null; lastRunAt: string | null }>(
-    `SELECT locked_until AS lockedUntil, last_run_at AS lastRunAt
-    FROM task_ui_action_runs WHERE task_id = ? AND action_id = ?`,
-    [taskId, actionId],
-  );
+  const row = await tasksRepo().findTaskUiActionLease(taskId, actionId);
   const secondsUntil = (ms: number) => Math.max(1, Math.ceil((ms - nowMs) / 1000));
   if (row?.lockedUntil && row.lockedUntil >= now) {
     return { status: "running", retryAfterSec: secondsUntil(Date.parse(row.lockedUntil)) };
@@ -237,11 +193,11 @@ export async function finishTaskUiScriptActionRun(
   error: string | null,
 ): Promise<void> {
   const now = new Date().toISOString();
-  await getDbClient().run(
-    `UPDATE task_ui_action_runs SET locked_until = NULL, last_run_at = ?,
-      run_count = run_count + 1, last_error = ?, updated_at = ?
-    WHERE task_id = ? AND action_id = ?`,
-    [now, error === null ? null : scrubSecrets(error), now, taskId, actionId],
+  await tasksRepo().finishTaskUiScriptActionRun(
+    taskId,
+    actionId,
+    error === null ? null : scrubSecrets(error),
+    now,
   );
 }
 
@@ -250,10 +206,5 @@ export async function finishTaskUiScriptActionRun(
  * an `agent_log` row, so it also shows in the task's activity timeline.
  */
 export async function hasTaskUiSpecCheckRefusal(taskId: string): Promise<boolean> {
-  return Boolean(
-    await getDbClient().get<{ id: string }>(
-      "SELECT id FROM agent_log WHERE taskId = ? AND eventType = 'task_ui_spec_check_refused' LIMIT 1",
-      [taskId],
-    ),
-  );
+  return getStorage().repos.agents.hasTaskLogEvent(taskId, "task_ui_spec_check_refused");
 }

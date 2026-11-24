@@ -1,0 +1,37 @@
+getDbClient() call sites: 1480 matches in 207 files
+.transaction( sites: 291 matches in 127 files
+new Database( openers: 5 matches in 4 files
+bun:sqlite importers: 9 matches in 9 files
+SQL statements (string starting with SELECT/INSERT/UPDATE/DELETE/WITH): 2454 matches in 344 files
+IN-list expansions (map(() => "?")): 107 matches in 47 files
+placeholders join(", ") / WHERE-fragment arrays (conditions.push): 178 matches in 19 files
+strftime(: 79 matches in 16 files
+datetime('now': 44 matches in 17 files
+IS NOT <value> (uppercase, not NULL): 21 matches in 11 files
+GLOB: 45 matches in 18 files
+rowid: 184 matches in 33 files
+INSERT OR IGNORE/REPLACE: 24 matches in 12 files
+changes() / .changes / lastInsertRowid: 157 matches in 48 files
+json_each: 34 matches in 19 files
+json_extract: 65 matches in 22 files
+PRAGMA: 28 matches in 6 files
+LIKE: 132 matches in 35 files
+scalar max(a,b)/min(a,b) in SQL: 3 matches in 2 files
+rowTo* mappers: 76 matches in 21 files
+SQLite error text matches: 26 matches in 14 files
+JSON.parse in files with rowTo* mappers: 92
+getDbClient() by directory:
+  src/be/db.ts: 425 matches in 1 files
+  src/be/db/: 270 matches in 39 files
+  src/be/db-queries/: 81 matches in 6 files
+  src/http/: 70 matches in 26 files
+  src/be/memory/: 59 matches in 15 files
+  src/workflows/: 40 matches in 12 files
+  src/tools/: 23 matches in 10 files
+  src/apps/: 18 matches in 6 files
+  src/scheduler/: 11 matches in 3 files
+  src/heartbeat/: 5 matches in 1 files
+check-async-db-seam.sh allowlist entries: 19
+seed-scripts lines with SQL keywords: 555
+migration files: 261; CREATE TRIGGER statements across migrations: 71
+docs-site pages naming SQLite: 19

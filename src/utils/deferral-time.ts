@@ -2,6 +2,16 @@
 // channel renderers. Kept apart from the tool so Slack rendering does not load
 // the tool's module graph.
 
+export function isValidTimezone(zone: unknown): zone is string {
+  if (typeof zone !== "string" || !zone) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Date/time parts of `date` as rendered in IANA zone `tz`. */
 function partsInTz(date: Date, tz: string) {
   const fmt = new Intl.DateTimeFormat("en-US", {
@@ -11,19 +21,17 @@ function partsInTz(date: Date, tz: string) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
+    timeZoneName: "short",
+    hourCycle: "h23",
   });
   const parts = Object.fromEntries(fmt.formatToParts(date).map((p) => [p.type, p.value]));
-  // Some locales render midnight as "24" under hour12: false.
-  const hour = parts.hour === "24" ? "00" : parts.hour;
   return {
     year: parts.year!,
     month: parts.month!,
     day: parts.day!,
-    hour: hour!,
+    hour: parts.hour!,
     minute: parts.minute!,
-    second: parts.second!,
+    abbreviation: parts.timeZoneName!,
   };
 }
 
@@ -36,17 +44,13 @@ export function formatDeferralDateTime(
   target: Date,
   now: Date,
   tz: string,
+  labelZone = false,
 ): { date: string; time: string } {
-  let zone = tz;
-  try {
-    Intl.DateTimeFormat("en-US", { timeZone: zone });
-  } catch {
-    zone = "UTC";
-  }
+  const zone = isValidTimezone(tz) ? tz : "UTC";
   const t = partsInTz(target, zone);
   // Minute precision: this string is read by a human deciding whether to wait,
   // and the wake-up is scheduler-polled anyway, so seconds were false precision.
-  const time = `${t.hour}:${t.minute}`;
+  const time = `${t.hour}:${t.minute}${labelZone ? ` ${t.abbreviation}` : ""}`;
   const n = partsInTz(now, zone);
   if (t.year === n.year && t.month === n.month && t.day === n.day) return { date: "today", time };
   const tm = partsInTz(new Date(now.getTime() + 86_400_000), zone);

@@ -1,6 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { basename } from "node:path";
+import {
+  createPostgresDatabase,
+  type DbFixture,
+  type DbTarget,
+  dropPostgresDatabase,
+  type Engine,
+  loadDbFixture,
+  preparePostgresQueryReader,
+  restoreSqliteFixture,
+} from "./db";
 
 export const repoRoot = `${import.meta.dir}/../..`;
 
@@ -38,7 +48,11 @@ export type Sut = {
   port: number;
   baseUrl: string;
   apiKey: string;
+  /** SQLite file (default engine). Unused on Postgres, where `databaseUrl` holds the data. */
   dbPath: string;
+  engine: Engine;
+  /** `--engine postgres`: the per-boot database (decision D1 selects Postgres from it). */
+  databaseUrl?: string;
   logPath: string;
   logPaths: string[];
   tempPaths: string[];
@@ -59,27 +73,12 @@ export function minimalEnv(): Record<string, string> {
   return result;
 }
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("Failed to allocate a TCP port"));
-        return;
-      }
-      const port = address.port;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
-}
-
-// Ports a scenario binds minutes after boot (stand-ins the SUT's env names up front). A
-// kernel-picked port sits in the ephemeral range, where any later `listen(0)` in the runner
-// can take it first ("Failed to start server. Is port N in use?"). Below the range (Linux
-// starts at 32768, macOS at 49152) only an explicit bind can.
+// Ports bound some time after they are picked: the SUT's own API port (seconds of boot) and
+// stand-ins the SUT's env names up front (minutes). A kernel-picked port sits in the
+// ephemeral range, where any later `listen(0)` in the runner, or in a parallel test file,
+// can take it first. For the API port that is silent: /health then hits the other server,
+// and every request lands on it. Below the range (Linux starts at 32768, macOS at 49152)
+// only an explicit bind can.
 // shortcut: probes loopback only, so two runs sharing a host can still race; upgrade to a lock.
 const reserved = new Set<number>();
 async function reservedPort(): Promise<number> {
@@ -190,7 +189,7 @@ async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
   await sut.process.exited.catch(() => {});
   await sut.drains.catch(() => {});
   if (keep) {
-    console.log(`KEEP db: ${sut.dbPath}`);
+    console.log(`KEEP db: ${keptDb(sut)}`);
     for (const path of sut.logPaths) console.log(`KEEP API log: ${path}`);
     for (const path of sut.tempPaths) console.log(`KEEP temp: ${path}`);
   } else {
@@ -199,7 +198,7 @@ async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
   throw new Error(`API server did not become healthy within 60 seconds\n${tail}`);
 }
 
-async function stopSutProcess(sut: Sut): Promise<void> {
+export async function stopSutProcess(sut: Sut): Promise<void> {
   if (sut.process.exitCode === null) {
     sut.process.kill("SIGTERM");
     // Under --coverage, Bun writes lcov for every loaded file after the API exits. A cleared
@@ -218,7 +217,19 @@ async function stopSutProcess(sut: Sut): Promise<void> {
   await sut.drains.catch(() => {});
 }
 
+/** Where the assertion handle (ctx.db) reads this SUT's data. */
+export function sutDbTarget(sut: Sut): DbTarget {
+  return sut.databaseUrl
+    ? { engine: "postgres", url: sut.databaseUrl }
+    : { engine: "sqlite", path: sut.dbPath };
+}
+
+function keptDb(sut: Sut): string {
+  return sut.databaseUrl ? new URL(sut.databaseUrl).pathname.slice(1) : sut.dbPath;
+}
+
 async function deleteSutState(sut: Sut): Promise<void> {
+  if (sut.databaseUrl) await dropPostgresDatabase(sut.databaseUrl).catch(() => {});
   for (const path of [sut.dbPath, `${sut.dbPath}-wal`, `${sut.dbPath}-shm`, ...sut.logPaths]) {
     await Bun.file(path)
       .delete()
@@ -239,9 +250,12 @@ export async function startSut(
   slackEnv: Record<string, string>,
   extraEnv: Record<string, string> = {},
   coverageDir?: string,
+  engine: Engine = "sqlite",
+  /** Runs after the SUT state paths exist and before the API process starts. */
+  prepare?: (sut: Sut) => Promise<void>,
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
-  const port = await freePort();
+  const port = await reservedPort();
   // The Codex device-login base is an env-only, loopback-only key, so the stand-in's port
   // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
   const codexDevicePort = await reservedPort();
@@ -252,6 +266,7 @@ export async function startSut(
   const chatSdkRocketchatPort = await reservedPort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
+  const databaseUrl = engine === "postgres" ? await createPostgresDatabase(stamp) : undefined;
   const logPath = `/tmp/e2e-api-${stamp}.log`;
   const fsDir = `/tmp/e2e-fs-${stamp}`;
   const secretsDir = `/tmp/e2e-secrets-${stamp}`;
@@ -269,6 +284,7 @@ export async function startSut(
     API_KEY: apiKey,
     AGENT_SWARM_API_KEY: apiKey,
     DATABASE_PATH: dbPath,
+    ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
     // test, not development: the Slack socket-mode guard refuses to connect
     // under development, and every run drives Slack through the mock.
     NODE_ENV: "test",
@@ -318,6 +334,8 @@ export async function startSut(
     baseUrl: `http://127.0.0.1:${port}`,
     apiKey,
     dbPath,
+    engine,
+    databaseUrl,
     logPath,
     logPaths: [logPath],
     tempPaths: [fsDir, secretsDir, homeDir],
@@ -328,8 +346,118 @@ export async function startSut(
     flushLog: () => {},
     drains: Promise.resolve(),
   };
+  await prepare?.(sut);
+  // After prepare: db-copy needs a database with no tables, and the reader role
+  // needs the tables (it applies the chain when nothing else did).
+  if (databaseUrl) {
+    const databaseQueryUrl = await preparePostgresQueryReader(databaseUrl);
+    sut.env = { ...sut.env, DATABASE_QUERY_URL: databaseQueryUrl };
+  }
   await launch(sut, keep);
   return sut;
+}
+
+/**
+ * Boot a second, independent SUT on a database fixture (for example the database file a
+ * base commit made). SQLite restores the dump into the SUT's file. Postgres takes the
+ * operator path of the runbook: an API of this build starts once on the SQLite file (it
+ * applies the newer migrations) and stops, then `agent-swarm db-copy` (decision D11)
+ * copies the file into the SUT's new database, and the SUT boots on the copy with the
+ * same encryption key.
+ */
+export async function startFixtureSut(
+  keep: boolean,
+  source: string | DbFixture,
+  extraEnv: Record<string, string>,
+  engine: Engine,
+): Promise<{ sut: Sut; fixture: DbFixture }> {
+  const fixture = typeof source === "string" ? await loadDbFixture(source) : source;
+  const restore = async (prepared: Sut) => {
+    await restoreSqliteFixture(prepared.dbPath, fixture);
+    const keyFile = prepared.env.SECRETS_ENCRYPTION_KEY_FILE;
+    if (keyFile && typeof fixture.meta.secretsKey === "string")
+      await Bun.write(keyFile, fixture.meta.secretsKey);
+  };
+  if (engine === "sqlite") {
+    const sut = await startSut(
+      keep,
+      { SLACK_DISABLE: "true" },
+      extraEnv,
+      undefined,
+      engine,
+      restore,
+    );
+    return { sut, fixture };
+  }
+  const staging = await startSut(
+    keep,
+    { SLACK_DISABLE: "true" },
+    extraEnv,
+    undefined,
+    "sqlite",
+    restore,
+  );
+  try {
+    await stopSutProcess(staging);
+    const sut = await startSut(
+      keep,
+      { SLACK_DISABLE: "true" },
+      extraEnv,
+      undefined,
+      engine,
+      async (prepared) => {
+        await copySutKey(staging, prepared);
+        const copy = await runDataCopyCli(staging.dbPath, prepared.databaseUrl ?? "");
+        if (copy.exitCode !== 0) {
+          throw new Error(
+            `fixture ${fixture.name}: db-copy exited ${copy.exitCode}\n${copy.output.slice(-3000)}`,
+          );
+        }
+      },
+    );
+    return { sut, fixture };
+  } finally {
+    await stopSut(staging, keep);
+  }
+}
+
+/** Give `target` the encryption key file of `source`, so copied secrets decrypt. */
+export async function copySutKey(source: Sut, target: Sut): Promise<void> {
+  const from = source.env.SECRETS_ENCRYPTION_KEY_FILE;
+  const to = target.env.SECRETS_ENCRYPTION_KEY_FILE;
+  if (from && to) await Bun.write(to, await Bun.file(from).text());
+}
+
+/** `agent-swarm db-copy --from <file> --to <url>` with the SUT's minimal environment. */
+export async function runDataCopyCli(
+  sqlitePath: string,
+  databaseUrl: string,
+): Promise<{ exitCode: number; output: string }> {
+  const child = Bun.spawn(
+    [
+      "bun",
+      "--no-orphans",
+      "run",
+      `${repoRoot}/src/cli.tsx`,
+      "db-copy",
+      "--from",
+      sqlitePath,
+      "--to",
+      databaseUrl,
+    ],
+    {
+      cwd: repoRoot,
+      env: { ...minimalEnv(), DESPLEGA_TELEMETRY_ENV: "test" },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { exitCode, output: `${stdout}\n${stderr}` };
 }
 
 /**
@@ -346,7 +474,7 @@ export async function restartSut(sut: Sut, extraEnv: Record<string, string> = {}
 export async function stopSut(sut: Sut, keep: boolean): Promise<void> {
   await stopSutProcess(sut);
   if (keep) {
-    console.log(`KEEP db: ${sut.dbPath}`);
+    console.log(`KEEP db: ${keptDb(sut)}`);
     for (const path of sut.logPaths) console.log(`KEEP API log: ${path}`);
     for (const path of sut.tempPaths) console.log(`KEEP temp: ${path}`);
     return;

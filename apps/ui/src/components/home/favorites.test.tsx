@@ -25,6 +25,12 @@ mock.module("@/api/hooks/use-workflows", () => ({
 mock.module("@/api/hooks/use-schedules", () => ({
   useScheduledTask: () => ({ data: { name: "Competitor scan", enabled: false } }),
 }));
+mock.module("@/api/hooks/use-apps", () => ({
+  useApp: () => ({
+    data: { app: { name: "Deal board", updatedAt: "2026-11-04T10:00:00Z" } },
+    isError: false,
+  }),
+}));
 mock.module("@/api/hooks/use-session-tree", () => ({
   useSessionLabels: () => ({}),
   useSessionTree: () => ({
@@ -72,6 +78,7 @@ test("every favorite type renders a row that opens its entity", () => {
     fav("page", "p1"),
     fav("workflow", "w1"),
     fav("schedule", "s1"),
+    fav("app", "a1"),
     fav("agent-fs-path", "org/drive/shared/po-qa/"),
   ]);
   expect(html).toContain("po-qa");
@@ -84,6 +91,8 @@ test("every favorite type renders a row that opens its entity", () => {
   expect(html).toContain("Competitor scan");
   expect(html).toContain("Paused");
   expect(html).toContain('href="/schedules/s1"');
+  expect(html).toContain("Deal board");
+  expect(html).toContain('href="/apps/a1"');
   expect(html).toContain("shared/po-qa/");
   expect(html).toContain('href="/file/~/org/drive/shared/po-qa/"');
   expect(html).toContain("Folder");

@@ -360,42 +360,41 @@ const onVcsEvent = (name: string, data: unknown): void => {
   });
 };
 
+// Every bus name the bridge forwards to extension handlers. Handlers trust these payloads,
+// so only server code may emit them (the workflow-events API refuses them).
+const BRIDGED_EVENTS: ReadonlyArray<readonly [string, (data: unknown) => void]> = [
+  ["task.created", onTaskCreated],
+  ["task.create_blocked", onTaskBlocked],
+  ["task.completed", onTaskCompleted],
+  ["task.failed", onTaskFailed],
+  ["task.cancelled", onTaskCancelled],
+  ["task.superseded", onTaskSuperseded],
+  ["task.progress", onTaskProgress],
+  ["slack.message", onSlackMessage],
+  ["approval.resolved", onApprovalResolved],
+  ["task.budget_refused", onTaskBudgetRefused],
+  ["agentmail.message.received", onEmailReceived],
+  ["kapso.message.received", onKapsoMessage],
+  ["chat.message.received", onChatMessageReceived],
+  ["chat.message.sent", onChatMessageSent],
+];
+const BRIDGED_EVENT_NAMES: ReadonlySet<string> = new Set(BRIDGED_EVENTS.map(([name]) => name));
+
+/** True for a bus name the extension post-bridge forwards: server-emitted only. */
+export function isExtensionBridgedEvent(name: string): boolean {
+  return BRIDGED_EVENT_NAMES.has(name) || VCS_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
 export function initExtensionPostBridge(): void {
   if (subscribed) return;
   subscribed = true;
-  workflowEventBus.on("task.created", onTaskCreated);
-  workflowEventBus.on("task.create_blocked", onTaskBlocked);
-  workflowEventBus.on("task.completed", onTaskCompleted);
-  workflowEventBus.on("task.failed", onTaskFailed);
-  workflowEventBus.on("task.cancelled", onTaskCancelled);
-  workflowEventBus.on("task.superseded", onTaskSuperseded);
-  workflowEventBus.on("task.progress", onTaskProgress);
-  workflowEventBus.on("slack.message", onSlackMessage);
-  workflowEventBus.on("approval.resolved", onApprovalResolved);
-  workflowEventBus.on("task.budget_refused", onTaskBudgetRefused);
-  workflowEventBus.on("agentmail.message.received", onEmailReceived);
-  workflowEventBus.on("kapso.message.received", onKapsoMessage);
-  workflowEventBus.on("chat.message.received", onChatMessageReceived);
-  workflowEventBus.on("chat.message.sent", onChatMessageSent);
+  for (const [name, handler] of BRIDGED_EVENTS) workflowEventBus.on(name, handler);
   for (const prefix of VCS_PREFIXES) workflowEventBus.onPrefix(prefix, onVcsEvent);
 }
 
 export function teardownExtensionPostBridge(): void {
   if (!subscribed) return;
   subscribed = false;
-  workflowEventBus.off("task.created", onTaskCreated);
-  workflowEventBus.off("task.create_blocked", onTaskBlocked);
-  workflowEventBus.off("task.completed", onTaskCompleted);
-  workflowEventBus.off("task.failed", onTaskFailed);
-  workflowEventBus.off("task.cancelled", onTaskCancelled);
-  workflowEventBus.off("task.superseded", onTaskSuperseded);
-  workflowEventBus.off("task.progress", onTaskProgress);
-  workflowEventBus.off("slack.message", onSlackMessage);
-  workflowEventBus.off("approval.resolved", onApprovalResolved);
-  workflowEventBus.off("task.budget_refused", onTaskBudgetRefused);
-  workflowEventBus.off("agentmail.message.received", onEmailReceived);
-  workflowEventBus.off("kapso.message.received", onKapsoMessage);
-  workflowEventBus.off("chat.message.received", onChatMessageReceived);
-  workflowEventBus.off("chat.message.sent", onChatMessageSent);
+  for (const [name, handler] of BRIDGED_EVENTS) workflowEventBus.off(name, handler);
   for (const prefix of VCS_PREFIXES) workflowEventBus.offPrefix(prefix, onVcsEvent);
 }

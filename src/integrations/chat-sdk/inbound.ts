@@ -537,19 +537,22 @@ export async function flushChatThread(
     mostRecentTask && thread
       ? await getChatThreadContext(thread, new Set(items.map((item) => item.messageId)), resetAt)
       : "";
-  const header = resolveTemplate("chat.message.header", {
-    chat_facts: formatChatHeaderFacts(
-      adapter,
-      otherSenders > 0
-        ? { ...requester.facts, from: `${requester.facts.from} +${otherSenders} more` }
-        : requester.facts,
-      requester.addressed,
-    ),
-  }).text;
+  const header = (
+    await resolveTemplate("chat.message.header", {
+      chat_facts: formatChatHeaderFacts(
+        adapter,
+        otherSenders > 0
+          ? { ...requester.facts, from: `${requester.facts.from} +${otherSenders} more` }
+          : requester.facts,
+        requester.addressed,
+      ),
+    })
+  ).text;
   const description = [
     header,
     threadContext
-      ? resolveTemplate("chat.message.thread_context", { thread_messages: threadContext }).text
+      ? (await resolveTemplate("chat.message.thread_context", { thread_messages: threadContext }))
+          .text
       : "",
     marked,
   ]

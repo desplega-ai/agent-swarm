@@ -1,0 +1,39 @@
+{
+  "name": "@desplega.ai/agent-swarm-sdk",
+  "version": "0.1.0",
+  "description": "Typed, fetch-based client for the Agent Swarm API: send tasks, wait for results, search memory, run scripts.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/desplega-ai/agent-swarm.git",
+    "directory": "packages/agent-swarm-sdk"
+  },
+  "homepage": "https://agent-swarm.dev",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "gen:types": "bun scripts/gen-types.ts",
+    "build": "rm -rf dist && bun build src/index.ts --outdir dist --target browser --format esm && tsc -p tsconfig.build.json",
+    "tsc": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test",
+    "prepack": "bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "openapi-typescript": "^7",
+    "typescript": "^5.9.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

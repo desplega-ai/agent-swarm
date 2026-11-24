@@ -57,11 +57,12 @@ Do **not** use pages for:
 // → { id, version: 1, designVersion: 2, app_url, api_url }
 ```
 
-Share `app_url` (the SPA route) for the general case; share `api_url` for a
-no-SPA-required direct link.
+Share `app_url` (the SPA route) with signed-in dashboard users; share `api_url`
+for a no-SPA-required direct link.
 
 Use `authMode: "public"` only when the page is intentionally safe for anyone
-with the URL to view.
+with the URL to view. A public page shared with someone outside the dashboard
+gets its `api_url`, never its `app_url` (see [URL Shapes](#url-shapes)).
 
 A complete report built from the design system below is bundled at
 **`examples/report-page.html`**. Copy it as your starting point instead of
@@ -625,7 +626,7 @@ To check a page by screenshot, open it from an origin its data endpoints allow. 
 
 | Mode | URL behavior | When to use |
 |---|---|---|
-| `public` | No gate. Anyone with the URL sees the content. General API calls require a page session. Rooms and channels permit anonymous guests. | Static reports, marketing pages, anything safe to share externally. |
+| `public` | No gate on `api_url` (`/p/:id`): anyone with that URL sees the content. `app_url` still needs a dashboard login. General API calls require a page session. Rooms and channels permit anonymous guests. | Static reports, marketing pages, anything safe to share externally. |
 | `authed` | SPA `app_url` works for any signed-in dashboard user. Direct `api_url` requires that page's `page_session_<id>` cookie (mint via `POST /api/pages/:id/launch`). Each page has its own cookie, so several pages stay open in one browser. User-token launches retain viewer identity. Operator launches use guest sessions. | Per-team dashboards, JSON pages with action buttons. |
 | `password` | `?key=<password>` or HTTP Basic on `/p/:id` unlocks. Unlock mints an anonymous guest session. It does not establish a user identity. | Pages shared with non-swarm users (clients, contractors). |
 
@@ -638,9 +639,10 @@ To check a page by screenshot, open it from an origin its data endpoints allow. 
 
 | URL | Shape | Notes |
 |---|---|---|
-| `app_url` | `${APP_URL}/pages/:id` | SPA route. Renders HTML in a sandboxed iframe, JSON via `@json-render/react`. Default share target. |
+| `app_url` | `${APP_URL}/pages/:id` | SPA route. Renders HTML in a sandboxed iframe, JSON via `@json-render/react`. Needs a dashboard login: a logged-out visitor is sent to `/setup`. Share target for signed-in dashboard users. |
 | `app_url` (full mode) | `${APP_URL}/pages/:id?mode=full` | Same SPA route, maximized: hides the SPA sidebar/header so the page body gets the full viewport. Slim header with title + Exit-Full button. Useful for embeds + standalone dashboards. |
-| `api_url` | `${MCP_BASE_URL}/p/:id` | Direct API render. HTML inlines and serves; JSON 302-redirects to `app_url`. Useful for no-SPA-required links. |
+| `app_url` (chromeless) | `${APP_URL}/pages/:id?mode=chromeless` | Same SPA route, the page body alone: no header, no border, the whole viewport. For a link opened on a phone, or an embed. |
+| `api_url` | `${PUBLIC_MCP_BASE_URL}/p/:id` | Direct API render on the public API origin. HTML inlines and serves; JSON 302-redirects to `app_url`. Share target for a `public` or `password` page read by anyone without a dashboard login. |
 
 `${APP_URL}` is the deployment's SPA origin and `${MCP_BASE_URL}` is its API
 origin. `${SWARM_URL}` is the bare host (no scheme) for copy that needs only the
@@ -648,10 +650,34 @@ domain. All three are env vars in your session. Read them; never hardcode a
 host. When a variable you need is missing, say so in your output instead of
 falling back to localhost or inventing a host.
 
-**Default**: share `app_url`. Append `?mode=full` when the recipient should
-see ONLY the page (no surrounding swarm chrome). Use `api_url` only when you
-specifically need a link that bypasses the SPA (e.g. embedding in Slack,
-where the unfurl preview only follows the API origin).
+`${MCP_BASE_URL}` can be an internal host (for example `http://api:3013`) that
+no reader can open. The server builds `api_url` from `PUBLIC_MCP_BASE_URL` and
+falls back to `MCP_BASE_URL` when that is unset. So take the public API origin
+from the `api_url` that `create_page` returns, never by joining
+`${MCP_BASE_URL}` and `/p/:id` yourself. If the returned `api_url` is an
+internal host, `PUBLIC_MCP_BASE_URL` is unset: say so in your output instead of
+sharing the link.
+
+**Default**: pick by reader.
+
+- Signed-in dashboard users: share `app_url`. Append `?mode=full` when they
+  should see ONLY the page (no surrounding swarm chrome), or `?mode=chromeless`
+  for the page with no title bar at all (a phone, an embed).
+- Anyone else (a client, a public post, a logged-out teammate) reading a
+  `public` page: share `api_url`. Also use `api_url` when you need a link
+  that bypasses the SPA (e.g. embedding in Slack, where the unfurl preview
+  only follows the API origin). A JSON page's `api_url` redirects to
+  `app_url`, so it needs a dashboard login: publish HTML for these readers.
+
+**A `200` on `app_url` is not an access check.** Logged out, the SPA route
+returns the same `200` dashboard shell for every id, even one that does not
+exist, then redirects to `/setup` in the browser. To prove a public page is
+readable, fetch `api_url` with no cookies and check the body holds the page
+content, not only the status:
+
+```bash
+curl -s "<api_url>" | grep -c "<a phrase from your page>"   # 0: not readable
+```
 
 ## Versioning
 
@@ -1045,8 +1071,8 @@ human-facing summary.
 - The **`kv-storage`** skill: page-scoped state via `swarmSdk.kv`.
 - `runbooks/secret-scrubbing.md`: egress scrubbing details.
 - SPA listing: `${APP_URL}/pages`, the same `APP_URL` used for share links above.
-  Prefer the `app_url` that `create_page` returns; build URLs by hand only when
-  you have no page id.
+  Prefer the `app_url` and `api_url` that `create_page` returns; build URLs by
+  hand only when you have no page id.
 
 ## Multiplayer rooms and live channels
 

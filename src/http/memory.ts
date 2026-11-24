@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getAgentById, getDbClient, getTaskById } from "../be/db";
+import { getAgentById, getTaskById } from "../be/db";
 import { withLoopPath } from "../be/event-loop-lag";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
@@ -40,6 +40,7 @@ import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retriev
 import { dropReviewTaskCompletions, isReviewTaskId } from "../be/memory/review-recall-filter";
 import { searchMemoryCandidates } from "../be/memory/search-candidates";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
+import { getStorage } from "../be/storage";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { buildRecallQuery } from "../memory/recall-query";
 import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
@@ -152,7 +153,9 @@ const searchMemory = route({
       schema: z.object({ results: z.array(MemorySearchResultItemSchema) }),
     },
     400: { description: "Missing query or agent ID" },
+    500: { description: "Memory search failed (never sent as an empty result list)" },
   },
+  rbac: { ungated: "worker-only: needs X-Agent-ID, which a user token cannot send" },
 });
 
 // Mirrors `MemoryEditResult` (src/be/memory/types.ts) — `store.edit()`'s
@@ -201,6 +204,7 @@ const reEmbedMemory = route({
   summary: "Re-embed all memories using the current embedding provider",
   tags: ["Memory"],
   auth: { apiKey: true },
+  rbac: { permission: "memory.reembed" },
   body: z.object({
     agentId: z
       .string()
@@ -710,6 +714,7 @@ const rateMemory = route({
     400: { description: "Validation error or explicit-self R6 spam-guard rejection" },
     409: { description: "Duplicate explicit-self rating for (taskId, memoryId)" },
   },
+  rbac: { ungated: "worker-only: needs X-Agent-ID, which a user token cannot send" },
 });
 
 // Mirrors `RetrievalListRow` (src/be/memory/retrieval-store.ts).
@@ -1035,8 +1040,13 @@ export async function handleMemory(
         })),
       });
     } catch (err) {
-      console.error("[memory-search] Error:", (err as Error).message);
-      searchMemory.respond(res, 200, { results: [] });
+      // A failed search is an error, not "no memories": an empty 200 hid a
+      // broken engine path from agents and operators. Prompt recall in the
+      // runner already treats a non-2xx answer as "no memories" for the task.
+      console.error(
+        scrubSecrets(`[memory-search] Error: ${err instanceof Error ? err.message : String(err)}`),
+      );
+      jsonError(res, "Memory search failed", 500);
     }
     return true;
   }
@@ -1165,7 +1175,9 @@ export async function handleMemory(
         mode: "list",
       });
     } catch (err) {
-      console.error("[memory-list] Error:", (err as Error).message);
+      console.error(
+        scrubSecrets(`[memory-list] Error: ${err instanceof Error ? err.message : String(err)}`),
+      );
       jsonError(res, "Memory list failed", 500);
     }
     return true;
@@ -1340,7 +1352,7 @@ export async function handleMemory(
     const parsed = await memoryHealth.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    memoryHealth.respond(res, 200, getMemoryStore().getHealth());
+    memoryHealth.respond(res, 200, await getMemoryStore().getHealth());
     return true;
   }
 
@@ -1628,14 +1640,12 @@ export async function purgeStaleSearchRetrievals(
       // `+eventType` keeps the planner on the retrievedAt range. Without
       // sqlite_stat1 it prefers the eventType equality, which reads every
       // search row to test its date, even when nothing is stale.
-      const result = await getDbClient().run(
-        `DELETE FROM memory_retrieval WHERE rowid IN (
-          SELECT rowid FROM memory_retrieval
-          WHERE +eventType = 'search' AND retrievedAt < ? LIMIT ?)`,
-        [cutoff, batchSize],
+      const changes = await getStorage().repos.memory.purgeSearchRetrievalsBefore(
+        cutoff,
+        batchSize,
       );
-      purged += result.changes;
-      if (result.changes < batchSize) return purged;
+      purged += changes;
+      if (changes < batchSize) return purged;
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   } catch (err) {

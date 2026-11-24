@@ -21,7 +21,7 @@ import {
 import { getPageEditCounter } from "../be/db/page-versions";
 import { snapshotPage } from "../pages/version";
 import { resolveTemplate } from "../prompts/resolver";
-import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
+import { authorizeHttpAssetKeyWrite, resolveDashboardUser } from "./asset-key-write";
 // Side-effect import: registers `task.page.feedback`.
 import "../prompts/session-templates";
 import { can } from "../rbac";
@@ -180,6 +180,10 @@ const createPageRoute = route({
     400: { description: "Invalid body, unknown theme, or invalid themeTokens" },
     409: { description: "Slug already exists for this agent" },
   },
+  rbac: {
+    ungated:
+      "agents publish pages like the create-page tool; no verb covers page writes, so user roles need admin",
+  },
 });
 
 const getPageRoute = route({
@@ -229,6 +233,8 @@ const launchPageRoute = route({
   path: "/api/pages/{id}/launch",
   pattern: ["api", "pages", null, "launch"],
   summary: "Launch a page session (issues HttpOnly cookie)",
+  description:
+    "The session acts as the caller's user for a user token, or as the active user named in `X-Swarm-User-Id` for the operator key (the dashboard's user picker). Any other operator-key launch gets an operator session with a guest name.",
   tags: ["Pages"],
   params: z.object({ id: z.string() }),
   rbac: { permission: "page.launch" },
@@ -290,6 +296,10 @@ const updatePageRoute = route({
     400: { description: "Unknown theme or invalid themeTokens" },
     404: { description: "Page not found" },
     413: { description: "Payload too large" },
+  },
+  rbac: {
+    ungated:
+      "agents publish pages like the create-page tool; no verb covers page writes, so user roles need admin",
   },
 });
 
@@ -364,6 +374,7 @@ const deletePageRoute = route({
     204: { description: "Page deleted" },
     404: { description: "Page not found" },
   },
+  rbac: { permission: "page.delete.any" },
 });
 
 const listPagesRoute = route({
@@ -966,7 +977,7 @@ export async function handlePages(
     }
 
     const note = parsed.body.note;
-    const taskPrompt = resolveTemplate("task.page.feedback", {
+    const taskPrompt = await resolveTemplate("task.page.feedback", {
       page_id: page.id,
       page_title: page.title,
       page_slug: page.slug,
@@ -1062,10 +1073,12 @@ export async function handlePages(
     }
 
     // public + authed both mint a cookie here. The signed cookie carries the
-    // user identity when a user-bound bearer launched it. Operator sessions
-    // receive a guest handle, while password sessions remain anonymous.
+    // user identity when a user-bound bearer launched it, or when the operator
+    // key names an active user in `X-Swarm-User-Id` (the dashboard's user
+    // picker, trusted as favorites trust it). Other operator sessions receive
+    // a guest handle, while password sessions remain anonymous.
     const auth = getRequestAuth(req);
-    const user = authUser(auth);
+    const user = authUser(auth) ?? (await resolveDashboardUser(req, myAgentId));
     const identity = user
       ? { uid: user.id, name: user.name }
       : isOperatorAuth(auth)

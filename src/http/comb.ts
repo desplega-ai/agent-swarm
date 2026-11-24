@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpRequesterUserId } from "../be/audit-user";
+import { getTaskById } from "../be/db";
 import { getCombConfig } from "../comb/config";
 import {
   REVIEW_BATCH_MAX,
@@ -11,8 +12,9 @@ import {
 import { can } from "../rbac";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { requestPrincipal } from "./request-principal";
-import { route } from "./route-def";
+import { agentFirstPrincipal, requestPrincipal } from "./request-principal";
+import { bodyTask, route } from "./route-def";
+import { denyParentAttach } from "./session-access";
 import { jsonError } from "./utils";
 
 const skippedSchema = z.object({
@@ -50,11 +52,12 @@ const reviewBatchRoute = route({
   method: "post",
   path: "/api/comb/review-batches",
   pattern: ["api", "comb", "review-batches"],
-  summary: "Send agent-fs comments to the swarm as one lead task",
+  summary: "Send agent-fs comments to the swarm as one task",
   description:
-    "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
+    "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates one task. An optional parentTaskId attaches it as a follow-up for the parent’s agent. Without a parent assignee it routes to the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. An optional `note` from the sender goes into the task text. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
   tags: ["Comb"],
   body: z.object({
+    parentTaskId: z.uuid().optional(),
     orgId: z.string().min(1),
     driveId: z.string().min(1),
     // agent-fs comment ids are UUIDs, so a malformed id never costs an agent-fs read.
@@ -89,6 +92,7 @@ const reviewBatchRoute = route({
       schema: batchErrorSchema,
     },
   },
+  session: bodyTask("parentTaskId"),
   rbac: { permission: "task.create.own" },
 });
 
@@ -118,8 +122,20 @@ export async function handleComb(
   }
 
   try {
+    const { parentTaskId, ...batch } = parsed.body;
+    const parent = parentTaskId ? await getTaskById(parentTaskId) : null;
+    if (parentTaskId && !parent) {
+      jsonError(res, "Parent task not found", 404);
+      return true;
+    }
+    const sender = parent ? await agentFirstPrincipal(req, myAgentId) : null;
+    if (parent && sender && (await denyParentAttach(req, res, myAgentId, parent, sender)))
+      return true;
     const result = await sendReviewBatch({
-      ...parsed.body,
+      ...batch,
+      parent: parent
+        ? { id: parent.id, agentId: parent.agentId, agentCaller: sender?.kind === "agent" }
+        : undefined,
       requestedByUserId: await resolveHttpRequesterUserId(req, myAgentId),
     });
     reviewBatchRoute.respond(res, result.taskId === null ? 200 : 201, result);

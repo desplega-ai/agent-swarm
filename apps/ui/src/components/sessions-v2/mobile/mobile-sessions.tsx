@@ -263,7 +263,7 @@ export function MobileSessions({
   /** A link in a screen: its file, page, or task opens as the asset screen over it. */
   const openAsset = (target: LinkPreviewTarget) => {
     const params = new URLSearchParams(searchParams);
-    params.set("asset", assetTabId(target));
+    params.set("asset", assetTabId(target, asset ?? sessionId));
     push(`${routeAsset ? "/sessions" : location.pathname}?${params.toString()}`);
   };
   /** Back: to the entry this view pushed, else up one screen (a deep link). */

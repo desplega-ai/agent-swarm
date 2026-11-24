@@ -49,6 +49,10 @@ mock.module("./session-presence", () => ({
   useSessionPresenceContext: () => ({ viewers: [], setTyping: () => {} }),
 }));
 mock.module("./composer-dock", () => ({ ComposerReadOnlyNotice: () => null }));
+mock.module("./pending-follow-ups", () => ({
+  usePendingFollowUps: () => [],
+  PendingFollowUps: () => null,
+}));
 mock.module("@/components/shared/empty-state", () => ({ EmptyState: () => null }));
 mock.module("@/components/ui/button", () => ({ Button: () => null }));
 mock.module("@/components/ui/skeleton", () => ({ Skeleton: () => null }));

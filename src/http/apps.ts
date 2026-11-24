@@ -63,7 +63,13 @@ import {
   rollbackApp,
   snapshotApp,
 } from "../apps/version";
-import { getAgentById, getAppVersion, getAppVersions, getTaskById } from "../be/db";
+import {
+  getAgentById,
+  getAppVersion,
+  getAppVersions,
+  getTaskById,
+  withFavoriteFlags,
+} from "../be/db";
 import type { RbacResource } from "../rbac";
 import { can } from "../rbac";
 import { APP_SESSION_KEY_PATTERN, appSessionContextKey } from "../tasks/context-key";
@@ -146,6 +152,8 @@ const AppSummarySchema = z.object({
   icon: AppIconSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** Whether the caller starred the app (an `app` favorite). */
+  favorite: z.boolean(),
 });
 
 /**
@@ -1003,19 +1011,12 @@ function filtersFromQuery(
   return { filters, issues };
 }
 
-function compareValues(
-  left: unknown,
-  right: unknown,
-  direction: "asc" | "desc",
-  dateValues = false,
-): number {
+function compareValues(left: unknown, right: unknown, direction: "asc" | "desc"): number {
   if (left === right) return 0;
   if (left === undefined || left === null) return 1;
   if (right === undefined || right === null) return -1;
   let result: number;
-  if (dateValues && typeof left === "string" && typeof right === "string") {
-    result = Date.parse(left) - Date.parse(right);
-  } else if (typeof left === "number" && typeof right === "number") {
+  if (typeof left === "number" && typeof right === "number") {
     result = left - right;
   } else if (typeof left === "boolean" && typeof right === "boolean") {
     result = Number(left) - Number(right);
@@ -1027,6 +1028,30 @@ function compareValues(
 
 function rowValue(row: AppRow, column: string): unknown {
   return Object.hasOwn(row, column) ? row[column] : undefined;
+}
+
+// Sorts like compareValues but parses each date string once, not twice per
+// comparison: Date.parse inside the comparator froze the event loop for seconds
+// on large tables. Order is identical (nulls last, NaN compares as a tie).
+export function sortRowsByColumn(
+  rows: AppRow[],
+  column: string,
+  dir: "asc" | "desc",
+  dateValues: boolean,
+): AppRow[] {
+  const keyed = rows.map((row) => {
+    const value = rowValue(row, column);
+    return { row, value, ts: dateValues && typeof value === "string" ? Date.parse(value) : 0 };
+  });
+  keyed.sort((a, b) => {
+    if (dateValues && typeof a.value === "string" && typeof b.value === "string") {
+      if (a.value === b.value) return 0;
+      const result = a.ts - b.ts;
+      return dir === "asc" ? result : -result;
+    }
+    return compareValues(a.value, b.value, dir);
+  });
+  return keyed.map((k) => k.row);
 }
 
 export function rowMatchesFilters(row: AppRow, filters: RowFilter[]): boolean {
@@ -1046,17 +1071,13 @@ export function applyQuery(
   );
   const sort = query.sort;
   if (sort) {
-    selected = [...selected].sort((a, b) => {
-      const result = compareValues(
-        rowValue(a, sort.column),
-        rowValue(b, sort.column),
-        sort.dir,
-        SORTABLE_SYSTEM_DATE_COLUMNS.has(sort.column) ||
-          (Object.hasOwn(model.columns, sort.column) &&
-            model.columns[sort.column]!.kind === "date"),
-      );
-      return result;
-    });
+    selected = sortRowsByColumn(
+      selected,
+      sort.column,
+      sort.dir,
+      SORTABLE_SYSTEM_DATE_COLUMNS.has(sort.column) ||
+        (Object.hasOwn(model.columns, sort.column) && model.columns[sort.column]!.kind === "date"),
+    );
   }
   return selected.slice(0, query.limit ?? 200);
 }
@@ -1080,7 +1101,7 @@ export async function selectAppRows(
   if (jsonFilterIssues.length > 0) throw new AppRowValidationError(jsonFilterIssues);
 
   // SQL narrows the scan; the `===` re-check keeps the exact filter semantics.
-  const rows = (
+  let rows = (
     await listAppRows(
       appId,
       modelName,
@@ -1112,16 +1133,13 @@ export async function selectAppRows(
     if (model.columns[column]?.kind === "json") {
       throw new AppRowValidationError([{ path: "sort", message: "json columns cannot be sorted" }]);
     }
-    rows.sort((a, b) => {
-      const result = compareValues(
-        rowValue(a, column),
-        rowValue(b, column),
-        dir,
-        SORTABLE_SYSTEM_DATE_COLUMNS.has(column) ||
-          (Object.hasOwn(model.columns, column) && model.columns[column]!.kind === "date"),
-      );
-      return result;
-    });
+    rows = sortRowsByColumn(
+      rows,
+      column,
+      dir,
+      SORTABLE_SYSTEM_DATE_COLUMNS.has(column) ||
+        (Object.hasOwn(model.columns, column) && model.columns[column]!.kind === "date"),
+    );
   }
   const total = rows.length;
   return { rows: rows.slice(0, limit), total };
@@ -1176,8 +1194,12 @@ export async function handleApps(
   if (listAppsRoute.match(req.method, pathSegments)) {
     const parsed = await listAppsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     listAppsRoute.respond(res, 200, {
-      apps: await listApps({ q: parsed.query.q, limit: parsed.query.limit }),
+      apps: await withFavoriteFlags(
+        await listApps({ q: parsed.query.q, limit: parsed.query.limit }),
+        { favoriteScope, itemType: "app" },
+      ),
     });
     return true;
   }

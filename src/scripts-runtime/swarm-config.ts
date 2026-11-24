@@ -5,6 +5,8 @@ export class SwarmConfig {
   readonly apiKey: RedactedValue<string>;
   readonly agentId: RedactedValue<string>;
   readonly mcpBaseUrl: RedactedValue<string>;
+  /** Base URL of `ctx.swarm` / `ctx.mcp` requests: `system.sdkBaseUrl`, else `mcpBaseUrl`. */
+  readonly sdkBaseUrl: RedactedValue<string>;
   /** Per-boot runtime identity of the invoking worker; system context, never script input. */
   readonly runtimeInstanceId: RedactedValue<string> | undefined;
   /** Task the run acts for; system context, sent as `X-Audit-Source-Task-Id`. */
@@ -26,6 +28,11 @@ export class SwarmConfig {
     this.mcpBaseUrl = Redacted.make(payload.system.mcpBaseUrl.value, {
       type: "system",
       isSecret: payload.system.mcpBaseUrl.isSecret,
+    });
+    const sdkBaseUrl = payload.system.sdkBaseUrl ?? payload.system.mcpBaseUrl;
+    this.sdkBaseUrl = Redacted.make(sdkBaseUrl.value, {
+      type: "system",
+      isSecret: sdkBaseUrl.isSecret,
     });
     this.runtimeInstanceId = payload.system.runtimeInstanceId
       ? Redacted.make(payload.system.runtimeInstanceId.value, {

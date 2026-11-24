@@ -59,7 +59,7 @@ describe("runtime identity header in OpenAPI", () => {
     // Representative routes across the surface, none of which opt in.
     expect(headerParams("/api/agents")).toHaveLength(0);
     expect(headerParams("/api/config", "put")).toHaveLength(0);
-    expect(headerParams("/api/tasks")).toHaveLength(0);
+    expect(headerParams("/api/tasks/{id}/cancel")).toHaveLength(0);
   });
 
   test("header support adds parameters to no other operation", () => {
@@ -75,6 +75,7 @@ describe("runtime identity header in OpenAPI", () => {
       "GET /api/poll",
       "POST /api/mcp-bridge",
       "POST /api/scripts/run",
+      "POST /api/tasks",
       "POST /api/workflows",
       "POST /api/workflows/{id}/trigger",
       "POST /close",

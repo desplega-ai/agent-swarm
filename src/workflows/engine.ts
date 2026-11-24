@@ -12,7 +12,6 @@ import {
   createWorkflowRunStep,
   getCompletedStepNodeIds,
   getCurrentStepForNode,
-  getDbClient,
   getLatestStepForNode,
   getStepByIdempotencyKey,
   getStepCountForNode,
@@ -27,6 +26,7 @@ import {
   getRunLineageBlock,
   isParentStepAttemptCurrent,
 } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import { WorkflowReplayStateError } from "../be/workflow-replay";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
@@ -59,6 +59,7 @@ import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
 import { runWithNodeDeadline } from "./node-timeout";
 import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
+import { decideWorkflowRunPrincipal } from "./run-principal";
 import {
   hasOwedSuccessors,
   holdSuccessorRouting,
@@ -157,7 +158,7 @@ export async function startWorkflowExecution(
     await getAutomationSetupStates(),
   );
   if (preflight.state === "needs_setup" && !options.parentStepId) {
-    const { runId, recorded } = await getDbClient().transaction(async () => {
+    const { runId, recorded } = await getStorage().transaction(async () => {
       const failure = await recordWorkflowPreflightFailure({
         workflowId: workflow.id,
         triggerType: options.triggerType ?? "manual",
@@ -346,7 +347,7 @@ async function createRunWithInitialState(
   preflightAlert?: boolean;
   status?: InitialRunState["status"];
 }> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const { parentStepId } = options;
     const attempt = options.parentStepAttempt ?? 0;
     if (parentStepId) {
@@ -367,6 +368,9 @@ async function createRunWithInitialState(
         ? { status: "skipped", error: "cooldown", finishedAt: new Date().toISOString() }
         : initial;
     const definitionHash = await pinWorkflowDefinition(pinSource);
+    // Decided from the same read as the pin, so a re-save while the run is in
+    // flight cannot lend the creator's identity to a definition another agent wrote.
+    const principal = await decideWorkflowRunPrincipal(pinSource, options.triggeredByAgentId);
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
@@ -377,6 +381,7 @@ async function createRunWithInitialState(
       parentStepAttempt: parentStepId ? attempt : undefined,
       triggeredByAgentId: options.triggeredByAgentId,
       definitionHash,
+      principal: JSON.stringify(principal),
     });
     await updateWorkflowRun(
       runId,
@@ -411,6 +416,17 @@ const activeWalks = new Map<string, number>();
 // yet. Process-local like activeWalks: a crash clears it, so a `running` row
 // left behind is not mistaken for a live execution.
 const executingSteps = new Set<string>();
+
+/**
+ * Mark a step as executed by this process, inside the claim transaction. An
+ * attempt that rolls back gives the mark back, also when the client runs the
+ * callback again (decision D6): a kept mark would make the next attempt read
+ * its own claim as another walker's.
+ */
+function claimExecutingStep(stepId: string): void {
+  executingSteps.add(stepId);
+  getStorage().onAttemptRollback(() => executingSteps.delete(stepId));
+}
 
 /**
  * Fail closed when a run's sealed replay state cannot be opened. Resuming from
@@ -696,7 +712,7 @@ async function walkGraphOwned(
   // overwritten from a stale snapshot, resurrecting the run as `completed` or
   // parking it in `waiting` with no waiting step left to ever finalize it.
   routed();
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || run.status !== "running") return;
     // Inside a cancelled tree the run's outcome is the cancel, not its steps.
@@ -887,7 +903,6 @@ async function executeStep(
   // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
-  let claimedStepId: string | undefined;
   const claimStep = async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) {
@@ -916,8 +931,7 @@ async function executeStep(
       // executor reconnects to the child run or task it already started (a
       // crash between the insert and the step parking) instead of a second one.
       if (current && (node.type === "sub-workflow" || node.type === "agent-task")) {
-        claimedStepId = current.id;
-        executingSteps.add(current.id);
+        claimExecutingStep(current.id);
         return {
           existingStep: current,
           stepId: current.id,
@@ -971,17 +985,12 @@ async function executeStep(
     }
     // Registered before the transaction commits, so no other walker can see
     // this `running` row without also seeing it owned.
-    claimedStepId = stepId;
-    executingSteps.add(stepId);
+    claimExecutingStep(stepId);
     const fence = { retryCount: reusableForeachStep?.retryCount ?? 0 };
     return { existingStep, stepId, fence, deduped: false };
   };
-  const dedup = await getDbClient()
-    .transaction(claimStep)
-    .catch((err) => {
-      if (claimedStepId) executingSteps.delete(claimedStepId);
-      throw err;
-    });
+  // A claim whose transaction fails gives its mark back (claimExecutingStep).
+  const dedup = await getStorage().transaction(claimStep);
 
   if ("halted" in dedup) return { outcome: "completed", successors: [] };
   if ("current" in dedup && dedup.current) {
@@ -1089,7 +1098,7 @@ async function runClaimedStep(
   const executionCtx: Record<string, unknown> = { ...ctx, ...interpolationCtx };
 
   if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
-    const errorMsg = scriptBodyInterpolationError(node.id, scriptBodyUnresolved);
+    const errorMsg = scriptBodyInterpolationError(node.id, scriptBodyUnresolved, node.type);
     await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { fence });
     return { outcome: "failed", successors: [] };
   }
@@ -1387,6 +1396,17 @@ export function buildNodeInterpolationCtx(
 const SCRIPT_BODY_ALLOWED_SOURCES = new Set(["input", "workflow", "swarm", "run"]);
 
 /**
+ * Config field, per node type, whose string value is executable source and so
+ * interpolates only from SCRIPT_BODY_ALLOWED_SOURCES. A wait filter is source
+ * only in its string form; the object form is matched as data.
+ */
+const EXECUTABLE_SOURCE_FIELDS = new Map<string, string>([
+  ["script", "script"],
+  ["code-match", "code"],
+  ["wait", "filter"],
+]);
+
+/**
  * Project `interpolationCtx` down to the sources a script body is allowed to
  * read. Aliases are classified by the ROOT of their declared source path, not
  * by their local name, so `inputs: { payload: "trigger.payload" }` is excluded
@@ -1484,14 +1504,17 @@ export function interpolateNodeConfig(
     };
   }
 
-  if (node.type === "script" && typeof node.config.script === "string") {
-    const { script, ...configWithoutScript } = node.config;
+  const sourceField = EXECUTABLE_SOURCE_FIELDS.get(node.type);
+  if (sourceField !== undefined && typeof node.config[sourceField] === "string") {
+    const { [sourceField]: script, ...configWithoutScript } = node.config;
     const restResult = deepInterpolate(configWithoutScript, interpolationCtx);
 
     // The interpolated script body is handed straight to `bash -c` / `bun -e` /
-    // `python3 -c` (ScriptExecutor.runScript), so string-substituting untrusted
-    // text into it is a direct shell/code injection vector. Restrict the body to
-    // an ALLOWLIST of operator/system-authored sources rather than blocking
+    // `python3 -c` (ScriptExecutor.runScript), and code-match code and string
+    // wait filters run as JavaScript in the QuickJS predicate sandbox, so
+    // string-substituting untrusted text into them is a direct code injection
+    // vector. Restrict the source to an ALLOWLIST of operator/system-authored
+    // sources rather than blocking
     // `trigger` alone: excluding only the literal `trigger` key would still let
     // a declared alias (`inputs: { payload: "trigger.payload" }` used as
     // `{{payload}}`) carry webhook data into the body, and upstream node outputs
@@ -1507,7 +1530,7 @@ export function interpolateNodeConfig(
     return {
       value: {
         ...(restResult.value as Record<string, unknown>),
-        script: scriptResult.unresolved.length > 0 ? script : scriptResult.value,
+        [sourceField]: scriptResult.unresolved.length > 0 ? script : scriptResult.value,
       },
       unresolved: [...restResult.unresolved, ...scriptResult.unresolved],
       scriptBodyUnresolved: scriptResult.unresolved,
@@ -1531,8 +1554,22 @@ export function interpolateNodeConfig(
   };
 }
 
-export function scriptBodyInterpolationError(nodeId: string, tokens: string[]): string {
+export function scriptBodyInterpolationError(
+  nodeId: string,
+  tokens: string[],
+  nodeType = "script",
+): string {
   const renderedTokens = [...new Set(tokens)].map((token) => `{{${token}}}`).join(", ");
+  const field = EXECUTABLE_SOURCE_FIELDS.get(nodeType);
+  if (nodeType !== "script" && field !== undefined) {
+    return (
+      `Executable source interpolation failed for node "${nodeId}" (config.${field}): unresolved or disallowed token(s): ${renderedTokens}. ` +
+      "Executable source may interpolate only input, workflow, swarm, or run values. " +
+      (nodeType === "wait"
+        ? "Match trigger or upstream values with the object form of config.filter, whose values interpolate as data."
+        : "Read trigger, alias, item, or upstream values at runtime from the function's input argument.")
+    );
+  }
   return (
     `Script body interpolation failed for node "${nodeId}": unresolved or disallowed token(s): ${renderedTokens}. ` +
     "Executable source may interpolate only input, workflow, swarm, or run values. " +

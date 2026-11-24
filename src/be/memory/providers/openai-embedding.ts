@@ -1,8 +1,11 @@
 import OpenAI from "openai";
+import { publicEndpointSsrfOptions } from "../../../oauth/mcp-wrapper";
 import { selectCredential } from "../../../utils/credentials";
+import { createSsrfGuardedFetch } from "../../../utils/egress-guard";
 import { getOpenRouterAttributionHeaders } from "../../../utils/openrouter-base-url";
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
 import { noteEmbeddingFailure, noteEmbeddingSuccess } from "../embedding-recovery";
+import { embeddingEndpoint } from "../index";
 import type { EmbeddingInputKind, EmbeddingProvider, EmbeddingSpace, EmbedOptions } from "../types";
 
 // text-embedding-3-* reject any input over 8,192 tokens with a 400, and one
@@ -140,11 +143,18 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     if (!this.apiKey) return null;
     if (!this.client) {
       const baseURL = this.baseURL;
+      // A base URL stored through config must reach a public address. The
+      // deployment environment's own value may be private (bundled TEI).
+      const endpoint = embeddingEndpoint(baseURL ?? null);
       this.client = new OpenAI({
         baseURL,
         apiKey: this.apiKey,
         // Only an openrouter.ai base URL gets attribution; OpenAI and gateways get none.
         defaultHeaders: getOpenRouterAttributionHeaders(baseURL ?? ""),
+        fetch:
+          endpoint && !endpoint.fromDeployment
+            ? createSsrfGuardedFetch(publicEndpointSsrfOptions())
+            : undefined,
       });
     }
     return this.client;

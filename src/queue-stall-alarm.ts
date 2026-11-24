@@ -1,4 +1,4 @@
-import { getDbClient } from "./be/db";
+import { getStorage } from "./be/storage";
 import { getSlackApp } from "./slack/app";
 import { scrubSecrets } from "./utils/secret-scrubber";
 
@@ -26,81 +26,10 @@ let alarmActive = false;
  * dependencies are excluded because a worker cannot start them yet.
  */
 export async function getQueueStallSnapshot(now = new Date()): Promise<QueueStallSnapshot> {
-  const oldest = await getDbClient().get<{
-    claimableCount: number;
-    oldestTaskId: string | null;
-    oldestClaimableAt: string | null;
-  }>(
-    `WITH queued AS (
-         SELECT
-           t.id,
-           t.dependsOn,
-           COALESCE(
-             (
-               SELECT MAX(entry.createdAt)
-               FROM agent_log entry
-               WHERE entry.taskId = t.id
-                 AND entry.newValue = t.status
-                 AND entry.eventType IN (
-                   'task_created',
-                   'task_status_change',
-                   'task_released',
-                   'task_accepted',
-                   'task_rejected'
-                 )
-             ),
-             t.createdAt
-           ) AS queueEnteredAt
-         FROM agent_tasks t
-         WHERE t.status IN ('pending', 'unassigned')
-       ),
-       claimable AS (
-         SELECT
-           queued.id,
-           MAX(
-             queued.queueEnteredAt,
-             COALESCE(
-               (
-                 SELECT MAX(COALESCE(prerequisite.finishedAt, prerequisite.createdAt))
-                 FROM json_each(COALESCE(queued.dependsOn, '[]')) dep
-                 JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
-               ),
-               queued.queueEnteredAt
-             )
-           ) AS claimableAt
-         FROM queued
-         WHERE NOT EXISTS (
-             SELECT 1
-             FROM json_each(COALESCE(queued.dependsOn, '[]')) dep
-             LEFT JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
-             WHERE prerequisite.id IS NULL OR prerequisite.status != 'completed'
-           )
-       ),
-       oldest AS (
-         SELECT id, claimableAt FROM claimable ORDER BY claimableAt ASC LIMIT 1
-       )
-       SELECT
-         (SELECT COUNT(*) FROM claimable) AS claimableCount,
-         (SELECT id FROM oldest) AS oldestTaskId,
-         (SELECT claimableAt FROM oldest) AS oldestClaimableAt`,
-  );
+  const oldest = await getStorage().repos.tasks.queueStallOldest();
 
   const pickupCutoff = new Date(now.getTime() - QUEUE_STALL_THRESHOLD_MS).toISOString();
-  // Unary + keeps eventType off idx_agent_log_eventType, so the short
-  // createdAt window drives through idx_agent_log_createdAt instead of every
-  // status-change row ever logged.
-  const recentPickupCount =
-    (
-      await getDbClient().get<{ count: number }>(
-        `SELECT COUNT(*) AS count
-         FROM agent_log
-         WHERE +eventType IN ('task_status_change', 'task_claimed')
-           AND oldValue IN ('pending', 'unassigned')
-           AND newValue = 'in_progress'
-           AND createdAt >= ?`,
-        [pickupCutoff],
-      )
-    )?.count ?? 0;
+  const recentPickupCount = await getStorage().repos.agents.countRecentQueuePickups(pickupCutoff);
 
   const oldestClaimableAt = oldest?.oldestClaimableAt ?? null;
   return {

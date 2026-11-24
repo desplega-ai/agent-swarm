@@ -78,6 +78,27 @@ export function getMcpBaseUrl(): string {
   return (raw || `http://localhost:${process.env.PORT || "3013"}`).replace(/\/+$/, "");
 }
 
+let apiLoopbackBaseUrl: string | undefined;
+
+/** API process only: record this server's loopback URL once it listens. */
+export function setApiLoopbackBaseUrl(url: string): void {
+  apiLoopbackBaseUrl = url.replace(/\/+$/, "");
+}
+
+/**
+ * Base URL that scripts, the script tools, script workflow subprocesses and any
+ * other API-side code use to call this API with its own key. Order: the
+ * `SCRIPT_API_BASE_URL` deployment env, then this server's loopback URL once it
+ * listens, then {@link getMcpBaseUrl}. Loopback keeps these calls off the public
+ * proxy that `MCP_BASE_URL` often names, and off a stored `MCP_BASE_URL` row.
+ * Never use it for URLs that leave this host.
+ */
+export function getScriptApiBaseUrl(): string {
+  const override = process.env.SCRIPT_API_BASE_URL?.trim();
+  if (override) return override.replace(/\/+$/, "");
+  return apiLoopbackBaseUrl ?? getMcpBaseUrl();
+}
+
 /**
  * Public, browser-/externally-reachable origin of the API server — where
  * `/api/mcp-oauth/callback`, OAuth redirect URIs, and registered webhook URLs

@@ -318,12 +318,14 @@ What the adapter does, and why:
 - **Model selection.** No model flag exists. `modelTier` maps to Amp's modes
   (`DEFAULT_MODEL_TIER_MAP.amp`: `low`, `medium`, `high`, `ultra`). A concrete model
   is a mode or a `provider/model` pin (`src/utils/amp-models.ts`; validated at
-  send-task, agent runtime and session start). A pin runs on the `medium` mode's
-  prompt and tools. Measured 2026-10-05: `low` is GLM-5.3 Flash (cheapest), `medium` is
-  Claude Opus 5.5, so the regular tier is not cheap. The Runtime editor defaults to `low`.
+  send-task, agent runtime and session start). A plugin agent must name a model, so
+  a mode runs its `AMP_MODE_MODELS` entry (measured 2026-10-05: `low` is GLM-5.3 Flash,
+  cheapest, at `low` effort since it has no `medium`; `medium` is Claude Opus 5.5, so the
+  regular tier is not cheap). Re-measure on a CLI bump. The Runtime editor defaults to `low`.
 - **System prompt.** The plugin route: a generated plugin registers one agent mode
-  that `extends` the base mode and appends the swarm prompt as `instructions`
-  (live verified). The prompt is a JSON literal. AGENTS.md was not needed.
+  on a concrete model and appends the swarm prompt as `instructions` (live verified).
+  Amp rejects `extends` and built-in agents there; a plugin that fails to load makes
+  thread creation fail with HTTP 400 on `agentMode`. The prompt is a JSON literal. AGENTS.md was not needed.
 - **Reasoning effort.** The CLI has no effort flag (`--effort` is rejected). The
   plugin agent's `reasoningEffort` carries it, only for a pinned model whose
   catalog entry lists levels (`off` -> `none`).
@@ -380,7 +382,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.2.2-rc.4` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.3-alpha.2` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -445,7 +447,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.4.1`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.4.2`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
@@ -717,6 +719,7 @@ When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `
 Production Codex sessions start a fresh `codex app-server` inside the existing isolated per-task runner. The parent adapter and task runner keep their JSONL control channel open. The task runner uses JSON-RPC with the app-server.
 
 - Session system instructions go in `thread/start.developerInstructions`. Never inject them into the task repository's `AGENTS.md` or `CLAUDE.md`. Before startup, `recoverLegacyCodexAgentsMd` strips stale blocks and restores swapped symlinks from older versions' out-of-repo records, preserving in-tree edits without reading or writing out-of-tree targets. New sessions leave repository instruction files and symlinks unchanged.
+- Codex supplies built-in web search terms on `item/completed`. The tool-loop guard compares the completed query and any additional queries in the batch. Other tools enter the guard on `item/started`.
 - `steer` sends native `turn/steer`. Codex adds the input to the active turn.
 - `queue` stores the message in the adapter. Delivery succeeds only after Codex accepts the next native turn.
 - If the session ends before that turn starts, delivery fails and the pending message remains eligible for follow-up promotion.
@@ -764,6 +767,8 @@ A schema'd task whose captured text is free-form prose (not valid against `outpu
 
 **pi empty final turn:** some models end a pi session on an assistant turn with no text block and no tool call (thinking only, or empty content). pi treats that as a clean end, so a schema'd task finished with nothing to validate. After the first `waitForIdle()`, `PiMonoSession.repromptAfterEmptyFinalTurn` sends one in-session reprompt (registered template `task.nudge.empty_final_turn`) through the normal prompt path and waits for idle again; `output` then comes from the second turn. Never more than one per session, and none when the final turn has text or a tool call, errored, or was aborted, when `abort()` was called, or after a terminal `store-progress` call (`completed` or `failed`) returned without error. A rejected reprompt keeps the original outcome. Every empty assistant turn also writes a `[pi-mono] assistant turn ended with no text and no tool call (stopReason=..., content=[...])` stderr line to session logs: block types and token count only, never content.
 
+**codex outputSchema:** the runner passes the task's effective `outputSchema` in `ProviderSessionConfig.outputSchema`. `CodexSession` sends it as `turn/start.outputSchema` (codex 0.171.0 app-server), which codex forwards to the Responses API with `strict: true`. Strict mode rejects a schema with an open object or an optional property, so `toCodexOutputSchema` (`src/providers/codex-output-schema.ts`) closes each object and turns an optional property into a required nullable one; `matchOutputSchema` (`src/utils/output-schema.ts`) drops those `null`s before the runner validates against the original schema. A schema strict mode cannot express (an open object, an array without `items`, `oneOf`, an unknown keyword) runs the turn unconstrained. If the API still rejects it (`invalid_json_schema`), the turn reruns once without it. When the session would end with a last agent message that does not match the schema and `GET /api/tasks/:id` shows no output and status `in_progress`, the adapter sends one in-session reprompt (template `task.nudge.structured_output_missing`). Never more than one per session; an unreadable task state skips it.
+
 When provider output fails `outputSchema` validation and the fallback also fails (always for non-claude adapters), the task's `failureReason` keeps the validation error after the fallback's own reason.
 
 ## Reasoning / effort control
@@ -781,9 +786,15 @@ When unset, every adapter behaves exactly as it does today — no fleet-wide def
 | `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; native vocabulary already includes `off`. |
 | `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (internal numeric translation — not a user-facing knob), or `effort` for `max`. `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (noop) — Opencode has no explicit off switch. |
 
+The Codex session child receives the selected model's catalog row from the worker. It sends a supported effort in the thread configuration and on every `turn/start`. The session log reports a rejected effort or a different thread default. On the task, `harnessVariantMeta.observedModel` and `observedReasoningEffort` record what `thread/start` returned. For Claude Code, the worker reads these fields from the last main-thread `api-request` in the session transcript when available.
+
 The adapter's actually-applied level flows back through `ProviderResult.appliedReasoningEffort` (`null` on a capability-rejected noop) into `agents.cred_status.latestModel.reasoningEffort`, surfaced in the dashboard's runtime editor, the `HarnessCell` tooltip, and the agents-list Model column (`[|||]`-style badge, more bars = higher effort).
 
 Refs: [reasoning-effort runtime control research](../thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md).
+
+## Pi model resolution
+
+The Pi adapter resolves an explicit model against the composed runtime and bundled catalog. On a miss, it retries after a provider-catalog refresh bounded to three seconds. An unresolved choice fails before starting the session. The worker reports its picker catalog with credential status so the agent runtime editor can filter the shared model catalog.
 
 ## pi-mono + Amazon Bedrock auth
 

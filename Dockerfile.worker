@@ -43,6 +43,9 @@ COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
 COPY packages/model-routing/package.json ./packages/model-routing/package.json
+COPY packages/storage/package.json ./packages/storage/package.json
+COPY packages/storage-sqlite/package.json ./packages/storage-sqlite/package.json
+COPY packages/storage-postgres/package.json ./packages/storage-postgres/package.json
 # Retry transient extraction failures with a clean dependency tree.
 RUN for attempt in 1 2 3; do \
         bun install --frozen-lockfile && break; \
@@ -51,6 +54,9 @@ RUN for attempt in 1 2 3; do \
     done
 COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
+COPY packages/storage/ ./packages/storage/
+COPY packages/storage-sqlite/ ./packages/storage-sqlite/
+COPY packages/storage-postgres/ ./packages/storage-postgres/
 COPY src/ ./src/
 COPY templates/ ./templates/
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
@@ -138,7 +144,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.327
+ARG CLAUDE_CODE_VERSION=2.1.331
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -152,7 +158,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.5.2
+ARG PI_CODING_AGENT_VERSION=1.6.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -164,7 +170,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.170.0
+ARG CODEX_VERSION=0.172.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -203,7 +209,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.3.2
+ARG OPENCODE_VERSION=2.4.1
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -231,7 +237,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.33
+ARG AGENT_FS_VERSION=0.18.37
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -520,8 +526,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # Install the Ubuntu 24.04 packages Playwright's Chromium binary needs at
 # runtime. `playwright install chromium` (below) only installs the browser
 # binary itself; it does not apt-install these shared libs.
+# fonts-noto-color-emoji: without an emoji font, headless Chromium draws every
+# emoji as an empty box, which blanks the icons in Slack mock frames
+# (`bun run e2e:visuals`) and agent-browser screenshots. CI's ubuntu-latest
+# runner has the font, so only frames rendered inside this image were affected.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+      fonts-noto-color-emoji \
       libasound2t64 \
       libatk-bridge2.0-0t64 \
       libatk1.0-0t64 \
@@ -552,8 +563,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.2-rc.4
-ARG DSH_SHA512=0d125a4d6224e0e6e40ce1f195df978c580774acd7e5402913b3e3cc4fc4b29cb8e26d5f4f8a58ecb44908c0c2143f80ac827e1b097514bf60d7f52533036fa7
+ARG DSH_VERSION=0.2.3-alpha.2
+ARG DSH_SHA512=9a2e61abdea7939c7a1cf53a8247074946442acd3fc68c9df0c57b1824c3a542d895c25521491f9f926236ff9400c695db654ee154306cb5a78e41415796ff8a
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -568,9 +579,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1794974444-g035056
-ARG AMP_SHA512_AMD64=dbccf1f790e4e9125072b497c0e5e90da7db7f55dd7fd0130b59b884eab16f827797970599e8f5d9e1cf01820bd23b138ce9f42882f643358de5602dd36c172d
-ARG AMP_SHA512_ARM64=9ffd2f943caf757c75792dbb59b493b330fa9e9d67332d5fd967c2723f485915ca84657a3f91284463074ff18d167306ad87864ed8ae15488476df1681bd3578
+ARG AMP_VERSION=0.0.1795492832-gd47416
+ARG AMP_SHA512_AMD64=077bde043823bab32ee898122bfea955e16363ebf94bc503641503db16bb7ad02cf2ae2eaf73b7c9bc623eec84f9a52e28902e3d1155ee929ee33af4ba8293d0
+ARG AMP_SHA512_ARM64=bafb7b004b6c46f64b2f195512e9f408fe4832a75ce05e5f4797259250b3c90c53f64f86ee2cd4263e7b72b2dac645343f1c533d5d571d22c7c1d7d28dd24a15
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -586,7 +597,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.4.1
+ARG CURSOR_SDK_VERSION=1.4.2
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -605,7 +616,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.68.0
+ARG GEMINI_CLI_VERSION=0.71.1
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -618,7 +629,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.113
+ARG COPILOT_CLI_VERSION=1.0.114
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -628,8 +639,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.28.0), so none run as root.
-ARG QWEN_CODE_VERSION=0.28.0
+# scripts are not needed for ACP (verified on 0.28.4), so none run as root.
+ARG QWEN_CODE_VERSION=0.28.4
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -639,9 +650,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.60.1
-ARG GOOSE_SHA256_AMD64=0327b1857f8030343f59b77503e0455629bbf472c2901cb94b88389d6278635a
-ARG GOOSE_SHA256_ARM64=6a962a0ba55829e00f6f297dff736d53b9bdc8da84f0f49c4768e2557ac39cbe
+ARG GOOSE_VERSION=1.60.2
+ARG GOOSE_SHA256_AMD64=5f6e463621a8428617ae4870eecee7a00a253e9bbfccb6340dfaa4f0ec2aaf32
+ARG GOOSE_SHA256_ARM64=7e74d796e93b89df374715dc669149cb634f74d778de0b87bb7c031b5b093731
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -659,9 +670,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.4.0
-ARG KIRO_CLI_SHA256_AMD64=0fb88e5174f074b7728c339abdebb1a6357344898467b40d55d4cd803c4358ed
-ARG KIRO_CLI_SHA256_ARM64=85dee8522c11a111577bc0375058f454abaea0096cd7f383c1263369eb9a6cc4
+ARG KIRO_CLI_VERSION=3.5.0
+ARG KIRO_CLI_SHA256_AMD64=98f016b746b342d8337a0e937cabecc381037e2e920ea0ffaae649e51ef59d4e
+ARG KIRO_CLI_SHA256_ARM64=34444fee032944037282c762df4ff6929a51e827dd72d402cb7a8afbecb33e7f
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -679,9 +690,9 @@ RUN case "$TARGETARCH" in \
 # pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
 # the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
 # and both pins together.
-ARG GROK_VERSION=1.0.89
-ARG GROK_SHA512_AMD64=3e7f0598112997faffac69a729b1c51e639d25dcbf713d206893433baedb3c817462a0835afa51a3f31d0e7cd2fb51760d5233ba7ca9b0c45311d11207c1fbcf
-ARG GROK_SHA512_ARM64=80aa518138dd5a80d62322bb0a0aa0aff5f3b31edee8238af3708100eb71bac4fad99036ad5d4a692bb7f31b153c91111958a7490a7595af3fe4e99b52f8b8b6
+ARG GROK_VERSION=1.0.92
+ARG GROK_SHA512_AMD64=ab096cd6c6726b9c99a2b97b41c4af20231f00d00d4544a708730b268cc0199ae6c305deb8149c2441e28cd179b23ac36f7a3e8af3b4bbae6fb5035e2cf7ac08
+ARG GROK_SHA512_ARM64=e3a408531744ece3fdf1c573c4470c399f3e68552e75068e8bf5adedbb44f37c63a671edd8d6ce1823512ed7809f9700bc8389fb1176841a58770f2457307e52
 RUN case "$TARGETARCH" in \
       amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
       arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \
@@ -735,7 +746,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.43.0",
+    "agent-browser": "0.44.0",
     "playwright": "1.63.0"
   },
   "overrides": {

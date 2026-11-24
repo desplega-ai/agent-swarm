@@ -2,6 +2,7 @@ import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
 import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemetry-ranking";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
+import { SLACK_WORKFLOW_BOT_IDS_KEY, validateSlackWorkflowBotIds } from "../slack/workflow-bots";
 import { ProviderNameSchema } from "../types";
 import {
   UI_SPEC_SCRIPT_ACTIONS_KEY,
@@ -14,6 +15,7 @@ import {
   COMPANY_USE_CASES,
 } from "../utils/company-profile";
 import { envExportRestrictedError, isEnvExportRestrictedKey } from "../utils/config-env-export";
+import { isValidTimezone } from "../utils/deferral-time";
 import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
 import {
@@ -81,12 +83,24 @@ const RESERVED_KEYS = new Set([
   // tokens, so only the deployment env may redirect it.
   "GITHUB_URL",
   "GITHUB_API_URL",
+  // Linear host (E2E emulator): the API base receives the OAuth client secret and tokens.
+  "LINEAR_URL",
+  "LINEAR_API_URL",
   // Picks which App installation workers get tokens for; a config writer must not choose it.
   "GITHUB_APP_INSTALLATION_ID",
   // Owners whose repos get a token for their own installation; same reason.
   "GITHUB_APP_REPO_OWNERS",
   // The worker imports this module path into its own process. Deployment env only.
   "OPENCODE_SDK_PATH",
+  // Every script run token goes to this base URL; a config writer must not redirect it.
+  "SCRIPT_API_BASE_URL",
+  // Storage engine selection and its credentials (Postgres decisions D1, D10):
+  // deployment env only, never a config row.
+  "DATABASE_URL",
+  "DATABASE_QUERY_URL",
+  "DATABASE_PASSWORD",
+  // Locates the encryption key file before any config row is read (D2).
+  "SWARM_DATA_DIR",
 ]);
 
 /**
@@ -106,6 +120,9 @@ const API_PROCESS_CONTROL_ENV_KEYS = new Set([
   "BUN_OPTIONS",
   "GCONV_PATH",
   "GLIBC_TUNABLES",
+  // Names the executable the API runs for its own `claude -p` calls
+  // (`defaultSpawnClaudeCli`). Workers read it from their config overlay.
+  "CLAUDE_BINARY",
 ]);
 const API_PROCESS_CONTROL_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_", "BUN_INSPECT"];
 
@@ -323,6 +340,16 @@ function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
 }
 
 /** Build a single `{ KEY: validator }` entry restricted to `options`. */
+function scheduleIdsValidator(key: string): Record<string, ConfigValidator> {
+  const message = `Invalid ${key} (must be comma-separated schedule UUIDs)`;
+  return {
+    [key]: (value: unknown) => {
+      if (typeof value !== "string") return message;
+      return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
+    },
+  };
+}
+
 function enumValidator(key: string, options: string[]): Record<string, ConfigValidator> {
   const listed = options.filter(Boolean).join(", ");
   const message = `Invalid ${key} value (must be one of: ${listed}${options.includes("") ? ", or empty" : ""})`;
@@ -502,6 +529,8 @@ function validateWorkflowInputEnvAllowlist(value: unknown): string | null {
 }
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  SLACK_DEFAULT_TIMEZONE: (value) =>
+    isValidTimezone(value) ? null : "SLACK_DEFAULT_TIMEZONE must be a valid IANA timezone",
   WORKFLOW_INPUT_ENV_ALLOWLIST: validateWorkflowInputEnvAllowlist,
   [UI_SPEC_SCRIPT_ACTIONS_KEY]: validateScriptActionAllowlist,
   ...booleanValidators(["RUNTIME_POOLS_ENABLED", "DOCKER_HARDENED"]),
@@ -634,13 +663,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
   ...enumValidator("CREDENTIAL_SELECTION_STRATEGY", [...CREDENTIAL_SELECTION_STRATEGIES]),
   ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
-  // `enforce` is deliberately absent: the follow-up gate only records decisions.
-  ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow"]),
-  FOLLOW_UP_GATE_SCHEDULE_IDS: (value: unknown) => {
-    const message = "Invalid FOLLOW_UP_GATE_SCHEDULE_IDS (must be comma-separated schedule UUIDs)";
-    if (typeof value !== "string") return message;
-    return parseFollowUpGateScheduleIds(value).every(isFollowUpGateScheduleId) ? null : message;
-  },
+  ...enumValidator("FOLLOW_UP_GATE_MODE", ["off", "shadow", "enforce"]),
+  ...scheduleIdsValidator("FOLLOW_UP_GATE_SCHEDULE_IDS"),
+  ...scheduleIdsValidator("FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS"),
   ...enumValidator("SYSTEM_ONE_DEFAULT_PROVIDER", [...SYSTEM_ONE_DEFAULT_PROVIDER_OPTIONS]),
   ...enumValidator("SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER", [
     ...SYSTEM_ONE_EXTRACT_DEFAULT_PROVIDER_OPTIONS,
@@ -713,8 +738,11 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "CHAT_SDK_ENABLED",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_TASK_TREE_ENABLED",
+    "SLACK_REPLY_FOOTER_ENABLED",
     "SLACK_RENDER_V2_DELEGATION",
+    "SLACK_RENDER_V2_QUIET_LEAD_THREADS",
     "SLACK_BLOCK_EXTERNAL_CHANNELS",
+    "SLACK_STOP_BUTTON_ENABLED",
     "GITHUB_DISABLE",
     "GITLAB_DISABLE",
     "AZURE_DEVOPS_DISABLE",
@@ -737,6 +765,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "BUDGET_ADMISSION_DISABLED",
     "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
     "OTEL_TRACE_POLL",
+    "OTEL_TRACE_DB_STATEMENTS",
     "OTEL_EXPORT_API_LOGS",
     "ANONYMIZED_TELEMETRY",
     "IMPROVEMENTS_ENABLED",
@@ -755,6 +784,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
   ...enumValidator("SLACK_SESSION_MIRROR", ["off", "reply", "both"]),
+  [SLACK_WORKFLOW_BOT_IDS_KEY]: validateSlackWorkflowBotIds,
   ...shortcodeValidators([
     "SLACK_REACTION_ACCEPTED",
     "SLACK_REACTION_BUFFERED",

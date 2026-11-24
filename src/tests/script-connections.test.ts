@@ -375,7 +375,7 @@ describe("script connections", () => {
     expect(connection.generatedTypes).toContain(
       "getRepo(args: VendorApiGetRepoArgs, options: ScriptApiRawOptions): Promise<ScriptApiRawResult>;",
     );
-    const descriptor = getScriptApiConnectionDescriptors().find(
+    const descriptor = (await getScriptApiConnectionDescriptors()).find(
       (candidate) => candidate.slug === "vendorApi",
     );
     const getRepo = descriptor?.operations.find((operation) => operation.name === "getRepo");
@@ -486,7 +486,7 @@ describe("script connections", () => {
       "graphql<T = JsonValue>(query: string, variables?: Record<string, JsonValue>): Promise<T>;",
     );
 
-    const descriptor = getScriptApiConnectionDescriptors().find(
+    const descriptor = (await getScriptApiConnectionDescriptors()).find(
       (candidate) => candidate.slug === "countries",
     );
     expect(descriptor).toEqual({
@@ -732,6 +732,14 @@ describe("script connections", () => {
       markMigrationApplied(database, "342_script_run_sources.sql");
       // 354 alters session_tokens and script_runs, which this fixture does not create.
       markMigrationApplied(database, "354_durable_objects.sql");
+      // 356 alters slack_messages, which this fixture does not create.
+      markMigrationApplied(database, "356_slack_outcome_card_groups.sql");
+      // 362 rebuilds user_favorites, which this fixture does not create (see 301).
+      markMigrationApplied(database, "362_favorites_app.sql");
+      // 367 alters workflow_runs, which this fixture does not create.
+      markMigrationApplied(database, "367_workflow_run_principal.sql");
+      // The UTC backfill needs scheduled_tasks, which this fixture does not create.
+      markMigrationApplied(database, "374_schedule_next_run_at_utc.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -1136,7 +1144,7 @@ describe("script connections", () => {
       expect(refreshed?.openapiSpecEtag).toBe('"v2"');
       expect(refreshed?.generationError).toBeNull();
       expect(refreshed?.generatedTypes).toContain("listOrgRepos");
-      const descriptor = getScriptApiConnectionDescriptors().find(
+      const descriptor = (await getScriptApiConnectionDescriptors()).find(
         (candidate) => candidate.slug === connection.slug,
       );
       expect(descriptor?.operations.some((operation) => operation.name === "listOrgRepos")).toBe(
@@ -1396,7 +1404,7 @@ describe("script connections", () => {
         agentId: "agent-1",
         resources,
         egressSecrets: await buildScriptCredentialBindings({ agentId: "agent-1" }),
-        apiConnections: getScriptApiConnectionDescriptors(),
+        apiConnections: await getScriptApiConnectionDescriptors(),
         source: `
           export default async (_args, ctx) => {
             return await ctx.api.runtimeVendor.getRepo({

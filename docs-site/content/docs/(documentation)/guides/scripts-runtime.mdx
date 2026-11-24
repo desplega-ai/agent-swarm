@@ -123,6 +123,12 @@ Bun's Node compatibility layer makes these available:
 Three layers retry transient failures: status 429, 502, 503 or 504, or a
 network error.
 
+`ctx.swarm` and `ctx.mcp` calls go to the API over loopback
+(`http://127.0.0.1:<PORT>`), not through `MCP_BASE_URL`, so a public proxy in
+front of the API is not in their path. The deployment env `SCRIPT_API_BASE_URL`
+overrides this address. `ctx.swarm.config.mcpBaseUrl` still holds
+`MCP_BASE_URL`, for scripts that fetch the API themselves.
+
 - **`ctx.swarm`** retries on its own. A 429 retries on every call, honouring
   `Retry-After`. A 502, 503, 504 or network error retries only on a read
   (GET routes and read tools such as `db_query`, `kv_get`, `get_*`, `list_*`)
@@ -583,6 +589,18 @@ scripts run. The setting applies to every script run on that server.
 |---|---|---|
 | `native` (default) | A sandboxed `bun` subprocess with `ulimit` limits. Everything on this page applies. | ~10 ms (process spawn) |
 | `quickjs` (experimental) | QuickJS compiled to WASM, in a pool of worker threads inside the API process. | ~1 ms |
+
+Durable script runs (`launch-script-run`, `POST /api/script-runs`) have only a
+`native` runner. Under `quickjs` the server refuses new durable runs with a 400
+and marks any durable run it would restart as `failed`.
+
+Workflow `script` nodes (inline `bash`, `ts` or `python`) also run as a native
+subprocess. Under `quickjs` the step fails before it spawns. Use a
+`swarm-script` node instead.
+
+Under `quickjs`, saving a script stores no `argsJsonSchema`, because reading
+the `argsSchema` export means evaluating the module in native Bun. Runs still
+validate their args against `argsSchema` inside the sandbox.
 
 `SCRIPT_QUICKJS_POOL_SIZE` (default `4`, 1 to 32) caps the `quickjs` worker
 threads. The pool reads it once, when it is first created, so restart the API

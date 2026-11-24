@@ -1,5 +1,6 @@
-import { createTaskExtended, getAgentById, getDbClient, getTaskById } from "@/be/db";
+import { createTaskExtended, getAgentById, getTaskById } from "@/be/db";
 import { carryUnhandledSteering } from "@/be/steering";
+import { getStorage } from "@/be/storage";
 import { chatThreadOfContextKey, scheduleContextKey } from "@/tasks/context-key";
 import {
   type PreparedTaskCreate,
@@ -74,6 +75,7 @@ export async function prepareStandaloneScheduleTask(
       model: schedule.model,
       modelTier: schedule.modelTier,
       profile: schedule.profile,
+      modelGroup: schedule.modelGroup,
       scheduleId: schedule.id,
       source: "schedule",
       requestedByUserId: schedule.createdBy,
@@ -106,12 +108,10 @@ export async function createStandaloneScheduleTask(
   // pending watchers before the resume task becomes visible or its schedule is
   // disabled; their own schedules retain the original ceilings.
   if (schedule.taskType === "deferred" && schedule.parentTaskId) {
-    await getDbClient().run(
-      `UPDATE deferred_task_wait_members SET taskId = ?, updated_at = ?
-       WHERE taskId = ? AND scheduleId IN (
-         SELECT scheduleId FROM deferred_task_waits WHERE status = 'pending'
-       )`,
-      [task.id, new Date().toISOString(), schedule.parentTaskId],
+    await getStorage().repos.tasks.transferWaitMembers(
+      schedule.parentTaskId,
+      task.id,
+      new Date().toISOString(),
     );
     // The wake-up continues the deferred task, so it takes over steering the
     // deferred task received but never accepted.

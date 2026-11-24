@@ -11,7 +11,8 @@ const DEFAULT_WORKER_MAX_CONCURRENT_TASKS = 1;
 // suppression comments in one place.
 
 // Image tag for the API and agent images. Blank or unset resolves to `latest`,
-// which moves on every commit to main; operators pin a release in .env.
+// which moves on every commit to main. env-generator.ts writes this CLI's
+// release to .env, so a generated install starts pinned.
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const IMAGE_TAG_EXPRESSION = "${AGENT_SWARM_VERSION:-latest}";
 // Host address for published ports, from AGENT_SWARM_BIND_ADDRESS in .env. Blank

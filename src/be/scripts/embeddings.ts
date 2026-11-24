@@ -1,41 +1,12 @@
+import type { ScriptSearchScope } from "@desplega/storage";
 import type { ScriptRecord, ScriptScope } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { getDbClient } from "../db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "../embedding";
 import { getEmbeddingProvider } from "../memory";
 import type { EmbeddingProvider } from "../memory/types";
+import { getStorage } from "../storage";
 
-type ScriptEmbeddingRow = {
-  scriptId: string;
-  embedding: Buffer;
-  embeddingModel: string;
-  embeddedText: string;
-  embeddedAt: string;
-};
-
-type ScriptEmbeddingCandidateRow = ScriptEmbeddingRow & {
-  id: string;
-  name: string;
-  scope: ScriptScope;
-  scopeId: string | null;
-  source: string;
-  description: string;
-  intent: string;
-  signatureJson: string;
-  argsJsonSchema: string | null;
-  contentHash: string;
-  version: number;
-  isScratch: number;
-  typeChecked: number;
-  fsMode: "none" | "workspace-rw";
-  executor: "native" | "quickjs" | null;
-  createdByAgentId: string | null;
-  updatedByAgentId: string | null;
-  created_by: string | null;
-  updated_by: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
+type ScriptEmbeddingCandidateRow = import("@desplega/storage").ScriptEmbeddingCandidateRow;
 
 export type ScriptSearchResult = {
   script: ScriptRecord;
@@ -106,18 +77,13 @@ export async function computeScriptEmbedding(
 
 /** Upserts a computed vector. Joins the caller's transaction when there is one. */
 export async function writeScriptEmbedding(scriptId: string, e: ScriptEmbedding): Promise<void> {
-  await getDbClient().run(
-    `INSERT INTO script_embeddings (
-      scriptId, embedding, embeddingModel, embeddedText, embeddedAt
-    )
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(scriptId) DO UPDATE SET
-      embedding = excluded.embedding,
-      embeddingModel = excluded.embeddingModel,
-      embeddedText = excluded.embeddedText,
-      embeddedAt = excluded.embeddedAt`,
-    [scriptId, serializeEmbedding(e.embedding), e.model, e.text, new Date().toISOString()],
-  );
+  await getStorage().repos.scripts.upsertScriptEmbedding({
+    scriptId,
+    embedding: serializeEmbedding(e.embedding),
+    embeddingModel: e.model,
+    embeddedText: e.text,
+    embeddedAt: new Date().toISOString(),
+  });
 }
 
 /** Returns whether a vector was stored. */
@@ -128,64 +94,25 @@ export async function embedScript(script: ScriptRecord): Promise<boolean> {
   return true;
 }
 
+function searchScope(scope?: ScriptScope, scopeId?: string | null): ScriptSearchScope {
+  if (scope === "global") return { kind: "global" };
+  if (scope === "agent") return { kind: "agent", scopeId: scopeId ?? "" };
+  if (scopeId) return { kind: "agentOrGlobal", scopeId };
+  return { kind: "global" };
+}
+
 async function candidateRows(
   scope?: ScriptScope,
   scopeId?: string | null,
 ): Promise<ScriptEmbeddingCandidateRow[]> {
-  const params: string[] = [];
-  let where = "s.isScratch = 0";
-
-  if (scope === "global") {
-    where += " AND s.scope = 'global' AND s.scopeId IS NULL";
-  } else if (scope === "agent") {
-    where += " AND s.scope = 'agent' AND s.scopeId = ?";
-    params.push(scopeId ?? "");
-  } else if (scopeId) {
-    where +=
-      " AND ((s.scope = 'agent' AND s.scopeId = ?) OR (s.scope = 'global' AND s.scopeId IS NULL))";
-    params.push(scopeId);
-  } else {
-    where += " AND s.scope = 'global' AND s.scopeId IS NULL";
-  }
-
-  return getDbClient().query<ScriptEmbeddingCandidateRow>(
-    `SELECT
-      s.*,
-      e.scriptId,
-      e.embedding,
-      e.embeddingModel,
-      e.embeddedText,
-      e.embeddedAt
-    FROM script_embeddings e
-    JOIN scripts s ON s.id = e.scriptId
-    WHERE ${where}`,
-    params,
-  );
+  return getStorage().repos.scripts.listEmbeddedScripts(searchScope(scope, scopeId));
 }
 
 async function scriptRows(
   scope?: ScriptScope,
   scopeId?: string | null,
 ): Promise<ScriptEmbeddingCandidateRow[]> {
-  const params: string[] = [];
-  let where = "isScratch = 0";
-
-  if (scope === "global") {
-    where += " AND scope = 'global' AND scopeId IS NULL";
-  } else if (scope === "agent") {
-    where += " AND scope = 'agent' AND scopeId = ?";
-    params.push(scopeId ?? "");
-  } else if (scopeId) {
-    where += " AND ((scope = 'agent' AND scopeId = ?) OR (scope = 'global' AND scopeId IS NULL))";
-    params.push(scopeId);
-  } else {
-    where += " AND scope = 'global' AND scopeId IS NULL";
-  }
-
-  return getDbClient().query<ScriptEmbeddingCandidateRow>(
-    `SELECT *, NULL as scriptId, NULL as embedding, NULL as embeddingModel, NULL as embeddedText, NULL as embeddedAt FROM scripts WHERE ${where}`,
-    params,
-  );
+  return getStorage().repos.scripts.listSearchableScripts(searchScope(scope, scopeId));
 }
 
 function nameMatchBonus(script: ScriptRecord, query: string): number {
@@ -238,7 +165,7 @@ export async function searchScripts(args: {
 
   const results: ScriptSearchResult[] = [];
   for (const row of candidates) {
-    const stored = deserializeEmbedding(row.embedding);
+    const stored = deserializeEmbedding(row.embedding as Buffer);
     if (stored.length !== queryEmbedding.length) continue;
     const script = rowToScript(row);
     const semanticScore = cosineSimilarity(queryEmbedding, stored);
@@ -257,9 +184,7 @@ export async function searchScripts(args: {
 }
 
 export async function reembedAllScripts(): Promise<void> {
-  const rows = await getDbClient().query<ScriptEmbeddingCandidateRow>(
-    "SELECT *, NULL as scriptId, NULL as embedding, NULL as embeddingModel, NULL as embeddedText, NULL as embeddedAt FROM scripts WHERE isScratch = 0 ORDER BY updatedAt ASC",
-  );
+  const rows = await getStorage().repos.scripts.listScriptsForReembed();
 
   for (const row of rows) {
     await embedScript(rowToScript(row));

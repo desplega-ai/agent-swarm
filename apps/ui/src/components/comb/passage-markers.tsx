@@ -1,3 +1,4 @@
+import { MessageSquare } from "lucide-react";
 import { type RefObject, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { AnchorResolution } from "@/lib/comb/comment-anchor";
@@ -10,6 +11,7 @@ interface PassageMarkersProps {
   anchors: Map<string, AnchorResolution>;
   /** Comments to mark: the processing threads the rail shows. */
   ids: ReadonlySet<string>;
+  onOpen?: (id: string) => void;
 }
 
 /**
@@ -20,7 +22,7 @@ interface PassageMarkersProps {
  * their line is outside the pane. Decorative: the thread card says
  * "Processing" and links the task.
  */
-export function PassageMarkers({ rootRef, space, anchors, ids }: PassageMarkersProps) {
+export function PassageMarkers({ rootRef, space, anchors, ids, onOpen }: PassageMarkersProps) {
   const marked = useMemo(
     () =>
       [...ids].filter((id) => {
@@ -81,7 +83,6 @@ export function PassageMarkers({ rootRef, space, anchors, ids }: PassageMarkersP
     marked.map((id) => (
       <span
         key={id}
-        aria-hidden
         ref={(element) => {
           if (!element) return;
           elements.current.set(id, element);
@@ -91,9 +92,20 @@ export function PassageMarkers({ rootRef, space, anchors, ids }: PassageMarkersP
         }}
         className="pointer-events-none invisible fixed top-0 left-0 z-10 flex"
       >
-        <ProcessingDot className="size-2" />
+        {onOpen ? (
+          <button
+            type="button"
+            className="pointer-events-auto rounded bg-background p-0.5 text-muted-foreground hover:text-foreground focus-visible:ring-2"
+            aria-label="Open passage comment"
+            onClick={() => onOpen(id)}
+          >
+            <MessageSquare className="size-3" />
+          </button>
+        ) : (
+          <ProcessingDot className="size-2" />
+        )}
       </span>
     )),
-    document.body,
+    onOpen && rootRef.current ? rootRef.current : document.body,
   );
 }

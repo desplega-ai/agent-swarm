@@ -1258,6 +1258,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_DEFAULT_TIMEZONE",
+        label: "Default Slack deferral timezone",
+        description:
+          "IANA timezone for wake-up times on Slack deferral cards when the requester has no timezone.",
+        kind: "string",
+        defaultValue: "UTC",
+        docsUrl: `${DOCS}ui/configuration#slack-deferral-timezone`,
+      },
+      {
         key: "SLACK_RENDER_V2",
         label: "Slack thread renderer v2",
         description:
@@ -1276,6 +1285,14 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_REPLY_FOOTER_ENABLED",
+        label: "Show Slack reply footer",
+        description: "Show task details below Slack replies, including the task link.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}integrations/slack#outcome-cards-and-message-provenance`,
+      },
+      {
         key: "SLACK_RENDER_V2_DELEGATION",
         label: "Slack delegated-result delivery",
         description:
@@ -1283,6 +1300,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_RENDER_V2_QUIET_LEAD_THREADS",
+        label: "Quiet Lead threads in Slack",
+        description:
+          "Post only the Lead's replies in Slack threads: no waiting card when the Lead defers, and no card for a Lead follow-up that ends without a reply. The task tree still shows both. Requires Slack thread renderer v2.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#quiet-lead-threads-in-slack`,
       },
       {
         key: "UI_SPEC_ENABLED",
@@ -1607,6 +1633,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_STOP_BUTTON_ENABLED",
+        label: "Slack Stop button",
+        description:
+          "Let people stop a running ask with Slack's native Stop button in the thread's Working… line. Stop cancels the thread's open tasks and the tasks they delegated. The button appears only once the Slack app also subscribes to the `agent_session_stopped` bot event.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack#stop-button`,
+      },
+      {
+        key: "SLACK_WORKFLOW_BOT_IDS",
+        label: "Bots that start Slack workflows",
+        description:
+          "Comma-separated `CHANNEL_ID:BOT_ID` pairs. A post from a listed bot in its listed channel starts `slack.message` workflows, and never creates an agent task. Unset drops every bot message. The swarm's own bot is always ignored.",
+        kind: "string",
+        placeholder: "e.g. C0123ABCD:B0123ABCD",
+        docsUrl: `${DOCS}integrations/slack#bot-messages-and-workflows`,
+      },
+      {
         key: "LINEAR_ALLOWED_STATES",
         label: "Linear pickup states",
         description:
@@ -1870,9 +1914,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "FOLLOW_UP_GATE_MODE",
         label: "Follow-up gate mode",
         description:
-          "off runs nothing. shadow runs the verifier script on each completed run of a gated schedule after its Lead follow-up is created, and logs whether the follow-up could have been skipped. Shadow never skips or delays a follow-up.",
+          "off runs nothing. shadow runs the verifier script on each completed run of a gated schedule after its Lead follow-up is created, and logs whether the follow-up could have been skipped. Shadow never skips or delays a follow-up. enforce keeps shadow for the gated schedules and skips the follow-up of an enforced schedule's run when the verifier says it can.",
         kind: "enum",
-        options: ["off", "shadow"],
+        options: ["off", "shadow", "enforce"],
         defaultValue: "off",
         docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
       },
@@ -1881,6 +1925,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Follow-up gate schedules",
         description:
           "Comma-separated schedule ids whose runs the follow-up gate evaluates. Empty evaluates nothing. Leave off any schedule whose follow-up does required work.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
+      },
+      {
+        key: "FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS",
+        label: "Follow-up gate enforced schedules",
+        description:
+          "Comma-separated schedule ids whose follow-ups enforce mode may skip. Each completed run waits for the verifier: would_skip skips the follow-up; any other result, an error or a timeout creates it. Failed runs always get one. Ignored unless the mode is enforce.",
         kind: "string",
         defaultValue: "",
         docsUrl: `${DOCS}ui/configuration#follow-up-gate`,
@@ -2045,6 +2098,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Trace poll loop",
         description:
           "Include the worker poll-loop spans in tracing. High volume — enable only while debugging polling.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/observability-opentelemetry`,
+      },
+      {
+        key: "OTEL_TRACE_DB_STATEMENTS",
+        label: "Trace database statements",
+        description:
+          "Add a span per database statement under its request span, with the statement text and no parameters. High volume. The duration metric is always on.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/observability-opentelemetry`,

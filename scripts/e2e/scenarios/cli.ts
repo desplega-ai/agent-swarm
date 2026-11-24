@@ -111,10 +111,28 @@ export const cliOnboard: Scenario = {
       const dotenv = await Bun.file(`${real.cwd}/.env`).text();
       expect(dotenv.includes(`API_KEY=${apiKey}`), ".env lacks the swarm API key from env");
       expect(dotenv.includes("INSTALL_PRESET=solo"), ".env lacks the preset");
+      // The API and agent images pin this CLI's release, like the agent-fs and TEI pins.
+      const { version } = await readJson(`${repoRoot}/package.json`);
+      expect(
+        dotenv.includes(`\nAGENT_SWARM_VERSION=${version}\n`),
+        `.env does not pin AGENT_SWARM_VERSION to the CLI release ${version}`,
+      );
       const config = await readJson(`${real.cwd}/.agent-swarm/config.json`);
       expect(
         String(config.apiUrl ?? "").startsWith("http://localhost:"),
         ".agent-swarm/config.json lacks apiUrl",
+      );
+
+      // AGENT_SWARM_VERSION in the installer's environment overrides the pin.
+      const tracking = await runCli(["onboard", "--yes", "--preset=solo", "--no-agent-fs"], {
+        env: { ...env, AGENT_SWARM_API_KEY: apiKey, AGENT_SWARM_VERSION: "latest" },
+      });
+      const trackingEnv = await Bun.file(`${tracking.cwd}/.env`)
+        .text()
+        .catch(() => "");
+      expect(
+        trackingEnv.includes("\nAGENT_SWARM_VERSION=latest\n"),
+        `.env ignores AGENT_SWARM_VERSION=latest from env\nstdout:\n${tracking.stdout}\nstderr:\n${tracking.stderr}`,
       );
     } finally {
       await Bun.$`rm -rf ${bin}`.quiet().nothrow();

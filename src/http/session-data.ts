@@ -160,6 +160,7 @@ const createSessionLogsRoute = route({
     },
     400: { description: "Validation error" },
   },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const getSessionLogsByTask = route({
@@ -318,6 +319,7 @@ const createSessionCostRoute = route({
     403: { description: "Untrusted session attribution" },
     409: { description: "Session identity conflict" },
   },
+  rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
 
 const getSessionCostSummaryRoute = route({

@@ -198,7 +198,7 @@ With the v2 renderer, Slack's own "working" state follows the whole life of an a
 | Nothing is running, and a `request-human-input` request from the thread is still open | `suspended`: waiting on a person |
 | Everything is finished, or the ask is deferred and waits for its wake-up | `active`: indicator cleared |
 
-The status starts when the ask is accepted, is re-asserted every 30 minutes because Slack ends a `processing` session after one hour, and is cleared when the outcome card lands. If a second ask in the thread is still running when the first card lands, the indicator stays. The swarm does not subscribe to `agent_session_stopped`, so Slack shows no Stop button. Cancelling still goes through the task itself.
+The status starts when the ask is accepted, is re-asserted every 30 minutes because Slack ends a `processing` session after one hour, and is cleared when the outcome card lands. If a second ask in the thread is still running when the first card lands, the indicator stays. Slack shows a Stop button next to the indicator only when the Slack app subscribes to `agent_session_stopped`: see [Stop button](#stop-button).
 
 Setting the status also opens the thread for the person who asked, and Slack's free-text status (`is working on your request...`) is not available with this method, so Slack shows its standard loading indicator.
 
@@ -208,6 +208,19 @@ The indicator never blocks a task. If Slack refuses the call, the swarm logs it 
 - **Slack refuses one thread** (for example the bot is not in the channel): that thread is left alone until it goes idle.
 - **Transient errors** (rate limit, timeout, `internal_error`): retried with backoff by the swarm, never by the Slack client. At most eight status writes start per render tick, counting tree creation, tree recovery, and outcome delivery; threads past the cap catch up on the next tick.
 - **A write that gets no answer** (timeout, reset): status calls use their own Slack client, separate from message delivery, with no automatic retries and an 8 second limit that aborts the request. Slack may still have applied the write, so the next reconcile sends its status even if the thread looked already clear. A write that lands after the timeout is reconciled against the thread's tasks again.
+
+### Stop button
+
+Slack can show a native **Stop** button in a thread's "Working…" line while the swarm is on an ask. It is off by default. To turn it on:
+
+1. Set `SLACK_STOP_BUTTON_ENABLED=true` on the API, or turn on **Slack Stop button** in **Settings → Configuration**. It applies without a restart.
+2. In the Slack app settings, under **Event Subscriptions → Subscribe to bot events**, add `agent_session_stopped` and save. It needs only the `chat:write` scope the app already has. Reinstall the app if Slack asks you to.
+
+The checked-in `slack-manifest.json` does not subscribe to the event, because a subscribed app with the setting off would show a Stop button that does nothing.
+
+When someone clicks Stop, the swarm checks the channel and the person as it does for any message (external channels and [user filtering](#user-filtering)). It then cancels every open task in that thread and the open tasks delegated from them (up to 500 delegated tasks outside the thread), with the reason `Stopped from Slack by @person`. Workers stop their sessions and workflow steps see a cancelled task, as with a cancel from the dashboard. The thread's status leaves `processing` right away: Slack does not do this by itself, and would keep the button up for an hour. The tree, reactions and outcome card then show the cancel as usual.
+
+With the setting off, the swarm ignores `agent_session_stopped` and logs once that the app is subscribed while the setting is off. The button exists only in the built-in Slack integration, not through the Chat SDK adapter.
 
 ### Outcome Cards and Message Provenance
 
@@ -228,6 +241,10 @@ A Lead follow-up or resume result can merge into the previous outcome card inste
 - No message, from a person or a bot, came after the previous card.
 - One card holds at most 5 results, and the merged text fits one card.
 
+Set `SLACK_RENDER_V2_QUIET_LEAD_THREADS=true` to keep Lead threads to the Lead's replies: a Lead deferral posts no ⏳ waiting card, and a successful Lead follow-up that ends without `slack-reply` posts no card; failed or cancelled follow-ups and resumed asks still post their cards. See [Quiet Lead threads](/docs/ui/configuration#quiet-lead-threads-in-slack).
+
+Set `SLACK_REPLY_FOOTER_ENABLED=false` to hide the task details footer from outcome cards, agent replies, and replies mirrored from Sessions. The footer is enabled by default. Reply content, citations, and attachments still appear.
+
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
 Outcome cards answer live work; the renderer never backfills history. A task that finished more than `SLACK_CONCLUSION_TIMEOUT_MIN` minutes ago (at least one hour) gets no new outcome card, even when its thread renders again. A delegated ask's conclusion card stays eligible for that window after the closure's timeout. A Lead deferred wake also gets no card of its own when its answer already reached the thread: it called `slack-reply`, or the bot replied in the thread after the wake was created.
@@ -236,7 +253,7 @@ Outcome cards answer live work; the renderer never backfills history. A task tha
 
 Set `SLACK_RENDER_V2_DELEGATION=true` (requires `SLACK_RENDER_V2=true`) to opt in to a lifecycle built around each ask's **closure**: the ask task plus every delegated task, transitive child, follow-up task, resume task, and reroute-decision task reachable from it in the same thread.
 
-- **Tree glyphs.** Each task line shows one state glyph — queued 🕒, blocked ⛔, starting ▶️, running 🔄, stalled ⚠️, paused ⏸️, done ✅, failed ❌, cancelled 🚫, superseded ↪️ — recomputed on every tick. The thread header summarizes the closure as working, stalled, done, done with failures, or concluded with unfinished work. Glyphs ship under `SLACK_RENDER_V2` alone; they do not require the delegation flag.
+- **Tree glyphs.** Each task line shows one state glyph — queued 🕒, blocked ⛔, starting ▶️, running 🔄, stalled ⚠️, paused ⏸️, done ✅, failed ❌, cancelled 🚫, superseded ↪️ — recomputed on every tick. The thread header summarizes the closure as working, stalled, waiting, stopped (the last task to end was cancelled), done, done with failures, or concluded with unfinished work. Glyphs ship under `SLACK_RENDER_V2` alone; they do not require the delegation flag.
 - **Child result cards.** A terminal delegated task (`completed` or `failed`, not a `follow-up` or `reroute-decision` control-plane task) gets its own card in the thread once its output has nowhere else to go — capped at 3 new cards per thread per tick and 10 per ask closure. A child that already delivered its answer with `slack-reply` does not get a duplicate card; children past the cap appear as a one-line digest in the conclusion card instead.
 - **Deferred conclusion card.** The ask's own outcome card does not post while its closure is open. It posts once every closure member is terminal and the closure has been quiet for `SLACK_CONCLUSION_SETTLE_SEC` seconds, or once the closure has been idle for `SLACK_CONCLUSION_TIMEOUT_MIN` minutes, whichever comes first. A settled conclusion lists each child's result under a Results section; a timed-out conclusion is marked "Concluded with unfinished work" and links every still-open member. Cards remain immutable once finalized — the deferral changes only when the card is written, not the immutability contract.
 - **Reaction gate.** The trigger message's checkmark reaction now flips only when the ask's conclusion card finalizes, not when the ask's own task completes. Outcome mapping: any failed closure member → `x`; a timed-out closure → `warning`; otherwise → `white_check_mark`. A closure where every member is cancelled and none failed still resolves to `white_check_mark` — a cancellation is not a failure.
@@ -335,6 +352,8 @@ If the bot is not yet a member of a **public, internal** channel, `slack-read`, 
 
 Set `SLACK_BLOCK_EXTERNAL_CHANNELS=true` (global swarm config, default `false`) to keep the bot out of channels shared with another organization. A channel is external when Slack reports `is_ext_shared` or `is_pending_ext_shared` for it, or when the event carries `is_ext_shared_channel`. Enterprise Grid org-shared channels stay internal. The key is read on every event, so a change on **Settings → Configuration** applies without a restart.
 
+When the flag is off, an external channel works like any other: an ask and the Lead's follow-ups on it post their outcome cards in the thread.
+
 When the flag is on:
 
 - **Inbound guard.** Messages, assistant threads, Work Object previews, follow-up buttons, and `/agent-swarm-status` in an external channel create no task and return no task data. This guard works even when the bot cannot leave.
@@ -378,6 +397,23 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321
 ```
 
 If both are set, a user must match **either** an allowed domain **or** be in the user ID whitelist.
+
+## Bot messages and workflows
+
+The swarm drops every message posted by a bot. To let an alerting tool (Sentry, Datadog, PagerDuty) start [`slack.message` workflows](/docs/concepts/workflows), list its bot in `SLACK_WORKFLOW_BOT_IDS` per channel:
+
+```bash
+# Comma-separated CHANNEL_ID:BOT_ID pairs
+SLACK_WORKFLOW_BOT_IDS=C0123ABCD:B0SENTRY1,C0123ABCD:B0DDOG001
+```
+
+- A listed bot's post in its listed channel emits `slack.message` with `botId` set. The same bot in another channel is dropped.
+- It only starts workflows. It never creates an agent task or reaches agent routing, even when it @mentions the bot.
+- The swarm's own bot is always dropped, even when listed, so its replies cannot loop.
+- User filtering does not apply to bot posts. External channel blocking and left threads still do.
+- The value is read on each message, so a change applies without a restart. A malformed entry is rejected when saved.
+
+Find a bot's `bot_id` in the message JSON (`bot_id` field) or with `bots.info`. Unset keeps the default: every bot message is dropped.
 
 ## Attachment Handling
 

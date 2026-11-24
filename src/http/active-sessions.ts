@@ -56,6 +56,7 @@ const createActiveSession = route({
     201: { description: "Session created", schema: z.object({ session: ActiveSessionSchema }) },
     400: { description: "Validation error" },
   },
+  rbac: { ungated: "worker runner bookkeeping for its own active session; no user flow writes it" },
 });
 
 const deleteSessionByTask = route({
@@ -69,6 +70,7 @@ const deleteSessionByTask = route({
   responses: {
     200: { description: "Session deleted", schema: z.object({ deleted: z.boolean() }) },
   },
+  rbac: { ungated: "worker runner bookkeeping for its own active session; no user flow writes it" },
 });
 
 const deleteSessionById = route({
@@ -82,6 +84,7 @@ const deleteSessionById = route({
   responses: {
     200: { description: "Session deleted", schema: z.object({ deleted: z.boolean() }) },
   },
+  rbac: { ungated: "worker runner bookkeeping for its own active session; no user flow writes it" },
 });
 
 const heartbeatSession = route({
@@ -95,6 +98,7 @@ const heartbeatSession = route({
   responses: {
     200: { description: "Heartbeat updated", schema: z.object({ updated: z.boolean() }) },
   },
+  rbac: { ungated: "worker runner bookkeeping for its own active session; no user flow writes it" },
 });
 
 const updateProviderSession = route({
@@ -109,6 +113,7 @@ const updateProviderSession = route({
   responses: {
     200: { description: "Provider session ID updated", schema: z.object({ updated: z.boolean() }) },
   },
+  rbac: { ungated: "worker runner bookkeeping for its own active session; no user flow writes it" },
 });
 
 const cleanupSessions = route({
@@ -127,6 +132,7 @@ const cleanupSessions = route({
   responses: {
     200: { description: "Cleanup result", schema: z.object({ cleaned: z.number().int() }) },
   },
+  rbac: { ungated: "worker runner bookkeeping for its own active session; no user flow writes it" },
 });
 
 const recoverOrphanedTasks = route({
@@ -147,6 +153,7 @@ const recoverOrphanedTasks = route({
     },
     403: { description: "Can only recover orphaned tasks for the calling agent" },
   },
+  rbac: { ungated: "worker runner bookkeeping for its own active session; no user flow writes it" },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

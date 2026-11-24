@@ -26,6 +26,7 @@ import { handleActiveSessions } from "../http/active-sessions";
 import { handleApiKeys } from "../http/api-keys";
 import { handleApprovalRequests } from "../http/approval-requests";
 import { handleApps } from "../http/apps";
+import { handleComb } from "../http/comb";
 import { handleContext } from "../http/context";
 import { handleCore } from "../http/core";
 import { handleEvents } from "../http/events";
@@ -72,6 +73,7 @@ const HANDLERS: Handler[] = [
   handlePoll,
   handleTasks,
   handleContext,
+  handleComb,
   handleSessionData,
   handleEvents,
   handleFs,
@@ -112,6 +114,7 @@ let writer: { id: string };
 let reader: { id: string };
 const tokens = {} as Record<Who, string>;
 let filesDir: string;
+const agentFsUrl = process.env.AGENT_FS_API_URL;
 const multiRuntime = process.env.MULTI_RUNTIME_ENABLED;
 
 beforeAll(async () => {
@@ -119,12 +122,13 @@ beforeAll(async () => {
   process.env.MULTI_RUNTIME_ENABLED = "false";
   filesDir = await mkdtemp(join(tmpdir(), "session-posture-"));
   process.env.AGENT_FS_LOCAL_DIR = filesDir;
-  delete process.env.AGENT_FS_API_URL;
+  // Enable the Comb route. With no agent-fs credentials, storage still uses the local provider.
+  process.env.AGENT_FS_API_URL = "http://agent-fs.invalid";
   delete process.env.API_AGENT_FS_API_KEY;
   delete process.env.AGENT_FS_API_KEY;
   resetFileStorageProvider();
   initDb(":memory:");
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   agent = await createAgent({ name: "Worker", isLead: false, status: "idle" });
   owner = await createUser({ name: "Owner" });
   writer = await createUser({ name: "Writer" });
@@ -141,6 +145,8 @@ beforeAll(async () => {
 afterAll(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (agentFsUrl === undefined) delete process.env.AGENT_FS_API_URL;
+  else process.env.AGENT_FS_API_URL = agentFsUrl;
   closeDb();
   resetFileStorageProvider();
   if (multiRuntime === undefined) delete process.env.MULTI_RUNTIME_ENABLED;

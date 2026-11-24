@@ -1,0 +1,91 @@
+---
+title: 'Coordinating a new hire''s first-day readiness across HR, managers and operations with AI agents'
+description: "Agent Swarm can prepare a source-linked first-day readiness packet from approved sources, while people make every employment decision and send every message to the new hire."
+agent:
+  offer: false
+  when: "Someone wants HR, a hiring manager and operations to confirm a new hire is ready for day one without losing track of who owns each item"
+---
+
+A configured Agent Swarm workflow can help prepare a human-reviewed first-day readiness packet from approved sources. Agents collect the approved start date, equipment readiness, the manager's welcome plan, workplace orientation and outstanding prerequisites from the source records the team connects, flag the items that are missing or that disagree with each other, and send a source-linked status packet to one accountable person. People make every employment decision and send every message to the new hire.
+
+The scope is one approved hire's day-one readiness across people and operations: the items somebody has to confirm before the start date, who owns each one, and what state it is in. It is not a current employee asking for access to a system, covered in [employee access requests](https://www.agent-swarm.dev/blog/omnia/ai-employee-access-request-handoffs); provisioning and access approvals are out of scope here. It is also not a departing employee's access review, covered by the [offboarding access review guide](/docs/playbooks/use-cases/employee-offboarding-access-review); not customer onboarding; and not a marketplace partner's launch readiness, covered by the [partner onboarding readiness guide](/docs/playbooks/use-cases/partner-onboarding-readiness). Coordinating the interview loop before an offer is covered in the [interview scheduling guide](/docs/playbooks/use-cases/interview-scheduling-handoff).
+
+## When a checklist or HR onboarding tool fits better
+
+**A simple checklist.** If one person owns every item and the company hires a few people a year, a checklist in a document is the cheaper control: agents add machinery around a file that already works.
+
+**The existing HR onboarding tool.** If its built-in onboarding tasks already cover the items the company cares about and show who owns each one, it is the answer. A workflow that rebuilds that status view duplicates a tool the team already pays for.
+
+Agent Swarm fits a different shape: the items sit in several systems owned by HR, the manager and operations, and nobody holds the whole picture. The week before the start date goes into assembling it. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is an illustrative adaptation, not a built-in HR feature, not a turnkey HR integration, not a customer deployment and not a measured run. It needs connectors and checks the team builds.
+
+<Mermaid title="Illustrative first-day readiness flow, from an approved start date to an HR owner's decision to approve, reject or escalate the readiness packet." chart={`flowchart LR
+  A["Approved start date<br/>(HR record)"] --> B["Scoped review<br/>one hire,<br/>one start date"]
+  B --> C["Configured sources:<br/>equipment, welcome plan,<br/>orientation, prerequisites"]
+  C --> D["Deterministic checks:<br/>missing items,<br/>conflicting records,<br/>no named owner"]
+  D --> E["Agent prepares a<br/>source-linked packet<br/>(one row per item)"]
+  E --> F{{"human-in-the-loop<br/>HR owner review"}}
+  F -- "approve" --> G["Ready packet<br/>recorded"]
+  F -- "reject with note" --> H["Item owner fixes<br/>the source record"]
+  H --> C
+  F -- "escalate" --> I["Named backup,<br/>explicit hold"]
+`} />
+
+The company and people below are fictional: a regional field-services business hiring a field coordinator called Diego, with Marta in HR as the accountable owner.
+
+**1. An approved start date triggers a scoped review.** The review opens from a start date HR has already approved and covers one hire. Nothing is collected before that approval.
+
+**2. Configured sources collect the items.** Scripts read the systems the team has connected: the HR record for the start date and prerequisites, the equipment tracker in operations, the manager's welcome plan, the calendar holding the orientation booking. Each script reads only the item sources this review names and emits JSON, with no model picking which records to open. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) covers that collection.
+
+**3. Configured rules raise the day-one gaps.** A rule set compares the sources and raises three cases: an expected item that is missing, two records that disagree on the start date, and an item with no named owner. The team writes and reviews these rules.
+
+**4. An agent prepares a source-linked packet.** One row per item: the status, a link to the record that owns it, the named owner and any flag. One file, so the gate message carries the version Marta reads.
+
+**5. The HR owner reviews it.** A [human-in-the-loop node](/docs/playbooks/patterns/hitl-gates) pauses the run and posts to Slack, then resumes only when Marta responds. She sees the flags and the open rows, not a green dashboard.
+
+## Review, rejection and escalation
+
+**Approve** means the HR owner confirms the packet, and the run records who confirmed what and when. It does not establish that the item is done: an approval records a person's decision, and the evidence that equipment arrived or orientation is booked lives in the source system.
+
+**Reject with a note** returns the packet to the item owner. That person fixes the source record, not the packet, and the workflow re-collects from the system of record.
+
+**Escalate** is for an item owner who does not answer. The gate needs a reminder, then a named backup, then an explicit hold so the row stays open. Never proceed on silence, and never close a row because the start date arrived.
+
+## Privacy and data boundaries
+
+**Collect only what readiness needs.** The item, its status, its owner and its date. Compensation, background-check details, health or accommodation information and personal contact data stay out of the collection and the packet.
+
+**Restrict the packet to the people who act on it.** The HR owner, the hiring manager and the operations owner for the items they hold. The [governance guide](/docs/playbooks/use-cases/ai-operations-governance) sets roles and a named owner per workflow; its limit applies here: RBAC gates requests made with user tokens, while operator-key calls and agent calls are not affected.
+
+**Keep source links rather than copies.** Each row links to the record its item owner updates, so the owner, not the packet, holds the item's state.
+
+**Set a retention rule before the first run.** A packet names a start date and an owner per item, so write down how long it outlives the start date, who may open it later and when it is deleted.
+
+**Keep connectors narrow and secrets server-side.** Each connector sees only the items it serves. Scripts call external systems through [script connections](/docs/guides/script-connections); the [credential broker](/docs/guides/scripts-credential-broker) supplies credentials, so the raw secret stays out of script source and arguments.
+
+## What stays human-owned
+
+Employment decisions stay with people, and so do payroll and contract changes; any permission or access grant stays with a person too, and every message to the new hire is written and sent by a person. The workflow assembles and tracks: it does not decide whether the hire starts or what they are paid, and it grants nothing.
+
+## Operator checklist
+
+- Name the accountable HR owner and a named backup, both able to answer the gate.
+- List every source, what it contributes and who owns it.
+- Define what counts as ready for each item, in words a check can apply.
+- Define the conflict rules: which sources must agree, and what happens when they do not.
+- Set the review gate timeout, the reminder and the fallback owner.
+- Set the retention period and who may read a completed packet.
+- Scope each connector to read only what its part of the review needs.
+- Dry-run on a fictional record before a real hire enters the workflow.
+- Confirm that nobody outside the named owners can open the packet.
+
+## What is documented and what needs custom setup
+
+**Documented and already shipping.** `swarm-script` collection that emits JSON per source, then agent synthesis: [Reports from multiple sources](/docs/playbooks/reports-multiple-sources). A node that holds the run until a person answers, plus `request-human-input` outside a workflow: [HITL gates](/docs/playbooks/patterns/hitl-gates). Server-side credentials for outbound calls: [script connections](/docs/guides/script-connections) and the [scripts credential broker](/docs/guides/scripts-credential-broker).
+
+**Custom setup the team builds.** A connector per system that holds an item: the HRIS, the equipment tracker, the calendar, the ticketing system. Then the readiness checks, and the rules for missing and conflicting items. Agent Swarm ships no native HRIS connectors, so every connector is work the team commissions, scopes and keeps running, each with its own permissions and its own named owner.
+
+**Not claimed here.** It does not verify that an item is complete and does not replace the HR owner's judgment. This is not HR or legal advice.

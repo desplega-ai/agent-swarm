@@ -27,6 +27,7 @@ import {
   type LinearGateInput,
   shouldCreateTaskFromLinearEvent,
 } from "./gate";
+import { linearApiUrl } from "./host";
 // Side-effect import: registers all Linear event templates in the in-memory registry
 import "./templates";
 
@@ -78,7 +79,7 @@ async function postAgentActivity(
     content,
   };
 
-  const res = await fetch("https://api.linear.app/graphql", {
+  const res = await fetch(linearApiUrl("/graphql"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -124,7 +125,7 @@ async function updateAgentSession(
     return false;
   }
 
-  const res = await fetch("https://api.linear.app/graphql", {
+  const res = await fetch(linearApiUrl("/graphql"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -309,7 +310,7 @@ export async function _fetchIssueGatingInfo(issueId: string): Promise<LinearGate
     );
     return { stateType: null, labelNames: [] };
   }
-  const res = await fetch("https://api.linear.app/graphql", {
+  const res = await fetch(linearApiUrl("/graphql"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -619,7 +620,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   const requestSection = buildSessionRequestSection(event, actorName);
   const descriptionSection = issueDescription ? `\nDescription:\n${issueDescription}\n` : "";
   const templateName = existing ? "linear.issue.reassigned" : "linear.issue.assigned";
-  const templateResult = resolveTemplate(templateName, {
+  const templateResult = await resolveTemplate(templateName, {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,
@@ -915,7 +916,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     promptedSampleContext,
   );
 
-  const followupResult = resolveTemplate("linear.issue.followup", {
+  const followupResult = await resolveTemplate("linear.issue.followup", {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
     issue_url: issueUrl,

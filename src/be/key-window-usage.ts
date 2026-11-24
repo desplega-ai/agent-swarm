@@ -1,3 +1,4 @@
+import { KEY_WINDOW_USAGE_MAX_ROWS, type KeyWindowUsageRow } from "@desplega/storage";
 import { z } from "zod";
 import { SessionCostModelBreakdownSchema } from "../types";
 import {
@@ -6,12 +7,15 @@ import {
   modelFamilyOf,
 } from "../utils/model-rate-limit-windows";
 import { codexWindowKey } from "../utils/provider-account-telemetry";
-import { type ApiKeyStatus, getDbClient } from "./db";
+import type { ApiKeyStatus } from "./db";
+import { getStorage } from "./storage";
+
+export { KEY_WINDOW_USAGE_SQL } from "./storage-root";
 
 const MAX_USAGE_WINDOWS = 256;
 const MAX_USAGE_WINDOWS_PER_CREDENTIAL = 16;
 const MAX_USAGE_LOOKBACK_MS = 90 * 86400000;
-const MAX_USAGE_ROWS = 100_000;
+const MAX_USAGE_ROWS = KEY_WINDOW_USAGE_MAX_ROWS;
 
 export class KeyWindowUsageLimitError extends Error {
   constructor(
@@ -135,56 +139,6 @@ export function currentKeyWindows(statuses: ApiKeyStatus[], nowMs: number): KeyW
   return result;
 }
 
-interface UsageRow {
-  taskId: string | null;
-  credentialKeyType: string | null;
-  credentialKeySuffix: string | null;
-  harness: string | null;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number | null;
-  cacheWriteTokens: number | null;
-  reasoningOutputTokens: number;
-  thinkingTokens: number;
-  model: string;
-  modelBreakdown: string | null;
-  isError: number;
-  createdAt: string;
-  finishedAt: string | null;
-}
-
-const usageColumns = `sc.taskId, sc.credentialKeyType, sc.credentialKeySuffix, sc.harness,
-  sc.inputTokens, sc.outputTokens, sc.cacheReadTokens, sc.cacheWriteTokens,
-  sc.reasoningOutputTokens, sc.thinkingTokens, sc.model, sc.modelBreakdown,
-  sc.isError, sc.createdAt`;
-
-// Receipt rows and older completion-attribution rows are disjoint.
-// Drive older rows from recent task completions, never the credential's entire history.
-export const KEY_WINDOW_USAGE_SQL = `
-  WITH requested_keys AS (
-    SELECT json_extract(value, '$.keyType') AS keyType,
-      json_extract(value, '$.keySuffix') AS keySuffix FROM json_each(?)
-  )
-  SELECT ${usageColumns}, CASE WHEN t.status = 'completed' THEN t.finishedAt END AS finishedAt
-  FROM requested_keys k
-  JOIN session_costs sc INDEXED BY idx_session_costs_credential_createdAt
-    ON sc.credentialKeyType = k.keyType AND sc.credentialKeySuffix = k.keySuffix
-  LEFT JOIN agent_tasks t ON t.id = sc.taskId
-  WHERE sc.createdAt >= ? AND sc.createdAt < ?
-  UNION ALL
-  SELECT ${usageColumns}, t.finishedAt
-  FROM agent_tasks t INDEXED BY idx_agent_tasks_status_finishedAt
-  CROSS JOIN session_costs sc INDEXED BY idx_session_costs_taskId ON sc.taskId = t.id
-  JOIN requested_keys k ON sc.credentialKeyType = k.keyType AND sc.credentialKeySuffix = k.keySuffix
-  WHERE t.status = 'completed' AND t.finishedAt >= ? AND t.finishedAt < ? AND sc.createdAt < ?
-  UNION ALL
-  SELECT NULL, NULL, NULL, NULL, 0, 0, NULL, NULL, 0, 0, '', NULL, 0, sc.createdAt, NULL
-  FROM session_costs sc
-  WHERE (sc.credentialKeyType IS NULL OR sc.credentialKeySuffix IS NULL)
-    AND sc.kind = 'harness'
-    AND sc.createdAt >= ? AND sc.createdAt < ?
-  LIMIT ${MAX_USAGE_ROWS + 1}`;
-
 const emptyTokens = (): Tokens =>
   Object.fromEntries(
     ["uncachedInput", "output", "cacheRead", "cacheWrite", "reasoning", "thinking"].map((name) => [
@@ -244,22 +198,17 @@ export async function aggregateKeyWindowUsage(windows: KeyWindowUsage[], through
       ]),
     ).values(),
   ];
-  const rows = await getDbClient().query<UsageRow>(KEY_WINDOW_USAGE_SQL, [
-    JSON.stringify(credentials),
+  const rows = await getStorage().repos.sessions.listKeyWindowUsageRows(
+    credentials,
     start,
     through,
-    start,
-    through,
-    start,
-    start,
-    through,
-  ]);
+  );
   if (rows.length > MAX_USAGE_ROWS) {
     throw new KeyWindowUsageLimitError(
       "Too many sessions for window usage. Filter by credential or scope.",
     );
   }
-  const rowsByCredential = new Map<string, UsageRow[]>();
+  const rowsByCredential = new Map<string, KeyWindowUsageRow[]>();
   const unattributedTimes: string[] = [];
   for (const row of rows) {
     if (row.credentialKeyType === null || row.credentialKeySuffix === null) {

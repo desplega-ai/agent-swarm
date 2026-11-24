@@ -5,6 +5,7 @@ import {
   updateScriptRun,
   updateScriptRunIfRunning,
 } from "../be/db";
+import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
 import type { ScriptRun } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -31,6 +32,17 @@ export function setScriptRunExecutor(executor: ScriptExecutor): void {
   scriptExecutor = executor;
 }
 
+export const DURABLE_RUNS_NATIVE_REFUSED =
+  'Durable script runs use the native executor, which is not permitted when deployment SCRIPT_EXECUTOR="quickjs"';
+
+/**
+ * Durable runs only have a native harness (a `bun` subprocess), so they follow
+ * the same deployment ceiling as an inline run that asks for `native`.
+ */
+export function durableScriptRunsAllowed(): boolean {
+  return isExecutorAllowedByDeployment("native");
+}
+
 export async function startScriptRunProcess(
   run: ScriptRun,
   baseUrl: string,
@@ -38,6 +50,8 @@ export async function startScriptRunProcess(
 ): Promise<void> {
   if (supervisorDisabled()) return;
   if (managed.has(run.id)) return;
+  // Also covers reconcile respawns of runs created before the setting changed.
+  if (!durableScriptRunsAllowed()) throw new Error(DURABLE_RUNS_NATIVE_REFUSED);
   const apiKey = apiKeyOverride ?? getApiKey();
   if (!apiKey) throw new Error("AGENT_SWARM_API_KEY is required to spawn script runs");
   if (process.env.SCRIPT_WORKFLOW_DEBUG === "true") {

@@ -1002,6 +1002,10 @@ export const AgentTaskSchema = z
     // the agent's default). Unset when no profile applied.
     profile: z.string().optional(),
     resolvedProfile: z.string().optional(),
+    // Model group (runbooks/model-tiers.md § Model groups): the creator's ask.
+    // Claim runs the first member that passes on the claiming agent; a
+    // fallback hop's resume also sets `profile` to the member it picked.
+    modelGroup: z.string().optional(),
     // Provider-error fallback hops so far, oldest first; carried by every
     // resume of the same work. Unset when the work never hopped.
     fallbackHops: z.array(FallbackHopSchema).optional(),
@@ -1141,6 +1145,7 @@ export const CreateTaskOptionsSchema = z.object({
   modelTier: ModelTierSchema.optional(),
   effort: ReasoningEffortSchema.optional(),
   profile: z.string().optional(),
+  modelGroup: z.string().optional(),
   /** Internal: the fallback hops a resume carries over (`createResumeFollowUp`). */
   fallbackHops: z.array(FallbackHopSchema).optional(),
   scheduleId: z.string().optional(),
@@ -1520,6 +1525,7 @@ export const FavoriteItemTypeSchema = z.enum([
   "key",
   "session",
   "hidden-key",
+  "app",
 ]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 
@@ -1909,6 +1915,8 @@ export const AgentCredStatusSchema = z
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
     /** Pi-mono only: the `opencode-go` model ids the worker's pi-ai resolves. */
     opencodeGo: AgentOpencodeGoStatusSchema.nullable().default(null),
+    /** Provider-qualified Pi models available to the worker's model picker. */
+    piModelIds: z.array(z.string()).optional(),
     /** ACP options advertised by the most recently created session. */
     acp: AgentAcpStatusSchema.nullable().default(null),
   })
@@ -2067,6 +2075,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
+  // Claim ran a model group's member; metadata lists the members it skipped
+  "task_model_group_resolved",
   // Reboot sweep moved a never-started dependent from the swept task to its retry
   "task_dependency_repointed",
   "task_released",
@@ -2369,6 +2379,8 @@ export const ScheduledTaskSchema = z
     modelTier: ModelTierSchema.optional(),
     /** Model profile copied onto every fired task; exclusive with model/modelTier. */
     profile: z.string().optional(),
+    /** Model group copied onto every fired task; exclusive with model/modelTier/profile. */
+    modelGroup: z.string().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     targetType: ScheduledTaskTargetTypeSchema.default("agent-task"),
     workflowId: z.uuid().optional(),
@@ -2551,7 +2563,7 @@ export const SwarmRepoSchema = z
     defaultBranch: z.string().default("main"),
     autoClone: z.boolean().default(true),
     hooks: RepoHooksSchema.describe(
-      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
+      "Worker hook installation. Enabled by default: a repo created without `hooks` stores { enabled: true }, except a repo a non-lead agent session token creates, which stores { enabled: false }. Disable with { enabled: false }. A repo with no stored hooks config reads as disabled.",
     ),
     guidelines: RepoGuidelinesSchema.nullable().optional(),
     createdAt: z.string(),
@@ -3231,6 +3243,56 @@ export const WebhookDeliveryFilterSchema = z
   );
 export type WebhookDeliveryFilter = z.infer<typeof WebhookDeliveryFilterSchema>;
 
+/** Bus events that start workflows with a matching `event` trigger. */
+export const WORKFLOW_EVENT_TRIGGER_NAMES = [
+  "slack.message",
+  "azure-devops.work_item.assigned",
+  "azure-devops.work_item.commented",
+  "github.pull_request.opened",
+  "github.pull_request.ready_for_review",
+  "github.pull_request.synchronize",
+  "github.pull_request.closed",
+  "github.issue.opened",
+  "github.issue.assigned",
+  "github.issue.labeled",
+  "github.issue_comment.created",
+  "github.check_suite.completed",
+  "jira.issue.assigned",
+  "jira.issue.commented",
+  "jira.issue.transitioned",
+] as const;
+export type WorkflowEventTriggerName = (typeof WORKFLOW_EVENT_TRIGGER_NAMES)[number];
+
+const matchValue = (what: string) =>
+  z.string().trim().min(1).describe(`${what} Compared case-insensitively.`);
+
+export const EventTriggerMatchSchema = z
+  .object({
+    repo: matchValue("GitHub repository `owner/name` (payload `repo`)."),
+    project: matchValue("Jira project key (payload `project`)."),
+    label: matchValue(
+      "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`).",
+    ),
+    assignee: matchValue(
+      "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee.",
+    ),
+    status: matchValue("Jira status the issue moved to (payload `status`)."),
+  })
+  .partial()
+  .strict()
+  .describe(
+    "Start a run only when every given field matches the event payload. A field the payload lacks never matches.",
+  );
+export type EventTriggerMatch = z.infer<typeof EventTriggerMatchSchema>;
+export type EventTriggerMatchField = keyof EventTriggerMatch;
+
+/** Match fields an event trigger accepts, by event family. */
+export function eventTriggerMatchFields(eventName: string): EventTriggerMatchField[] {
+  if (eventName.startsWith("github.")) return ["repo", "label", "assignee"];
+  if (eventName.startsWith("jira.")) return ["project", "label", "assignee", "status"];
+  return [];
+}
+
 export const TriggerConfigSchema = z
   .discriminatedUnion("type", [
     z.object({
@@ -3271,14 +3333,25 @@ export const TriggerConfigSchema = z
     }),
     z.object({
       type: z.literal("event"),
-      eventName: z.enum([
-        "slack.message",
-        "azure-devops.work_item.assigned",
-        "azure-devops.work_item.commented",
-      ]),
+      eventName: z.enum(WORKFLOW_EVENT_TRIGGER_NAMES),
+      match: EventTriggerMatchSchema.optional(),
     }),
   ])
   .superRefine((trigger, ctx) => {
+    if (trigger.type === "event" && trigger.match) {
+      const allowed = eventTriggerMatchFields(trigger.eventName);
+      for (const field of Object.keys(trigger.match)) {
+        if (!allowed.includes(field as EventTriggerMatchField)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: allowed.length
+              ? `match.${field} is not supported on ${trigger.eventName}; use ${allowed.join(", ")}`
+              : `${trigger.eventName} takes no match fields`,
+            path: ["match", field],
+          });
+        }
+      }
+    }
     if (trigger.type === "webhook" && trigger.verification && !trigger.hmacSecret) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -3618,6 +3691,7 @@ export type AgentTaskSummary = Pick<
   | "resolvedEffort"
   | "profile"
   | "resolvedProfile"
+  | "modelGroup"
   | "provider"
   | "requestedByUserId"
   | "progress"
@@ -4392,7 +4466,7 @@ export type ExtensionInstallBody = z.infer<typeof ExtensionInstallBodySchema>;
 export type ScriptListItem = Omit<
   ScriptRecord,
   "source" | "signatureJson" | "argsJsonSchema" | "contentHash"
->;
+> & { kind: "function" | "durable" };
 
 /** Full record served by `GET /api/scripts/{id}` — includes `source` plus parsed `signature`/`argsJsonSchema`. */
 export type ScriptDetail = Omit<ScriptRecord, "argsJsonSchema"> & {

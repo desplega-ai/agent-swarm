@@ -1,7 +1,6 @@
 import { renderAutomationTokens } from "../be/automation-preflight";
 import {
   detachTaskFromWorkflowRunStep,
-  getDbClient,
   getLatestStepForNode,
   getRunWorkflow,
   getTaskByWorkflowRunStepId,
@@ -12,6 +11,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { getRunLineageBlock, getWorkflowRunStatus } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import type {
   Workflow,
   WorkflowDefinition,
@@ -371,10 +371,7 @@ async function childLiveness(
 }
 
 async function requeueChild(stepId: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE workflow_run_steps SET status = 'pending' WHERE id = ? AND status = 'running'",
-    [stepId],
-  );
+  await getStorage().repos.workflows.transitionStepStatus(stepId, "running", "pending");
 }
 
 /**
@@ -383,7 +380,7 @@ async function requeueChild(stepId: string): Promise<void> {
  * must not finalize a run whose joiner is still walking the successors.
  */
 async function parkRunIfRunning(runId: string): Promise<void> {
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (run?.status !== "running") return;
     const steps = await getWorkflowRunStepsByRunId(runId);
@@ -409,7 +406,14 @@ async function claimChildren(
     // The in-flight count and the claim share one BEGIN IMMEDIATE transaction,
     // so concurrent drives (a settlement's drive and the recovery sweep)
     // serialize here and never exceed the cap together.
-    await getDbClient().transaction(async () => {
+    await getStorage().transaction(async () => {
+      // The claim set is a per-process guard that must change under the write
+      // lock, so it is not deferred to afterCommit. A replayed attempt
+      // (decision D6) first gives back what the rolled-back attempt took.
+      // tx-replay-safe: this loop resets the claims of the previous attempt
+      for (const child of claimed) ownedChildren.delete(child.id);
+      // tx-replay-safe: each attempt starts with an empty claim list
+      claimed.length = 0;
       // A cancel of the run (or of an ancestor) that committed first wins.
       const status = await getWorkflowRunStatus(runId);
       if (status !== "running" && status !== "waiting") return;
@@ -421,7 +425,9 @@ async function claimChildren(
       );
       for (const child of children) {
         if (child.status === "running" && !ownedChildren.has(child.id)) {
+          // tx-replay-safe: reset at the callback start
           ownedChildren.add(child.id);
+          // tx-replay-safe: reset at the callback start
           claimed.push(child);
         }
       }
@@ -433,12 +439,15 @@ async function claimChildren(
       for (const child of children) {
         if (free <= 0) break;
         if (child.status !== "pending") continue;
-        const row = await getDbClient().get<{ id: string }>(
-          "UPDATE workflow_run_steps SET status = 'running' WHERE id = ? AND status = 'pending' RETURNING id",
-          [child.id],
+        const moved = await getStorage().repos.workflows.transitionStepStatus(
+          child.id,
+          "pending",
+          "running",
         );
-        if (!row) continue;
+        if (!moved) continue;
+        // tx-replay-safe: reset at the callback start
         ownedChildren.add(child.id);
+        // tx-replay-safe: reset at the callback start
         claimed.push({ ...child, status: "running" });
         free--;
       }
@@ -492,7 +501,11 @@ async function startChild(input: {
   if (interpolation.scriptBodyUnresolved && interpolation.scriptBodyUnresolved.length > 0) {
     return {
       status: "failed",
-      error: scriptBodyInterpolationError(child.nodeId, interpolation.scriptBodyUnresolved),
+      error: scriptBodyInterpolationError(
+        child.nodeId,
+        interpolation.scriptBodyUnresolved,
+        bodyNode.type,
+      ),
     };
   }
   if (interpolation.strictUnresolved && interpolation.strictUnresolved.length > 0) {
@@ -541,9 +554,10 @@ async function startChild(input: {
   }
 
   if ("async" in result && (result as AsyncExecutorResult).async) {
-    const parked = await getDbClient().get<{ id: string }>(
-      "UPDATE workflow_run_steps SET status = 'waiting' WHERE id = ? AND status = 'running' RETURNING id",
-      [child.id],
+    const parked = await getStorage().repos.workflows.transitionStepStatus(
+      child.id,
+      "running",
+      "waiting",
     );
     // A child run that finished before the item parked had its event dropped.
     if (parked && (result as AsyncExecutorResult).waitFor === "workflow.child.finished") {

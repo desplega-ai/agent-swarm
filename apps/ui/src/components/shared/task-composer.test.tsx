@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useLayoutEffect, useState } from "react";
+import type { AgentTask } from "../../api/types";
 
 // A DOM for the composer; removed after this file so other files keep their
 // server-render environment.
@@ -17,6 +18,7 @@ mock.module("@/lib/use-can", () => require("../../lib/use-can"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
 mock.module("@/lib/chat-width", () => require("../../lib/chat-width"));
 mock.module("@/lib/task-title", () => require("../../lib/task-title"));
+mock.module("@/api/hooks/session-query-keys", () => require("../../api/hooks/session-query-keys"));
 mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/kbd", () => require("../ui/kbd"));
@@ -39,8 +41,23 @@ mock.module("@/components/sessions/compose-attachment-upload", () =>
   require("../sessions/compose-attachment-upload"),
 );
 mock.module("@/components/sessions/audio-recorder", () => require("../sessions/audio-recorder"));
+mock.module("@/lib/uuid", () => require("../../lib/uuid"));
+mock.module("@/api/hooks/session-query-keys", () => require("../../api/hooks/session-query-keys"));
+mock.module("@/components/shared/transcript/message-text", () => ({
+  MessageText: ({ text }: { text: string }) => text,
+}));
+mock.module("@/components/sessions/pending-follow-ups", () =>
+  require("../sessions/pending-follow-ups"),
+);
 
 const createdTasks: Array<Record<string, unknown>> = [];
+// The second argument of each create (the Sessions follow-up's idempotency key).
+const createOpts: Array<{ idempotencyKey?: string } | undefined> = [];
+// Creates that fail before the server commits them.
+let rejectCreates = 0;
+// Held creates wait here until the test settles them (a slow response).
+let holdCreates = false;
+const heldCreates: Array<{ settle: (error?: Error) => void }> = [];
 const uploads: Array<{ taskId: string; file: File }> = [];
 // Promotions the server committed, and every promotion request sent.
 const promoted: string[] = [];
@@ -57,11 +74,23 @@ let cancelMode: "ok" | "reject" | "lose-first-response" | "lose-every-response" 
 // Every status read fails.
 let rejectReads = false;
 let rejectUploads = false;
+// Set: every upload waits for it, so a test can look while files upload.
+let uploadGate: Promise<void> | null = null;
 let nextTaskId = 0;
 mock.module("@/api/client", () => ({
   api: {
-    createTask: async (input: Record<string, unknown>) => {
+    createTask: async (input: Record<string, unknown>, opts?: { idempotencyKey?: string }) => {
       createdTasks.push(input);
+      createOpts.push(opts);
+      if (holdCreates) {
+        await new Promise<void>((resolve, reject) =>
+          heldCreates.push({ settle: (error) => (error ? reject(error) : resolve()) }),
+        );
+      }
+      if (rejectCreates > 0) {
+        rejectCreates -= 1;
+        throw new Error("network error");
+      }
       nextTaskId += 1;
       return { id: nextTaskId === 1 ? "follow-up" : `follow-up-${nextTaskId}`, ...input };
     },
@@ -102,13 +131,16 @@ mock.module("@/api/client", () => ({
 }));
 mock.module("@/api/fs", () => ({
   uploadTaskAttachment: async (input: { taskId: string; file: File }) => {
+    if (uploadGate) await uploadGate;
     if (rejectUploads) throw new Error("upload failed");
     uploads.push(input);
     return {};
   },
 }));
+// The person using the tab; a test switches it mid-send.
+let viewerId = "u1";
 mock.module("@/contexts/current-user-context", () => ({
-  useCurrentUser: () => ({ userId: "u1" }),
+  useCurrentUser: () => ({ userId: viewerId }),
 }));
 // Steering is its own surface; the stub shows which composer is up, the send
 // label, placeholder and route detail it was handed, and renders its extra actions.
@@ -139,10 +171,12 @@ mock.module("@/components/steering/steer-composer", () => ({
 }));
 
 const { createRoot } = await import("react-dom/client");
-const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { QueryClient, QueryClientProvider, useQueryClient } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../ui/tooltip");
 const { TaskComposer } = await import("./task-composer");
 const { GrantsContext } = await import("../../lib/use-can");
+const { sessionDetailKey } = await import("../../api/hooks/session-query-keys");
+const { PendingFollowUps, usePendingFollowUps } = await import("../sessions/pending-follow-ups");
 
 const runningLeadTask = {
   id: "lead-1",
@@ -167,15 +201,19 @@ async function mount(node: React.ReactNode) {
   document.body.appendChild(container);
   const root = createRoot(container);
   const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-  await act(async () =>
-    root.render(
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>{node}</TooltipProvider>
-      </QueryClientProvider>,
-    ),
-  );
+  const render = (next: React.ReactNode) =>
+    act(async () =>
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>{next}</TooltipProvider>
+        </QueryClientProvider>,
+      ),
+    );
+  await render(node);
   return {
     container,
+    queryClient,
+    rerender: render,
     unmount: async () => {
       await act(async () => root.unmount());
       container.remove();
@@ -208,11 +246,23 @@ async function waitFor(done: () => boolean) {
   }
 }
 
+/** Picks `files` in the dock's hidden file input. */
+async function pick(container: HTMLElement, files: File[]) {
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  Object.defineProperty(input, "files", { configurable: true, value: files });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+}
+
 const sendButton = (container: HTMLElement) =>
   container.querySelector('button[type="submit"]') as HTMLButtonElement;
 
 beforeEach(() => {
   createdTasks.length = 0;
+  createOpts.length = 0;
+  rejectCreates = 0;
+  holdCreates = false;
+  heldCreates.length = 0;
+  viewerId = "u1";
   uploads.length = 0;
   promoted.length = 0;
   promoteCalls.length = 0;
@@ -222,6 +272,7 @@ beforeEach(() => {
   cancelMode = "ok";
   rejectReads = false;
   rejectUploads = false;
+  uploadGate = null;
   nextTaskId = 0;
 });
 
@@ -335,6 +386,151 @@ describe("TaskComposer on Sessions", () => {
     expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
 
     await unmount();
+  });
+
+  test("a Sessions follow-up clears the box at once; a failed one keeps its text, Retry resends its key, Edit takes it back", async () => {
+    rejectCreates = 2;
+    const { PendingFollowUps, usePendingFollowUps } = await import(
+      "../sessions/pending-follow-ups"
+    );
+    function Session() {
+      const items = usePendingFollowUps("root-1", []);
+      return (
+        <>
+          <PendingFollowUps rootTaskId="root-1" items={items} draftKey="session:root-1" />
+          <TaskComposer
+            rootTaskId="root-1"
+            targetTask={null}
+            canSteer={false}
+            draftKey="session:root-1"
+          />
+        </>
+      );
+    }
+    const { container, unmount } = await mount(<Session />);
+    const bubbleText = () =>
+      container.querySelector('section[aria-label="Your message"]')?.textContent ?? null;
+    const action = (name: string) =>
+      [...container.querySelectorAll("button")].find((b) => b.textContent === name);
+
+    await type(container, "ship it");
+    await send(container);
+    // The box is empty and editable while the send runs or after it fails.
+    expect(textOf(container)).toBe("");
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).disabled).toBe(false);
+    await waitFor(() => action("Retry") !== undefined);
+    expect(bubbleText()).toContain("ship it");
+    expect(bubbleText()).toContain("Not sent");
+
+    await act(async () => action("Retry")?.click());
+    await waitFor(() => createdTasks.length === 2);
+    // useMutationState notifies on a later tick: let the retried bubble replace the first.
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(action("Retry")).toBeDefined();
+    // One key per bubble: the retry can only ever give back the first task.
+    expect(createOpts[0]?.idempotencyKey).toBeString();
+    expect(createOpts[1]?.idempotencyKey).toBe(createOpts[0]?.idempotencyKey as string);
+
+    await act(async () => action("Edit")?.click());
+    // useMutationState notifies on the next tick.
+    await waitFor(() => bubbleText() === null);
+    expect(bubbleText()).toBeNull();
+    expect(textOf(container)).toBe("ship it");
+    await unmount();
+  });
+
+  describe("a viewer switch while a follow-up sends", () => {
+    let rerender: () => void = () => {};
+    // A session view whose chain is the current viewer's cached session detail.
+    function ViewerSession() {
+      const [, setTick] = useState(0);
+      rerender = () => setTick((tick) => tick + 1);
+      const chain = useQueryClient().getQueryData<{ chain: AgentTask[] }>(
+        sessionDetailKey("root-1", viewerId),
+      )?.chain;
+      const items = usePendingFollowUps("root-1", chain);
+      return (
+        <>
+          <PendingFollowUps rootTaskId="root-1" items={items} draftKey="session:root-1" />
+          <TaskComposer
+            rootTaskId="root-1"
+            targetTask={null}
+            canSteer={false}
+            draftKey="session:root-1"
+          />
+        </>
+      );
+    }
+    async function sendAsAliceThenSwitchToBob() {
+      holdCreates = true;
+      const mounted = await mount(<ViewerSession />);
+      for (const viewer of ["alice", "bob"]) {
+        mounted.queryClient.setQueryData(sessionDetailKey("root-1", viewer), { chain: [] });
+      }
+      viewerId = "alice";
+      await act(async () => rerender());
+      await type(mounted.container, "alice only");
+      await send(mounted.container);
+      await waitFor(() => heldCreates.length === 1);
+      await waitFor(() => bubbles(mounted.container).length > 0);
+      expect(bubbles(mounted.container)).toEqual(["alice only"]);
+      viewerId = "bob";
+      await act(async () => rerender());
+      return mounted;
+    }
+    const bubbles = (container: HTMLElement) =>
+      [...container.querySelectorAll('section[aria-label="Your message"]')].map(
+        (bubble) => bubble.querySelector("div")?.textContent ?? "",
+      );
+    const settle = async (error?: Error) => {
+      await act(async () => heldCreates.shift()?.settle(error));
+      await act(async () => new Promise((r) => setTimeout(r, 20)));
+    };
+    const chainIds = (queryClient: InstanceType<typeof QueryClient>, viewer: string) =>
+      queryClient
+        .getQueryData<{ chain: AgentTask[] }>(sessionDetailKey("root-1", viewer))
+        ?.chain.map((task) => task.id);
+
+    test("the created task lands in the sender's session cache, never the new viewer's", async () => {
+      const { container, queryClient, unmount } = await sendAsAliceThenSwitchToBob();
+      // Bob never sees Alice's sending bubble.
+      expect(bubbles(container)).toEqual([]);
+
+      await settle();
+      expect(chainIds(queryClient, "alice")).toEqual(["follow-up"]);
+      expect(chainIds(queryClient, "bob")).toEqual([]);
+      expect(bubbles(container)).toEqual([]);
+
+      // Back to Alice: the chain holds the task, so no bubble is left over.
+      viewerId = "alice";
+      await act(async () => rerender());
+      await act(async () => new Promise((r) => setTimeout(r, 20)));
+      expect(bubbles(container)).toEqual([]);
+      await unmount();
+    });
+
+    test("a send failing after the switch stays the sender's: Retry and Edit show only to them", async () => {
+      const { container, queryClient, unmount } = await sendAsAliceThenSwitchToBob();
+      await settle(new Error("network error"));
+      // Bob gets no "Not sent" bubble, so no Retry or Edit on Alice's text.
+      expect(bubbles(container)).toEqual([]);
+      expect(container.textContent).not.toContain("Not sent");
+
+      viewerId = "alice";
+      await act(async () => rerender());
+      await act(async () => new Promise((r) => setTimeout(r, 20)));
+      expect(bubbles(container)).toEqual(["alice only"]);
+      const retry = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Retry",
+      );
+      await act(async () => retry?.click());
+      await waitFor(() => heldCreates.length === 1);
+      expect(createOpts[1]?.idempotencyKey).toBe(createOpts[0]?.idempotencyKey as string);
+      await settle();
+      expect(chainIds(queryClient, "alice")).toEqual(["follow-up"]);
+      expect(chainIds(queryClient, "bob")).toEqual([]);
+      await unmount();
+    });
   });
 
   test("before the chain loads, the follow-up chains off the session root", async () => {
@@ -560,6 +756,214 @@ describe("TaskComposer on Sessions", () => {
     );
     expect(started).toEqual([]);
     await unmount();
+  });
+});
+
+describe("TaskComposer on Sessions, while files upload", () => {
+  test("the draft joins the session and the box clears before the uploads finish", async () => {
+    let release = () => {};
+    uploadGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const { container, queryClient, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    const detailKey = ["session", "root-1", "u1"];
+    queryClient.setQueryData(detailKey, { root: { id: "root-1" }, chain: [{ id: "root-1" }] });
+    await attachAndSend(container);
+
+    // Uploads are still held: the turn shows and the box is empty already.
+    const chain = () =>
+      (queryClient.getQueryData(detailKey) as { chain: Array<{ id: string; draft?: boolean }> })
+        .chain;
+    expect(chain().map((task) => task.id)).toEqual(["root-1", "follow-up"]);
+    expect(chain()[1]).toMatchObject({ draft: true });
+    expect(promoteCalls).toEqual([]);
+    expect(textOf(container)).toBe("");
+    expect(fileInBox(container)).toBe(false);
+    expect(container.textContent).toContain("Creating task…");
+
+    release();
+    await waitFor(() => promoted.length === 1);
+    expect(promoted).toEqual(["follow-up"]);
+    await unmount();
+  });
+
+  const steerBox = (container: HTMLElement) =>
+    container.querySelector('[data-testid="steer-composer"]') !== null;
+  const boxLocked = (container: HTMLElement) =>
+    (container.querySelector("textarea") as HTMLTextAreaElement | null)?.disabled === true;
+
+  test("a file sent to a running lead keeps the locked dock until the upload settles, even when the task ends", async () => {
+    let release = () => {};
+    uploadGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const composer = (task: never, canSteer: boolean) => (
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={task}
+        canSteer={canSteer}
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />
+    );
+    const { container, rerender, unmount } = await mount(composer(runningLeadTask, true));
+    await attachAndSend(container);
+
+    // The box is empty, but the send is not done: no steer box to type into.
+    expect(promoteCalls).toEqual([]);
+    expect(steerBox(container)).toBe(false);
+    expect(boxLocked(container)).toBe(true);
+    // The task ends and starts again meanwhile: still the locked dock.
+    await rerender(composer(completedWorkerTask, false));
+    expect(boxLocked(container)).toBe(true);
+    await rerender(composer(runningLeadTask, true));
+    expect(steerBox(container)).toBe(false);
+    expect(boxLocked(container)).toBe(true);
+
+    release();
+    await waitFor(() => promoted.length === 1);
+    await act(async () => {});
+    // Sent: steering is back for the running task.
+    expect(steerBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a failed file send to a running lead puts its text and file back in the dock", async () => {
+    let release = () => {};
+    uploadGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    rejectUploads = true;
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={runningLeadTask}
+        canSteer
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />,
+    );
+    await attachAndSend(container);
+    expect(steerBox(container)).toBe(false);
+    expect(boxLocked(container)).toBe(true);
+
+    release();
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+    await waitFor(() => !boxLocked(container));
+    expect(steerBox(container)).toBe(false);
+    expect(textOf(container)).toBe("see the screenshot");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("a box that mounts on the same draft mid-send stays locked until the send settles", async () => {
+    let release = () => {};
+    uploadGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    // The task page: the steer box sends, the task ends, the follow-up box
+    // under the outcome replaces it on the same draft.
+    const steerSlot = (
+      <TaskComposer
+        key="steer"
+        targetTask={runningLeadTask}
+        canSteer
+        draftKey="task:b1-swap"
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+        )}
+      />
+    );
+    const outcomeSlot = (
+      <TaskComposer
+        key="outcome"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        draftKey="task:b1-swap"
+      />
+    );
+    const { container, rerender, unmount } = await mount(steerSlot);
+    await attachAndSend(container);
+    await rerender(outcomeSlot);
+    expect(boxLocked(container)).toBe(true);
+    expect(container.textContent).toContain("Uploading files…");
+
+    release();
+    await waitFor(() => promoted.length === 1);
+    await waitFor(() => !boxLocked(container));
+    expect(textOf(container)).toBe("");
+    await unmount();
+  });
+
+  test("a failed file send keeps the cited passage, quoted in the text, for the retry", async () => {
+    rejectUploads = true;
+    function Cited() {
+      const [quotes, setQuotes] = useState(["quoted passage"]);
+      return (
+        <TaskComposer
+          targetTask={completedWorkerTask}
+          canSteer={false}
+          citations={{ quotes, remove: () => {}, clear: () => setQuotes([]) }}
+          renderActions={(add) => (
+            <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          )}
+        />
+      );
+    }
+    const { container, unmount } = await mount(<Cited />);
+    await attachAndSend(container);
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+    expect(textOf(container)).toContain("> quoted passage");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+});
+
+describe("TaskComposer focus across a mode swap", () => {
+  const composer = (task: never, canSteer: boolean) => (
+    <TaskComposer
+      rootTaskId="root-1"
+      targetTask={task}
+      canSteer={canSteer}
+      renderActions={() => <button type="button" aria-label="In the box" />}
+    />
+  );
+  const inTheBox = (container: HTMLElement) =>
+    container.querySelector('button[aria-label="In the box"]') as HTMLButtonElement;
+
+  test("a task that ends while the person types in the steer box keeps the focus in the box", async () => {
+    const { container, rerender, unmount } = await mount(composer(runningLeadTask, true));
+    await act(async () => inTheBox(container).focus());
+    expect(container.querySelector('[data-testid="steer-composer"]')).not.toBeNull();
+
+    // The poll brings the lead task back completed: the dock replaces the steer box.
+    await rerender(composer(completedWorkerTask, false));
+    expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
+    expect(document.activeElement).toBe(container.querySelector("textarea"));
+    await unmount();
+  });
+
+  test("a swap does not pull focus into the box when it was elsewhere", async () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    const { rerender, unmount } = await mount(composer(runningLeadTask, true));
+    await act(async () => outside.focus());
+
+    await rerender(composer(completedWorkerTask, false));
+    expect(document.activeElement).toBe(outside);
+    await unmount();
+    outside.remove();
   });
 });
 
@@ -816,6 +1220,29 @@ describe("composer attachment types", () => {
       '"tool.exe" isn\'t an allowed file type',
     );
   });
+  test("custom limits: extensions and MIME types, the size cap and the count per message", async () => {
+    const { partitionAttachmentFiles } = await import("../sessions/composer-dock");
+    const limits = { accept: [".PDF", "image/*"], maxBytes: 20 * 1024 * 1024, maxFiles: 2 };
+    const photo = new File([new Uint8Array([1])], "photo.heic", { type: "image/heic" });
+    const spec = new File([new Uint8Array([1])], "spec.pdf");
+    const notes = new File([new Uint8Array([1])], "notes.md", { type: "text/markdown" });
+    expect(partitionAttachmentFiles([photo, spec], limits)).toEqual({
+      valid: [photo, spec],
+      error: null,
+    });
+    expect(partitionAttachmentFiles([notes, spec], limits)).toEqual({
+      valid: [spec],
+      error: '"notes.md" isn\'t an allowed file type (.PDF, image/*).',
+    });
+    const big = new File([new Uint8Array(20 * 1024 * 1024 + 1)], "flow.pdf");
+    expect(partitionAttachmentFiles([big], limits).error).toBe(
+      '"flow.pdf" exceeds the 20 MB attachment limit.',
+    );
+    expect(partitionAttachmentFiles([photo, spec], limits, 1)).toEqual({
+      valid: [photo],
+      error: "Attach up to 2 files per message.",
+    });
+  });
 });
 
 // A fake mic: `getUserMedia` hands out a stream whose track stop is counted,
@@ -942,7 +1369,7 @@ describe("composer audio recording", () => {
     );
     await type(container, "typed instead");
     await send(container);
-    expect(createdTasks[0]).toMatchObject({ task: "typed instead", draft: false });
+    expect(createdTasks[0]).toMatchObject({ task: "typed instead", source: "ui" });
     await unmount();
   });
 
@@ -1038,6 +1465,88 @@ describe("TaskComposer with a caller follow-up (an app page)", () => {
     expect(container.querySelector('button[aria-label="Attach files"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Add test file"]')).toBeNull();
     expect(container.querySelector('button[aria-label^="Record audio"]')).toBeNull();
+    await unmount();
+  });
+
+  test("with followUpAttachments the box takes files within its limits and hands them over", async () => {
+    const sent: Array<[string, string | undefined, string[]]> = [];
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onFollowUp={async (text, parentTaskId, files) => {
+          sent.push([text, parentTaskId, files.map((file) => file.name)]);
+        }}
+        followUpAttachments={{ accept: [".png", ".pdf"], maxBytes: 10, maxFiles: 2 }}
+      />,
+    );
+    expect(container.querySelector('button[aria-label="Attach files"]')).not.toBeNull();
+    expect(container.querySelector('input[type="file"]')?.getAttribute("accept")).toBe(".png,.pdf");
+    expect(container.querySelector('button[aria-label^="Record audio"]')).toBeNull();
+    await pick(container, [new File(["x"], "photo.heic")]);
+    expect(container.textContent).toContain(
+      '"photo.heic" isn\'t an allowed file type (.png, .pdf).',
+    );
+    await pick(container, [new File(["x".repeat(11)], "big.pdf")]);
+    expect(container.textContent).toContain('"big.pdf" exceeds the 10 B attachment limit.');
+    await pick(container, [screenshot, new File(["%PDF"], "flow.pdf"), new File(["x"], "c.png")]);
+    expect(container.textContent).toContain("Attach up to 2 files per message.");
+    expect(fileInBox(container)).toBe(true);
+    await type(container, "use these");
+    await act(async () => sendButton(container).click());
+    await waitFor(() => sent.length > 0);
+    await act(async () => {});
+    expect(sent).toEqual([["use these", "done-1", ["screenshot-x.png", "flow.pdf"]]]);
+    expect(createdTasks).toEqual([]);
+    expect(textOf(container)).toBe("");
+    expect(fileInBox(container)).toBe(false);
+    await unmount();
+  });
+
+  test("a rejected caller follow-up with files keeps the text and every file", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        rootTaskId="root-1"
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onFollowUp={async () => {
+          throw new Error("flow.pdf failed to upload (403), so nothing was sent.");
+        }}
+        followUpAttachments={{ accept: [".png"], maxBytes: 100 }}
+      />,
+    );
+    await pick(container, [screenshot]);
+    await type(container, "hello");
+    await act(async () => sendButton(container).click());
+    await waitFor(() => container.textContent?.includes("nothing was sent") ?? false);
+    expect(textOf(container)).toBe("hello");
+    expect(fileInBox(container)).toBe(true);
+    await unmount();
+  });
+
+  test("files never steer: a box holding a file stays a follow-up when a task starts", async () => {
+    const limits = { accept: [".png"], maxBytes: 100 };
+    const { container, rerender, unmount } = await mount(
+      <TaskComposer
+        targetTask={completedWorkerTask}
+        canSteer={false}
+        onFollowUp={async () => {}}
+        followUpAttachments={limits}
+      />,
+    );
+    await pick(container, [screenshot]);
+    await rerender(
+      <TaskComposer
+        targetTask={runningLeadTask}
+        canSteer
+        onFollowUp={async () => {}}
+        followUpAttachments={limits}
+      />,
+    );
+    expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
+    expect(sendLabelOf(container)).toBe("Follow up");
+    expect(fileInBox(container)).toBe(true);
     await unmount();
   });
 

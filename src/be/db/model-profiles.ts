@@ -4,6 +4,8 @@
  * Claim resolves them (`src/be/model-tier-resolution.ts`). See
  * runbooks/model-tiers.md § Model profiles.
  */
+
+import type { ModelProfileRow, TaskHoldWindow } from "@desplega/storage";
 import {
   type ModelProfile,
   type ModelProfileCredentials,
@@ -15,30 +17,21 @@ import {
   SUPERSEDED_WORKFLOW_TASK_REASON,
 } from "../../types";
 import {
+  groupUnavailableMessage,
+  modelGroupMemberHarnesses,
+  resolveGroupForAgent,
+} from "../model-group-resolution";
+import {
   checkProfileForAgent,
   formatProfileCheckFailures,
   vcsRepoId,
 } from "../model-profile-check";
-import { getDbClient } from "./runtime";
+import { getStorage } from "../storage";
+import { getAgentById } from "./agents";
 import { SUPERSEDED_RESUME_REPAIR_WINDOW_MS } from "./tasks/read";
 
 /** Agent-scoped swarm_config key holding the agent's default profile name. */
 export const MODEL_PROFILE_CONFIG_KEY = "MODEL_PROFILE";
-
-type ModelProfileRow = {
-  id: string;
-  name: string;
-  harness: string;
-  model: string;
-  effort: string | null;
-  allowCustomModel: number;
-  description: string | null;
-  seededFrom: string | null;
-  credentialAllowlist: string | null;
-  fallbacks: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-};
 
 /**
  * Profiles whose stored allowlist is set but unreadable (bad JSON or schema).
@@ -115,22 +108,14 @@ function rowToModelProfile(row: ModelProfileRow): ModelProfile {
 export async function listModelProfiles(
   filter: { harness?: ProviderName } = {},
 ): Promise<ModelProfile[]> {
-  const rows = filter.harness
-    ? await getDbClient().query<ModelProfileRow>(
-        "SELECT * FROM model_profiles WHERE harness = ? ORDER BY harness, name",
-        [filter.harness],
-      )
-    : await getDbClient().query<ModelProfileRow>(
-        "SELECT * FROM model_profiles ORDER BY harness, name",
-      );
+  const rows = await getStorage().repos.models.listProfiles(
+    filter.harness ? { harness: filter.harness } : {},
+  );
   return rows.map(rowToModelProfile);
 }
 
 export async function getModelProfileByName(name: string): Promise<ModelProfile | null> {
-  const row = await getDbClient().get<ModelProfileRow>(
-    "SELECT * FROM model_profiles WHERE name = ?",
-    [name.trim()],
-  );
+  const row = await getStorage().repos.models.findProfileByName(name.trim());
   return row ? rowToModelProfile(row) : null;
 }
 
@@ -154,29 +139,20 @@ export async function createModelProfile(
   audit: { userId?: string | null } = {},
 ): Promise<ModelProfile | null> {
   const now = new Date().toISOString();
-  const row = await getDbClient().get<ModelProfileRow>(
-    `INSERT INTO model_profiles
-       (id, name, harness, model, effort, allowCustomModel, description, seededFrom, credentialAllowlist, fallbacks, createdAt, lastUpdatedAt, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(name) DO NOTHING
-     RETURNING *`,
-    [
-      crypto.randomUUID(),
-      input.name,
-      input.harness,
-      input.model,
-      input.effort ?? null,
-      input.allowCustomModel ? 1 : 0,
-      input.description ?? null,
-      input.seededFrom ?? null,
-      serializeCredentialAllowlist(input.credentials),
-      JSON.stringify(input.fallbacks ?? []),
-      now,
-      now,
-      audit.userId ?? null,
-      audit.userId ?? null,
-    ],
-  );
+  const row = await getStorage().repos.models.insertProfile({
+    id: crypto.randomUUID(),
+    name: input.name,
+    harness: input.harness,
+    model: input.model,
+    effort: input.effort ?? null,
+    allowCustomModel: Boolean(input.allowCustomModel),
+    description: input.description ?? null,
+    seededFrom: input.seededFrom ?? null,
+    credentialAllowlist: serializeCredentialAllowlist(input.credentials),
+    fallbacks: JSON.stringify(input.fallbacks ?? []),
+    actor: audit.userId ?? null,
+    now,
+  });
   return row ? rowToModelProfile(row) : null;
 }
 
@@ -196,67 +172,44 @@ export async function updateModelProfile(
   patch: ModelProfilePatch,
   audit: { userId?: string | null } = {},
 ): Promise<ModelProfile | null> {
-  const sets: string[] = [];
-  const params: (string | number | null)[] = [];
-  if (patch.model !== undefined) {
-    sets.push("model = ?");
-    params.push(patch.model);
-  }
-  if (patch.effort !== undefined) {
-    sets.push("effort = ?");
-    params.push(patch.effort);
-  }
-  if (patch.allowCustomModel !== undefined) {
-    sets.push("allowCustomModel = ?");
-    params.push(patch.allowCustomModel ? 1 : 0);
-  }
-  if (patch.description !== undefined) {
-    sets.push("description = ?");
-    params.push(patch.description);
-  }
-  if (patch.credentials !== undefined) {
-    sets.push("credentialAllowlist = ?");
-    params.push(serializeCredentialAllowlist(patch.credentials));
-  }
-  if (patch.fallbacks !== undefined) {
-    sets.push("fallbacks = ?");
-    params.push(JSON.stringify(patch.fallbacks));
-  }
-  sets.push("lastUpdatedAt = ?", "updated_by = ?");
-  params.push(new Date().toISOString(), audit.userId ?? null);
-  const row = await getDbClient().get<ModelProfileRow>(
-    `UPDATE model_profiles SET ${sets.join(", ")} WHERE name = ? RETURNING *`,
-    [...params, name],
+  const row = await getStorage().repos.models.updateProfile(
+    name,
+    {
+      ...(patch.model !== undefined ? { model: patch.model } : {}),
+      ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
+      ...(patch.allowCustomModel !== undefined
+        ? { allowCustomModel: Boolean(patch.allowCustomModel) }
+        : {}),
+      ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.credentials !== undefined
+        ? { credentialAllowlist: serializeCredentialAllowlist(patch.credentials) }
+        : {}),
+      ...(patch.fallbacks !== undefined ? { fallbacks: JSON.stringify(patch.fallbacks) } : {}),
+    },
+    { actor: audit.userId ?? null, now: new Date().toISOString() },
   );
   return row ? rowToModelProfile(row) : null;
 }
 
 /**
- * Tasks (alias `t`) that still hold their profile: unfinished ones, and
- * superseded ones still owed a resume. The resume copies the profile in a
- * later write than the supersede (HTTP supersede, heartbeat remediation), and
- * after a restart the heartbeat's orphan repair makes it, inside the same
- * window (`SUPERSEDED_RESUME_REPAIR_WINDOW_MS`). Binds one parameter: the
- * oldest `finishedAt` the repair still covers. A superseded workflow-step cut
- * gets no resume, so it never holds its profile.
+ * The window of the "task still holds its profile" rule (the repository's
+ * `taskHolds`): unfinished tasks, and superseded ones still owed a resume. The
+ * resume copies the profile in a later write than the supersede (HTTP
+ * supersede, heartbeat remediation), and after a restart the heartbeat's
+ * orphan repair makes it, inside the same window
+ * (`SUPERSEDED_RESUME_REPAIR_WINDOW_MS`). A superseded workflow-step cut gets
+ * no resume, so it never holds its profile.
  */
-export const TASK_HOLDS_PROFILE_SQL = `(
-  t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded', 'skipped')
-  OR (t.status = 'superseded'
-      AND t.workflowRunStepId IS NULL
-      AND t.failureReason IS NOT '${SUPERSEDED_WORKFLOW_TASK_REASON}'
-      AND (t.finishedAt IS NULL OR t.finishedAt > ?)
-      AND NOT EXISTS (
-        SELECT 1 FROM agent_tasks c WHERE c.parentTaskId = t.id AND c.taskType = 'resume')))`;
+export function taskHoldWindow(): TaskHoldWindow {
+  return {
+    repairWindowStart: repairWindowStart(),
+    supersededWorkflowReason: SUPERSEDED_WORKFLOW_TASK_REASON,
+  };
+}
 
 export function repairWindowStart(): string {
   return new Date(Date.now() - SUPERSEDED_RESUME_REPAIR_WINDOW_MS).toISOString();
 }
-
-/** Profiles (alias `o`) whose fallback list names `model_profiles.name`. */
-const LISTED_AS_FALLBACK_SQL = `EXISTS (
-  SELECT 1 FROM model_profiles o, json_each(CASE WHEN json_valid(o.fallbacks) THEN o.fallbacks ELSE '[]' END) j
-   WHERE j.value = model_profiles.name AND o.name <> model_profiles.name)`;
 
 /**
  * Who still points at a profile: agents with it as default, tasks that still
@@ -270,36 +223,21 @@ export async function modelProfileReferences(name: string): Promise<{
   fallbackOf: string[];
   groups: string[];
 }> {
-  const agents = await getDbClient().query<{ scopeId: string }>(
-    "SELECT scopeId FROM swarm_config WHERE scope = 'agent' AND key = ? AND value = ?",
-    [MODEL_PROFILE_CONFIG_KEY, name],
+  const agentIds = await getStorage().repos.config.listAgentScopeIdsWithValue(
+    MODEL_PROFILE_CONFIG_KEY,
+    name,
   );
-  const tasks = await getDbClient().get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM agent_tasks t
-      WHERE (t.profile = ? OR t.resolvedProfile = ?) AND ${TASK_HOLDS_PROFILE_SQL}`,
-    [name, name, repairWindowStart()],
-  );
-  const schedules = await getDbClient().query<{ id: string }>(
-    "SELECT id FROM scheduled_tasks WHERE profile = ? ORDER BY id",
-    [name],
-  );
-  const fallbackOf = await getDbClient().query<{ name: string }>(
-    `SELECT o.name FROM model_profiles o,
-            json_each(CASE WHEN json_valid(o.fallbacks) THEN o.fallbacks ELSE '[]' END) j
-      WHERE j.value = ? AND o.name <> ? ORDER BY o.name`,
-    [name, name],
-  );
-  const groups = await getDbClient().query<{ name: string }>(
-    `SELECT g.name FROM model_group_members m JOIN model_groups g ON g.id = m.groupId
-      WHERE m.profileName = ? ORDER BY g.name`,
-    [name],
-  );
+  const models = getStorage().repos.models;
+  const openTaskCount = await models.countTasksHoldingProfile(name, taskHoldWindow());
+  const scheduleIds = await getStorage().repos.schedules.listIdsByProfile(name);
+  const fallbackOf = await models.listProfilesWithFallback(name);
+  const groups = await models.listGroupsWithMember(name);
   return {
-    agentIds: agents.map((a) => a.scopeId),
-    openTaskCount: tasks?.n ?? 0,
-    scheduleIds: schedules.map((s) => s.id),
-    fallbackOf: [...new Set(fallbackOf.map((p) => p.name))],
-    groups: groups.map((g) => g.name),
+    agentIds,
+    openTaskCount,
+    scheduleIds,
+    fallbackOf: [...new Set(fallbackOf)],
+    groups,
   };
 }
 
@@ -322,7 +260,7 @@ export function isModelNameTakenError(error: unknown): boolean {
 }
 
 /**
- * Delete a profile unless a task still holds it (`TASK_HOLDS_PROFILE_SQL`) as
+ * Delete a profile unless a task still holds it (`taskHoldWindow`) as
  * its ask or as the profile claim applied (`resolvedProfile`, which a paused
  * task's resume re-reads for its credential allowlist), an
  * agent default names it, a schedule names it, another profile lists it
@@ -332,25 +270,12 @@ export function isModelNameTakenError(error: unknown): boolean {
  * opposite order (a reference written after this delete).
  */
 export async function deleteModelProfile(name: string): Promise<"deleted" | "missing" | "in-use"> {
-  const row = await getDbClient().get<{ id: string }>(
-    `DELETE FROM model_profiles
-      WHERE name = ?
-        AND NOT EXISTS (
-          SELECT 1 FROM agent_tasks t
-           WHERE (t.profile = model_profiles.name OR t.resolvedProfile = model_profiles.name)
-             AND ${TASK_HOLDS_PROFILE_SQL})
-        AND NOT EXISTS (
-          SELECT 1 FROM swarm_config
-           WHERE scope = 'agent' AND key = ? AND trim(value) = model_profiles.name)
-        AND NOT EXISTS (
-          SELECT 1 FROM scheduled_tasks s WHERE s.profile = model_profiles.name)
-        AND NOT ${LISTED_AS_FALLBACK_SQL}
-        AND NOT EXISTS (
-          SELECT 1 FROM model_group_members m WHERE m.profileName = model_profiles.name)
-      RETURNING id`,
-    [name, repairWindowStart(), MODEL_PROFILE_CONFIG_KEY],
+  const deleted = await getStorage().repos.models.deleteUnreferencedProfile(
+    name,
+    taskHoldWindow(),
+    MODEL_PROFILE_CONFIG_KEY,
   );
-  if (row) return "deleted";
+  if (deleted) return "deleted";
   return (await getModelProfileByName(name)) ? "in-use" : "missing";
 }
 
@@ -379,9 +304,7 @@ export async function modelProfileFallbacksError(
     seen.add(fallback);
   }
   if (fallbacks.length === 0) return null;
-  const rows = await getDbClient().query<{ name: string; harness: string; fallbacks: string }>(
-    "SELECT name, harness, fallbacks FROM model_profiles",
-  );
+  const rows = await getStorage().repos.models.listProfileFallbackGraph();
   const graph = new Map(rows.map((row) => [row.name, parseFallbacks(row.fallbacks)]));
   const harnessOf = new Map(rows.map((row) => [row.name, row.harness]));
   for (const fallback of fallbacks) {
@@ -408,9 +331,10 @@ export async function modelProfileFallbacksError(
 
 /** The agent's default profile name (agent-scoped MODEL_PROFILE), or null. */
 export async function getAgentDefaultProfileName(agentId: string): Promise<string | null> {
-  const row = await getDbClient().get<{ value: string }>(
-    "SELECT value FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
-    [agentId, MODEL_PROFILE_CONFIG_KEY],
+  const row = await getStorage().repos.config.findConfigByScopeKey(
+    "agent",
+    agentId,
+    MODEL_PROFILE_CONFIG_KEY,
   );
   return row?.value.trim() || null;
 }
@@ -430,13 +354,13 @@ export async function repoModelOverrideKeys(
 ): Promise<Set<string>> {
   const repoId = await vcsRepoId(vcsRepo);
   if (!repoId) return new Set();
-  const rows = await getDbClient().query<{ key: string }>(
-    `SELECT key FROM swarm_config
-      WHERE scope = 'repo' AND scopeId = ? AND key IN ('MODEL_OVERRIDE', 'REASONING_EFFORT_OVERRIDE')
-        ${includeSecrets ? "" : "AND isSecret = 0"}`,
-    [repoId],
+  const keys = await getStorage().repos.config.listScopedKeys(
+    "repo",
+    repoId,
+    ["MODEL_OVERRIDE", "REASONING_EFFORT_OVERRIDE"],
+    { includeSecrets },
   );
-  return new Set(rows.map((row) => row.key));
+  return new Set(keys);
 }
 
 /**
@@ -445,15 +369,22 @@ export async function repoModelOverrideKeys(
  * (harness, model, credentials, allowlist). A pooled task (no agent) is judged
  * per agent at claim instead. `profile` is exclusive with `model` and
  * `modelTier`, which pick the model another way.
+ *
+ * A `modelGroup` is judged the same way: exclusive with `model`, `modelTier`
+ * and `profile`, the group must exist, and with a known agent one of its
+ * members must run there (`resolveGroupForAgent`).
  */
 export async function taskProfileError(check: {
   profile?: string | null;
   model?: string | null;
   modelTier?: string | null;
+  modelGroup?: string | null;
   agentId?: string | null;
   /** The task's repo; its scoped credentials count, as on the worker. */
   vcsRepo?: string | null;
 }): Promise<string | null> {
+  const group = check.modelGroup?.trim();
+  if (group) return await taskModelGroupError({ ...check, modelGroup: group });
   const name = check.profile?.trim();
   if (!name) return null;
   if (check.model?.trim() || check.modelTier?.trim()) {
@@ -472,26 +403,94 @@ export async function taskProfileError(check: {
   return formatProfileCheckFailures(result);
 }
 
+async function taskModelGroupError(check: {
+  modelGroup: string;
+  profile?: string | null;
+  model?: string | null;
+  modelTier?: string | null;
+  agentId?: string | null;
+  vcsRepo?: string | null;
+}): Promise<string | null> {
+  if (check.model?.trim() || check.modelTier?.trim() || check.profile?.trim()) {
+    return "Pass `modelGroup`, or `model`/`modelTier`/`profile`, not both.";
+  }
+  if (!check.agentId) {
+    return (await modelGroupMemberHarnesses(check.modelGroup))
+      ? null
+      : unknownModelGroupMessage(check.modelGroup);
+  }
+  const resolution = await resolveGroupForAgent(check.modelGroup, check.agentId, {
+    vcsRepo: check.vcsRepo,
+  });
+  if (resolution.kind === "missing") return unknownModelGroupMessage(check.modelGroup);
+  if (resolution.kind === "resolved") return null;
+  const agent = await getAgentById(check.agentId);
+  return groupUnavailableMessage(
+    check.modelGroup,
+    agent?.harnessProvider ?? agent?.provider,
+    resolution.skipped,
+  );
+}
+
+function unknownModelGroupMessage(name: string): string {
+  return `Unknown model group "${name}". List groups with GET /api/model-groups.`;
+}
+
 /**
- * The profile half of a schedule update. `profile` and `model`/`modelTier`
- * pick the model two ways, so setting one clears the other, and sending both
- * is an error. A new profile, or a move of a profiled schedule to another
- * agent, is judged by `taskProfileError`. Returns the columns to write.
+ * Whether a model-group reference trigger (migration 314) refused a write:
+ * the group was deleted between the gate and the insert.
+ */
+export function modelGroupRefError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("model-group-missing:");
+}
+
+/**
+ * The profile and group half of a schedule update. `profile`, `modelGroup` and
+ * `model`/`modelTier` pick the model three ways, so setting one clears the
+ * others, and sending two is an error. A new profile or group, or a move of a
+ * profiled or grouped schedule to another agent, is judged by
+ * `taskProfileError`. Returns the columns to write.
  */
 export async function scheduleProfileUpdate(
-  existing: { profile?: string | null; targetAgentId?: string | null },
+  existing: {
+    profile?: string | null;
+    modelGroup?: string | null;
+    targetAgentId?: string | null;
+  },
   patch: {
     profile?: string | null;
+    modelGroup?: string | null;
     model?: string | null;
     modelTier?: string | null;
     targetAgentId?: string | null;
   },
 ): Promise<
   | { error: string }
-  | { error?: undefined; fields: { profile?: string | null; model?: null; modelTier?: null } }
+  | {
+      error?: undefined;
+      fields: {
+        profile?: string | null;
+        modelGroup?: string | null;
+        model?: null;
+        modelTier?: null;
+      };
+    }
 > {
   const profile = patch.profile === undefined ? undefined : patch.profile?.trim() || null;
+  const modelGroup = patch.modelGroup === undefined ? undefined : patch.modelGroup?.trim() || null;
   const agentId = patch.targetAgentId !== undefined ? patch.targetAgentId : existing.targetAgentId;
+  if (modelGroup) {
+    const error = await taskProfileError({
+      modelGroup,
+      profile,
+      model: patch.model,
+      modelTier: patch.modelTier,
+      agentId,
+    });
+    if (error) return { error };
+    return { fields: { modelGroup, profile: null, model: null, modelTier: null } };
+  }
   if (profile) {
     const error = await taskProfileError({
       profile,
@@ -500,18 +499,28 @@ export async function scheduleProfileUpdate(
       agentId,
     });
     if (error) return { error };
-    return { fields: { profile, model: null, modelTier: null } };
+    return { fields: { profile, modelGroup: null, model: null, modelTier: null } };
   }
-  if (patch.model?.trim() || patch.modelTier?.trim() || profile === null) {
-    return { fields: { profile: null } };
+  if (patch.model?.trim() || patch.modelTier?.trim()) {
+    return { fields: { profile: null, modelGroup: null } };
   }
+  const cleared = {
+    ...(profile === null ? { profile: null } : {}),
+    ...(modelGroup === null ? { modelGroup: null } : {}),
+  };
   const agentChanged =
     patch.targetAgentId !== undefined && patch.targetAgentId !== existing.targetAgentId;
-  if (agentChanged && existing.profile) {
-    const error = await taskProfileError({ profile: existing.profile, agentId });
+  if (agentChanged) {
+    const keptProfile = profile === null ? null : existing.profile;
+    const keptGroup = modelGroup === null ? null : existing.modelGroup;
+    const error = keptGroup
+      ? await taskProfileError({ modelGroup: keptGroup, agentId })
+      : keptProfile
+        ? await taskProfileError({ profile: keptProfile, agentId })
+        : null;
     if (error) return { error };
   }
-  return { fields: {} };
+  return { fields: cleared };
 }
 
 type OverrideRowState = { value: string; exportToEnv?: number } | null;
@@ -537,8 +546,9 @@ export async function clearAgentModelProfileOnOverrideChange(
 ): Promise<void> {
   if (key !== "MODEL_OVERRIDE" && key !== "REASONING_EFFORT_OVERRIDE") return;
   if (effectiveOverride(before) === effectiveOverride(after)) return;
-  await getDbClient().run(
-    "DELETE FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
-    [agentId, MODEL_PROFILE_CONFIG_KEY],
+  await getStorage().repos.config.deleteConfigByScopeKey(
+    "agent",
+    agentId,
+    MODEL_PROFILE_CONFIG_KEY,
   );
 }

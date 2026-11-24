@@ -88,10 +88,13 @@ afterAll(async () => {
 
 beforeEach(() => {
   process.env.BITBUCKET_BOT_ACCOUNT_ID = BOT_ACCOUNT_ID;
+  // The fixture sender is unlinked; mentions need a linked or allowed sender.
+  process.env.BITBUCKET_ALLOWED_SENDERS = HUMAN_ACCOUNT_ID;
 });
 
 afterEach(() => {
   delete process.env.BITBUCKET_BOT_ACCOUNT_ID;
+  delete process.env.BITBUCKET_ALLOWED_SENDERS;
   resetBitbucket();
   resetBitbucketBotCache();
   resetBitbucketDedup();
@@ -188,7 +191,7 @@ describe("handlePullRequestCreated", () => {
   });
 
   test("a skip_event template override suppresses the task", async () => {
-    const override = upsertPromptTemplate({
+    const override = await upsertPromptTemplate({
       eventType: "bitbucket.pull_request.opened",
       scope: "global",
       state: "skip_event",

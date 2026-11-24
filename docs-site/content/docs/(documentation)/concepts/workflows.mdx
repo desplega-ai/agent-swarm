@@ -7,7 +7,7 @@ Agent Swarm includes a **workflow automation engine** that lets you define multi
 
 Bundled workflows declare the parameters and integrations they require. If one is enabled before setup is complete, it reports `needs_setup` with exactly what is missing in the dashboard and refuses to trigger until setup is complete. Operator-created workflows remain unaffected unless they opt into the same `params`, `requiredParams`, and `requires` metadata.
 
-If you are deciding which workflows a small team should run and where the human gate belongs, [Small tech team operating model](/docs/guides/small-tech-team-operating-model) covers the ownership boundary and the staged rollout.
+If you are deciding which workflows a small team should run and where the human gate belongs, [Small tech team operating model](/docs/playbooks/use-cases/small-tech-team-operating-model) covers the ownership boundary and the staged rollout.
 
 ## Core Concepts
 
@@ -345,9 +345,40 @@ The webhook payload supplies `event` and `pull_request`. A nonmatching event end
 | `webhook` | HTTP POST to `/api/workflows/:id/trigger` with optional verification |
 | `schedule` | References a schedule by ID — the schedule creates workflow runs at configured times |
 | `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
-| `event` | Starts from a named internal event; `slack.message`, `azure-devops.work_item.assigned` and `azure-devops.work_item.commented` are supported |
+| `event` | Starts from a named internal event: Slack, Azure DevOps, GitHub or Jira (table below) |
 
-An event trigger uses `{ "type": "event", "eventName": "slack.message" }`. The Slack message payload becomes the workflow's `triggerData` and contains `channel`, `text`, `user`, `ts`, and `threadTs`; any configured `triggerSchema` is applied before a run starts.
+An event trigger uses `{ "type": "event", "eventName": "slack.message" }`. The Slack message payload becomes the workflow's `triggerData` and contains `channel`, `text`, `user`, `ts`, and `threadTs`; any configured `triggerSchema` is applied before a run starts. Bot messages are dropped unless the bot is listed for that channel in [`SLACK_WORKFLOW_BOT_IDS`](/docs/integrations/slack#bot-messages-and-workflows); a listed bot's post carries `botId` (and `user` only when Slack sends one) and starts workflows without creating an agent task.
+
+### Event triggers
+
+| `eventName` | Fed by | `match` fields |
+|---|---|---|
+| `slack.message` | Slack | none |
+| `azure-devops.work_item.assigned`, `azure-devops.work_item.commented` | Azure DevOps service hooks | none |
+| `github.pull_request.opened`, `.ready_for_review`, `.synchronize`, `.closed` | GitHub webhook | `repo`, `label`, `assignee` |
+| `github.issue.opened`, `.assigned`, `.labeled` | GitHub webhook | `repo`, `label`, `assignee` |
+| `github.issue_comment.created` | GitHub webhook | `repo`, `label`, `assignee` |
+| `github.check_suite.completed` | GitHub webhook | `repo` |
+| `jira.issue.assigned`, `jira.issue.commented`, `jira.issue.transitioned` | Jira dynamic webhook | `project`, `label`, `assignee`, `status` |
+
+The GitHub and Jira triggers read the integration webhooks the swarm already authenticates (the GitHub signature, the Jira URL token), so a workflow needs no secret of its own. Set `match` so a workflow does not start on every event. A run starts only when every given field matches the payload, compared case-insensitively:
+
+```json
+{
+  "type": "event",
+  "eventName": "github.issue.labeled",
+  "match": { "repo": "acme/api", "label": "needs-triage" }
+}
+```
+
+- `repo` is the GitHub `owner/name`. `project` is the Jira project key. `status` is the Jira status the issue moved to.
+- `label` is the label the delivery added on `github.issue.labeled`, and any current label elsewhere.
+- `assignee` is the new assignee on an `assigned` event (GitHub login, Jira display name or accountId), and any current assignee elsewhere.
+- A field the payload lacks never matches. A field outside the event's column is rejected when the workflow is saved.
+
+The payload uses the same flat shape as the Azure DevOps triggers: `action`, `title`, `user_login`, plus `repo`, `number`, `html_url`, `labels`, `assignees`, `head_sha` (GitHub) or `issue_key`, `project`, `status`, `assigned_to`, `previous_assignee`, `previous_status`, `comment` (Jira). `github.issue_comment.created` starts only on a new comment, not an edit or delete.
+
+Each GitHub and Jira payload carries `delivery_id`: the `X-GitHub-Delivery` header, or Jira's `X-Atlassian-Webhook-Identifier`. A redelivery or retry with the same id starts no second run of a workflow. `wait` nodes keep receiving these events as before.
 
 Workflow runs preserve the human who actually triggered them in `createdBy`. Authenticated HTTP and MCP triggers use the trusted caller context, schedules use their creator when present, and Kapso routing uses its resolved sender. Generic ownerless webhooks and creatorless schedules remain unattributed rather than inheriting the workflow author's identity. Retry, resume, and recovery paths rehydrate this requester from the run so agent tasks created later keep the same attribution.
 
@@ -688,7 +719,7 @@ By default, upstream step outputs are **not** available for interpolation. Built
 - For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`
 - Without `inputs`, ordinary templates referencing upstream nodes resolve to empty strings and report the token in run diagnostics
 
-Executable source has a stricter boundary. Inline `script` source may interpolate only `input`, `workflow`, `swarm`, and `run`; pass trigger or upstream values through `config.args` or `config.env` so they arrive as data instead of executable text. Named `swarm-script` source is never workflow-interpolated, so pass all dynamic values through its `args` object. Disallowed or unresolved source tokens fail the node before execution, while unrelated mustache strings remain literal data.
+Executable source has a stricter boundary. Inline `script` source may interpolate only `input`, `workflow`, `swarm`, and `run`; pass trigger or upstream values through `config.args` or `config.env` so they arrive as data instead of executable text. Named `swarm-script` source is never workflow-interpolated, so pass all dynamic values through its `args` object. The same allowlist covers `code-match` `config.code` and a string `wait` `config.filter`: in `code-match` code, read trigger, alias and `item` values from the function's `input` argument. A string wait filter receives only the event payload, so match run values with the object form of `filter`. Disallowed or unresolved source tokens fail the node before execution, while unrelated mustache strings remain literal data.
 
 ### Structured Output (`outputSchema`)
 

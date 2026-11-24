@@ -1,6 +1,7 @@
-import { createLogEntry, getDbClient } from "../be/db";
+import { createLogEntry } from "../be/db";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
+import { getStorage } from "../be/storage";
 import type { AgentTask, ScriptRecord } from "../types";
 import {
   isFollowUpGateScheduleId,
@@ -9,17 +10,23 @@ import {
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 /**
- * Follow-up gate, shadow mode. When a gated scheduled run's Lead follow-up is
- * created, a configured verifier script checks the run after commit and the
+ * Follow-up gate. In shadow mode, when a gated scheduled run's Lead follow-up
+ * is created, a configured verifier script checks the run after commit and the
  * server records whether the follow-up could have been skipped. Shadow mode
  * never skips or delays a follow-up.
+ *
+ * Enforce mode keeps shadow for `FOLLOW_UP_GATE_SCHEDULE_IDS`. For a schedule
+ * in `FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS`, the follow-up waits for the
+ * verifier: `would_skip` skips it, any other outcome creates it (fail open).
  */
 
 export const FOLLOW_UP_GATE_SHADOW_EVENT = "task_follow_up_gate_shadow" as const;
 
 export type FollowUpGateConfig = {
-  mode: "off" | "shadow";
+  mode: "off" | "shadow" | "enforce";
   scheduleIds: ReadonlySet<string>;
+  /** Empty unless mode is `enforce`. */
+  enforceScheduleIds: ReadonlySet<string>;
   verifierScript: string;
 };
 
@@ -28,20 +35,32 @@ export type GateIneligibleReason =
   | "not_scheduled"
   | "schedule_not_gated"
   | "status_failed"
-  | "follow_up_instructions";
+  | "follow_up_instructions"
+  | "chain_rejected";
 
-/**
- * Read the gate config on every call so a `swarm_config` reload applies. Any
- * mode other than `shadow` reads as `off`, and malformed ids are ignored.
- */
-export function readFollowUpGateConfig(env: NodeJS.ProcessEnv = process.env): FollowUpGateConfig {
-  const mode = env.FOLLOW_UP_GATE_MODE?.trim().toLowerCase() === "shadow" ? "shadow" : "off";
-  const scheduleIds = new Set(
-    parseFollowUpGateScheduleIds(env.FOLLOW_UP_GATE_SCHEDULE_IDS)
+function scheduleIdSet(raw: string | undefined): Set<string> {
+  return new Set(
+    parseFollowUpGateScheduleIds(raw)
       .filter(isFollowUpGateScheduleId)
       .map((id) => id.toLowerCase()),
   );
-  return { mode, scheduleIds, verifierScript: env.FOLLOW_UP_GATE_VERIFIER_SCRIPT?.trim() ?? "" };
+}
+
+/**
+ * Read the gate config on every call so a `swarm_config` reload applies. Any
+ * mode other than `shadow` or `enforce` reads as `off`, and malformed ids are
+ * ignored.
+ */
+export function readFollowUpGateConfig(env: NodeJS.ProcessEnv = process.env): FollowUpGateConfig {
+  const raw = env.FOLLOW_UP_GATE_MODE?.trim().toLowerCase();
+  const mode = raw === "shadow" || raw === "enforce" ? raw : "off";
+  return {
+    mode,
+    scheduleIds: scheduleIdSet(env.FOLLOW_UP_GATE_SCHEDULE_IDS),
+    enforceScheduleIds:
+      mode === "enforce" ? scheduleIdSet(env.FOLLOW_UP_GATE_ENFORCE_SCHEDULE_IDS) : new Set(),
+    verifierScript: env.FOLLOW_UP_GATE_VERIFIER_SCRIPT?.trim() ?? "",
+  };
 }
 
 /** Pure decision on whether a follow-up's worker task may be verified. */
@@ -49,18 +68,31 @@ export function classifyFollowUpGate(input: {
   task: Pick<AgentTask, "scheduleId" | "followUpConfig">;
   status: "completed" | "failed";
   config: FollowUpGateConfig;
+  /** The completion named a `chainedTaskId` that was rejected. */
+  chainRejected?: boolean;
 }): { eligible: true } | { eligible: false; reason: GateIneligibleReason } {
   const { task, status, config } = input;
   if (config.mode === "off") return { eligible: false, reason: "mode_off" };
   if (!task.scheduleId) return { eligible: false, reason: "not_scheduled" };
-  if (!config.scheduleIds.has(task.scheduleId.toLowerCase())) {
+  const scheduleId = task.scheduleId.toLowerCase();
+  if (!config.scheduleIds.has(scheduleId) && !config.enforceScheduleIds.has(scheduleId)) {
     return { eligible: false, reason: "schedule_not_gated" };
   }
   if (status === "failed") return { eligible: false, reason: "status_failed" };
   if (task.followUpConfig?.onCompleted?.trim() || task.followUpConfig?.onFailed?.trim()) {
     return { eligible: false, reason: "follow_up_instructions" };
   }
+  // The rejected-handoff warning lives only in the follow-up, so keep it.
+  if (input.chainRejected) return { eligible: false, reason: "chain_rejected" };
   return { eligible: true };
+}
+
+/** Whether this run's follow-up waits for the verifier and is skipped on `would_skip`. */
+export function isFollowUpGateEnforced(input: Parameters<typeof classifyFollowUpGate>[0]): boolean {
+  return (
+    classifyFollowUpGate(input).eligible &&
+    input.config.enforceScheduleIds.has(input.task.scheduleId?.toLowerCase() ?? "")
+  );
 }
 
 type VerifierScript = Pick<ScriptRecord, "name" | "version" | "contentHash">;
@@ -118,20 +150,33 @@ export function setFollowUpGateTimeoutMsForTests(ms: number | null): void {
   timeoutMs = ms ?? FOLLOW_UP_GATE_TIMEOUT_MS;
 }
 
-/** Wait until every scheduled shadow hook has written its row. */
+/** Wait until every scheduled shadow or enforce hook has written its row. */
 export async function drainFollowUpGateShadowForTest(): Promise<void> {
   // Hooks run in FIFO order behind the client lock, so once this marker runs,
   // every earlier hook has started and registered its promise.
-  await new Promise<void>((resolve) => getDbClient().afterCommit(resolve));
+  await new Promise<void>((resolve) => getStorage().afterCommit(resolve));
   while (pending.size > 0) await Promise.allSettled([...pending]);
 }
 
-type ShadowArgs = {
+type GateArgs = {
   task: Pick<AgentTask, "id" | "scheduleId" | "followUpConfig">;
   status: "completed" | "failed";
-  followUpTaskId: string;
   leadAgentId: string;
+  chainRejected?: boolean;
 };
+
+type ShadowArgs = GateArgs & { followUpTaskId: string };
+
+type EnforceArgs = GateArgs & {
+  config: FollowUpGateConfig;
+  /** Create the Lead follow-up; called unless the verdict is `would_skip`. */
+  createFollowUp: () => Promise<AgentTask | null>;
+};
+
+/** Where the follow-up stands when the row is written. */
+type GateOutcome =
+  | { mode: "shadow"; followUpTaskId: string }
+  | { mode: "enforce"; followUpTaskId: string | null; skipped: boolean };
 
 type ShadowRecord = {
   decision: "would_skip" | "would_keep" | "error" | "ineligible";
@@ -150,7 +195,12 @@ type ShadowRecord = {
  */
 export function scheduleFollowUpGateShadow(args: ShadowArgs): void {
   const config = readFollowUpGateConfig();
-  const verdict = classifyFollowUpGate({ task: args.task, status: args.status, config });
+  const verdict = classifyFollowUpGate({
+    task: args.task,
+    status: args.status,
+    config,
+    chainRejected: args.chainRejected,
+  });
   if (
     !verdict.eligible &&
     (verdict.reason === "mode_off" ||
@@ -160,37 +210,87 @@ export function scheduleFollowUpGateShadow(args: ShadowArgs): void {
     return;
   }
   const deps = depsForTests ?? defaultDeps;
-  getDbClient().afterCommit(() => {
-    const run = verdict.eligible
-      ? runShadow(args, config, deps)
-      : writeRecord(args, { decision: "ineligible", reason: verdict.reason });
-    pending.add(run);
-    const settle = () => {
-      pending.delete(run);
-    };
-    void run.then(settle, settle);
-  });
+  // An enforced schedule reaches here only when ineligible: its follow-up was created up front.
+  const outcome: GateOutcome = config.enforceScheduleIds.has(
+    args.task.scheduleId?.toLowerCase() ?? "",
+  )
+    ? { mode: "enforce", followUpTaskId: args.followUpTaskId, skipped: false }
+    : { mode: "shadow", followUpTaskId: args.followUpTaskId };
+  getStorage().afterCommit(() =>
+    track(
+      verdict.eligible
+        ? verifyCapped(args, config, deps).then((record) => writeRecord(args, record, outcome))
+        : writeRecord(args, { decision: "ineligible", reason: verdict.reason }, outcome),
+    ),
+  );
 }
 
-async function runShadow(
-  args: ShadowArgs,
+/**
+ * Enforce the gate for a run that `isFollowUpGateEnforced` accepted. Returns
+ * synchronously; after commit the verifier runs, and the follow-up is created
+ * unless the verdict is `would_skip`. Errors, timeouts, the concurrency cap and
+ * a missing verifier all create it.
+ *
+ * shortcut: a server restart while the verifier runs (up to 60s) drops the
+ * follow-up; add a boot sweep for unrecorded enforced runs if that shows up.
+ */
+export function scheduleFollowUpGateEnforce(args: EnforceArgs): void {
+  const deps = depsForTests ?? defaultDeps;
+  getStorage().afterCommit(() => track(runEnforce(args, deps)));
+}
+
+async function runEnforce(args: EnforceArgs, deps: FollowUpGateDeps): Promise<void> {
+  const record = await verifyCapped(args, args.config, deps);
+  if (record.decision === "would_skip") {
+    await writeRecord(args, record, { mode: "enforce", followUpTaskId: null, skipped: true });
+    try {
+      await createLogEntry({
+        eventType: "task_follow_up_suppressed",
+        taskId: args.task.id,
+        agentId: args.leadAgentId,
+        metadata: { reason: "follow_up_gate", status: args.status },
+      });
+    } catch {}
+    return;
+  }
+  let followUpTaskId: string | null = null;
+  try {
+    followUpTaskId = (await args.createFollowUp())?.id ?? null;
+  } catch (err) {
+    console.warn(
+      `[follow-up-gate] Could not create follow-up for task ${args.task.id.slice(0, 8)}:`,
+      scrubSecrets(err instanceof Error ? err.message : String(err)),
+    );
+  }
+  await writeRecord(args, record, { mode: "enforce", followUpTaskId, skipped: false });
+}
+
+function track(run: Promise<void>): void {
+  pending.add(run);
+  const settle = () => {
+    pending.delete(run);
+  };
+  void run.then(settle, settle);
+}
+
+async function verifyCapped(
+  args: GateArgs,
   config: FollowUpGateConfig,
   deps: FollowUpGateDeps,
-): Promise<void> {
+): Promise<ShadowRecord> {
   if (inFlight >= FOLLOW_UP_GATE_MAX_IN_FLIGHT) {
-    await writeRecord(args, { decision: "error", reason: "concurrency_cap" });
-    return;
+    return { decision: "error", reason: "concurrency_cap" };
   }
   inFlight++;
   try {
-    await writeRecord(args, await verify(args, config, deps));
+    return await verify(args, config, deps);
   } finally {
     inFlight--;
   }
 }
 
 async function verify(
-  args: ShadowArgs,
+  args: GateArgs,
   config: FollowUpGateConfig,
   deps: FollowUpGateDeps,
 ): Promise<ShadowRecord> {
@@ -288,7 +388,11 @@ function clip(text: string): string {
   return scrubSecrets(text).slice(0, TEXT_LIMIT);
 }
 
-async function writeRecord(args: ShadowArgs, record: ShadowRecord): Promise<void> {
+async function writeRecord(
+  args: GateArgs,
+  record: ShadowRecord,
+  outcome: GateOutcome,
+): Promise<void> {
   try {
     await createLogEntry({
       eventType: FOLLOW_UP_GATE_SHADOW_EVENT,
@@ -296,8 +400,9 @@ async function writeRecord(args: ShadowArgs, record: ShadowRecord): Promise<void
       agentId: args.leadAgentId,
       metadata: {
         v: 1,
-        mode: "shadow",
-        followUpTaskId: args.followUpTaskId,
+        mode: outcome.mode,
+        followUpTaskId: outcome.followUpTaskId,
+        ...(outcome.mode === "enforce" ? { skipped: outcome.skipped } : {}),
         scheduleId: args.task.scheduleId ?? null,
         status: args.status,
         decision: record.decision,
@@ -311,7 +416,7 @@ async function writeRecord(args: ShadowArgs, record: ShadowRecord): Promise<void
     });
   } catch (err) {
     console.warn(
-      `[follow-up-gate] Could not record shadow decision for task ${args.task.id.slice(0, 8)}:`,
+      `[follow-up-gate] Could not record ${outcome.mode} decision for task ${args.task.id.slice(0, 8)}:`,
       scrubSecrets(err instanceof Error ? err.message : String(err)),
     );
   }

@@ -30,6 +30,12 @@ const RESERVED_FAMILIES = new Map([
     "session-labels",
     "namespace is reserved for session source labels; GET /api/session-tree returns them",
   ],
+  // Slack profile emails read from users.info (src/slack/enrich.ts). They decide the
+  // email-domain allowlist and the Slack-to-user auto-link, so only the API writes them.
+  [
+    "integration:user-enrichment",
+    "namespace is reserved for integration profile enrichment; the API writes it from the provider",
+  ],
   // Kapso number routing and inbound dedupe (src/integrations/kapso/config.ts).
   [
     "integrations:kapso",

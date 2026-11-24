@@ -4013,6 +4013,9 @@
     },
     "sourceStepId": {
       "exempt": "identifier"
+    },
+    "principal": {
+      "exempt": "server-built WorkflowRunPrincipal JSON: agent ids plus the workflow name, which workflows.name already exempts"
     }
   },
   "workflow_versions": {
@@ -4357,6 +4360,32 @@
     },
     "profileName": {
       "exempt": "enum or fixed-format value"
+    }
+  },
+  "task_idempotency_keys": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "principal": {
+      "exempt": "identifier (user:/agent:/controller:<id> or operator)"
+    },
+    "keyHash": {
+      "exempt": "hash or digest"
+    },
+    "requestFingerprint": {
+      "exempt": "hash or digest"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
     }
   },
   "workflow_idempotency_keys": {

@@ -1,6 +1,6 @@
 import * as z from "zod";
 import { getApiKey } from "@/utils/api-key";
-import { getMcpBaseUrl } from "@/utils/constants";
+import { getScriptApiBaseUrl } from "@/utils/constants";
 import {
   type RequestInfo,
   type SwarmToolData,
@@ -41,7 +41,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function apiBaseUrl(): string {
-  return getMcpBaseUrl();
+  return getScriptApiBaseUrl();
 }
 
 /** `{path, message}` renders as one `path: message` line; anything else verbatim. */
