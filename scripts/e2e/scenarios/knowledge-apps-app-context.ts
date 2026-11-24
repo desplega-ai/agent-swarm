@@ -187,7 +187,10 @@ export const knowledgeAppsAppContext: Scenario = {
 
       const channel = new MessageChannel();
       const requests: Json[] = [];
-      channel.port1.onmessage = (event) => {
+      // The e2e tsconfig's MessagePort type has no `onmessage`; the runtime port does.
+      (channel.port1 as unknown as { onmessage: (event: { data: unknown }) => void }).onmessage = (
+        event,
+      ) => {
         const request = event.data as Json;
         requests.push(request);
         if (request.type === "swarm-app:action") {
