@@ -190,7 +190,7 @@
         <p class="lead"><strong>α</strong> counts the times it helped.<br><strong>β</strong> counts the times it did not.</p>
         <p class="lead"><span class="mono" style="color:var(--amber-700)">Beta(α, β)</span>: a distribution on 0 to 1.<br>Our belief about how often it helps.</p>
         <table style="font-size:30px">
-          <tr><td>Implicit citation</td><td>cited <strong>+0.5</strong> · ignored <strong>−0.25</strong></td></tr>
+          <tr><td>Implicit citation</td><td>cited: α <strong>+0.5</strong> · ignored: β <strong>+0.25</strong></td></tr>
           <tr><td>LLM judge</td><td>rides on the summary call</td></tr>
           <tr><td>Self-rating</td><td><span class="mono">memory_rate(id, useful)</span></td></tr>
         </table>
@@ -279,7 +279,7 @@
       <svg id="nodes-grid" class="chart" style="border:0;background:none;border-radius:0"></svg>
       <div class="bignums">
         <div><b>63%</b><span>of the steps run no model<br>26 of 41 · they cost $0</span></div>
-        <div><b>$10</b><span>a night, mean of the last 7<br>before: $9.48, for one prompt</span></div>
+        <div><b>$10</b><span>a night, like the old prompt ($9.48)<br>for about 3× the output</span></div>
       </div>
     </div>
     <aside class="notes">
@@ -288,7 +288,7 @@
         <li>41 nodes = 16 scripts, 9 gate checks, 1 notification, 15 model steps. These are the numbers in the blog post (2026-10-28).</li>
         <li>The workflow that ships today is a little larger (18 script nodes, 10 gates in templates/workflows/dreaming). The ratio holds. If someone counts, say "about 60%".</li>
         <li>Cost: the last 7 nights cost $10.40 on average. The night before last cost $8.74. In last night's report the model steps were the 7 self-reports ($1.94), the synthesis ($1.73) and the skills lane ($0.99). Gather, gates, apply and verify are code.</li>
-        <li>Cost change: the one prompt it replaced cost $9.48 a night, measured in September. So about the same price, for several times the output (slide 15). The two numbers use different model prices. Say "about the same".</li>
+        <li>Cost change: the one prompt it replaced cost $9.48 a night, measured in September. So about the same price. "3× the output" is the table on slide 15: 93 changes in 28 nights for the old job, 318 for dreaming. The two numbers use different model prices. Say "about the same".</li>
         <li>The blog post says $17.80 a night for 3 agents. That was the October estimate at Opus prices. Nights are cheaper now.</li>
         <li><strong>For this room:</strong> a process where 63% of the steps are code depends less on which model you run.</li>
         <li><strong>Trap:</strong> we benchmarked open models on the swarm with Helmcode (swar.am/helmcode). I did not check if dreaming itself ran on an open model. Do not say it did unless you know.</li>
@@ -299,7 +299,7 @@
   <!-- 11. ONE NIGHT -->
   <section class="slide top">
     <div class="kicker">part 2 · dreaming · one night, 4:30 AM</div>
-    <h2>One night: propose, gate, apply, re-read</h2>
+    <h2>One night: gather, propose, apply, verify</h2>
     <div style="display:flex;flex-direction:column;gap:22px">
       <div class="lane"><div class="name">GATHER</div><div class="flow">
         <div class="box"><b>last 24 hours</b><span>tasks · cost · skills · memories</span></div><div class="arrow">→</div>
@@ -324,6 +324,7 @@
       <ul>
         <li><strong>Say (70s):</strong> "A script reads the last day: tasks, cost, skill use, memories. Then every agent writes a self-report. The prompt forbids write tools: proposals only, each with an evidence id. A script drops reports that break the rules. The lead reviews and returns an approved list. Every rejection has a reason. Only then code applies the writes, inside caps. And a last script reads every write again and compares it."</li>
         <li>Five lanes: profile files (identity and instructions), memory, skills, scripts, and the lead's heartbeat checklist.</li>
+        <li><strong>Say it aloud, there is no legend:</strong> "Amber means a model runs. All the rest is code."</li>
         <li><strong>Where a model runs (amber boxes):</strong> the self-reports, the lead synthesis, and the report, which a writer agent writes. The skills and scripts lanes also use agents to write the skill or the script. The re-read is NOT a model: it is the script dreaming-verify. It reads every claimed write again and compares.</li>
         <li>After verify there is one more script, dreaming-learn. It scores the cuts of the last 14 days. A cut whose text came back becomes a pin: no lane may cut that text again.</li>
         <li>The schedule is 03:30 UTC. That is 04:30 in Barcelona in winter. It runs after the daily blocker digest, which the lead reads during synthesis.</li>
@@ -344,7 +345,7 @@
         <tr><td>A trim</td><td>must leave the text smaller</td></tr>
         <tr><td>A write</td><td>is read again, then logged</td></tr>
         <tr><td>A run</td><td>has a budget: <span class="mono">$25</span></td></tr>
-        <tr><td style="white-space:nowrap">The trail</td><td>report + changelog per night, in agent-fs</td></tr>
+        <tr><td style="white-space:nowrap">The trail</td><td>report + changelog per night, versioned</td></tr>
       </table>
       <div class="bignums">
         <div><b>65%</b><span>of proposals rejected<br>first 28 nights</span></div>
@@ -406,6 +407,7 @@
     <div class="kicker">part 2 · dreaming · tokenminning · 12 busiest agents</div>
     <h2>The old job added, dreaming <span class="grad">cut</span></h2>
     <svg id="dream-chart" class="chart"></svg>
+    <p class="small mono">y axis: instruction tokens, summed over the 12 busiest agents</p>
     <aside class="notes">
       <ul>
         <li><strong>Say (60s):</strong> "This is all the instruction text that our 12 busiest agents load, in tokens. Left: four weeks of the old job. Up 4.7 thousand. Then dreaming starts. The first cliff is one night: the lead's instructions went from 90 thousand characters to 20 thousand. Four weeks later: minus 52%. And the last part is the honest one. In month two it stays flat, even a little up. It found the floor."</li>
@@ -433,8 +435,8 @@
         <tr><td>Memories created</td><td>77</td><td><strong>148</strong></td></tr>
       </table>
       <div class="bignums">
-        <div><b>−93%</b><span>lead heartbeat: 55k → 4k tokens</span></div>
-        <div><b>80+</b><span>memories deleted in 56 nights</span></div>
+        <div><b>−93%</b><span>lead's checklist: 55k → 4k tokens</span></div>
+        <div><b>80+</b><span>memories deleted, all 56 nights</span></div>
       </div>
     </div>
     <aside class="notes">
@@ -461,7 +463,7 @@
       <tr><td>Memories</td><td>every task, every night</td><td>agents write, dreaming curates</td></tr>
       <tr><td>Skills and scripts</td><td>every task, every night</td><td>agents write, dreaming refactors</td></tr>
       <tr><td>Instructions</td><td>every night</td><td>dreaming, mostly to cut</td></tr>
-      <tr class="locked"><td>Weights</td><td>never</td><td>rented, or use Helmcode 🫣</td></tr>
+      <tr class="locked"><td>Weights</td><td>never</td><td>rented, use Helmcode 🫣</td></tr>
     </table>
     <aside class="notes">
       <ul>
@@ -490,18 +492,18 @@
         </ul>
       </div>
       <div class="card amber">
-        <h3>Our answer: second-order evals</h3>
+        <h3>What we watch: second-order evals</h3>
         <ul>
           <li><strong>Repeated work:</strong> schedules, PRs, reviews</li>
           <li><strong>A skill changes:</strong> same PR merge rate?</li>
           <li><strong>A script ships:</strong> does its use go up?</li>
-          <li><strong>Each night:</strong> 8 of 9 changes survive</li>
+          <li><strong>Last night:</strong> 8 of 9 changes survived</li>
         </ul>
       </div>
     </div>
     <aside class="notes">
       <ul>
-        <li><strong>Say (70s):</strong> "Here is the part we have not solved. The swarm changes itself every night. How do you know that it improved, and not only changed? You cannot replay yesterday. A shorter prompt is not a better prompt. Our answer today is second-order evals. We do not grade the change. We watch the work that uses it. And a swarm repeats itself a lot: the same schedules, the same PR flow, the same reviews, every day. So if dreaming changes a skill that mostly the coder uses, and the share of merged PRs stays the same, the change is fine. If it drops, we see it the next day. If a new script ships and agents start to use it, that is adoption. Repetition is our benchmark."</li>
+        <li><strong>Say (70s):</strong> "Here is the part we have not solved. The swarm changes itself every night. How do you know that it improved, and not only changed? You cannot replay yesterday. A shorter prompt is not a better prompt. What we watch today is second-order evals. We do not grade the change. We watch the work that uses it. And a swarm repeats itself a lot: the same schedules, the same PR flow, the same reviews, every day. So if dreaming changes a skill that mostly the coder uses, and the share of merged PRs stays the same, the change is fine. If it drops, we see it the next day. If a new script ships and agents start to use it, that is adoption. Repetition is our benchmark."</li>
         <li><strong>The nightly numbers:</strong> did last night's change survive, or did someone revert it? 8 of 9 last night. Did a cut come back because an agent missed it? 0 of 54 so far. Size and cost, night over night. And every new script ships with two controls: one run that must pass and one that must fail.</li>
         <li><strong>Trap:</strong> the second-order reading is mostly done by people and by the lead today, on top of the per-agent stats that the gather step collects. I did not find an automated gate that compares a PR merge rate before and after a skill change. Say "we watch", not "the system checks".</li>
         <li><strong>Be honest:</strong> these measure stability and cost. They do not measure quality. "It survived" is not "it is better".</li>
