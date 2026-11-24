@@ -1677,12 +1677,17 @@
       }
     },
     "OnEnter": {
-      "description": "Renders nothing. Runs its `on.enter` chain once when mounted, and again each time the resolved `deps` value changes (`{ \"$state\": \"/route\" }` re-runs it on every page or route-param change). Unlike `watch`, a state write by a step does not cancel the remaining steps.",
+      "description": "Renders nothing. Runs its `on.enter` chain once when mounted, and again each time the resolved `deps` value changes (`{ \"$state\": \"/route\" }` re-runs it on every page or route-param change). `everyMs` also re-runs it on an interval while the tab is visible, skipping a tick while the previous run is still going. Unlike `watch`, a state write by a step does not cancel the remaining steps.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-          "deps": {}
+          "deps": {},
+          "everyMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 9007199254740991
+          }
         },
         "additionalProperties": false
       }
