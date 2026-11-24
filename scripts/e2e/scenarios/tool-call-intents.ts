@@ -55,8 +55,10 @@ export const toolCallIntents: Scenario = {
         cwd,
         timeoutMs: 60_000,
         stdin: JSON.stringify({ session_id: `e2e-${token}`, cwd, ...event }),
+        // HOOK_WORKSPACE_DIR keeps a worker host's /workspace/.mcp.json from winning over cwd.
         env: {
           CLAUDE_PROJECT_DIR: cwd,
+          HOOK_WORKSPACE_DIR: cwd,
           TMPDIR: await tmpDir("tmp"),
           AGENT_SWARM_TASK_ID: taskId,
         },

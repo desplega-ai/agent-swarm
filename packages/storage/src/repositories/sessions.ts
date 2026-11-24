@@ -41,6 +41,20 @@ export type NewSessionLog = {
   reasoningKind: string | null;
 };
 
+// ---- tool_call_intents ----
+
+export type ToolCallIntentRow = {
+  id: string;
+  taskId: string;
+  agentId: string | null;
+  toolCallId: string;
+  toolName: string;
+  argsSummary: string | null;
+  createdAt: string;
+};
+
+export type NewToolCallIntent = Omit<ToolCallIntentRow, "createdAt">;
+
 // ---- session_costs ----
 
 export type SessionCostRow = {
@@ -514,6 +528,17 @@ export interface SessionsRepository {
   /** One iteration's lines in insert order. */
   listLogsBySession(sessionId: string, iteration: number): Promise<SessionLogRow[]>;
 
+  // ---- tool_call_intents ----
+  /**
+   * Inserts once per `(taskId, toolCallId)`: a retried insert keeps the first
+   * row. `createdAt` is the engine's current time. Returns the stored row.
+   */
+  insertToolCallIntent(intent: NewToolCallIntent): Promise<ToolCallIntentRow | null>;
+  /** Deletes the intent of one call; returns the number of rows deleted. */
+  deleteToolCallIntent(taskId: string, toolCallId: string): Promise<number>;
+  /** A task's intents, oldest first (ties by id), at most `limit`. */
+  listToolCallIntents(taskId: string, limit: number): Promise<ToolCallIntentRow[]>;
+
   // ---- session_costs ----
   /**
    * The agent and the task row id of the active session registered under
@@ -909,6 +934,29 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   /** Insert order needs the engine's insert sequence. */
   abstract listLogsByTask(taskId: string, limit?: number): Promise<SessionLogRow[]>;
   abstract listLogsBySession(sessionId: string, iteration: number): Promise<SessionLogRow[]>;
+
+  // ---- tool_call_intents ----
+
+  async insertToolCallIntent(intent: NewToolCallIntent): Promise<ToolCallIntentRow | null> {
+    await this.db.run(sql`
+      INSERT INTO tool_call_intents (id, "taskId", "agentId", "toolCallId", "toolName", "argsSummary", "createdAt")
+      VALUES (${intent.id}, ${intent.taskId}, ${intent.agentId}, ${intent.toolCallId}, ${intent.toolName}, ${intent.argsSummary}, ${nowIso})
+      ON CONFLICT ("taskId", "toolCallId") DO NOTHING`);
+    return this.db.get<ToolCallIntentRow>(sql`
+      SELECT * FROM tool_call_intents WHERE "taskId" = ${intent.taskId} AND "toolCallId" = ${intent.toolCallId}`);
+  }
+
+  async deleteToolCallIntent(taskId: string, toolCallId: string): Promise<number> {
+    const result = await this.db.run(sql`
+      DELETE FROM tool_call_intents WHERE "taskId" = ${taskId} AND "toolCallId" = ${toolCallId}`);
+    return result.changes;
+  }
+
+  listToolCallIntents(taskId: string, limit: number): Promise<ToolCallIntentRow[]> {
+    return this.db.query<ToolCallIntentRow>(sql`
+      SELECT * FROM tool_call_intents WHERE "taskId" = ${taskId}
+      ORDER BY "createdAt" ASC, id ASC LIMIT ${limit}`);
+  }
 
   // ---- session_costs ----
 
