@@ -63,13 +63,25 @@ describe("openSqliteCopySource", () => {
     }
   });
 
-  test("lists each orphan row with its parent table and key columns", () => {
+  test("lists each orphan row with its parent table, key columns and delete action", () => {
     const source = openSqliteCopySource(path);
     try {
       const orphans = source.foreignKeyViolations?.() ?? [];
       expect(orphans.sort((x, y) => x.row.localeCompare(y.row))).toEqual([
-        { table: "children", row: "rowid 2", parent: "parents", columns: ["parent"] },
-        { table: "children", row: "rowid 3", parent: "pairs", columns: ["a", "b"] },
+        {
+          table: "children",
+          row: "rowid 2",
+          parent: "parents",
+          columns: ["parent"],
+          onDelete: "CASCADE",
+        },
+        {
+          table: "children",
+          row: "rowid 3",
+          parent: "pairs",
+          columns: ["a", "b"],
+          onDelete: "NO ACTION",
+        },
       ]);
     } finally {
       source.close();

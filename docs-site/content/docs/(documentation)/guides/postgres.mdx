@@ -77,6 +77,7 @@ Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API a
    docker run --rm -v <api data volume>:/app/data --network <network> \
      <api image>:<api tag> db-copy --from /app/data/agent-swarm-db.sqlite --to <postgres url>
    ```
+   A long-lived database often holds rows that Postgres refuses (a NUL byte in text, a row whose parent row is gone). The copy lists each one and writes nothing. Run it again with `--repair` to fix those kinds during the copy: each fix is listed, and the SQLite file is not changed.
 4. Set `DATABASE_URL`, keep the same encryption key, and start the API.
 
 If the copy reports values that Postgres cannot store (a NUL byte, invalid UTF-8, an invalid timestamp), it writes nothing. Fix those rows in the SQLite file and copy again. To roll back, unset `DATABASE_URL`: the API starts on the untouched SQLite file.

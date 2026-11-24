@@ -3,7 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   CopyCell,
+  CopyOrphan,
   CopyProblem,
+  CopyRepair,
   CopyReport,
   CopySource,
   CopyTable,
@@ -39,6 +41,14 @@ export type PostgresCopyOptions = {
   batchSize?: number;
   /** Stored bytes per INSERT statement. A larger single row still goes alone. */
   batchBytes?: number;
+  /**
+   * Repair what Postgres cannot store instead of refusing it (`--repair`): NUL
+   * bytes and invalid UTF-8 in text, `\u0000` and unpaired surrogate escapes in
+   * JSON, a value of the wrong kind in a nullable number or flag column, and
+   * orphan rows. Each repair is in the report. Off by default: the copy then
+   * changes no value.
+   */
+  repair?: boolean;
   /** Problems kept in the report (all are counted). */
   maxProblems?: number;
   log?: (line: string) => void;
@@ -211,22 +221,40 @@ async function readTargetTables(conn: Conn): Promise<Map<string, TargetTable>> {
 // ---------------------------------------------------------------------------
 // Value conversion (D11 steps 4 and 5)
 
-type Converted = { ok: true; value: string | null } | { ok: false; reason: string };
+type Converted =
+  | {
+      ok: true;
+      value: string | null /** What `--repair` changed, when it did. */;
+      repaired?: string;
+    }
+  | { ok: false; reason: string };
 
 // ignoreBOM keeps a leading U+FEFF: it is part of the stored value, not a byte order mark.
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+// For --repair: an invalid byte sequence becomes U+FFFD.
+const utf8Lossy = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
 const ISO_TIMESTAMP =
   /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?)?$/;
 
-function decodeText(bytes: Uint8Array): Converted {
+function decodeText(bytes: Uint8Array, repair = false): Converted {
   let text: string;
+  const repairs: string[] = [];
   try {
     text = utf8.decode(bytes);
   } catch {
-    return { ok: false, reason: "invalid UTF-8" };
+    if (!repair) return { ok: false, reason: "invalid UTF-8" };
+    text = utf8Lossy.decode(bytes);
+    repairs.push("invalid UTF-8 bytes replaced with U+FFFD");
   }
-  if (text.includes("\u0000")) return { ok: false, reason: "NUL byte in text" };
-  return { ok: true, value: text };
+  if (text.includes("\u0000")) {
+    if (!repair) return { ok: false, reason: "NUL byte in text" };
+    const kept = text.replaceAll("\u0000", "");
+    repairs.push(`${text.length - kept.length} NUL byte(s) removed`);
+    text = kept;
+  }
+  return repairs.length > 0
+    ? { ok: true, value: text, repaired: repairs.join("; ") }
+    : { ok: true, value: text };
 }
 
 // A high surrogate with no low surrogate after it, or a low one with no high one before it.
@@ -260,6 +288,20 @@ function jsonStringProblem(value: unknown): string | null {
   return null;
 }
 
+const LONE_SURROGATES = new RegExp(LONE_SURROGATE.source, "g");
+
+/** A parsed JSON value with the strings `jsonb` refuses made storable (`--repair`). */
+function storableJson(value: unknown): unknown {
+  if (typeof value === "string")
+    return value.replaceAll("\u0000", "").replace(LONE_SURROGATES, "\uFFFD");
+  if (Array.isArray(value)) return value.map(storableJson);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [storableJson(key), storableJson(item)]),
+    );
+  return value;
+}
+
 /** SQLite timestamp text to an ISO instant; text with no zone is UTC, as SQLite reads it. */
 function timestampText(text: string): string | null {
   const match = ISO_TIMESTAMP.exec(text.trim());
@@ -285,7 +327,7 @@ function timestampText(text: string): string | null {
   return Number.isFinite(Date.parse(iso)) ? iso : null;
 }
 
-function cellText(cell: CopyCell): Converted {
+function cellText(cell: CopyCell, repair = false): Converted {
   switch (cell.kind) {
     case "null":
       return { ok: true, value: null };
@@ -293,7 +335,7 @@ function cellText(cell: CopyCell): Converted {
     case "real":
       return { ok: true, value: String(cell.value) };
     default:
-      return decodeText(cell.bytes);
+      return decodeText(cell.bytes, repair);
   }
 }
 
@@ -301,34 +343,43 @@ function hex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("hex");
 }
 
-/** Convert one SQLite value to the text form of its Postgres column type. */
-export function convertCell(cell: CopyCell, column: TargetColumn): Converted {
+/**
+ * Convert one SQLite value to the text form of its Postgres column type. With
+ * `repair`, a value that a rule covers is changed and `repaired` says how.
+ */
+export function convertCell(cell: CopyCell, column: TargetColumn, repair = false): Converted {
   if (cell.kind === "null") {
     return column.notNull
       ? { ok: false, reason: "NULL in a NOT NULL column" }
       : { ok: true, value: null };
   }
+  // A value of the wrong kind for a number or flag column. No rule can guess the
+  // number that was meant, so the repair is NULL, and only where NULL is allowed.
+  const wrongKind = (reason: string): Converted =>
+    repair && !column.notNull
+      ? { ok: true, value: null, repaired: `${describe(cell)} replaced with NULL (${reason})` }
+      : { ok: false, reason: `${reason}: ${describe(cell)}` };
   switch (column.typname) {
     case "bool":
       if (cell.kind === "integer" && (cell.value === 0n || cell.value === 1n))
         return { ok: true, value: cell.value === 1n ? "true" : "false" };
-      return { ok: false, reason: `not a flag (0 or 1): ${describe(cell)}` };
+      return wrongKind("not a flag (0 or 1)");
     case "int2":
     case "int4":
     case "int8":
       if (cell.kind === "integer") return { ok: true, value: cell.value.toString() };
       if (cell.kind === "real" && Number.isInteger(cell.value))
         return { ok: true, value: BigInt(cell.value).toString() };
-      return { ok: false, reason: `not an integer: ${describe(cell)}` };
+      return wrongKind("not an integer");
     case "float4":
     case "float8":
     case "numeric":
       if (cell.kind === "integer" || cell.kind === "real")
         return { ok: true, value: String(cell.value) };
-      return { ok: false, reason: `not a number: ${describe(cell)}` };
+      return wrongKind("not a number");
     case "json":
     case "jsonb": {
-      const text = cellText(cell);
+      const text = cellText(cell, repair);
       if (!text.ok || text.value === null) return text;
       let parsed: unknown;
       try {
@@ -337,17 +388,25 @@ export function convertCell(cell: CopyCell, column: TargetColumn): Converted {
         return { ok: false, reason: `invalid JSON: ${text.value.slice(0, 60)}` };
       }
       const refused = jsonStringProblem(parsed);
-      return refused ? { ok: false, reason: refused } : text;
+      if (!refused) return text;
+      if (!repair) return { ok: false, reason: refused };
+      const what =
+        "JSON strings made storable (\\u0000 removed, unpaired surrogate escapes replaced with U+FFFD)";
+      return {
+        ok: true,
+        value: JSON.stringify(storableJson(parsed)),
+        repaired: text.repaired ? `${text.repaired}; ${what}` : what,
+      };
     }
     case "timestamptz":
     case "timestamp": {
       if (cell.kind !== "text") return { ok: false, reason: `not a timestamp: ${describe(cell)}` };
-      const text = decodeText(cell.bytes);
+      const text = decodeText(cell.bytes, repair);
       if (!text.ok || text.value === null) return text;
       const iso = timestampText(text.value);
       return iso === null
         ? { ok: false, reason: `invalid timestamp: ${text.value.slice(0, 60)}` }
-        : { ok: true, value: iso };
+        : { ok: true, value: iso, repaired: text.repaired };
     }
     case "bytea":
       if (cell.kind === "blob" || cell.kind === "text")
@@ -356,7 +415,7 @@ export function convertCell(cell: CopyCell, column: TargetColumn): Converted {
     case "text":
     case "varchar":
     case "bpchar":
-      return cellText(cell);
+      return cellText(cell, repair);
     default:
       return { ok: false, reason: `no conversion to Postgres type ${column.type}` };
   }
@@ -819,7 +878,16 @@ export async function copyIntoPostgres(
 
         // Orphan rows first: Postgres would refuse them at the end of the copy and
         // name only the first one. The source lists every one in seconds.
+        // With --repair an orphan row is repaired when its table is copied. A
+        // row with no rowid cannot be matched there, so it stays a problem.
+        const orphansToRepair = new Map<string, Map<string, CopyOrphan[]>>();
         for (const orphan of source.foreignKeyViolations?.() ?? []) {
+          if (options.repair && /^rowid \d+$/.test(orphan.row)) {
+            const rows = orphansToRepair.get(orphan.table) ?? new Map<string, CopyOrphan[]>();
+            rows.set(orphan.row, [...(rows.get(orphan.row) ?? []), orphan]);
+            orphansToRepair.set(orphan.table, rows);
+            continue;
+          }
           problem({
             table: orphan.table,
             column: orphan.columns.join(", "),
@@ -829,6 +897,11 @@ export async function copyIntoPostgres(
         }
         if (report.problemCount > 0)
           log(`[db-copy] ${report.problemCount} orphan row(s) in the source: checking values only`);
+        const repaired = (r: CopyRepair) => {
+          report.repairCount = (report.repairCount ?? 0) + 1;
+          report.repairs ??= [];
+          if (report.repairs.length < maxProblems) report.repairs.push(r);
+        };
 
         const checksums = new Map<string, TableChecksum>();
         let vectors = 0;
@@ -837,7 +910,18 @@ export async function copyIntoPostgres(
         const writing = () => report.problemCount === 0;
         for (const table of sourceTables) {
           const target = targets.get(table.name) as TargetTable;
-          const sum = await copyTable(conn, source, table, target, options, problem, log, writing);
+          const sum = await copyTable(
+            conn,
+            source,
+            table,
+            target,
+            options,
+            problem,
+            log,
+            writing,
+            repaired,
+            orphansToRepair.get(table.name),
+          );
           checksums.set(table.name, sum.checksum);
           if (table.name === "agent_memory" && vectorTable && writing()) {
             const widths = embeddingWidths(sum.embeddings);
@@ -1094,6 +1178,8 @@ async function copyTable(
   problem: (p: CopyProblem) => void,
   log: (line: string) => void,
   writing: () => boolean = () => true,
+  repaired: (r: CopyRepair) => void = () => {},
+  orphans?: Map<string, CopyOrphan[]>,
 ): Promise<{ checksum: TableChecksum; embeddings: [string, Uint8Array][] }> {
   const { columns, rowid } = insertColumns(table, target);
   const all = rowid ? [rowid, ...columns] : columns;
@@ -1109,16 +1195,69 @@ async function copyTable(
   const embeddingIndex = table.columns.findIndex((c) => c.name === "embedding");
   let failed = false;
   let copied = 0;
+  let dropped = 0;
+  const repair = options.repair === true;
 
   for (const batch of source.rows(table, batchSize, options.batchBytes ?? DEFAULT_BATCH_BYTES)) {
     const params: (string | null)[] = [];
     for (const row of batch) {
+      // --repair, orphan rows: what the foreign key would have done when the
+      // parent row went. CASCADE drops the row. Any other action clears the
+      // reference, where the column allows NULL.
+      const cleared = new Set<string>();
+      let drop = false;
+      for (const orphan of (repair ? orphans?.get(row.label) : undefined) ?? []) {
+        const where = orphan.columns.join(", ");
+        if (orphan.onDelete === "CASCADE") {
+          drop = true;
+          repaired({
+            table: table.name,
+            column: where,
+            row: row.label,
+            action: `orphan row dropped (no row in ${orphan.parent}; the key is ON DELETE CASCADE)`,
+          });
+        } else if (
+          orphan.columns.every((name) => columns.some((c) => c.name === name && !c.notNull))
+        ) {
+          for (const name of orphan.columns) cleared.add(name);
+          repaired({
+            table: table.name,
+            column: where,
+            row: row.label,
+            action: `orphan reference set to NULL (no row in ${orphan.parent})`,
+          });
+        } else {
+          failed = true;
+          problem({
+            table: table.name,
+            column: where,
+            row: row.label,
+            reason: `orphan row: no row in ${orphan.parent} for this foreign key, and --repair cannot clear a NOT NULL column`,
+          });
+        }
+      }
+      if (drop) {
+        dropped++;
+        continue;
+      }
       const values: (string | null)[] = rowid
         ? [row.rowid === null ? null : row.rowid.toString()]
         : [];
       for (let i = 0; i < columns.length; i++) {
         const column = columns[i] as TargetColumn;
-        const converted = convertCell(row.cells[i] as CopyCell, column);
+        if (cleared.has(column.name)) {
+          values.push(null);
+          continue;
+        }
+        const converted = convertCell(row.cells[i] as CopyCell, column, repair);
+        if (converted.ok && converted.repaired) {
+          repaired({
+            table: table.name,
+            column: column.name,
+            row: row.label,
+            action: converted.repaired,
+          });
+        }
         if (!converted.ok) {
           failed = true;
           problem({
@@ -1148,6 +1287,9 @@ async function copyTable(
       continue;
     }
     const rows = params.length / perRow;
+    // A batch can hold no row to write: an empty batch from the source, or
+    // --repair dropped every row of it (a run of orphan rows).
+    if (rows === 0) continue;
     const tuples: string[] = [];
     for (let r = 0; r < rows; r++) {
       // Through text: Bun.SQL sends a string bound straight to jsonb as a JSON string.
@@ -1160,7 +1302,7 @@ async function copyTable(
     copied += rows;
   }
   log(
-    `[db-copy] ${table.name}: ${failed ? "values refused" : writing() ? `${copied} rows` : "checked, not written"}`,
+    `[db-copy] ${table.name}: ${failed ? "values refused" : writing() ? `${copied} rows${dropped > 0 ? `, ${dropped} orphan row(s) dropped` : ""}` : "checked, not written"}`,
   );
   return { checksum, embeddings };
 }

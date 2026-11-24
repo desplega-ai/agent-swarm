@@ -413,16 +413,3 @@ export function plantRefusedRows(path: string, tasks: RefusedRowTasks): void {
     db.close();
   }
 }
-
-/** The repair an operator makes for each planted row. The Litestream tables stay. */
-export function repairRefusedRows(path: string, tasks: RefusedRowTasks): void {
-  const db = new Database(path);
-  try {
-    db.run("PRAGMA foreign_keys = OFF");
-    db.run(`UPDATE agent_tasks SET "requestedByUserId" = NULL WHERE id = ?`, [tasks.orphan]);
-    db.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["ab", tasks.nul]);
-    db.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", ['["cut"]', tasks.surrogate]);
-  } finally {
-    db.close();
-  }
-}

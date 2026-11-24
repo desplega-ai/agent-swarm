@@ -76,8 +76,20 @@ export interface CopySource {
   close(): void;
 }
 
-/** A row whose foreign key columns name no row of `parent`. */
-export type CopyOrphan = { table: string; row: string; parent: string; columns: string[] };
+/**
+ * A row whose foreign key columns name no row of `parent`. `onDelete` is the
+ * action of that key in the source (`CASCADE`, `SET NULL`, `NO ACTION`, ...).
+ */
+export type CopyOrphan = {
+  table: string;
+  row: string;
+  parent: string;
+  columns: string[];
+  onDelete: string;
+};
+
+/** One value or row that `--repair` changed, and how. */
+export type CopyRepair = { table: string; column: string; row: string; action: string };
 
 /** A value the target cannot store as it is. The copy writes nothing when any exists. */
 export type CopyProblem = { table: string; column: string; row: string; reason: string };
@@ -110,6 +122,9 @@ export type CopyReport = {
    * queries is unverified, so an operator runs it once on Postgres.
    */
   unchecked?: CopyProblem[];
+  /** What `--repair` changed (the list holds every one unless a cap was set). */
+  repairs?: CopyRepair[];
+  repairCount?: number;
   /**
    * Steps after COMMIT that did not run (planner statistics). The copy is
    * committed and complete; each line says what the operator runs by hand.
