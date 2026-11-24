@@ -1210,7 +1210,10 @@ async function targetChecksum(
     `DECLARE db_copy_checksum NO SCROLL CURSOR FOR SELECT ${select} FROM ${quote(target.name)}`,
   );
   try {
-    let size = 200;
+    // The first fetch is one row, so every later fetch is sized from rows this
+    // cursor already returned. The size grows at most 8 times a step: one small row
+    // at the start of a table of large rows cannot ask for 5,000 of them.
+    let size = 1;
     for (;;) {
       const rows = await conn.unsafe(`FETCH FORWARD ${size} FROM db_copy_checksum`);
       let bytes = 0;
@@ -1222,7 +1225,7 @@ async function targetChecksum(
       }
       if (rows.length < size) return checksum;
       const perRow = Math.max(1, bytes / rows.length);
-      size = Math.max(1, Math.min(5000, Math.floor(fetchBytes / perRow)));
+      size = Math.max(1, Math.min(5000, size * 8, Math.floor(fetchBytes / perRow)));
     }
   } finally {
     // After an error the transaction is aborted and CLOSE fails: the rollback ends the cursor.
