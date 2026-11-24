@@ -1216,7 +1216,7 @@ async function targetChecksum(
       let bytes = 0;
       for (const row of rows) {
         for (const value of Object.values(row)) {
-          if (typeof value === "string") bytes += value.length;
+          if (typeof value === "string") bytes += Buffer.byteLength(value, "utf8");
         }
         checksum.add(normalizeRow(all, row));
       }
