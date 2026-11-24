@@ -22,8 +22,11 @@ function titleOf(slide) {
 function show(i, fromPeer = false) {
   current = Math.max(0, Math.min(slides.length - 1, i));
   slides.forEach((s, n) => s.classList.toggle("active", n === current));
-  document.getElementById("progress").style.width = `${((current + 1) / slides.length) * 100}%`;
-  document.getElementById("counter").textContent = `${current + 1} / ${slides.length}`;
+  // Appendix slides (class "appendix") do not count: the counter and the bar end at the last main slide.
+  const main = slides.filter((s) => !s.classList.contains("appendix")).length;
+  const inAppendix = slides[current].classList.contains("appendix");
+  document.getElementById("progress").style.width = `${Math.min(1, (current + 1) / main) * 100}%`;
+  document.getElementById("counter").textContent = inAppendix ? "appendix" : `${current + 1} / ${main}`;
   const notes = slides[current].querySelector("aside.notes")?.innerHTML ?? "<p>(no notes)</p>";
   document.getElementById("notes-overlay").innerHTML = notes;
   document.getElementById("p-title").textContent = `${current + 1}. ${titleOf(slides[current])}`;
