@@ -1915,6 +1915,8 @@ export const AgentCredStatusSchema = z
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
     /** Pi-mono only: the `opencode-go` model ids the worker's pi-ai resolves. */
     opencodeGo: AgentOpencodeGoStatusSchema.nullable().default(null),
+    /** Provider-qualified Pi models available to the worker's model picker. */
+    piModelIds: z.array(z.string()).optional(),
     /** ACP options advertised by the most recently created session. */
     acp: AgentAcpStatusSchema.nullable().default(null),
   })

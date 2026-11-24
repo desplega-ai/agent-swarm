@@ -767,6 +767,8 @@ A schema'd task whose captured text is free-form prose (not valid against `outpu
 
 **pi empty final turn:** some models end a pi session on an assistant turn with no text block and no tool call (thinking only, or empty content). pi treats that as a clean end, so a schema'd task finished with nothing to validate. After the first `waitForIdle()`, `PiMonoSession.repromptAfterEmptyFinalTurn` sends one in-session reprompt (registered template `task.nudge.empty_final_turn`) through the normal prompt path and waits for idle again; `output` then comes from the second turn. Never more than one per session, and none when the final turn has text or a tool call, errored, or was aborted, when `abort()` was called, or after a terminal `store-progress` call (`completed` or `failed`) returned without error. A rejected reprompt keeps the original outcome. Every empty assistant turn also writes a `[pi-mono] assistant turn ended with no text and no tool call (stopReason=..., content=[...])` stderr line to session logs: block types and token count only, never content.
 
+**codex outputSchema:** the runner passes the task's effective `outputSchema` in `ProviderSessionConfig.outputSchema`. `CodexSession` sends it as `turn/start.outputSchema` (codex 0.171.0 app-server), which codex forwards to the Responses API with `strict: true`. Strict mode rejects a schema with an open object or an optional property, so `toCodexOutputSchema` (`src/providers/codex-output-schema.ts`) closes each object and turns an optional property into a required nullable one; `matchOutputSchema` (`src/utils/output-schema.ts`) drops those `null`s before the runner validates against the original schema. A schema strict mode cannot express (an open object, an array without `items`, `oneOf`, an unknown keyword) runs the turn unconstrained. If the API still rejects it (`invalid_json_schema`), the turn reruns once without it. When the session would end with a last agent message that does not match the schema and `GET /api/tasks/:id` shows no output and status `in_progress`, the adapter sends one in-session reprompt (template `task.nudge.structured_output_missing`). Never more than one per session; an unreadable task state skips it.
+
 When provider output fails `outputSchema` validation and the fallback also fails (always for non-claude adapters), the task's `failureReason` keeps the validation error after the fallback's own reason.
 
 ## Reasoning / effort control
@@ -789,6 +791,10 @@ The Codex session child receives the selected model's catalog row from the worke
 The adapter's actually-applied level flows back through `ProviderResult.appliedReasoningEffort` (`null` on a capability-rejected noop) into `agents.cred_status.latestModel.reasoningEffort`, surfaced in the dashboard's runtime editor, the `HarnessCell` tooltip, and the agents-list Model column (`[|||]`-style badge, more bars = higher effort).
 
 Refs: [reasoning-effort runtime control research](../thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md).
+
+## Pi model resolution
+
+The Pi adapter resolves an explicit model against the composed runtime and bundled catalog. On a miss, it retries after a provider-catalog refresh bounded to three seconds. An unresolved choice fails before starting the session. The worker reports its picker catalog with credential status so the agent runtime editor can filter the shared model catalog.
 
 ## pi-mono + Amazon Bedrock auth
 

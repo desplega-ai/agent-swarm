@@ -32,99 +32,129 @@ Run these six failure-mode queries with `db-query`:
 **1.** Hard-failed workflow runs (last 24h)
 
 ```sql
-SELECT wr.id, w.name AS workflowName, wr.status,
-       wr.finishedAt, wr.lastUpdatedAt,
-       SUBSTR(COALESCE(wr.error, ''), 1, 220) AS errSnippet
+SELECT wr.id, w.name AS "workflowName", wr.status,
+       wr."finishedAt", wr."lastUpdatedAt",
+       SUBSTR(COALESCE(wr.error, ''), 1, 220) AS "errSnippet"
 FROM workflow_runs wr
-JOIN workflows w ON w.id = wr.workflowId
+JOIN workflows w ON w.id = wr."workflowId"
 WHERE wr.status = 'failed'
-  AND datetime(COALESCE(wr.finishedAt, wr.lastUpdatedAt, wr.startedAt)) > datetime('now', '-24 hours')
-ORDER BY wr.lastUpdatedAt DESC;
+<!-- dialect:sqlite -->
+  AND datetime(COALESCE(wr."finishedAt", wr."lastUpdatedAt", wr."startedAt")) > datetime('now', '-24 hours')
+<!-- /dialect -->
+<!-- dialect:postgres -->
+  AND COALESCE(wr."finishedAt", (wr."lastUpdatedAt"::timestamp AT TIME ZONE 'UTC'), wr."startedAt") > now() - interval '24 hours'
+<!-- /dialect -->
+ORDER BY wr."lastUpdatedAt" DESC;
 ```
 
 **2.** Hard-failed schedule-spawned tasks (last 24h)
 
 ```sql
-SELECT t.id, s.name AS scheduleName, t.status,
-       SUBSTR(COALESCE(t.failureReason, ''), 1, 220) AS reasonSnippet,
-       SUBSTR(COALESCE(t.output, ''), 1, 220) AS outSnippet,
-       t.lastUpdatedAt
+SELECT t.id, s.name AS "scheduleName", t.status,
+       SUBSTR(COALESCE(t."failureReason", ''), 1, 220) AS "reasonSnippet",
+       SUBSTR(COALESCE(t.output, ''), 1, 220) AS "outSnippet",
+       t."lastUpdatedAt"
 FROM agent_tasks t
-LEFT JOIN scheduled_tasks s ON s.id = t.scheduleId
+LEFT JOIN scheduled_tasks s ON s.id = t."scheduleId"
 WHERE t.status = 'failed'
-  AND t.scheduleId IS NOT NULL
-  AND datetime(t.lastUpdatedAt) > datetime('now', '-24 hours')
-ORDER BY t.lastUpdatedAt DESC;
+  AND t."scheduleId" IS NOT NULL
+<!-- dialect:sqlite -->
+  AND datetime(t."lastUpdatedAt") > datetime('now', '-24 hours')
+<!-- /dialect -->
+<!-- dialect:postgres -->
+  AND t."lastUpdatedAt" > now() - interval '24 hours'
+<!-- /dialect -->
+ORDER BY t."lastUpdatedAt" DESC;
 ```
 
 **3.** Halted >24h workflow runs (silent stuck)
 
 ```sql
-SELECT wr.id, w.name AS workflowName, wr.status, wr.lastUpdatedAt
+SELECT wr.id, w.name AS "workflowName", wr.status, wr."lastUpdatedAt"
 FROM workflow_runs wr
-JOIN workflows w ON w.id = wr.workflowId
+JOIN workflows w ON w.id = wr."workflowId"
 WHERE wr.status IN ('running', 'waiting')
-  AND datetime(wr.lastUpdatedAt) < datetime('now', '-24 hours')
-ORDER BY wr.lastUpdatedAt ASC;
+<!-- dialect:sqlite -->
+  AND datetime(wr."lastUpdatedAt") < datetime('now', '-24 hours')
+<!-- /dialect -->
+<!-- dialect:postgres -->
+  AND (wr."lastUpdatedAt"::timestamp AT TIME ZONE 'UTC') < now() - interval '24 hours'
+<!-- /dialect -->
+ORDER BY wr."lastUpdatedAt" ASC;
 ```
 
 **4.** Silent: schedule-spawned task completed with empty/sentinel output
 
 ```sql
-SELECT t.id, s.name AS scheduleName, t.status,
-       SUBSTR(COALESCE(t.output, ''), 1, 220) AS outSnippet,
-       LENGTH(TRIM(COALESCE(t.output, ''))) AS outLen,
-       t.lastUpdatedAt
+SELECT t.id, s.name AS "scheduleName", t.status,
+       SUBSTR(COALESCE(t.output, ''), 1, 220) AS "outSnippet",
+       LENGTH(TRIM(COALESCE(t.output, ''))) AS "outLen",
+       t."lastUpdatedAt"
 FROM agent_tasks t
-LEFT JOIN scheduled_tasks s ON s.id = t.scheduleId
+LEFT JOIN scheduled_tasks s ON s.id = t."scheduleId"
 WHERE t.status = 'completed'
-  AND t.scheduleId IS NOT NULL
-  AND datetime(t.lastUpdatedAt) > datetime('now', '-24 hours')
+  AND t."scheduleId" IS NOT NULL
+<!-- dialect:sqlite -->
+  AND datetime(t."lastUpdatedAt") > datetime('now', '-24 hours')
+<!-- /dialect -->
+<!-- dialect:postgres -->
+  AND t."lastUpdatedAt" > now() - interval '24 hours'
+<!-- /dialect -->
   AND (
     t.output IS NULL
     OR TRIM(t.output) = ''
     OR TRIM(t.output) = '⚡ Running shell command'
     OR LENGTH(TRIM(t.output)) < 10
   )
-ORDER BY t.lastUpdatedAt DESC;
+ORDER BY t."lastUpdatedAt" DESC;
 ```
 
 **5.** Cron didn't fire (nextRunAt in the past)
 
 ```sql
-SELECT s.id, s.name, s.cronExpression, s.lastRunAt, s.nextRunAt, s.consecutiveErrors,
-       SUBSTR(COALESCE(s.lastErrorMessage, ''), 1, 220) AS lastErrSnippet
+SELECT s.id, s.name, s."cronExpression", s."lastRunAt", s."nextRunAt", s."consecutiveErrors",
+       SUBSTR(COALESCE(s."lastErrorMessage", ''), 1, 220) AS "lastErrSnippet"
 FROM scheduled_tasks s
-WHERE s.enabled = 1
-  AND s.scheduleType = 'recurring'
-  AND s.nextRunAt IS NOT NULL
-  AND datetime(s.nextRunAt) < datetime('now', '-1 hour')
-ORDER BY s.nextRunAt ASC;
+WHERE s.enabled = true
+  AND s."scheduleType" = 'recurring'
+  AND s."nextRunAt" IS NOT NULL
+<!-- dialect:sqlite -->
+  AND datetime(s."nextRunAt") < datetime('now', '-1 hour')
+<!-- /dialect -->
+<!-- dialect:postgres -->
+  AND (s."nextRunAt"::timestamp AT TIME ZONE 'UTC') < now() - interval '1 hour'
+<!-- /dialect -->
+ORDER BY s."nextRunAt" ASC;
 ```
 
 **6.** Schedules with consecutive errors (defensive)
 
 ```sql
-SELECT s.id, s.name, s.cronExpression, s.consecutiveErrors, s.lastErrorAt,
-       SUBSTR(COALESCE(s.lastErrorMessage, ''), 1, 220) AS lastErrSnippet
+SELECT s.id, s.name, s."cronExpression", s."consecutiveErrors", s."lastErrorAt",
+       SUBSTR(COALESCE(s."lastErrorMessage", ''), 1, 220) AS "lastErrSnippet"
 FROM scheduled_tasks s
-WHERE s.enabled = 1
-  AND s.consecutiveErrors >= 3
-ORDER BY s.consecutiveErrors DESC;
+WHERE s.enabled = true
+  AND s."consecutiveErrors" >= 3
+ORDER BY s."consecutiveErrors" DESC;
 ```
 
 Plus:
 - Enabled/disabled counts: `SELECT enabled, COUNT(*) FROM scheduled_tasks GROUP BY enabled` and the workflow equivalent.
-- 7-day rollup, not just 24h: repeat the hard-failure and cron-didn't-fire queries with a `-7 days` window for a weekly trend line.
+- 7-day rollup, not just 24h: repeat the hard-failure and cron-didn't-fire queries with a 7-day window instead of the 24-hour one, for a weekly trend line.
 
 ### 1C. Agents
 Use global script `swarm-overview` for the roster + swarm-wide status counts. Supplement with `db-query`:
 ```sql
-SELECT a.id, a.name, a.status, a.maxTasks,
-       COUNT(t.id) FILTER (WHERE t.status = 'in_progress') AS activeCount,
-       COUNT(t.id) FILTER (WHERE t.status = 'failed' AND datetime(t.lastUpdatedAt) > datetime('now','-7 days')) AS failures7d
+SELECT a.id, a.name, a.status, a."maxTasks",
+       COUNT(t.id) FILTER (WHERE t.status = 'in_progress') AS "activeCount",
+<!-- dialect:sqlite -->
+       COUNT(t.id) FILTER (WHERE t.status = 'failed' AND datetime(t."lastUpdatedAt") > datetime('now', '-7 days')) AS "failures7d"
+<!-- /dialect -->
+<!-- dialect:postgres -->
+       COUNT(t.id) FILTER (WHERE t.status = 'failed' AND t."lastUpdatedAt" > now() - interval '7 days') AS "failures7d"
+<!-- /dialect -->
 FROM agents a
-LEFT JOIN agent_tasks t ON t.agentId = a.id
+LEFT JOIN agent_tasks t ON t."agentId" = a.id
 GROUP BY a.id;
 ```
 Report capacity as `activeCount / maxTasks` per agent, and flag any agent at or over capacity.

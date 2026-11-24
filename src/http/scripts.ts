@@ -637,6 +637,17 @@ async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   return agent;
 }
 
+// Route params arrive percent-encoded, and clients (the script-delete and
+// script-query-types tools) encode the name: decode it, or a spaced name never matches its row.
+function decodeScriptName(res: ServerResponse, raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    jsonError(res, "Validation error: name: malformed percent-encoding", 400);
+    return null;
+  }
+}
+
 function signatureJsonFor(source: string): string {
   return JSON.stringify(extractScriptSignature(source));
 }
@@ -1181,7 +1192,9 @@ export async function handleScripts(
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
-    const script = await resolveScript(parsed.params.name, agent.id, parsed.query.scope);
+    const name = decodeScriptName(res, parsed.params.name);
+    if (name === null) return true;
+    const script = await resolveScript(name, agent.id, parsed.query.scope);
     if (!script) {
       jsonError(res, "Script not found", 404);
       return true;
@@ -1226,8 +1239,10 @@ export async function handleScripts(
       }
     }
 
+    const name = decodeScriptName(res, parsed.params.name);
+    if (name === null) return true;
     const identity = {
-      name: parsed.params.name,
+      name,
       scope: parsed.query.scope,
       scopeId: parsed.query.scope === "agent" ? agent.id : null,
     };

@@ -64,6 +64,8 @@ export const workflowAgentTaskCrashWindow: Scenario = {
       `expected one running step before recovery, got ${JSON.stringify(orphan)}`,
     );
 
+    ctx.captureStateSurface("workflow-step-statuses");
+
     // The next boot recovers the run and parks the step on a task.
     await ctx.restartSut();
     const parked = await pollUntil(

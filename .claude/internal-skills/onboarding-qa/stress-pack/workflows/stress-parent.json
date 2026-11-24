@@ -1,0 +1,70 @@
+{
+  "name": "stress-parent",
+  "description": "Stress pack D (parent): starts 4 child runs of stress-child in parallel through a foreach of sub-workflow nodes, then joins them. No agent nodes, no LLM.",
+  "definition": {
+    "nodes": [
+      {
+        "id": "stagger",
+        "type": "wait",
+        "config": {
+          "mode": "time",
+          "durationMs": 15000
+        },
+        "next": "plan"
+      },
+      {
+        "id": "plan",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "plan",
+            "runId": "{{run.id}}",
+            "count": 4
+          }
+        },
+        "next": "fan"
+      },
+      {
+        "id": "fan",
+        "type": "foreach",
+        "inputs": {
+          "p": "plan"
+        },
+        "config": {
+          "over": "{{p.result.items}}",
+          "itemKey": "id",
+          "body": {
+            "type": "sub-workflow",
+            "config": {
+              "workflowId": "__WF:stress-child__",
+              "inputs": {
+                "parentRunId": "{{run.id}}",
+                "item": "{{item.id}}"
+              }
+            }
+          }
+        },
+        "next": "join"
+      },
+      {
+        "id": "join",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "parent-check",
+            "runId": "{{run.id}}",
+            "expect": 4,
+            "fan": "{{fan}}"
+          }
+        },
+        "inputs": {
+          "fan": "fan"
+        }
+      }
+    ]
+  }
+}

@@ -20,10 +20,10 @@ const manifest = {
  * requester (for example "Alice (admin)"). RBAC roles do not work here: every user is
  * created with the RBAC `admin` role.
  */
-export const CREATOR_SQL = `SELECT t.requestedByUserId, u.role
+export const CREATOR_SQL = `SELECT t."requestedByUserId", u.role
 FROM agent_tasks t
-LEFT JOIN users u ON u.id = t.requestedByUserId
-WHERE t.id = ?`;
+LEFT JOIN users u ON u.id = t."requestedByUserId"
+WHERE t.id = $1`;
 
 type Envelope = { success?: boolean; data?: { rows?: unknown[] }; rows?: unknown[] } | null;
 

@@ -134,18 +134,22 @@
       "excluded": [
         {
           "value": "draft",
+          "transient": true,
           "reason": "transient: a draft is promoted to pending or unassigned when its attachment batch settles, before the suite reads the table"
         },
         {
           "value": "reviewing",
+          "transient": true,
           "reason": "transient: an offered task is reviewing only between claim-for-review and accept or decline inside one poll"
         },
         {
           "value": "resume",
+          "transient": true,
           "reason": "transient: set by crash recovery for the duration of one resume dispatch, which the heartbeat sweep (disabled here) drives"
         },
         {
           "value": "unassigned",
+          "transient": true,
           "reason": "transient once a lead exists: a pool task is assigned to the lead at creation, and mcp-surface asserts the unassigned listing before claiming it"
         }
       ]
@@ -166,10 +170,6 @@
       "query": "SELECT DISTINCT status AS value FROM workflow_run_steps",
       "universe": ["pending", "running", "waiting", "completed", "failed", "skipped", "cancelled"],
       "excluded": [
-        {
-          "value": "running",
-          "reason": "transient: instant executors finish inside the request; async ones move to waiting"
-        },
         {
           "value": "skipped",
           "reason": "no engine path writes a skipped step: only a cooldown-skipped run carries skipped (src/workflows/engine.ts), and foreach-join reads the step value defensively"
@@ -232,9 +232,11 @@
         "storage-recovery",
         "data-copy",
         "data-copy-later-release",
+        "data-copy-refused-rows",
         "divergence-fulltext-search",
         "divergence-vector-search",
         "divergence-like-case",
+        "divergence-seeded-schedule-sql",
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
@@ -470,6 +472,10 @@
       "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards; groups resolve at create, claim, pool and fallback hops",
       "scenarios": ["platformb-model-groups", "model-group-resolution"]
     },
+    "codex-structured-output": {
+      "description": "A real codex worker against the mock Responses API: the task outputSchema reaches the request in strict mode, a prose turn gets one reprompt that completes or fails the task, and a task without a schema sends none",
+      "scenarios": ["codex-structured-output"]
+    },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
       "scenarios": ["model-harness-guard"]
@@ -641,7 +647,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -654,8 +660,10 @@
         "slack-relay-restart",
         "slack-task-output-citations",
         "slack-task-tree-toggle",
+        "slack-stop-button",
         "slack-task-output-ui-spec",
-        "slack-pre-task-create-block"
+        "slack-pre-task-create-block",
+        "slack-cancelled-task"
       ]
     },
     "slack-deferrals": {
@@ -664,7 +672,8 @@
         "slack-defer-eta-legacy",
         "slack-defer-eta-v2",
         "slack-defer-wake-v2",
-        "slack-redefer"
+        "slack-redefer",
+        "slack-defer-wake-reply-v2"
       ]
     },
     "slack-delegation": {
@@ -677,7 +686,8 @@
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
-        "slack-delegation-band-entry"
+        "slack-delegation-band-entry",
+        "slack-quiet-lead-threads"
       ]
     },
     "slack-http-native": {

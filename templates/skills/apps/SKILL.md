@@ -712,7 +712,7 @@ export default async function run(args, ctx) {
 }
 ```
 
-Durable wait: when the follow-up must run even if nobody watches the page, put it in a workflow whose human-in-the-loop node waits server-side, and use `Approval` only to answer. A script action starts the run with `ctx.swarm.workflow_trigger({ id, triggerData, wait: false })` and returns `runId`. The request appears once the run reaches its human-in-the-loop node, so a second script action (pressed from the page, or retried) finds it and returns its id: `ctx.swarm.db_query({ sql: "SELECT id FROM approval_requests WHERE workflowRunId = ? AND status = 'pending' ORDER BY createdAt DESC LIMIT 1", params: [args.runId] })`, then `{ requestId: res.data.rows[0]?.[0] }`. Bind `Approval.requestId` to that action's result. The workflow resumes on the answer whether or not the page is open.
+Durable wait: when the follow-up must run even if nobody watches the page, put it in a workflow whose human-in-the-loop node waits server-side, and use `Approval` only to answer. A script action starts the run with `ctx.swarm.workflow_trigger({ id, triggerData, wait: false })` and returns `runId`. The request appears once the run reaches its human-in-the-loop node, so a second script action (pressed from the page, or retried) finds it and returns its id: `ctx.swarm.db_query({ sql: "SELECT id FROM approval_requests WHERE \"workflowRunId\" = $1 AND status = 'pending' ORDER BY \"createdAt\" DESC, id LIMIT 1", params: [args.runId] })`, then `{ requestId: res.data.rows[0]?.[0] }`. Bind `Approval.requestId` to that action's result. The workflow resumes on the answer whether or not the page is open.
 
 SessionThread details — a chat on an app page, one session per viewer and `sessionKey`:
 

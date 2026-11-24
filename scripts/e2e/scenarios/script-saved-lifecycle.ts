@@ -321,6 +321,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
 
     // ── MCP tools: script-upsert, script-search, script-query-types, script-delete ──
     const toolName = `e2e-tool-${ctx.nonce}`;
+    const spacedName = `e2e spaced ${ctx.nonce}`;
     await withMcp(ctx, agentId, async (mcp) => {
       const saved = await callToolOk(mcp, "script-upsert", {
         name: toolName,
@@ -388,7 +389,34 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: any) {
       );
       const deleted = await callToolOk(mcp, "script-delete", { name: toolName });
       expect(asRecord(structured(deleted).data).deleted === true, "tool delete");
+
+      // A name with a space travels percent-encoded in the path: the route must decode it.
+      await upsertScript(ctx, agentId, { name: spacedName, source: source(2), description });
+      const spacedTypes = await callToolOk(mcp, "script-query-types", { name: spacedName });
+      expect(
+        String(structured(spacedTypes).message).includes(spacedName),
+        "script-query-types must find a script whose name has a space",
+      );
+      const spacedDeleted = await callToolOk(mcp, "script-delete", { name: spacedName });
+      expect(
+        asRecord(structured(spacedDeleted).data).deleted === true,
+        "script-delete of a name with a space must report deleted:true",
+      );
     });
+    const spacedGone = ctx.db.get<{ n: number }>(
+      sql`SELECT count(*) AS n FROM scripts WHERE name = ${spacedName}`,
+    );
+    expect(spacedGone?.n === 0, "script-delete did not remove the spaced-name row");
+    await upsertScript(ctx, agentId, { name: spacedName, source: source(2), description });
+    const spacedRest = await ctx.api(
+      "DELETE",
+      `/api/scripts/${encodeURIComponent(spacedName)}?scope=agent`,
+      { agentId },
+    );
+    expectStatus(spacedRest, [200], "REST delete of a spaced name");
+    expect(asRecord(spacedRest.json).deleted === true, "REST delete of a spaced name");
+    const malformed = await ctx.api("DELETE", "/api/scripts/bad%E0name?scope=agent", { agentId });
+    expectStatus(malformed, [400], "delete with malformed percent-encoding");
     const toolGone = ctx.db.get<{ n: number }>(
       sql`SELECT count(*) AS n FROM scripts WHERE name = ${toolName}`,
     );

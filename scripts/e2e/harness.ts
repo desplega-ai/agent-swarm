@@ -330,7 +330,7 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
  * after the user switch so file-based credentials such as the chatgpt-mode
  * codex auth.json are found.
  */
-function workerCommand(homeDir: string): string[] {
+export function workerCommand(homeDir: string): string[] {
   const command = process.env.E2E_WORKER_BINARY
     ? [process.env.E2E_WORKER_BINARY, "worker"]
     : ["bun", "run", "src/cli.tsx", "worker"];

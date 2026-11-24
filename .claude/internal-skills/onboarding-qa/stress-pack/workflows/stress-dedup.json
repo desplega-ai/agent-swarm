@@ -1,0 +1,39 @@
+{
+  "name": "stress-dedup",
+  "description": "Stress pack E: the target of the duplicate-trigger storm. One step that counts a hit for its key. The webhook trigger needs an HMAC signature. No agent nodes, no LLM.",
+  "triggers": [
+    {
+      "type": "webhook",
+      "hmacSecret": "__WEBHOOK_SECRET__"
+    }
+  ],
+  "triggerSchema": {
+    "type": "object",
+    "required": ["storm", "key"],
+    "properties": {
+      "storm": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      }
+    }
+  },
+  "definition": {
+    "nodes": [
+      {
+        "id": "hit",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-wf-step",
+          "scope": "global",
+          "args": {
+            "action": "dedup-hit",
+            "storm": "{{trigger.storm}}",
+            "key": "{{trigger.key}}"
+          }
+        }
+      }
+    ]
+  }
+}

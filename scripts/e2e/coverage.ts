@@ -89,7 +89,7 @@ export type StateSurfaceSpec = {
   /** Every value the engine can produce. A value the database holds outside this list fails strict. */
   universe: string[];
   /** Values a black box cannot leave behind (transient states, paths that refuse before storing). */
-  excluded: Array<{ value: string; reason: string }>;
+  excluded: Array<{ value: string; reason: string; transient?: boolean }>;
 };
 
 export type EngineSpec = {
@@ -383,9 +383,15 @@ export function coverageFrom(universe: CoverageUniverse, inputs: CoverageInputs)
   const stateSurfaces: StateSurfaceCoverage[] = inputs.manifest.stateSurfaces.map((spec) => {
     const observed = new Set(inputs.queryValues(spec.query));
     const excluded = new Set(spec.excluded.map((entry) => entry.value));
+    // A transient value that a final read happens to catch (a task the heartbeat has not
+    // routed yet, a scenario rerun on a fresh database) is a race, not coverage: the
+    // exclusion is not stale, whichever shard saw it.
+    const transient = new Set(spec.excluded.filter((entry) => entry.transient).map((e) => e.value));
     const universe = new Set(spec.universe);
     for (const value of excluded) {
-      if (observed.has(value)) staleExclusions.push(`state ${spec.name}: ${value}`);
+      if (observed.has(value) && !transient.has(value)) {
+        staleExclusions.push(`state ${spec.name}: ${value}`);
+      }
       if (!universe.has(value)) deadExclusions.push(`state ${spec.name}: ${value}`);
     }
     return {
@@ -713,7 +719,14 @@ function stateSurfaceEntry(entry: Record<string, unknown>): StateSurfaceSpec {
     if (typeof value !== "string" || value.length === 0) {
       throw new Error(`coverage-manifest state surface ${name} has an exclusion without a value`);
     }
-    return { value, reason: reasonOf(item, `state ${name}: ${value}`) };
+    if (item.transient !== undefined && typeof item.transient !== "boolean") {
+      throw new Error(`coverage-manifest state surface ${name}: ${value} transient must be a boolean`);
+    }
+    return {
+      value,
+      reason: reasonOf(item, `state ${name}: ${value}`),
+      ...(item.transient ? { transient: true } : {}),
+    };
   });
   const excludedValues = excluded.map((item) => item.value);
   if (

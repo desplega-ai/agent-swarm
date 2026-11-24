@@ -530,6 +530,49 @@ describe("ensureTaskFinished", () => {
     expect(lastFinishBody!.output).toBe('{"result":"ok"}');
   });
 
+  test("drops the nulls a strict-mode codex answer writes for optional properties", async () => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-provider-schema-strict-nulls",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      outputSchema: {
+        type: "object",
+        required: ["verdict", "findings"],
+        properties: {
+          verdict: { type: "string" },
+          note: { type: "string" },
+          findings: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["file"],
+              properties: { file: { type: "string" }, line: { type: "number" } },
+            },
+          },
+        },
+      },
+      logs: [],
+    };
+
+    await ensureTaskFinished(
+      makeConfig(),
+      "worker",
+      "task-provider-schema-strict-nulls",
+      0,
+      undefined,
+      '{"verdict":"ok","note":null,"findings":[{"file":"a.ts","line":null}]}',
+      "codex",
+    );
+
+    expect(lastFinishBody!.status).toBe("completed");
+    expect(JSON.parse(lastFinishBody!.output!)).toEqual({
+      verdict: "ok",
+      findings: [{ file: "a.ts" }],
+    });
+  });
+
   test("fails provider output that violates outputSchema", async () => {
     resetMocks();
     mockGetTask = {

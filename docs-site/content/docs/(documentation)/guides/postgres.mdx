@@ -72,7 +72,11 @@ Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API a
 
 1. Start the new version once on SQLite, so the file has the latest migrations. Stop it.
 2. Back up the SQLite file and the encryption key file.
-3. Run `agent-swarm db-copy --from <sqlite file> --to <postgres url>`. Expect `every count and checksum equal`.
+3. Run `agent-swarm db-copy --from <sqlite file> --to <postgres url>`. Expect `every count and checksum equal`. With the API Docker image, run the copy in a one-off container from the same image tag as the API, with the API data volume mounted and a network that reaches Postgres. The container does not start the API:
+   ```bash
+   docker run --rm -v <api data volume>:/app/data --network <network> \
+     <api image>:<api tag> db-copy --from /app/data/agent-swarm-db.sqlite --to <postgres url>
+   ```
 4. Set `DATABASE_URL`, keep the same encryption key, and start the API.
 
 If the copy reports values that Postgres cannot store (a NUL byte, invalid UTF-8, an invalid timestamp), it writes nothing. Fix those rows in the SQLite file and copy again. To roll back, unset `DATABASE_URL`: the API starts on the untouched SQLite file.

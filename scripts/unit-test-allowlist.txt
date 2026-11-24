@@ -37,6 +37,7 @@ src/commands/templates.ts  # runner trigger prompt templates, worker runtime
 src/commands/worktree-reaper.ts  # worker runtime helper imported by the runner
 src/utils/runtime-model-catalog.ts  # the Codex subprocess regression seeds a live-only model in the worker parent and checks the isolated child
 src/tests/vcs-provider.test.ts  # worker VCS detection needs a remote URL and deployment env matrix the black-box API suite cannot drive
+src/tests/pi-mono-adapter.test.ts  # checking offline and refreshed model resolution needs control of the worker's Pi SDK catalog and session factory, which the contract E2E suite never starts
 src/providers/  # harness adapters, worker runtime
 src/hooks/  # harness hooks, worker runtime
 src/prompts/  # prompt-template registry, worker runtime

@@ -1,0 +1,26 @@
+{
+  "name": "stress-sandbox",
+  "description": "Stress pack: sandbox behaviour. Waits 45 s, then one script node runs five nested script runs (cpu, sleep, throw, timeout, flood) and checks how each one ends. No agent nodes, no LLM.",
+  "definition": {
+    "nodes": [
+      {
+        "id": "stagger",
+        "type": "wait",
+        "config": {
+          "mode": "time",
+          "durationMs": 45000
+        },
+        "next": "probe"
+      },
+      {
+        "id": "probe",
+        "type": "swarm-script",
+        "config": {
+          "scriptName": "stress-sandbox",
+          "scope": "global",
+          "timeoutMs": 90000
+        }
+      }
+    ]
+  }
+}

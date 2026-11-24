@@ -208,6 +208,12 @@ export interface ProviderSessionConfig {
    * records `skill.invoke` (`via: "prompt"`) from this callback.
    */
   onPromptSkill?: (skillName: string) => void;
+  /**
+   * The task's effective `outputSchema`. Codex constrains each turn's final
+   * message with it and re-prompts once when the session ends without a
+   * matching result; other adapters ignore it.
+   */
+  outputSchema?: Record<string, unknown>;
 }
 
 export type SteerDelivery = { mode: SteerMode; text: string };
