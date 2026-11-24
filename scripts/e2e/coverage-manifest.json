@@ -314,7 +314,8 @@
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
         "knowledge-apps-primitives",
-        "knowledge-apps-session-thread-files"
+        "knowledge-apps-session-thread-files",
+        "knowledge-apps-template-refs"
       ]
     },
     "asset-namespaces": {
