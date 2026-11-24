@@ -490,6 +490,14 @@ const pageFrameProps = z.object({
   /** CSS height of the frame, e.g. '640px' (default '640px'). */
   height: z.string().optional(),
   fill: z.boolean().optional(),
+  /** State id: a page message (`appContext.emit`) lands at `/ui/<id>/message` before `on.message` runs. */
+  id: z.string().optional(),
+  /** Query params for the page (`location.search` and `appContext.params`). A change reloads the page. */
+  params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  /** App actions the page may run through `appContext.action` (script actions only). Default: none. */
+  actions: z.array(z.string()).optional(),
+  /** App state paths the page may read (`appContext.state`), e.g. `/app/window`. `/route` is always shared. */
+  expose: z.array(z.string()).optional(),
 });
 
 const markdownProps = z.object({
@@ -1735,7 +1743,7 @@ export const swarmCatalogSpec = {
     PageFrame: {
       props: pageFrameProps,
       description:
-        'A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ "$state": "/queries/<name>/data/0/pageId" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: "mobile"` narrows the frame to 390 px, so the page\'s own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows "No page selected".',
+        'A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ "$state": "/queries/<name>/data/0/pageId" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: "mobile"` narrows the frame to 390 px, so the page\'s own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows "No page selected". Inside an app, an HTML page gets `window.appContext` (see the apps skill, "Pages inside an app"): it reads the route, theme, `params` and the `expose`d state, runs the `actions` listed here as the viewer, navigates the app, and sends messages that run `on.message` with the message at `/ui/<id>/message`.',
     },
     ElementRef: {
       props: elementRefProps,

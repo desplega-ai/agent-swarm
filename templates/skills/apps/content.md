@@ -589,7 +589,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 | `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 | `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`, `attachments`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
-| `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`; a live, clickable swarm Page that reloads when the page changes; see below. |
+| `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`, `id`, `params`, `actions`, `expose`; a live, clickable swarm Page that reloads when the page changes; an HTML page inside an app gets `window.appContext`; see below. |
 | `Input` | none | Low-level text field: `value` (bind two-way with `$bindState` / `$bindItem`), `id` (the `ui.focus` target), `label`, `placeholder`, `type: "text"` or `"password"`, `inputMode`, `autoComplete: "off"` or `"one-time-code"`, `maxLength`, `size: "default"` or `"cell"` (square one-character box), `selectOnFocus`, `disabled`; chains `onInput`, `onPaste`, `onKeyDown:<Key>`; see Low-level primitives. |
 | `Svg` | `width`, `height` on the outer Svg | Vector drawing in `width` x `height` user units, scaled to its container; `label` (accessible name). Children: `Rect`, `Line`, `Path`, `Circle`, `SvgText`, or a nested `Svg` (a group offset by `x`/`y`, the place for `repeat`). |
 | `Rect` | `x`, `y`, `width`, `height` | `rx`, `fill`, `stroke`, `strokeWidth`, `opacity`, `title` (tooltip); only inside an Svg. |
@@ -748,6 +748,65 @@ PageFrame details — a live swarm Page inside the app, for a preview pane next 
   "device": { "$state": "/ui/device/value" },
   "fill": true
 } }
+```
+
+#### Pages inside an app (`appContext`)
+
+An HTML page in an app `PageFrame` talks to the app through `window.appContext`. Outside an app (a page opened on its own, or embedded by another page) it is `null`, so one page serves both.
+
+- **App side**, on the `PageFrame`: `params` (scalars, usually bound) reach the page as its query string and as `appContext.params`; a change reloads the frame. `actions` lists the app actions the page may run (script actions only; task actions stay on app buttons). `expose` lists the app state paths the page may read (`/app/<name>`, `/ui/<id>/...`). `id` plus `on.message` receive the page's messages: each one is stored at `/ui/<id>/message` (`{ name, data, seq }`) before the chain runs. The frame also follows the app's theme preset, not the dashboard's.
+- **Page side**: `await appContext.ready` (rejects after 5 s with no app), then read `appContext.route` (`{ page, params }`), `.params`, `.theme` (`{ mode, preset }`) and `.state` (keyed by exposed path). `appContext.on("change" | "route" | "params" | "theme" | "state", fn)` returns an unsubscribe. `await appContext.action(name, input)` returns `{ status: "ok", result }` or `{ status: "error", error }`. `appContext.navigate(page, params)` opens another page of this app. `appContext.emit(name, data)` runs `on.message`.
+- **Security**: the page holds no credential. The app runs each action with its own `app.action` step as the viewer, so the server's `app.use` gate and the script's `caller` checks apply. A page never gets more than the viewer: an action outside `actions` and a path outside `expose` are refused, and navigation stays inside this app. The frame answers only its own iframe on the API origin, and caps requests at 20 per second and 64 KiB each.
+- JSON pages render inline and get no `appContext`. Keep one static page per view and feed it with `params` and `appContext.action`, instead of writing a page per viewer.
+
+### Example: Page inside an app
+
+The trace page draws a waterfall for `?traceId=`, loads spans through `traceDetail`, and asks the app to open a span: `appContext.emit("open", { spanId })`.
+
+```json
+{
+  "models": {},
+  "defaultPage": "trace",
+  "state": { "window": "1h" },
+  "actions": { "traceDetail": { "kind": "script", "scriptId": "00000000-0000-4000-8000-000000000001" } },
+  "pages": {
+    "trace": {
+      "title": "Trace",
+      "params": { "traceId": { "kind": "string" } },
+      "root": "frame",
+      "elements": {
+        "frame": {
+          "type": "PageFrame",
+          "props": {
+            "id": "waterfall",
+            "pageId": "8b8077e8b7a94dfc89c88636889a46ac",
+            "params": { "traceId": { "$state": "/route/params/traceId" } },
+            "actions": ["traceDetail"],
+            "expose": ["/app/window"],
+            "fill": true
+          },
+          "on": {
+            "message": [
+              { "action": "ui.set", "params": { "path": "/app/window", "value": { "$state": "/ui/waterfall/message/data/window" } } }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+In the page:
+
+```js
+const ctx = window.appContext;
+if (ctx) {
+  await ctx.ready;
+  const { result } = await ctx.action("traceDetail", { traceId: ctx.params.traceId });
+  draw(result.spans, ctx.theme.mode);
+  ctx.on("state", (state) => redraw(state["/app/window"]));
+}
 ```
 
 Form details:

@@ -16,6 +16,11 @@ const JsonRenderThemeContext = createContext<string | null>(null);
 
 export const JsonRenderThemeProvider = JsonRenderThemeContext.Provider;
 
+/** The app's theme preset id inside a themed surface, `null` outside one. */
+export function useJsonRenderTheme(): string | null {
+  return useContext(JsonRenderThemeContext);
+}
+
 /**
  * Attribute bag for a portalled element: `{ "data-theme": <id> }` inside a
  * themed surface, `{}` outside one — spread it, unconditionally.

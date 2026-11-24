@@ -80,6 +80,7 @@ export const MAX_ELEMENT_REF_DEPTH = 5;
  * instances of one element would share (and clobber) one state slot.
  */
 export const UI_STATE_COMPONENTS: ReadonlySet<string> = new Set([
+  "PageFrame",
   "SearchInput",
   "Select",
   "NumberInput",

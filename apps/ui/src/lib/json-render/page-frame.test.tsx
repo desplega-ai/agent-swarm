@@ -43,6 +43,9 @@ const { MemoryRouter } = await import("react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ThemeProvider } = await import("@/hooks/use-theme");
 const { swarmComponents } = await import("./components");
+const { ActionProvider, StateProvider, useStateStore } = await import("@json-render/react");
+const { AppScopeProvider } = await import("./app-scope");
+const { JsonRenderThemeProvider } = await import("./theme-scope");
 
 type Renderable = (arg: { props: unknown }) => ReactNode;
 const PageFrame = swarmComponents.PageFrame as Renderable;
@@ -147,4 +150,137 @@ test("a first load that fails shows the error", async () => {
     await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
   }
   expect(host.textContent).toContain("This page could not be loaded");
+});
+
+test("inside an app: params, app marker and app theme reach the frame, and the handshake bridges actions", async () => {
+  const actionCalls: Record<string, unknown>[] = [];
+  const navigations: unknown[] = [];
+  let store: ReturnType<typeof useStateStore> | null = null;
+  const Capture = () => {
+    store = useStateStore();
+    return null;
+  };
+  const handlers = {
+    "app.action": async (params: Record<string, unknown>) => {
+      actionCalls.push(params);
+      store!.set(String(params.$outcome), { status: "ok", result: { spans: 3 } });
+    },
+    "app.navigate": async (params: Record<string, unknown>) => {
+      navigations.push(params);
+    },
+  };
+  const emitted: string[] = [];
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  roots.push(root);
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <ThemeProvider>
+          <MemoryRouter>
+            <StateProvider
+              initialState={{ route: { page: "trace", params: {} }, app: { window: "1h" } }}
+            >
+              <ActionProvider handlers={handlers}>
+                <AppScopeProvider value="app1">
+                  <JsonRenderThemeProvider value="nord">
+                    <Capture />
+                    {(
+                      swarmComponents.PageFrame as (arg: {
+                        props: unknown;
+                        emit: (e: string) => void;
+                      }) => ReactNode
+                    )({
+                      props: {
+                        pageId: PAGE_ID,
+                        id: "waterfall",
+                        params: { traceId: "t1" },
+                        actions: ["traceDetail"],
+                        expose: ["/app/window"],
+                      },
+                      emit: (event) => {
+                        emitted.push(event);
+                      },
+                    })}
+                  </JsonRenderThemeProvider>
+                </AppScopeProvider>
+              </ActionProvider>
+            </StateProvider>
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>,
+    ),
+  );
+  const frame = await settle(host, updatedAt);
+  const src = new URL(frame!.getAttribute("src")!);
+  expect(src.searchParams.get("__swarm_app")).toBe("app1");
+  expect(src.searchParams.get("traceId")).toBe("t1");
+  expect(src.searchParams.get("__swarm-theme")).toBe("nord");
+
+  // happy-dom loads no iframe document: stand in for its window.
+  const inits: { data: Record<string, unknown>; origin: string; port: MessagePort }[] = [];
+  const target = {
+    postMessage: (data: Record<string, unknown>, origin: string, ports: MessagePort[]) => {
+      inits.push({ data, origin, port: ports[0]! });
+    },
+  } as unknown as Window;
+  Object.defineProperty(frame!, "contentWindow", { value: target, configurable: true });
+  const hello = { type: "swarm-app:hello", appId: "app1" };
+  // Controls: a wrong origin or a foreign source gets no answer.
+  window.dispatchEvent(
+    new MessageEvent("message", { data: hello, origin: "https://evil.example", source: target }),
+  );
+  window.dispatchEvent(
+    new MessageEvent("message", { data: hello, origin: src.origin, source: window }),
+  );
+  expect(inits.length).toBe(0);
+  window.dispatchEvent(
+    new MessageEvent("message", { data: hello, origin: src.origin, source: target }),
+  );
+  expect(inits.length).toBe(1);
+  expect(inits[0]!.origin).toBe(src.origin);
+  const snapshot = inits[0]!.data.snapshot as Record<string, unknown>;
+  expect(snapshot.state).toEqual({ "/app/window": "1h" });
+  expect(snapshot.params).toEqual({ traceId: "t1" });
+
+  const port = inits[0]!.port;
+  const replies: Record<string, unknown>[] = [];
+  port.onmessage = (event) => replies.push(event.data);
+  port.postMessage({
+    type: "swarm-app:action",
+    id: 1,
+    name: "traceDetail",
+    input: { traceId: "t1" },
+  });
+  port.postMessage({ type: "swarm-app:action", id: 2, name: "other" });
+  port.postMessage({ type: "swarm-app:emit", name: "open", data: { spanId: "s1" } });
+  port.postMessage({ type: "swarm-app:navigate", page: "span", params: { spanId: "s1" } });
+  for (let i = 0; i < 50 && replies.length < 2; i++) {
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  }
+  const byId = Object.fromEntries(replies.map((reply) => [reply.id, reply.result]));
+  expect(byId[1]).toEqual({ status: "ok", result: { spans: 3 } });
+  expect((byId[2] as { status: string }).status).toBe("error");
+  expect(actionCalls.length).toBe(1);
+  expect(actionCalls[0]!.name).toBe("traceDetail");
+  expect(navigations).toEqual([{ page: "span", params: { spanId: "s1" } }]);
+  expect(emitted).toEqual(["message"]);
+  expect(store!.get("/ui/waterfall/message")).toEqual({
+    name: "open",
+    data: { spanId: "s1" },
+    seq: 1,
+  });
+
+  // A state change is pushed to the page.
+  const updates: Record<string, unknown>[] = [];
+  port.onmessage = (event) => updates.push(event.data);
+  await act(async () => store!.set("/app/window", "24h"));
+  for (let i = 0; i < 25 && updates.length === 0; i++) {
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  }
+  expect((updates.at(-1)?.snapshot as Record<string, unknown>)?.state).toEqual({
+    "/app/window": "24h",
+  });
+  port.close();
 });

@@ -71,6 +71,7 @@ export const ELEMENT_KEYS = new Set([
 // namespaces these ids per instance; `apps-element-assembly.test.ts` keeps the
 // two lists equal.
 const UI_STATE_COMPONENTS = new Set([
+  "PageFrame",
   "SearchInput",
   "Select",
   "NumberInput",
@@ -1795,6 +1796,51 @@ function agentFsPropIssues(
   return issues;
 }
 
+/**
+ * The `appContext` allowlists on a PageFrame: `actions` must be declared script
+ * actions (a task action would create tasks from page code), `on.message` needs
+ * an `id` to root `/ui/<id>/message`. `expose` paths are checked as state reads
+ * by the caller as state reads.
+ */
+function pageFrameBridgeIssues(
+  definition: AppDefinition,
+  element: Record<string, unknown>,
+  elementPath: string,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const props = isPlainObject(element.props) ? element.props : {};
+  if (Array.isArray(props.actions)) {
+    for (const [index, name] of props.actions.entries()) {
+      const action = typeof name === "string" ? definition.actions?.[name] : undefined;
+      if (!action) {
+        issues.push(
+          issue(`${elementPath}.props.actions.${index}`, `unknown app action "${String(name)}"`),
+        );
+      } else if (action.kind !== "script") {
+        issues.push(
+          issue(
+            `${elementPath}.props.actions.${index}`,
+            `only script actions can be called from a page (${String(name)} is ${action.kind})`,
+          ),
+        );
+      }
+    }
+  }
+  if (
+    isPlainObject(element.on) &&
+    Object.hasOwn(element.on, "message") &&
+    typeof props.id !== "string"
+  ) {
+    issues.push(
+      issue(
+        `${elementPath}.props.id`,
+        "is required with on.message: the message is stored at /ui/<id>/message",
+      ),
+    );
+  }
+  return issues;
+}
+
 /** `PageFrame.pageId` literal: a page id as the `/pages/:id` route takes it (no slugs). */
 const PAGE_FRAME_ID = /^[a-f0-9]{32}$/i;
 
@@ -2058,6 +2104,17 @@ export function validatePage(
         !PAGE_FRAME_ID.test(rawElement.props.pageId)
       ) {
         issues.push(issue(`${elementPath}.props.pageId`, "must be a page id (32 hex characters)"));
+      }
+      if (type === "PageFrame") {
+        issues.push(...pageFrameBridgeIssues(definition, rawElement, elementPath));
+        const expose = isPlainObject(rawElement.props) ? rawElement.props.expose : undefined;
+        if (Array.isArray(expose)) {
+          for (const [index, statePath] of expose.entries()) {
+            if (typeof statePath === "string") {
+              stateRefs.push({ path: `${elementPath}.props.expose.${index}`, value: statePath });
+            }
+          }
+        }
       }
       if (type === "Form") issues.push(...formFileFieldIssues(rawElement.props, elementPath));
       if (type === "DateRange") issues.push(...dateRangePropIssues(rawElement.props, elementPath));
