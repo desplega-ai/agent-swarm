@@ -555,8 +555,8 @@
       "scenarios": ["platform-secret-egress"]
     },
     "script-inline-run": {
-      "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
-      "scenarios": ["script-inline-run"]
+      "description": "Inline (args, ctx) runs return their results, auto-save a scratch script only on success, record each run, and persist idempotent output to KV. Concurrent runs of the same new source share one scratch script and one initial version.",
+      "scenarios": ["script-inline-run", "script-parallel-inline-runs"]
     },
     "script-tool-usage": {
       "description": "The seeded tool-usage script counts tool_use lines from session_logs, filters by the task owner's agent, and binds every argument as a SQL parameter.",
