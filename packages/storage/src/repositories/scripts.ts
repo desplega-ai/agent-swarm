@@ -408,7 +408,8 @@ export type NewScriptRunJournalStep = Pick<
 
 export interface ScriptsRepository {
   // ---- scripts ----
-  insertScript(script: NewScript): Promise<ScriptRow | null>;
+  /** With "ignore", a conflict on the script name and scope returns null. */
+  insertScript(script: NewScript, onNameConflict?: "ignore"): Promise<ScriptRow | null>;
   updateScriptMetadata(id: string, update: ScriptMetadataUpdate): Promise<ScriptRow | null>;
   updateScriptContent(id: string, update: ScriptContentUpdate): Promise<ScriptRow | null>;
   /** The script with this name and scope; a null `scopeId` matches NULL. */
@@ -619,7 +620,11 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
 
   // ---- scripts ----
 
-  insertScript(s: NewScript): Promise<ScriptRow | null> {
+  insertScript(s: NewScript, onNameConflict?: "ignore"): Promise<ScriptRow | null> {
+    const conflictClause =
+      onNameConflict === "ignore"
+        ? sql`ON CONFLICT (name, scope, COALESCE("scopeId", '')) DO NOTHING`
+        : EMPTY;
     return this.db.get<ScriptRow>(sql`
       INSERT INTO scripts (
         id, "key", name, scope, "scopeId", source, description, intent, "signatureJson",
@@ -631,6 +636,7 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
         ${s.typeChecked}, ${s.fsMode}, ${s.executor}, ${s.agentId}, ${s.now}, ${s.now},
         ${s.actor}, ${s.actor}, ${s.agentId}
       )
+      ${conflictClause}
       RETURNING *`);
   }
 
