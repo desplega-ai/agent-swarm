@@ -162,6 +162,8 @@
   opacity: 1;
 }
 :where([data-streamdown="table-wrapper"]) > :where(div:has(> table)) {
+  /* biome-ignore lint/complexity/noImportantStyles: Streamdown 2.6+ caps this box with an inline 300px max-height (`tableMaxHeight`); a table grows to its full height instead. */
+  max-height: none !important;
   overflow-x: auto;
   border: 0;
   border-radius: 0;
