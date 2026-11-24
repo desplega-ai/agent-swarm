@@ -212,7 +212,9 @@ After the scenarios, `coverage.ts`:
    that is covered anyway is **stale**; one that matches nothing is **dead**. Both fail strict.
 4. Reads every `stateSurfaces` entry: one read-only `SELECT ... AS value` on the SUT database
    (task statuses, workflow run and step statuses, script run statuses, script step types,
-   script scopes, fs modes, executors). Every value in the declared universe must have been
+   script scopes, fs modes, executors). A scenario can call `ctx.captureStateSurface(name)`
+   to run the same query while a transient state is held. The report includes both reads.
+   Every value in the declared universe must have been
    produced unless excluded with a reason; a value in the database that the universe does not
    list is a new engine state and fails strict until it is declared.
 5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the

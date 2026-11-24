@@ -167,10 +167,6 @@
       "universe": ["pending", "running", "waiting", "completed", "failed", "skipped", "cancelled"],
       "excluded": [
         {
-          "value": "running",
-          "reason": "transient: instant executors finish inside the request; async ones move to waiting"
-        },
-        {
           "value": "skipped",
           "reason": "no engine path writes a skipped step: only a cooldown-skipped run carries skipped (src/workflows/engine.ts), and foreach-join reads the step value defensively"
         }
