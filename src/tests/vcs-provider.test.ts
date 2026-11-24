@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { detectVcsForTask } from "../commands/runner";
 import { detectVcsProvider } from "../vcs";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 const originalGitLabUrl = process.env.GITLAB_URL;
 
@@ -113,7 +114,7 @@ describe("detectVcsProvider", () => {
  * src/tests/acp-adapter.test.ts; this file's CLI cases skip on Windows, where bun
  * resolves an installed gh.exe ahead of a .cmd stub whatever the PATH order.
  */
-function repoWithVcsStubs(remoteUrl: string) {
+async function repoWithVcsStubs(remoteUrl: string) {
   const dir = mkdtempSync(join(tmpdir(), "vcs-provider-"));
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -124,16 +125,26 @@ function repoWithVcsStubs(remoteUrl: string) {
     writeFileSync(path, `#!/bin/sh\necho "${tool} $*" >> "${log}"\necho "[]"\n`);
     chmodSync(path, 0o755);
   }
-  const git = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-C", dir, ...args]);
-    if (proc.exitCode !== 0) {
-      throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`);
+  const git = async (...args: string[]) => {
+    const result = await runChild(["git", "-C", dir, ...args], { timeoutMs: 15_000 });
+    if (result.exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
     }
   };
-  git("init", "-q");
-  git("remote", "add", "origin", remoteUrl);
-  git("-c", "user.name=x", "-c", "user.email=x@x", "commit", "-q", "--allow-empty", "-m", "init");
-  git("checkout", "-q", "-b", "feat");
+  await git("init", "-q");
+  await git("remote", "add", "origin", remoteUrl);
+  await git(
+    "-c",
+    "user.name=x",
+    "-c",
+    "user.email=x@x",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "init",
+  );
+  await git("checkout", "-q", "-b", "feat");
   return { dir, bin, log };
 }
 
@@ -149,17 +160,21 @@ describe.skipIf(process.platform === "win32")("detectVcsForTask", () => {
   test.each([
     ["gitlab.com/acme/github-sync", "https://gitlab.com/acme/github-sync.git", "glab mr list"],
     ["github.com/acme/gitlab-tools", "https://github.com/acme/gitlab-tools.git", "gh pr list"],
-  ])("routes %s to the CLI of its host", async (_name, remoteUrl, expectedCall) => {
-    const otherCall = expectedCall.startsWith("glab") ? "gh pr list" : "glab mr list";
-    const { dir, bin, log } = repoWithVcsStubs(remoteUrl);
-    try {
-      process.env.PATH = `${bin}${delimiter}${originalPath ?? ""}`;
-      await detectVcsForTask("http://127.0.0.1:1", "", "task-1", dir);
-      const calls = readFileSync(log, "utf8");
-      expect(calls).toContain(expectedCall);
-      expect(calls).not.toContain(otherCall);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  ])(
+    "routes %s to the CLI of its host",
+    async (_name, remoteUrl, expectedCall) => {
+      const otherCall = expectedCall.startsWith("glab") ? "gh pr list" : "glab mr list";
+      const { dir, bin, log } = await repoWithVcsStubs(remoteUrl);
+      try {
+        process.env.PATH = `${bin}${delimiter}${originalPath ?? ""}`;
+        await detectVcsForTask("http://127.0.0.1:1", "", "task-1", dir);
+        const calls = readFileSync(log, "utf8");
+        expect(calls).toContain(expectedCall);
+        expect(calls).not.toContain(otherCall);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });
