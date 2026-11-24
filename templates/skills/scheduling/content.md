@@ -4,7 +4,7 @@ Use a schedule when work repeats on a clock, or when it must run once at a later
 
 ## Who may change schedules
 
-Only the lead agent, the operator or a user creates, changes or runs workflows, schedules and prompt templates. A worker asks the lead through `send-task`.
+Creating, changing or manually running schedules requires the lead agent, the operator or a user with the required permission. A worker asks the lead through `send-task`. A worker may still change its own agent-scoped prompt templates; that permission does not cover schedules or workflow changes.
 
 ## Tools
 

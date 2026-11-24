@@ -21,7 +21,7 @@ The [REST reference](https://docs.agent-swarm.dev/docs/api-reference/rooms) desc
 
 User-token page launches sign `uid` and `name` into the page session.
 The API resolves the signed user again during proxy authentication. Inactive users cannot use these sessions.
-Operator launches sign `op` and a generated guest name. They keep operator API access and do not inherit the page author's agent ID. The exception is changes to workflows, schedules, prompt templates and config reload: those are judged as the agent that owns the page, so a worker's page gets 403 for any viewer.
+Operator launches sign `op` and a generated guest name. They normally keep operator API access without taking on the page owner's agent identity. For workflow and schedule writes and runs, prompt-template changes and config reload, the API evaluates a signed page session as the agent that owns the page. A worker-owned page can change only its owner's agent-scoped prompt templates; a privileged viewer does not widen that access. With RBAC enabled, a user viewer must also hold the matching permission.
 Password unlocks create guest sessions with neither `uid` nor `op`.
 Legacy browser SDK memory operations use the page owner's agent scope through verified page execution context.
 The server loads this context from the signed session's page record. It preserves the viewer's authentication, permissions, and audit identity.

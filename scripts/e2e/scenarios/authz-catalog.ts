@@ -5,6 +5,7 @@
 // validate, reads and the webhook trigger stay open.
 import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
 import {
   count,
@@ -25,16 +26,11 @@ export const authzCatalog: Scenario = {
   order: 360,
   async run(ctx) {
     const workerId = await registerWorker(ctx, "authz-catalog");
-    const leadId = await registerLead(ctx, "authz-catalog");
-    const token = await mintAgentToken(ctx, workerId);
-    const leadToken = await mintAgentToken(ctx, leadId);
-    const asLead = (method: string, path: string, body?: Record<string, unknown>) =>
-      ctx.api(method, path, { apiKey: leadToken, body });
     const pageIds: string[] = [];
     let rbacOn = false;
-    const workerMcp = await ctx.connectMcp(workerId, { apiKey: token });
-    const keyedWorkerMcp = await ctx.connectMcp(workerId);
-    const leadMcp = await ctx.connectMcp(leadId);
+    let workerMcp: McpConnection | undefined;
+    let keyedWorkerMcp: McpConnection | undefined;
+    let leadMcp: McpConnection | undefined;
     const created: string[] = [];
 
     const workflowRows = (name: string) =>
@@ -42,7 +38,16 @@ export const authzCatalog: Scenario = {
     const runRows = (workflowId: string) =>
       count(ctx, sql`SELECT COUNT(*) AS n FROM workflow_runs WHERE "workflowId" = ${workflowId}`);
 
+    const leadId = await registerLead(ctx, "authz-catalog");
     try {
+      const token = await mintAgentToken(ctx, workerId);
+      const leadToken = await mintAgentToken(ctx, leadId);
+      const asLead = (method: string, path: string, body?: Record<string, unknown>) =>
+        ctx.api(method, path, { apiKey: leadToken, body });
+      workerMcp = await ctx.connectMcp(workerId, { apiKey: token });
+      keyedWorkerMcp = await ctx.connectMcp(workerId);
+      leadMcp = await ctx.connectMcp(leadId);
+
       // A target workflow and a run, made by the lead.
       const targetName = `authz-target-${ctx.nonce}`;
       const target = await asLead("POST", "/api/workflows", {
@@ -304,14 +309,22 @@ export const authzCatalog: Scenario = {
         "a user with every grant triggers a workflow",
       );
     } finally {
-      for (const id of created) await ctx.api("DELETE", `/api/workflows/${id}`);
-      for (const id of pageIds) await ctx.api("DELETE", `/api/pages/${id}`);
-      // A restart for the RBAC block drops the MCP sessions.
-      await workerMcp.close().catch(() => {});
-      await keyedWorkerMcp.close().catch(() => {});
-      await leadMcp.close().catch(() => {});
-      if (rbacOn) await ctx.restartSut();
-      await retireAgent(ctx, leadId);
+      try {
+        for (const id of created) await ctx.api("DELETE", `/api/workflows/${id}`);
+        for (const id of pageIds) await ctx.api("DELETE", `/api/pages/${id}`);
+      } finally {
+        try {
+          // A restart for the RBAC block drops the MCP sessions.
+          await Promise.all([
+            retireAgent(ctx, leadId),
+            workerMcp?.close().catch(() => {}),
+            keyedWorkerMcp?.close().catch(() => {}),
+            leadMcp?.close().catch(() => {}),
+          ]);
+        } finally {
+          if (rbacOn) await ctx.restartSut();
+        }
+      }
     }
   },
 };

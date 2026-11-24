@@ -5,6 +5,7 @@
 // Render, preview and reads stay open.
 import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
 import {
   count,
@@ -25,25 +26,29 @@ export const authzTemplatesConfig: Scenario = {
   order: 361,
   async run(ctx) {
     const workerId = await registerWorker(ctx, "authz-tc");
-    const leadId = await registerLead(ctx, "authz-tc");
-    const token = await mintAgentToken(ctx, workerId);
-    const leadToken = await mintAgentToken(ctx, leadId);
     const pageIds: string[] = [];
     let rbacOn = false;
-    const workerMcp = await ctx.connectMcp(workerId, { apiKey: token });
-    const keyedWorkerMcp = await ctx.connectMcp(workerId);
-    const leadMcp = await ctx.connectMcp(leadId);
+    let workerMcp: McpConnection | undefined;
+    let keyedWorkerMcp: McpConnection | undefined;
+    let leadMcp: McpConnection | undefined;
     const cleanupSchedules: string[] = [];
     const cleanupTemplates = new Set<string>();
 
-    const worker = (method: string, path: string, body?: Record<string, unknown>) =>
-      ctx.api(method, path, { apiKey: token, body });
-    const lead = (method: string, path: string, body?: Record<string, unknown>) =>
-      ctx.api(method, path, { apiKey: leadToken, body });
     const scheduleRows = (name: string) =>
       count(ctx, sql`SELECT COUNT(*) AS n FROM scheduled_tasks WHERE name = ${name}`);
 
+    const leadId = await registerLead(ctx, "authz-tc");
     try {
+      const token = await mintAgentToken(ctx, workerId);
+      const leadToken = await mintAgentToken(ctx, leadId);
+      const worker = (method: string, path: string, body?: Record<string, unknown>) =>
+        ctx.api(method, path, { apiKey: token, body });
+      const lead = (method: string, path: string, body?: Record<string, unknown>) =>
+        ctx.api(method, path, { apiKey: leadToken, body });
+      workerMcp = await ctx.connectMcp(workerId, { apiKey: token });
+      keyedWorkerMcp = await ctx.connectMcp(workerId);
+      leadMcp = await ctx.connectMcp(leadId);
+
       const eventType = `e2e.authz-tc.${ctx.nonce}`;
       const override = (scopeId: string, body: string) => ({
         eventType,
@@ -384,15 +389,23 @@ export const authzTemplatesConfig: Scenario = {
         "a user with every grant reloads config",
       );
     } finally {
-      for (const id of cleanupSchedules) await ctx.api("DELETE", `/api/schedules/${id}`);
-      for (const id of cleanupTemplates) await ctx.api("DELETE", `/api/prompt-templates/${id}`);
-      for (const id of pageIds) await ctx.api("DELETE", `/api/pages/${id}`);
-      // A restart for the RBAC block drops the MCP sessions.
-      await workerMcp.close().catch(() => {});
-      await keyedWorkerMcp.close().catch(() => {});
-      await leadMcp.close().catch(() => {});
-      if (rbacOn) await ctx.restartSut();
-      await retireAgent(ctx, leadId);
+      try {
+        for (const id of cleanupSchedules) await ctx.api("DELETE", `/api/schedules/${id}`);
+        for (const id of cleanupTemplates) await ctx.api("DELETE", `/api/prompt-templates/${id}`);
+        for (const id of pageIds) await ctx.api("DELETE", `/api/pages/${id}`);
+      } finally {
+        try {
+          // A restart for the RBAC block drops the MCP sessions.
+          await Promise.all([
+            retireAgent(ctx, leadId),
+            workerMcp?.close().catch(() => {}),
+            keyedWorkerMcp?.close().catch(() => {}),
+            leadMcp?.close().catch(() => {}),
+          ]);
+        } finally {
+          if (rbacOn) await ctx.restartSut();
+        }
+      }
     }
   },
 };
