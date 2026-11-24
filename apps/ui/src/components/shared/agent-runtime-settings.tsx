@@ -1,7 +1,7 @@
 import { nearestReasoningLevel, openAICompatibleKeyVars } from "@desplega/model-catalog";
 import { AlertTriangle, ArrowUpCircle, Info, Save } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useAgentRuntime,
@@ -263,31 +263,31 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [agent.credStatus?.bedrock],
   );
   const liveOpencodeGoModels = agent.credStatus?.opencodeGo?.models ?? null;
-  const piModelIds = agent.credStatus?.piModelIds ?? null;
+  const reportedPiModelIds = agent.credStatus?.piModelIds ?? null;
   const catalogQuery = useModelsCatalog();
   const snapshotLoaded = useModelsSnapshot();
   const liveCatalog = catalogQuery.data?.providers ?? null;
-  const groups = useMemo(
-    () =>
+  const getModelGroups = useCallback(
+    (targetHarness: LocalHarnessProvider) =>
       modelGroupsForHarness(
-        harness,
+        targetHarness,
         configs,
         envPresenceQuery.data,
         liveBedrockStatus,
         liveCatalog,
         liveOpencodeGoModels,
-        piModelIds,
+        targetHarness === "pi" ? reportedPiModelIds : null,
       ),
     [
-      harness,
       configs,
       envPresenceQuery.data,
       liveBedrockStatus,
       liveCatalog,
       liveOpencodeGoModels,
-      piModelIds,
+      reportedPiModelIds,
     ],
   );
+  const groups = useMemo(() => getModelGroups(harness), [getModelGroups, harness]);
   // A model profile picks the model and effort: the controls show its values,
   // and the form's own model and effort stay underneath for "None".
   const shownModel = selectedModelProfile?.model ?? model;
@@ -352,15 +352,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     if (lastSyncKey.current === syncKey) return;
     lastSyncKey.current = syncKey;
     const nextModel = configuredModel(configs);
-    const nextGroups = modelGroupsForHarness(
-      initialHarness,
-      configs,
-      envPresenceQuery.data,
-      liveBedrockStatus,
-      liveCatalog,
-      liveOpencodeGoModels,
-      piModelIds,
-    );
+    const nextGroups = getModelGroups(initialHarness);
     setHarness(initialHarness);
     setDevinSelected(agent.harnessProvider === "devin");
     const shown = nextModel || pickDefaultModelForHarness(initialHarness, nextGroups, liveCatalog);
@@ -374,17 +366,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setAcpArgs(invocation.args.join("\n"));
     setAcpEnvKeys(configuredStringList(configs, "ACP_TARGET_ENV_KEYS", /\s*,\s*/).join("\n"));
     setAcpModelEnvKey(configuredValue(configs, "ACP_MODEL_ENV_KEY"));
-  }, [
-    syncKey,
-    agent.harnessProvider,
-    configs,
-    initialHarness,
-    envPresenceQuery.data,
-    liveBedrockStatus,
-    liveCatalog,
-    liveOpencodeGoModels,
-    piModelIds,
-  ]);
+  }, [syncKey, agent.harnessProvider, configs, initialHarness, liveCatalog, getModelGroups]);
 
   // A default picked before the lazily loaded snapshot landed came from the
   // registry sections alone: pick it again once the snapshot is in, unless the
@@ -424,15 +406,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   }
 
   function changeHarness(nextHarness: LocalHarnessProvider) {
-    const nextGroups = modelGroupsForHarness(
-      nextHarness,
-      configs,
-      envPresenceQuery.data,
-      liveBedrockStatus,
-      liveCatalog,
-      liveOpencodeGoModels,
-      piModelIds,
-    );
+    const nextGroups = getModelGroups(nextHarness);
     setHarness(nextHarness);
     // A model profile runs on one harness, and the picker lists only the
     // current harness's, so a pick that does not run on the new one is dropped.
@@ -700,7 +674,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
                   clearLabel={harness === "pi" ? "Default model" : undefined}
                 />
               )}
-              {harness === "pi" && !piModelIds && !customMode && !modelProfileActive ? (
+              {harness === "pi" && !reportedPiModelIds && !customMode && !modelProfileActive ? (
                 <p className="text-xs text-muted-foreground">
                   Pi model options appear after the worker reports its catalog.
                 </p>

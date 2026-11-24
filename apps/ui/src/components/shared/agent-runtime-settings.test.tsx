@@ -751,6 +751,26 @@ describe("AgentRuntimeSettings reasoning effort", () => {
     await view.unmount();
   });
 
+  test.each([
+    ["claude", "Claude Opus 5.5", "claude-opus-5-5"],
+    ["opencode", "DeepSeek V4.1 Flash", "openrouter/deepseek/deepseek-v4.1-flash"],
+  ])("%s keeps its own model options when the agent has a Pi catalog", async (harness, label, model) => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: model }];
+    const view = await mountSettings(harness, {
+      ready: true,
+      missing: [],
+      reportedAt: 1,
+      piModelIds: ["openrouter/google/gemini-3-flash-preview"],
+    });
+    try {
+      await pickModel(view.container, label, model);
+      await save(view.container);
+      expect(saves.at(-1)).toMatchObject({ harnessProvider: harness, model });
+    } finally {
+      await view.unmount();
+    }
+  });
+
   test("switching to Pi immediately uses the worker's reported model catalog", async () => {
     const reportedModel = "openrouter/google/gemini-3-flash-preview";
     const view = await mountSettings("claude", {
