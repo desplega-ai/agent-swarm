@@ -17,7 +17,7 @@ import {
   fetchUniverse,
   loadManifest,
 } from "./coverage";
-import { type DbFixture, openReadOnlyDb, type ReadOnlyDb } from "./db";
+import { type DbFixture, dropPostgresTemplate, openReadOnlyDb, type ReadOnlyDb } from "./db";
 import { runHarnessLeg, stopHarnessChildren } from "./harness";
 import {
   type ApiClient,
@@ -285,6 +285,10 @@ async function cleanup(keep: boolean): Promise<void> {
   await stopHarnessChildren();
   for (const stack of [...stacks]) await stopStack(stack, keep);
   await cleanupCliTemp(keep);
+  // Also under --keep: each kept database is a full clone and does not need its template.
+  await dropPostgresTemplate().catch((error) =>
+    console.error(`Could not drop the Postgres template database: ${errorMessage(error)}`),
+  );
 }
 
 /** A SUT that ignores --tx-replay would pass every scenario without replay: refuse that. */
@@ -300,8 +304,9 @@ async function assertSutReplaysTransactions(logPath: string): Promise<void> {
 /** A SUT that ignores DATABASE_URL would pass every scenario on the default engine: refuse that. */
 function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
   // The runner applies the migration chain before the SUT starts (the db-query
-  // reader role needs the tables), so a migrated schema proves nothing: the boot
-  // seeds the SUT writes do.
+  // reader role needs the tables), or clones a template that holds it, so a migrated
+  // schema proves nothing: the boot seeds the SUT writes do. The template holds no
+  // seed rows (no migration writes seed_state), so a clone proves it the same way.
   let seeded: unknown;
   try {
     seeded = db.get("SELECT 1 AS present FROM seed_state LIMIT 1");
@@ -428,6 +433,8 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
                 });
                 cli = await copyCli(targetUrl, step.args);
               },
+              // db-copy refuses a target that has tables.
+              "empty",
             );
             targetStack.sut = target;
             if (!cli) throw new Error("db-copy did not run");

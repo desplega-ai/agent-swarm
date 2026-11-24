@@ -184,20 +184,86 @@ function openPostgres(url: string): ReadOnlyDb {
  * `E2E_POSTGRES_URL` names. The URL must log in as a role that may CREATE DATABASE.
  */
 export async function createPostgresDatabase(stamp: string): Promise<string> {
+  return createDatabaseFrom(stamp, "template0");
+}
+
+/**
+ * Like `createPostgresDatabase`, but a clone of a template database that already holds
+ * the full migration chain. The chain takes about 4 s on each boot; a clone takes a
+ * fraction of a second. The clone has no seed rows, reader role or grants:
+ * `preparePostgresQueryReader` finds the chain applied and adds the role, and the API
+ * writes its boot seeds itself.
+ */
+export async function createMigratedPostgresDatabase(stamp: string): Promise<string> {
+  return createDatabaseFrom(stamp, await migratedTemplate());
+}
+
+async function createDatabaseFrom(stamp: string, template: string): Promise<string> {
   const admin = adminUrl();
   const name = `e2e_${stamp.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`;
   const client = new Bun.SQL({ url: admin, max: 1 });
   try {
     // Byte text order and ASCII-only case folding, like SQLite (ledger: C collation and ctype).
+    // The default WAL_LOG strategy: FILE_COPY forces a checkpoint and is much slower.
     await client.unsafe(
-      `CREATE DATABASE "${name}" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`,
+      `CREATE DATABASE "${name}" TEMPLATE "${template}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`,
     );
   } finally {
     await client.close();
   }
+  return databaseUrlFor(admin, name);
+}
+
+function databaseUrlFor(admin: string, name: string): string {
   const url = new URL(admin);
   url.pathname = `/${name}`;
   return url.toString();
+}
+
+// One template per runner process. The name is unique, so two runs on one server do not
+// share a template. It is set before the template exists, so a failed build still drops.
+let templateName: string | undefined;
+let templateBuild: Promise<string> | undefined;
+
+function migratedTemplate(): Promise<string> {
+  templateBuild ??= (async () => {
+    const name = `e2e_tpl_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    templateName = name;
+    const url = await createDatabaseFrom(name.slice("e2e_".length), "template0");
+    await applyPostgresMigrations(url);
+    // Postgres refuses to clone a database that has other sessions. The migration
+    // client above is closed; nothing else connects to the template.
+    return name;
+  })();
+  return templateBuild;
+}
+
+/** Drop this process's migrated template, if one was made. Safe to call more than once. */
+export async function dropPostgresTemplate(): Promise<void> {
+  const name = templateName;
+  if (!name) return;
+  templateName = undefined;
+  templateBuild = undefined;
+  const client = new Bun.SQL({ url: adminUrl(), max: 1 });
+  try {
+    await client.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+  } finally {
+    await client.close();
+  }
+}
+
+async function applyPostgresMigrations(databaseUrl: string): Promise<void> {
+  const { createPostgresClient, runPostgresMigrations } = await import(
+    "../../packages/storage-postgres/src/index"
+  );
+  const setup = createPostgresClient(databaseUrl, { max: 1 });
+  try {
+    await runPostgresMigrations(setup, {
+      migrationsDir: resolve(import.meta.dir, "../../src/be/migrations/postgres"),
+    });
+  } finally {
+    await setup.close();
+  }
 }
 
 /** The db-query reader role of a per-run database (decision D10). */
@@ -212,18 +278,10 @@ function readerRoleName(databaseUrl: string): string {
  * `DATABASE_QUERY_URL`. The SUT then finds the chain applied and probes the role.
  */
 export async function preparePostgresQueryReader(databaseUrl: string): Promise<string> {
-  const { createPostgresClient, runPostgresMigrations } = await import(
-    "../../packages/storage-postgres/src/index"
-  );
   const { DB_QUERY_DENIED_TABLES } = await import("../../packages/storage/src/index");
-  const setup = createPostgresClient(databaseUrl, { max: 1 });
-  try {
-    await runPostgresMigrations(setup, {
-      migrationsDir: resolve(import.meta.dir, "../../src/be/migrations/postgres"),
-    });
-  } finally {
-    await setup.close();
-  }
+  // A clone of the migrated template carries the `_migrations` ledger, so this finds
+  // every migration applied. Roles are cluster-wide, so the role is made per database.
+  await applyPostgresMigrations(databaseUrl);
   const role = readerRoleName(databaseUrl);
   const database = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
   const sql = new Bun.SQL({ url: databaseUrl, max: 1 });
