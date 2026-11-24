@@ -153,6 +153,7 @@ const searchMemory = route({
       schema: z.object({ results: z.array(MemorySearchResultItemSchema) }),
     },
     400: { description: "Missing query or agent ID" },
+    500: { description: "Memory search failed (never sent as an empty result list)" },
   },
   rbac: { ungated: "worker-only: needs X-Agent-ID, which a user token cannot send" },
 });
@@ -1039,8 +1040,13 @@ export async function handleMemory(
         })),
       });
     } catch (err) {
-      console.error("[memory-search] Error:", (err as Error).message);
-      searchMemory.respond(res, 200, { results: [] });
+      // A failed search is an error, not "no memories": an empty 200 hid a
+      // broken engine path from agents and operators. Prompt recall in the
+      // runner already treats a non-2xx answer as "no memories" for the task.
+      console.error(
+        scrubSecrets(`[memory-search] Error: ${err instanceof Error ? err.message : String(err)}`),
+      );
+      jsonError(res, "Memory search failed", 500);
     }
     return true;
   }
@@ -1169,7 +1175,9 @@ export async function handleMemory(
         mode: "list",
       });
     } catch (err) {
-      console.error("[memory-list] Error:", (err as Error).message);
+      console.error(
+        scrubSecrets(`[memory-list] Error: ${err instanceof Error ? err.message : String(err)}`),
+      );
       jsonError(res, "Memory list failed", 500);
     }
     return true;

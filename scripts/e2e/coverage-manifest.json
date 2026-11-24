@@ -231,6 +231,7 @@
         "tasks-historical-values",
         "storage-recovery",
         "data-copy",
+        "data-copy-later-release",
         "divergence-fulltext-search",
         "divergence-vector-search",
         "divergence-like-case",
@@ -239,6 +240,7 @@
         "stress-poll-claim",
         "stress-task-finish",
         "stress-task-create",
+        "stress-token-touch",
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
@@ -255,7 +257,8 @@
         "trigger-rbac-default-role",
         "trigger-cascades",
         "postgres-chain-layouts",
-        "postgres-password-env"
+        "postgres-password-env",
+        "postgres-dead-connections"
       ]
     },
     "live-task-claim": {
@@ -447,6 +450,10 @@
       "description": "store, search (fts/vec), get with links, edit with versions, rate with the explicit-self guard, delete by ACL",
       "scenarios": ["knowledge-memory"]
     },
+    "memory-search-demotion": {
+      "description": "search and list with a query keep returning memories when one has a net-negative rating (beta > alpha), on every engine",
+      "scenarios": ["memory-demotion-search"]
+    },
     "mention-wakeup": {
       "description": "post-message with a mention produces an unread_mentions poll trigger",
       "scenarios": ["core-messaging"]
@@ -487,6 +494,10 @@
       "description": "OTEL_EXPORT_API_LOGS mirrors API console output to an OTLP/HTTP collector through the SDK-registered LoggerProvider, with exported request spans as the reachability control",
       "scenarios": ["platform-otel-log-export"]
     },
+    "otel-db-statements": {
+      "description": "The storage StatementObserver exports agentswarm.db.statement.duration with engine, operation and table labels, a statement span under its request span with no parameter values (OTEL_TRACE_DB_STATEMENTS), and the Postgres transaction outcome counter",
+      "scenarios": ["platform-otel-db-statements"]
+    },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
@@ -502,6 +513,10 @@
     "prompt-template-override": {
       "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
       "scenarios": ["knowledge-prompt-templates"]
+    },
+    "request-body-json": {
+      "description": "A request body that is not valid JSON gets 400 with the shared error envelope on the route factory's routes, the JSON-RPC parse error on MCP, and 400 on a signed Linear webhook.",
+      "scenarios": ["http-malformed-json", "linear-emulate-flows"]
     },
     "provider-webhooks": {
       "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore. Linear, Jira, workflow, GitHub, AgentMail and Kapso receivers refuse a body over 5 MiB.",
@@ -677,8 +692,8 @@
       ]
     },
     "slack-inbound-gates": {
-      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, and reserved action ids in agent blocks",
-      "scenarios": ["slack-inbound-gates"]
+      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, reserved action ids in agent blocks, and SLACK_WORKFLOW_BOT_IDS bot posts that start workflows but never tasks",
+      "scenarios": ["slack-inbound-gates", "slack-workflow-bot-ids"]
     },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
@@ -777,11 +792,12 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs", "authz-workflow-env"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, event subscriber isolation, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
+      "description": "Idempotency keys, trigger schema, event subscriber isolation, GitHub and Jira event triggers with match filters and redelivery dedupe, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
         "workflow-retry-deadline",
         "workflow-event-subscriber-isolation",
+        "workflow-github-jira-event-triggers",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
         "workflow-webhook-hmac-sha1",

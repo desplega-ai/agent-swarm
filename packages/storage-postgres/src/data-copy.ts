@@ -72,7 +72,7 @@ function quoteLiteral(value: string): string {
 }
 
 /** Tables the migration chain writes rows into: the only ones a fresh target may hold rows in. */
-function chainSeededTables(migrationsDir: string): Set<string> {
+export function chainSeededTables(migrationsDir: string): Set<string> {
   const seeded = new Set<string>();
   for (const migration of loadPostgresMigrations(migrationsDir)) {
     for (const match of migration.sql.matchAll(/INSERT\s+INTO\s+"?([A-Za-z0-9_]+)"?/gi)) {

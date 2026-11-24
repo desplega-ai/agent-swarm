@@ -94,6 +94,27 @@ OTEL_TRACE_POLL=1
 
 Truthy values: `1`, `true`, `yes`, `on` (case-insensitive). Anything else (including unset/empty) keeps poll spans off. Expect span volume to roughly double when this is enabled.
 
+### Database statements
+
+The API records every statement that its storage client runs, on SQLite and on PostgreSQL:
+
+| Metric | Type | Unit | Labels |
+|---|---|---|---|
+| `agentswarm.db.statement.duration` | Histogram | `ms` | `db.system` (`sqlite`, `postgresql`), `db.operation` (`SELECT`, `INSERT`, …, `OTHER`), `db.sql.table` (the first table the statement names, absent for `SELECT 1`) |
+| `agentswarm.db.transactions` | Counter | `{transaction}` | `db.system`, `outcome` (`commit`, `rollback`, `exhausted`), `retried` |
+| `agentswarm.db.transaction.attempts` | Histogram | `{attempt}` | `db.system`, `outcome` |
+| `agentswarm.db.transaction.retries` | Counter | `{attempt}` | `db.system`, `db.response.status_code` (`40001`, `40P01`) |
+
+The transaction metrics come from PostgreSQL, which retries a whole transaction on a serialization failure or a deadlock. `exhausted` means the last attempt still failed that way.
+
+To also get a span per statement, nested under the request span, set on the API process:
+
+```bash
+OTEL_TRACE_DB_STATEMENTS=1
+```
+
+Each span carries the statement text in `db.statement`, scrubbed of secrets, and never its parameters. Statements that run outside a request (the scheduler, the heartbeat) get no span. Expect span volume to grow by the number of statements per request.
+
 ### Exporting API logs
 
 The API's console output (including the slow-statement warnings above) goes to stdout by default. To also send it to the collector as OTLP log records, set on the API process:

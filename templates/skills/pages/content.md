@@ -641,6 +641,7 @@ To check a page by screenshot, open it from an origin its data endpoints allow. 
 |---|---|---|
 | `app_url` | `${APP_URL}/pages/:id` | SPA route. Renders HTML in a sandboxed iframe, JSON via `@json-render/react`. Needs a dashboard login: a logged-out visitor is sent to `/setup`. Share target for signed-in dashboard users. |
 | `app_url` (full mode) | `${APP_URL}/pages/:id?mode=full` | Same SPA route, maximized: hides the SPA sidebar/header so the page body gets the full viewport. Slim header with title + Exit-Full button. Useful for embeds + standalone dashboards. |
+| `app_url` (chromeless) | `${APP_URL}/pages/:id?mode=chromeless` | Same SPA route, the page body alone: no header, no border, the whole viewport. For a link opened on a phone, or an embed. |
 | `api_url` | `${PUBLIC_MCP_BASE_URL}/p/:id` | Direct API render on the public API origin. HTML inlines and serves; JSON 302-redirects to `app_url`. Share target for a `public` or `password` page read by anyone without a dashboard login. |
 
 `${APP_URL}` is the deployment's SPA origin and `${MCP_BASE_URL}` is its API
@@ -660,7 +661,8 @@ sharing the link.
 **Default**: pick by reader.
 
 - Signed-in dashboard users: share `app_url`. Append `?mode=full` when they
-  should see ONLY the page (no surrounding swarm chrome).
+  should see ONLY the page (no surrounding swarm chrome), or `?mode=chromeless`
+  for the page with no title bar at all (a phone, an embed).
 - Anyone else (a client, a public post, a logged-out teammate) reading a
   `public` page: share `api_url`. Also use `api_url` when you need a link
   that bypasses the SPA (e.g. embedding in Slack, where the unfurl preview

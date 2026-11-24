@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { isConstraintViolation } from "@desplega/storage";
+import { isConstraintViolation, type TransactionObservation } from "@desplega/storage";
 import { createPostgresClient, type PostgresClient } from "../src";
 import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 
@@ -263,6 +263,39 @@ describe("postgres client", () => {
     expect((await solo).changes).toBe(1);
     expect((await client.get<{ n: number }>(`SELECT n FROM t WHERE id = 'solo'`))?.n).toBe(11);
     expect(client.retriedAttempts).toBe(before + 1);
+  });
+
+  test("the observer sees each transaction's attempts, retried SQLSTATEs and outcome", async () => {
+    const seen: TransactionObservation[] = [];
+    const observed = createPostgresClient(scratch.url, {
+      max: 2,
+      retry: { maxAttempts: 2, baseBackoffMs: 1, maxBackoffMs: 1 },
+      observer: { onTransaction: (info) => seen.push(info) },
+    });
+    const conflict = `DO $$ BEGIN RAISE EXCEPTION 'conflict' USING ERRCODE = '40001'; END $$`;
+    try {
+      let attempts = 0;
+      await observed.transaction(async () => {
+        attempts += 1;
+        if (attempts === 1) await observed.run(conflict);
+      });
+      await expect(observed.transaction(async () => observed.run(conflict))).rejects.toThrow();
+      await expect(
+        observed.transaction(async () => {
+          throw new Error("not retryable");
+        }),
+      ).rejects.toThrow("not retryable");
+      // A savepoint is part of its outermost transaction: no observation of its own.
+      await observed.transaction(async () => observed.transaction(async () => undefined));
+      expect(seen).toEqual([
+        { attempts: 2, retries: ["40001"], outcome: "commit" },
+        { attempts: 2, retries: ["40001"], outcome: "exhausted" },
+        { attempts: 1, retries: [], outcome: "rollback" },
+        { attempts: 1, retries: [], outcome: "commit" },
+      ]);
+    } finally {
+      await observed.close();
+    }
   });
 
   test("tx-replay runs each outermost callback twice and keeps only the second run", async () => {

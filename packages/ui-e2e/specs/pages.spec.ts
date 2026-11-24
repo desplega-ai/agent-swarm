@@ -175,6 +175,38 @@ test("page viewer forwards its query params to the page body", async ({
   await clean.assertClean();
 });
 
+for (const authMode of ["public", "authed"] as const) {
+  test(`chromeless mode shows the ${authMode} page alone, full-bleed`, async ({
+    page,
+    seed,
+    clean,
+  }, testInfo) => {
+    test.skip(!seed, "remote run without seed");
+    const { id } = seed!.pages[authMode];
+    const title = `e2e ${authMode} page`;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/pages/${id}?target=pr-1373&mode=chromeless`);
+    const frame = page.locator(`iframe[title='${title}']`);
+    // `mode` stays with the viewer; the page's own params reach the body.
+    await expect(frame).toHaveAttribute(
+      "src",
+      new RegExp(`/p/${id}\\?target=pr-1373&__swarm-mode=dark&__swarm_revision=.+$`),
+    );
+    await expect(page.frameLocator(`iframe[title='${title}']`).locator("body")).not.toBeEmpty();
+    expect(await frame.boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+    await expect(page.getByRole("link", { name: "Exit full" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: title })).toHaveCount(0);
+    const screenshot = testInfo.outputPath(`page-chromeless-${authMode}.png`);
+    await page.screenshot({ path: screenshot });
+    await testInfo.attach(`page-chromeless-${authMode}`, {
+      path: screenshot,
+      contentType: "image/png",
+    });
+    // An authed page's first metadata read is a 401 before its launch, as on every load.
+    if (authMode === "public") await clean.assertClean();
+  });
+}
+
 for (const authMode of ["authed", "password"] as const) {
   test(`page refresh preserves ${authMode} access`, async ({ page, seed, swarm }) => {
     test.skip(!seed, "remote run without seed");

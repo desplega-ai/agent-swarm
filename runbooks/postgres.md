@@ -64,6 +64,30 @@ The API holds a session advisory lock on its database for its whole life. A seco
 
 Connection budget per API process: 1 session for the one-process lock, up to 10 for the application pool, and up to 4 for the optional db-query reader (15 in total). Set the role's or the server's connection limit to at least that. With a connection pooler (PgBouncer, a cloud proxy) between the API and Postgres, use session pooling for the API's `DATABASE_URL`. The lock is a session advisory lock, so the lock connection needs session affinity: in transaction pooling the lock lands on a server connection that other clients share, and the write fence cannot see the owner session. Connect directly when the pooler offers only transaction pooling.
 
+## When the database is unreachable
+
+The API does not reconnect in place. When it cannot reach its database, it exits with code 1, and the supervisor (`restart: unless-stopped` in Compose, the Deployment on Kubernetes) starts it again. The new process opens new connections and waits for the one-process lock. The API runs on Postgres only under a supervisor.
+
+The lock watchdog checks the lock session once a second. When a check gets no answer within 10 seconds, the API logs `lost the one-process lock ... (the lock session did not answer within 10000 ms)` and exits. This covers connections that died without a FIN or RST: the database came back on another address (a recreated container), or the network drops packets. Before this rule, the API kept `/health` green and every database request hung until the kernel gave up on the sockets (about 15 minutes on Linux).
+
+Expected times when every connection dies without a close:
+
+| Step | Time |
+|---|---|
+| A request that needs the database fails (the process exits) | about 11 s |
+| `/health` stops answering 200 | about 11 s |
+| The restarted API serves requests, once the database answers again | about 5 s after the database is back, plus the supervisor's restart delay |
+
+Connection settings (all connections of the API, fixed values, no setting):
+
+- The server keeps TCP keepalive on each session (`tcp_keepalives_idle` 10 s, `tcp_keepalives_interval` 5 s, `tcp_keepalives_count` 3). After a network cut, the server ends the old session within about 25 seconds and releases its session lock, so the restarted API can take the lock. Without it the server holds the old session, and the lock, for 2 hours.
+- A new connection waits at most 10 seconds (`connectionTimeout`). A start against an unreachable database fails fast, and the supervisor tries again.
+- The pool closes a connection that is idle for 60 seconds. A NAT gateway or a load balancer drops an idle connection without a FIN after 4 minutes or more, so the pool never sends a request on such a connection.
+
+`/health` checks no database on either engine: it answers 200 while the process runs. On Postgres the exit above keeps it honest, because the process stops within about 11 seconds of losing its database.
+
+Limit: when only a pool connection dies and the lock session stays healthy, a request on that connection can still hang until the kernel gives up on it. The 60-second idle close makes this unlikely.
+
 More than one API replica is not supported on either engine. The parts that a second replica would break are listed, with file and line, in `thoughts/taras/research/2026-11-20-replica-blockers.md`: the in-memory realtime bus (`src/realtime/bus.ts`), the workflow event bus (`src/workflows/event-bus.ts`), in-memory locks (`src/oauth/ensure-mcp-token.ts`), per-process caches, and timers with no leader election.
 
 ## Backups
@@ -109,6 +133,7 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 
 - A new migration has one file for each engine with the same ordinal: `src/be/migrations/NNN_name.sql` and `src/be/migrations/postgres/NNN_name.sql`. A file may be a no-op for one engine, with a comment that says why. `bun run check:schema-parity` must pass. Never edit an applied migration.
 - No new triggers (`bun run check:no-new-triggers`). Put new rules in repository code.
+- A Postgres migration that changes rows must stay correct under `db-copy` (`bun run check:copy-migrations`): the copy writes the SQLite rows over the migrated target and records every migration as applied. A plain seed passes. For a rewrite of stored rows, list the migration in `after-copy.json`, port the rows in the copy, or write the reason in `scripts/storage-checks/copy-migrations-allowlist.txt`. A new column type needs a conversion in `packages/storage-postgres/src/data-copy.ts` and a sample in `packages/storage-postgres/test/data-copy-chain.test.ts`.
 - SQL lives in the storage packages (`packages/storage*`) only (`bun run check:storage-boundary`). Write portable SQL with the dialect helpers; SQLite-only syntax stays in `packages/storage-sqlite` (`bun run check:sql-portability`). Quote each identifier that has an uppercase letter.
 - Code tests a capability (`fullTextSearch`, `vectorSearch`, `dbQuery`), never the engine name.
 - A transaction callback may run twice on Postgres. Side effects go in `afterCommit` (`bun run check:tx-callbacks`; prove it with `bun run e2e --tx-replay`).
@@ -132,6 +157,7 @@ These assertion groups stay, with the reason:
 | Symptom | Cause and fix |
 |---|---|
 | `another API process holds this Postgres database` | A second API (or a running `db-copy`) holds the lock. Stop it. |
+| `lost the one-process lock ... did not answer within 10000 ms`, then a restart | The API could not reach its database for 10 s. Check the network path and the database. After a network cut, the next start can wait for the lock for up to about 25 s while the server ends the old session. |
 | `db-query is off: DATABASE_QUERY_URL is not set` / `failed its probe` | Create the reader role (above). The log names the failed probe rule. |
 | `type "vector" does not exist` at the first start | Create the pgvector extension as a superuser, then start again. |
 | `db-copy: migration heads differ` | Start this build once on the SQLite file, stop it, copy again. |

@@ -54,6 +54,7 @@ import {
   isInTransaction as sqliteIsInTransaction,
   updatePromptTemplateRecordSync,
 } from "@desplega/storage-sqlite";
+import { recordDbStatement, recordDbTransaction } from "../otel";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   getDb,
@@ -139,7 +140,10 @@ export const TX_REPLAY_BANNER =
 
 /** Params are never logged: they can carry secrets and user content. */
 const serverObserver: StatementObserver = {
-  onStatement: (sql, durationMs) => recordStatement(sql, durationMs),
+  onStatement: (sql, durationMs) => {
+    recordStatement(sql, durationMs);
+    recordDbStatement("sqlite", sql, durationMs);
+  },
   onSlowStatement: (sql, durationMs) => {
     // Scrub the complete SQL before truncation, so a secret that straddles the
     // cut cannot leave a partial token, then scrub the complete line at egress.
@@ -154,6 +158,15 @@ const serverObserver: StatementObserver = {
       ),
     );
   },
+};
+
+/**
+ * Postgres statements are async: they do not block the event loop, so they
+ * skip the event-loop accounting and the slow sync statement log.
+ */
+const postgresObserver: StatementObserver = {
+  onStatement: (sql, durationMs) => recordDbStatement("postgresql", sql, durationMs),
+  onTransaction: (info) => recordDbTransaction({ system: "postgresql", ...info }),
 };
 
 /**
@@ -381,6 +394,7 @@ export async function openPostgresEngine(
       txReplay,
       checkMessages,
       onTransactionEnd: transactionStatsSink(),
+      observer: postgresObserver,
       // Writes check that this process still owns the database (D16 write fence).
       fence: { ownerPid: lock.pid, ownerBackendStart: lock.backendStart },
     });
