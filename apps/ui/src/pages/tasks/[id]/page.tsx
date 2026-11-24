@@ -877,11 +877,8 @@ export default function TaskDetailPage() {
   const steerComposer = composerProps && !isTerminal ? <TaskComposer {...composerProps} /> : null;
 
   const headerTitle = taskListTitle(task);
-  // The server records the model it resolved when the task was claimed
-  // (`resolvedModel`, with the layer in `modelSource`). Older tasks and
-  // unclaimed ones fall back to the requested `model`, then to whatever the
-  // session_costs entries report.
-  const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
+  const displayModel = taskDisplayModel(task, costs);
+  const plannedModel = taskDisplayModel(task);
   const displayEffort = taskDisplayEffort(task);
   const creatorName =
     task.creatorAgentId && task.creatorAgentId !== task.agentId
@@ -914,6 +911,9 @@ export default function TaskDetailPage() {
       </TooltipTrigger>
       <TooltipContent side="bottom" align="start" className="text-left">
         <div className="font-mono">{displayModel}</div>
+        {plannedModel && plannedModel !== displayModel ? (
+          <div>Resolved before run: {plannedModel}</div>
+        ) : null}
         {describeModelResolution(task).map((line) => (
           <div key={line}>{line}</div>
         ))}

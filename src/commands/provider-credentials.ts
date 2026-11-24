@@ -740,6 +740,15 @@ export async function buildCredStatusReport(
     presence.opencodeGoModels !== undefined
       ? { probedAt: Date.now(), models: presence.opencodeGoModels }
       : null;
+  let piModelIds: string[] | undefined;
+  if (provider === "pi") {
+    try {
+      const { listPiPickerModelIds } = await import("../providers/pi-mono-adapter");
+      piModelIds = await listPiPickerModelIds(env);
+    } catch (err) {
+      console.warn(scrubSecrets(`[pi-mono] Could not list picker models: ${err}`));
+    }
+  }
   return {
     ready: presence.ready,
     missing: presence.missing ?? [],
@@ -751,6 +760,7 @@ export async function buildCredStatusReport(
     reportKind: kind,
     bedrock,
     opencodeGo,
+    piModelIds,
     acp: null,
   };
 }

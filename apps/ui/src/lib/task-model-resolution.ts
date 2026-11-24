@@ -1,4 +1,10 @@
-import { type AgentTask, type ModelProfile, type ModelSource, PROVIDER_NAMES } from "../api/types";
+import {
+  type AgentTask,
+  type ModelProfile,
+  type ModelSource,
+  PROVIDER_NAMES,
+  type SessionCost,
+} from "../api/types";
 import { modelTierLabel } from "./model-tiers";
 
 /** Labels for `agent_tasks.modelSource`, the layer that chose the model the task ran on. */
@@ -40,12 +46,17 @@ export function taskDisplayEffort(
 }
 
 /**
- * The model a task ran (or will run) on: the server's claim-time resolution
- * when there is one, else what was requested. Null when the task named neither
- * a model nor a tier.
+ * Prefer the latest harness cost row when it names the model. Before a run
+ * reports costs, use the claim-time resolution or the requested model.
  */
-export function taskDisplayModel(task: TaskModelFields): string | undefined {
-  return task.resolvedModel ?? task.model ?? undefined;
+export function taskDisplayModel(
+  task: TaskModelFields,
+  costs?: readonly Pick<SessionCost, "model" | "kind">[],
+): string | undefined {
+  const run = costs?.find(
+    (cost) => cost.kind !== "system-one" && cost.model && cost.model !== "default",
+  );
+  return run?.model ?? task.resolvedModel ?? task.model ?? undefined;
 }
 
 /**

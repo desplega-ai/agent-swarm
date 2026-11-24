@@ -6,6 +6,7 @@ import { Box, render, Text, useApp } from "ink";
 import type { ComponentType } from "react";
 import { createElement, useEffect, useState } from "react";
 import pkg from "../package.json";
+import { dbCopyHelp } from "./commands/db-copy-help.ts";
 import { getApiKey, setApiKey } from "./utils/api-key.ts";
 import { installConsoleScrub } from "./utils/console-scrub.ts";
 
@@ -329,21 +330,7 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: `  ${binName} rbac bootstrap`,
   },
-  "db-copy": {
-    usage: `${binName} db-copy --from <sqlite file> --to <postgres url> [options]`,
-    description:
-      "Copy a SQLite database file into an empty Postgres database at the same migration head.\nOpens the SQLite file read-only, refuses a target that holds rows, and writes nothing\nwhen a value cannot be stored in Postgres. Compares the row count and a checksum of\nevery table and exits 1 when one differs. Stop the API before you copy.",
-    options: [
-      "  --from <path>          SQLite database file (default: DATABASE_PATH)",
-      "  --to <url>             Target postgres:// URL (default: DATABASE_URL)",
-      "  --json <path>          Write the full report (tables, checksums, problems) as JSON",
-      "  -h, --help             Show this help",
-    ].join("\n"),
-    examples: [
-      `  ${binName} db-copy --from ./agent-swarm-db.sqlite --to postgres://swarm@db:5432/swarm`,
-      `  DATABASE_PATH=/data/swarm.sqlite DATABASE_URL=postgres://... ${binName} db-copy --json report.json`,
-    ].join("\n"),
-  },
+  "db-copy": dbCopyHelp(binName ?? "agent-swarm"),
   "codex-login": {
     usage: `${binName} codex-login [options]`,
     description:

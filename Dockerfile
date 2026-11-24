@@ -107,10 +107,11 @@ RUN mkdir -p script-types/node_modules && cd node_modules && \
       | tar --null -cf - -T - \
       | tar -xf - -C /build/script-types/node_modules
 
-# Compile HTTP server to standalone binary
+# Compile the API to a standalone binary. src/api-entry.ts boots the HTTP server
+# (src/http.ts), or runs `db-copy` without the API when the first argument is `db-copy`.
 # The quickjs executor's worker thread and the sheet engine's worker are separate entrypoints inside the binary.
 # (The SQLite memory search read worker starts from a Blob URL and needs none.)
-RUN bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts \
+RUN bun build ./src/api-entry.ts ./src/scripts-runtime/executors/quickjs-worker.ts \
       ./src/be/primitives/sheets/engine-worker.ts \
       --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 

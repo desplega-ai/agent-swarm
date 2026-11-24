@@ -37,8 +37,10 @@ import {
   routeCredentialStatus,
   routeUnsetEnv,
 } from "@desplega/model-routing";
+import "../commands/templates";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { contextBoundNoteThreshold, createContextBoundNote } from "../hooks/context-bound-note";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { getApiKey } from "../utils/api-key";
 import { isCodexRejectedAccessError } from "../utils/codex-auth-failure";
 import {
@@ -57,6 +59,7 @@ import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
+import { isEffectiveOutputSchema, matchOutputSchema } from "../utils/output-schema";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -82,6 +85,7 @@ import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
 import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
 import { codexUserHome } from "./codex-oauth/home.js";
 import { buildPoolRevalidationFailureReason, getValidCodexOAuth } from "./codex-oauth/storage.js";
+import { toCodexOutputSchema } from "./codex-output-schema";
 import { pruneCodexRollouts } from "./codex-rollouts";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
@@ -231,7 +235,10 @@ interface CodexThread {
     ProviderResult,
     "rateLimitWindows" | "providerAccount" | "rateLimitReplacements"
   >;
-  runStreamed(input: string): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+  runStreamed(
+    input: string,
+    outputSchema?: Record<string, unknown>,
+  ): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
   steer(input: string): Promise<void>;
   interrupt(): Promise<void>;
   close(): Promise<void>;
@@ -836,7 +843,10 @@ class AppServerCodexThread implements CodexThread {
     this.unsubscribeClose = client.onClose((error) => this.activeFail?.(error));
   }
 
-  async runStreamed(input: string): Promise<{ events: AsyncGenerator<ThreadEvent> }> {
+  async runStreamed(
+    input: string,
+    outputSchema?: Record<string, unknown>,
+  ): Promise<{ events: AsyncGenerator<ThreadEvent> }> {
     if (this.activePush) throw new Error("Codex turn already active");
 
     const pending: ThreadEvent[] = [];
@@ -869,6 +879,7 @@ class AppServerCodexThread implements CodexThread {
         // The bundled model catalog defaults the reasoning summary to `none`,
         // so reasoning items arrived with empty `summary` and `content`.
         summary: CODEX_REASONING_SUMMARY,
+        ...(outputSchema ? { outputSchema } : {}),
       });
       if (!finished) this.setActiveTurn(response.turn.id);
     } catch (error) {
@@ -1061,6 +1072,17 @@ export interface SummarizeSessionForCodexDeps {
 }
 
 /** Running session backed by a Codex `Thread`. */
+/** The API refused the turn's `outputSchema` (strict-mode `invalid_json_schema`). */
+function isOutputSchemaRejection(event: ThreadEvent): boolean {
+  const message =
+    event.type === "turn.failed"
+      ? event.error.message
+      : event.type === "error"
+        ? event.message
+        : "";
+  return /invalid_json_schema|codex_output_schema/.test(message);
+}
+
 export class CodexSession implements ProviderSession {
   private readonly thread: CodexThread;
   private readonly config: ProviderSessionConfig;
@@ -1107,6 +1129,11 @@ export class CodexSession implements ProviderSession {
    * summary path which materially relies on this ordering for testability.
    */
   private pendingResult: ProviderResult | null = null;
+  /** Strict-mode form of the task's outputSchema; cleared once the API rejects it. */
+  private turnOutputSchema: Record<string, unknown> | undefined;
+  /** Last non-empty agent message, the text the runner validates as output. */
+  private lastAgentMessage: string | undefined;
+  private structuredOutputNudged = false;
   /** Fed each main-thread request's prompt size; steers the one-time context-bound note. */
   private readonly observeContextBound: (contextTokens: number | undefined) => Promise<void>;
 
@@ -1127,6 +1154,7 @@ export class CodexSession implements ProviderSession {
     this.thread = thread;
     this.config = config;
     this.resolvedModel = resolvedModel;
+    this.turnOutputSchema = toCodexOutputSchema(config.outputSchema);
     this.contextWindow = getCodexContextWindow(resolvedModel);
     // `CODEX_SKILLS_DIR` lets tests / non-Docker installs point at a custom
     // tree without polluting `~/.codex/skills` on the host. Fall back to the
@@ -1488,6 +1516,7 @@ export class CodexSession implements ProviderSession {
           case "agent_message": {
             const msg = item as AgentMessageItem;
             if (msg.text) {
+              if (msg.text.trim()) this.lastAgentMessage = msg.text;
               this.emit({ type: "message", role: "assistant", content: msg.text });
               this.transcript.push(`Assistant: ${msg.text}`);
             }
@@ -1740,12 +1769,19 @@ export class CodexSession implements ProviderSession {
         let queuedPrompt: (typeof this.queuedPrompts)[number] | undefined;
         while (nextPrompt !== undefined && !this.aborted && !terminalError && !sawTurnInterrupted) {
           if (nextPrompt !== resolvedPrompt) this.transcript.push(`User: ${nextPrompt}`);
-          const streamed = await this.thread.runStreamed(nextPrompt);
+          const turnSchema = this.turnOutputSchema;
+          const streamed = await this.thread.runStreamed(nextPrompt, turnSchema);
           if (queuedPrompt) {
             this.queuedPrompts.shift();
             queuedPrompt.resolve({ delivered: true, mode: "queue" });
+            queuedPrompt = undefined;
           }
+          let schemaRejected = false;
           for await (const event of streamed.events) {
+            if (turnSchema && isOutputSchemaRejection(event)) {
+              schemaRejected = true;
+              continue;
+            }
             if (
               event.type === "turn.failed" ||
               event.type === "turn.interrupted" ||
@@ -1772,8 +1808,21 @@ export class CodexSession implements ProviderSession {
               this.errorTracker.processCodexUsageLimitMessage(event.message);
             }
           }
+          if (schemaRejected && !terminalError && !sawTurnInterrupted) {
+            // The API refused the schema before the model ran: rerun the same
+            // prompt unconstrained so the task behaves as it did without it.
+            this.turnOutputSchema = undefined;
+            this.emit({
+              type: "raw_stderr",
+              content: "[codex] API rejected the outputSchema; rerunning the turn without it\n",
+            });
+            continue;
+          }
           queuedPrompt = this.queuedPrompts[0];
           nextPrompt = queuedPrompt?.text;
+          if (nextPrompt === undefined && !terminalError && !sawTurnInterrupted && !this.aborted) {
+            nextPrompt = await this.structuredOutputNudge();
+          }
         }
       } catch (err) {
         this.acceptsSteering = false;
@@ -1921,6 +1970,45 @@ export class CodexSession implements ProviderSession {
           failureReason: "session did not settle",
         } as ProviderResult);
       this.resolveCompletion(finalResult);
+    }
+  }
+
+  /**
+   * The one reprompt a schema'd task gets when its session would end with no
+   * result: the last agent message does not match `outputSchema` and the task
+   * has no output from `store-progress`. `undefined` means end the session
+   * (no schema, already nudged, a result exists, or the task state is unknown).
+   */
+  private async structuredOutputNudge(): Promise<string | undefined> {
+    const schema = this.config.outputSchema;
+    if (this.structuredOutputNudged || !isEffectiveOutputSchema(schema)) return undefined;
+    if (this.lastAgentMessage && matchOutputSchema(schema, this.lastAgentMessage).ok) {
+      return undefined;
+    }
+    const { apiUrl, apiKey, agentId, taskId } = this.config;
+    if (!apiUrl || !taskId) return undefined;
+    try {
+      const res = await fetch(`${apiUrl}/api/tasks/${taskId}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, "X-Agent-ID": agentId },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return undefined;
+      const task = (await res.json()) as { status?: string; output?: string };
+      if (task.output || task.status !== "in_progress") return undefined;
+      const nudge = await resolveTemplateAsync("task.nudge.structured_output_missing", {});
+      if (nudge.skipped || !nudge.text.trim() || this.aborted) return undefined;
+      this.structuredOutputNudged = true;
+      this.emit({
+        type: "raw_stderr",
+        content: "[codex] final message did not match outputSchema; sending one reprompt\n",
+      });
+      return nudge.text;
+    } catch (err) {
+      this.emit({
+        type: "raw_stderr",
+        content: `[codex] structured-output check failed, no reprompt: ${String(err)}\n`,
+      });
+      return undefined;
     }
   }
 

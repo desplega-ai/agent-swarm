@@ -139,6 +139,39 @@ describe("reports and flows", () => {
     expect(await flowStatus([{ name: "a", status: "fail", durationMs: 1 }])).toBe("fail");
   });
 
+  test("a transient state exclusion is not stale when a final read catches the value", async () => {
+    const stateManifest = (transient: boolean) => ({
+      ...EMPTY_MANIFEST,
+      stateSurfaces: [
+        {
+          name: "task-statuses",
+          query: "SELECT status AS value FROM agent_tasks",
+          universe: ["pending", "unassigned"],
+          excluded: [
+            { value: "unassigned", reason: "transient: routed within a heartbeat", transient },
+          ],
+        },
+      ],
+    });
+    const stale = async (transient: boolean) =>
+      (
+        await computeCoverage(fakeApi, {
+          calls: [],
+          toolUniverse: new Set(),
+          calledTools: new Set(),
+          observedNodeTypes: new Set(),
+          calledCommands: new Set(),
+          scenarios: [],
+          knownScenarios: new Set(),
+          queryValues: () => ["pending", "unassigned"],
+          manifest: stateManifest(transient),
+        })
+      ).staleExclusions;
+    expect(await stale(true)).toEqual([]);
+    // Control: the same observation still flags a plain exclusion.
+    expect(await stale(false)).toEqual(["state task-statuses: unassigned"]);
+  });
+
   test("summary shows FLAKY, attempts and quarantine problems", () => {
     const empty = { total: 0, covered: 0, excluded: 0, percent: 100, uncovered: [] };
     const result: E2eResult = {

@@ -1,5 +1,6 @@
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
+import { callTool, expectToolOk } from "./platformb-helpers";
 import {
   announceLiveView,
   ask,
@@ -11,6 +12,7 @@ import {
   registerLead,
   registerWorker,
   settleWorkerFollowUp,
+  slackAbsenceWindowMs,
   slackPace,
   waitForEyes,
   waitForOutcome,
@@ -279,5 +281,105 @@ export const slackDeferWakeV2: Scenario = {
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
     await deferOnChildAndWake(ctx);
+  },
+};
+
+/**
+ * The wake-up answers with `slack-reply` instead of in its output: the ⏳
+ * card would only say "<lead> completed" above that reply, so it is deleted
+ * and the thread keeps the person's ask, the tree and the one reply.
+ */
+async function deferThenReplyFromWake(ctx: ScenarioContext): Promise<void> {
+  await registerLead(ctx, `e2e-lead-defer-reply-${ctx.nonce}`);
+  const workerName = "Reviewer";
+  const workerId = await registerWorker(ctx, workerName);
+  // Bob, not Alice: Alice's per-minute allowance is shared with the other visuals scenarios.
+  const message = await ctx.slack.postMessage({
+    channel: "general",
+    user: "bob",
+    text: `<@${ctx.slack.bot.userId}> merge the docs fix once the review is in`,
+  });
+  ctx.markThread("defer-wake-reply-v2", "C0GENERAL0", message.ts);
+  await waitForEyes(ctx, message.ts);
+  const task = await findSlackTask(ctx, message.ts);
+  const taskId = String(task.id);
+  const leadId = String(task.agentId);
+  await claimTask(ctx, leadId, taskId);
+
+  const childId = await createChildTask(ctx, taskId, workerId, "Review the docs fix");
+  await claimTask(ctx, workerId, childId);
+  const mcp = await ctx.connectMcp(leadId);
+  try {
+    const result = await mcp.callTool("defer-task", {
+      taskId,
+      delayMs: 86_400_000,
+      wakeOn: { event: "settled", taskId: childId },
+      summary: "Asked Reviewer to review the docs fix.",
+      note: "Merge once the review is approved.",
+    });
+    expect(!result.isError, `defer-task failed: ${JSON.stringify(result)}`);
+    const card = await waitForOutcome(ctx, message.ts, `Waiting on ${workerName} · resumes by `);
+    await ctx.slack.waitForApiCall("chat.stopStream", {
+      timeoutMs: 30_000,
+      where: (call) => call.args.ts === card.ts,
+    });
+    await slackPace("waiting-on");
+
+    await finish(ctx, workerId, childId, { status: "completed", output: "Approved." });
+    const wake = await findTask(
+      ctx,
+      leadId,
+      (row) => row.parentTaskId === taskId && row.taskType === "deferred",
+      `wake-up task for ${taskId}`,
+    );
+    const wakeId = String(wake.id);
+    await claimTask(ctx, leadId, wakeId);
+    const answer = `Reviewer approved, so the docs fix is merged ${ctx.nonce}`;
+    expectToolOk(
+      await callTool(mcp, "slack-reply", { taskId: wakeId, message: answer }),
+      "slack-reply from the wake-up",
+    );
+    await finish(ctx, leadId, wakeId, { status: "completed", output: "Replied in the thread." });
+
+    const deleted = await ctx.slack.waitForApiCall("chat.delete", {
+      timeoutMs: 30_000,
+      where: (call) => call.args.ts === card.ts && call.args.channel === "C0GENERAL0",
+    });
+    expect(deleted.ok === true, "chat.delete of the answered deferral card failed");
+    await waitForReaction(ctx, message.ts, "white_check_mark");
+    await waitForTreeHeader(ctx, message.ts, "🧵 ✅ done");
+    // The tree is the one bot message that may say "completed".
+    const texts = () =>
+      threadMessagesOf(ctx, message.ts)
+        .map((entry) => String(entry.text ?? ""))
+        .filter((text) => !text.startsWith("🧵"));
+    // A late card would land within a few render ticks.
+    await pollUntil(
+      () => texts().some((text) => text.includes("completed")),
+      slackAbsenceWindowMs(ctx),
+    );
+    const final = texts();
+    expect(!final.some((text) => text.startsWith("⏳")), `A waiting card is left: ${final}`);
+    expect(
+      !final.some((text) => text.includes("completed") || text.includes("Replied in the thread.")),
+      `A completed card posted after the reply: ${JSON.stringify(final)}`,
+    );
+    expect(
+      final.filter((text) => text.includes(answer)).length === 1,
+      `The reply should be in the thread once: ${JSON.stringify(final)}`,
+    );
+  } finally {
+    await mcp.close();
+  }
+  await slackPace("resolved");
+}
+
+export const slackDeferWakeReplyV2: Scenario = {
+  name: "slack-defer-wake-reply-v2",
+  order: 137.5,
+  groups: ["visuals-v2"],
+  async run(ctx) {
+    await enableSlackRenderV2Only(ctx);
+    await deferThenReplyFromWake(ctx);
   },
 };
