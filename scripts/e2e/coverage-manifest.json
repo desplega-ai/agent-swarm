@@ -781,11 +781,12 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs", "authz-workflow-env"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, event subscriber isolation, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
+      "description": "Idempotency keys, trigger schema, event subscriber isolation, GitHub and Jira event triggers with match filters and redelivery dedupe, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
         "workflow-retry-deadline",
         "workflow-event-subscriber-isolation",
+        "workflow-github-jira-event-triggers",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
         "workflow-webhook-hmac-sha1",
