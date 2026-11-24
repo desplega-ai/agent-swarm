@@ -192,6 +192,10 @@ agent-swarm db-copy --from ./agent-swarm-db.sqlite --to postgres://swarm:pass@db
 agent-swarm db-copy --json report.json   # --from defaults to DATABASE_PATH, --to to DATABASE_URL
 ```
 
+The API Docker image runs the same command without starting the API:
+`docker run --rm -v <api data volume>:/app/data <api image> db-copy --to <postgres url>`
+(`--from` defaults to `/app/data/agent-swarm-db.sqlite` there).
+
 The cutover procedure is in the [Postgres guide](/docs/guides/postgres).
 
 ### worker-token

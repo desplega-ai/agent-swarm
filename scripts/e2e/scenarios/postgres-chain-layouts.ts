@@ -57,8 +57,30 @@ function replicateDockerfileCopies(root: string): { migrationsDir: string } {
   return { migrationsDir: migrationsDir as string };
 }
 
-async function run(command: string[], cwd: string, env: Record<string, string>) {
-  const child = Bun.spawn(command, { cwd, env, stdout: "pipe", stderr: "pipe" });
+// The entrypoints of the `bun build ... --compile` line in the Dockerfile, so this
+// scenario compiles the binary the image ships.
+function dockerfileCompileEntrypoints(): string[] {
+  const text = readFileSync(join(repoRoot, "Dockerfile"), "utf8").replace(/\\\n/g, " ");
+  const line = text.split("\n").find((l) => /^RUN\s+bun build\s.*--compile/.test(l));
+  expect(line !== undefined, "the Dockerfile has no `RUN bun build ... --compile` line");
+  const entrypoints = (line as string).split(/\s+/).filter((t) => /^\.\/src\/.+\.tsx?$/.test(t));
+  expect(entrypoints.length > 0, "the Dockerfile compile line names no ./src entrypoint");
+  return entrypoints;
+}
+
+async function run(
+  command: string[],
+  cwd: string,
+  env: Record<string, string>,
+  timeoutMs?: number,
+) {
+  const child = Bun.spawn(command, {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: timeoutMs,
+  });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -71,8 +93,8 @@ async function run(command: string[], cwd: string, env: Record<string, string>) 
 // - the npm package: `dist/` chunks beside the shipped `src/`, `db-copy` run through the
 //   Node bin from a directory outside the checkout;
 // - the API image: a compiled binary (it reads `/$bunfs/`) with the
-//   files the Dockerfile runtime stage COPYs laid out from the Dockerfile itself, booted on
-//   DATABASE_URL.
+//   files the Dockerfile runtime stage COPYs laid out from the Dockerfile itself. It runs
+//   `db-copy` without booting the API, then boots on DATABASE_URL.
 export const postgresChainLayouts: Scenario = {
   name: "postgres-chain-layouts",
   order: 9_050,
@@ -122,16 +144,9 @@ export const postgresChainLayouts: Scenario = {
       // API image layout.
       const image = join(work, "image");
       mkdirSync(image, { recursive: true });
+      const binary = join(image, "agent-swarm-api");
       const compiled = await run(
-        [
-          "bun",
-          "build",
-          "./src/http.ts",
-          "./src/scripts-runtime/executors/quickjs-worker.ts",
-          "./src/be/primitives/sheets/engine-worker.ts",
-          "--compile",
-          `--outfile=${join(image, "agent-swarm-api")}`,
-        ],
+        ["bun", "build", ...dockerfileCompileEntrypoints(), "--compile", `--outfile=${binary}`],
         repoRoot,
         { ...minimalEnv() },
       );
@@ -143,6 +158,50 @@ export const postgresChainLayouts: Scenario = {
       expect(
         existsSync(join(layout.migrationsDir, "postgres")),
         `the Dockerfile runtime stage copies no Postgres chain to $MIGRATIONS_DIR/postgres (${layout.migrationsDir})`,
+      );
+
+      // `db-copy` through the compiled API binary: the cutover runs in the API image.
+      // A binary that boots the API instead never exits: the timeout fails it.
+      const copyEnv = {
+        ...minimalEnv(),
+        HOME: work,
+        DESPLEGA_TELEMETRY_ENV: "test",
+        MIGRATIONS_DIR: layout.migrationsDir,
+        DATABASE_PATH: join(image, "unused.sqlite"),
+        PORT: String(await freePort()),
+      };
+      const help = await run([binary, "db-copy", "--help"], image, copyEnv, 60_000);
+      expect(
+        help.exitCode === 0 && help.stdout.includes("db-copy --from <sqlite file>"),
+        `agent-swarm-api db-copy --help printed no db-copy usage (exit ${help.exitCode}; a booted API stops only at the timeout): ${help.stderr.slice(-800)}${help.stdout.slice(-800)}`,
+      );
+      const noTarget = await run(
+        [binary, "db-copy", "--from", source.dbPath],
+        image,
+        copyEnv,
+        60_000,
+      );
+      expect(
+        noTarget.exitCode === 2 && noTarget.stderr.includes("db-copy needs the target"),
+        `agent-swarm-api db-copy without a target exited ${noTarget.exitCode}, not 2: ${noTarget.stderr.slice(-800)}${noTarget.stdout.slice(-800)}`,
+      );
+      const binaryTarget = await createPostgresDatabase(`chain-bin-${ctx.nonce}`);
+      databases.push(binaryTarget);
+      const binaryCopy = await run(
+        [binary, "db-copy", "--from", source.dbPath, "--to", binaryTarget],
+        image,
+        copyEnv,
+        300_000,
+      );
+      expect(
+        binaryCopy.exitCode === 0 &&
+          binaryCopy.stdout.includes("every count and checksum equal") &&
+          !binaryCopy.stdout.includes("MCP HTTP server running"),
+        `agent-swarm-api db-copy exited ${binaryCopy.exitCode}: ${binaryCopy.stderr.slice(-1500)}${binaryCopy.stdout.slice(-800)}`,
+      );
+      expect(
+        !existsSync(copyEnv.DATABASE_PATH),
+        "agent-swarm-api db-copy opened DATABASE_PATH: it booted the API",
       );
       const imageTarget = await createPostgresDatabase(`chain-img-${ctx.nonce}`);
       databases.push(imageTarget);
