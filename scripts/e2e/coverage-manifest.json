@@ -450,6 +450,10 @@
       "description": "store, search (fts/vec), get with links, edit with versions, rate with the explicit-self guard, delete by ACL",
       "scenarios": ["knowledge-memory"]
     },
+    "memory-search-demotion": {
+      "description": "search and list with a query keep returning memories when one has a net-negative rating (beta > alpha), on every engine",
+      "scenarios": ["memory-demotion-search"]
+    },
     "mention-wakeup": {
       "description": "post-message with a mention produces an unread_mentions poll trigger",
       "scenarios": ["core-messaging"]

@@ -29601,6 +29601,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Memory search failed (never sent as an empty result list)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

@@ -189,6 +189,15 @@ veto demotion. Rating events are
 commutative (Beta updates compose by addition) so racing applies converge
 without idempotency checks.
 
+The evidence lookup runs on the engine's memory search reader
+(`getStorage().memoryIndexes.searchReader`), like every other search read. It
+is an enrichment. If it fails, search logs one
+`[memory-search] demotion evidence lookup failed` line and ranks the
+candidates without evidence, so none of them is demoted.
+
+`POST /api/memory/search` and `POST /api/memory/list` answer HTTP 500 when the
+search itself fails. They never answer an empty 200 for a failed search.
+
 ### New endpoints
 
 | Endpoint | Purpose |
@@ -305,6 +314,8 @@ fall back to bounded text. The query uses a conservative 8191 UTF-8 byte cap,
 preserving Unicode code points,
 to stay below the embedding input token limit without a tokenizer dependency.
 An empty content query returns no results without recording retrievals.
+A failed search answers 500. The runner then starts the task with no recalled
+memories, as before.
 
 ## Review tasks skip review completions
 
