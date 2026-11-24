@@ -879,10 +879,13 @@ export const workflowSchedules: Scenario = {
       expect(toolDeletedById.text.includes(tool.once), "delete-schedule by id");
       schedules.splice(schedules.indexOf(toolOnceId), 1);
     } finally {
-      await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
-      // Disable what is left so a stray tick can never fire it.
-      for (const id of schedules)
-        await ctx.api("PATCH", `/api/schedules/${id}`, { body: { enabled: false } });
+      try {
+        // Disable what is left so a stray tick can never fire it.
+        for (const id of schedules)
+          await ctx.api("PATCH", `/api/schedules/${id}`, { body: { enabled: false } });
+      } finally {
+        await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
+      }
     }
   },
 };

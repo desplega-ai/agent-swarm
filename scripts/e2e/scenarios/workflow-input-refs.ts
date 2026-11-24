@@ -295,9 +295,19 @@ export const workflowInputRefs: Scenario = {
         "worker HTTP definition update over a param-borne secret",
       );
     } finally {
-      await Promise.all([connection?.close(), workerConnection?.close(), retireAgent(ctx, leadId)]);
-      for (const id of workflowIds) await deleteWorkflowQuietly(ctx, id);
-      await dropSecret();
+      try {
+        try {
+          for (const id of workflowIds) await deleteWorkflowQuietly(ctx, id);
+        } finally {
+          await dropSecret();
+        }
+      } finally {
+        await Promise.all([
+          connection?.close(),
+          workerConnection?.close(),
+          retireAgent(ctx, leadId),
+        ]);
+      }
     }
   },
 };

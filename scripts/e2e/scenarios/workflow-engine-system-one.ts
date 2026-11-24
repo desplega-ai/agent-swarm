@@ -649,10 +649,13 @@ export const workflowEngineSystemOne: Scenario = {
         "the failed token check sent nothing to a SystemOne host",
       );
     } finally {
-      ctx.llm.setSystemOneResponder(undefined);
-      await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
-      for (const cleanup of cleanups.reverse()) await cleanup();
-      for (const id of workflows) await ctx.api("DELETE", `/api/workflows/${id}`);
+      try {
+        ctx.llm.setSystemOneResponder(undefined);
+        for (const cleanup of cleanups.reverse()) await cleanup();
+        for (const id of workflows) await ctx.api("DELETE", `/api/workflows/${id}`);
+      } finally {
+        await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
+      }
     }
   },
 };

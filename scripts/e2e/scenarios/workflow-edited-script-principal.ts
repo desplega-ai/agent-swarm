@@ -195,7 +195,8 @@ export const workflowEditedScriptPrincipal: Scenario = {
         "lead-edited worker workflow did not run as its worker creator",
       );
 
-      // A trusted parent's creator identity passes to its creator-less child.
+      // The operator starts the parent without an agent identity. The child
+      // inherits the parent's creator, not the identity that started the run.
       const child = await createWorkflow(ctx, "wf-edit-principal-child", {
         nodes: [{ id: "probe", type: "swarm-script", config: probe(leadScript, "a") }],
       });
@@ -208,8 +209,15 @@ export const workflowEditedScriptPrincipal: Scenario = {
         leadId,
       );
       workflowIds.push(parent);
-      run = await triggerWorkflow(ctx, parent, {}, { agentId: leadId });
+      run = await triggerWorkflow(ctx, parent);
       detail = await expectRunStatus(ctx, run.runId, "completed");
+      const parentRun = ctx.db.get<{ triggeredByAgentId: string | null }>(
+        sql`SELECT "triggeredByAgentId" FROM workflow_runs WHERE id = ${run.runId}`,
+      );
+      expect(
+        parentRun?.triggeredByAgentId === null,
+        "the operator did not name a triggering agent",
+      );
       const childOutputs = asRecord(outputOf(detail, "sub").outputs);
       expect(
         asRecord(asRecord(childOutputs.probe).result).ran === leadScript,
