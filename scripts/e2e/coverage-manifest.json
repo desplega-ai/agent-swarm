@@ -240,6 +240,7 @@
         "stress-poll-claim",
         "stress-task-finish",
         "stress-task-create",
+        "stress-token-touch",
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
