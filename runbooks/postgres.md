@@ -120,7 +120,15 @@ In the window:
 
 Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the untouched SQLite file. Writes made on Postgres after the cutover are not copied back.
 
-What the copy does, step by step: opens the SQLite file read-only; refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table.
+What the copy does, step by step: opens the SQLite file read-only; skips the two tables that Litestream adds to a replicated database (`_litestream_seq`, `_litestream_lock`); refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table; after COMMIT, runs `VACUUM (ANALYZE)` so the API starts with planner statistics (a `WARNING` line says so when this step fails: run it by hand before you start the API).
+
+Refused rows: one run lists every row the target cannot store. The copy first reads the orphan rows from SQLite (`PRAGMA foreign_key_check`: a row whose parent row is gone), then checks every value. After the first refused row it writes no more rows, so a refused run takes minutes, not the time of a full copy. Each line names the table, the column and the rowid. Repair each row in the SQLite file (in a copy of the file for the rehearsal), then copy again:
+
+- An orphan row: apply the action of its foreign key. Delete the row for `ON DELETE CASCADE`. Set the column to NULL for `ON DELETE SET NULL`, and for a key with no action when the column allows NULL.
+- A NUL byte in text: rewrite the value from a program. SQLite `replace()` does not remove a NUL byte, because it reads a pattern that starts with NUL as empty and changes nothing.
+- JSON with an unpaired surrogate escape (text that was cut in the middle of an emoji, for example `\ud83d` with no `\udXXX` after it): replace that escape. JavaScript reads such JSON, Postgres `jsonb` refuses it.
+
+Memory and batches: the copy process holds one batch of rows at a time (at most 500 rows or 16 MB of stored text, in both directions), and its checksums need no list of rows.
 
 ## Known differences
 
@@ -164,6 +172,8 @@ These assertion groups stay, with the reason:
 | `db-copy: the target database already holds tables` | Copy into a new, empty database. The copy runs the migrations itself. A migrated database (an API started on it, a restored dump) may hold edited seed rows (a renamed channel, a retitled widget) that the copy would replace, so it is refused. |
 | `db-copy: the target database is at migration N, this build at M` | Same cause: the target already holds tables. Copy into a new, empty database. |
 | `db-copy: the source embeddings have N dimensions` | Set `EMBEDDING_DIMENSIONS=N` (the API's value) and copy again. Nothing was written. |
+| `[db-copy] N orphan row(s) in the source: checking values only` | The SQLite file holds rows whose parent row is gone. The run lists each one and writes nothing. Repair them (cutover section, "Refused rows"), then copy again. |
+| `<table>: checked, not written` | A row before this table was refused. The copy still checks the table, so that one run lists every refused row. |
 | `db-copy: --json ... is the SQLite source` | Write the report to another path. |
 | `[db-copy] ATTENTION metrics ...` | Edit that dashboard query into Postgres SQL (`$n` placeholders, quoted camelCase columns) after the cutover. |
 | `db-copy: cannot store <table>.<column> (rowid N): ...` | Fix that value in the SQLite file, then copy again. Nothing was written. |
