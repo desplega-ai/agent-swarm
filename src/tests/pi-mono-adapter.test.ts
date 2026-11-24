@@ -20,6 +20,7 @@ import {
   extractPiAssistantText,
   extractPiThinkingBlocks,
   listPiOpencodeGoModelIds,
+  listPiPickerModelIds,
   PiMonoAdapter,
   resolveModel,
   type SessionModelsJson,
@@ -33,6 +34,20 @@ describe("PiMonoAdapter", () => {
     const adapter = new PiMonoAdapter();
     expect(adapter.name).toBe("pi");
   });
+});
+
+test("the Pi picker lists bundled models without a network refresh in offline mode", async () => {
+  const refresh = spyOn(piCodingAgent.ModelRuntime.prototype, "refresh").mockResolvedValue({
+    aborted: false,
+    errors: new Map(),
+  });
+  try {
+    const ids = await listPiPickerModelIds({ PI_OFFLINE: "" });
+    expect(ids).toContain("openrouter/google/gemini-3-flash-preview");
+    expect(refresh.mock.calls.some(([options]) => options?.allowNetwork)).toBe(false);
+  } finally {
+    refresh.mockRestore();
+  }
 });
 
 // ─── Phase 4 (reasoning-effort plan): createSession sessionOptions wiring ────
@@ -97,6 +112,25 @@ describe("PiMonoAdapter.createSession — reasoning_effort", () => {
           makeReasoningConfig({ model: "openrouter/test/missing" }),
         ),
       ).rejects.toThrow('Pi model "openrouter/test/missing" could not be resolved');
+      expect(createAgentSessionSpy).not.toHaveBeenCalled();
+    } finally {
+      refresh.mockRestore();
+    }
+  });
+
+  test("an unresolved explicit model skips network refresh when the session requests offline mode", async () => {
+    spyOnCreateAgentSession();
+    const refresh = spyOn(piCodingAgent.ModelRuntime.prototype, "refresh").mockResolvedValue({
+      aborted: false,
+      errors: new Map(),
+    });
+    try {
+      await expect(
+        new PiMonoAdapter().createSession(
+          makeReasoningConfig({ model: "openrouter/test/missing", env: { PI_OFFLINE: "" } }),
+        ),
+      ).rejects.toThrow('Pi model "openrouter/test/missing" could not be resolved');
+      expect(refresh.mock.calls.some(([options]) => options?.allowNetwork)).toBe(false);
       expect(createAgentSessionSpy).not.toHaveBeenCalled();
     } finally {
       refresh.mockRestore();

@@ -708,7 +708,7 @@ export async function listPiPickerModelIds(
       "openai",
       ...openAICompatibleProviders().map((provider) => provider.id),
     ];
-    if (process.env.PI_OFFLINE === undefined) {
+    if (piModelNetworkAllowed(env)) {
       await refreshPiModels(runtime, providers);
     }
     return providers.flatMap((provider) =>
@@ -717,6 +717,10 @@ export async function listPiPickerModelIds(
   } finally {
     await sessionModels.dispose();
   }
+}
+
+function piModelNetworkAllowed(env: Record<string, string | undefined>): boolean {
+  return env.PI_OFFLINE === undefined && process.env.PI_OFFLINE === undefined;
 }
 
 async function refreshPiModels(runtime: ModelRuntime, providers: string[]): Promise<void> {
@@ -2274,7 +2278,7 @@ export class PiMonoAdapter implements ProviderAdapter {
     );
     const requestedModel = config.model.trim();
     let model = resolveModel(requestedModel, sessionEnv, modelRuntime);
-    if (requestedModel && !model && process.env.PI_OFFLINE === undefined) {
+    if (requestedModel && !model && piModelNetworkAllowed(sessionEnv)) {
       // Refresh only on a miss, after installing the per-task runtime keys.
       const providers = requestedModel.includes("/")
         ? [requestedModel.slice(0, requestedModel.indexOf("/"))]

@@ -263,7 +263,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [agent.credStatus?.bedrock],
   );
   const liveOpencodeGoModels = agent.credStatus?.opencodeGo?.models ?? null;
-  const piModelIds = agent.harnessProvider === "pi" ? (agent.credStatus?.piModelIds ?? null) : null;
+  const piModelIds = agent.credStatus?.piModelIds ?? null;
   const catalogQuery = useModelsCatalog();
   const snapshotLoaded = useModelsSnapshot();
   const liveCatalog = catalogQuery.data?.providers ?? null;
