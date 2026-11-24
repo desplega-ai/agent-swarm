@@ -47,3 +47,105 @@ describe("PageFrame validation", () => {
     expect(issues.some((path) => path.includes("device"))).toBe(true);
   });
 });
+
+/**
+ * The `appContext` bridge props (`actions`, `expose`) inside a reusable element:
+ * a pure element runs no actions, and both lists stay literal so every name and
+ * path is checked here, not resolved at runtime past the script-only rule.
+ */
+describe("PageFrame appContext bridge validation", () => {
+  const SCRIPT_ID = "00000000-0000-0000-0000-000000000000";
+
+  function bridgeDefinition(
+    page: Record<string, unknown>,
+    element?: { mode: "pure" | "bound"; props: Record<string, unknown> },
+  ) {
+    return {
+      models: { note: { columns: { title: { kind: "string" } } } },
+      queries: { allNotes: { model: "note" } },
+      actions: {
+        run: { kind: "script", scriptId: SCRIPT_ID },
+        work: { kind: "task", prompt: "do it" },
+      },
+      ...(element
+        ? {
+            elements: {
+              frame: {
+                mode: element.mode,
+                export: true,
+                root: "f",
+                elements: {
+                  f: { type: "PageFrame", props: { pageId: PAGE_ID, ...element.props } },
+                },
+              },
+            },
+          }
+        : {}),
+      pages: {
+        main: {
+          title: "Main",
+          params: { names: { kind: "string" } },
+          root: "f",
+          elements: { f: { type: "PageFrame", props: { pageId: PAGE_ID, ...page } } },
+        },
+      },
+      defaultPage: "main",
+    };
+  }
+
+  async function bridgeIssues(def: unknown) {
+    const parsed = await parseAppDefinition(def);
+    return parsed.success
+      ? []
+      : parsed.issues
+          .filter((entry) => !entry.path.startsWith("actions."))
+          .map((entry) => entry.path);
+  }
+
+  test("a pure element's frame cannot run actions", async () => {
+    expect(
+      await bridgeIssues(bridgeDefinition({}, { mode: "pure", props: { actions: ["run"] } })),
+    ).toEqual(["elements.frame.elements.f.props.actions"]);
+  });
+
+  test("a pure element's frame cannot expose app state outside its props", async () => {
+    const issues = await bridgeIssues(
+      bridgeDefinition({}, { mode: "pure", props: { expose: ["/queries/allNotes/data"] } }),
+    );
+    expect(issues).toEqual(["elements.frame.elements.f.props.expose.0"]);
+  });
+
+  test("a bound exported element's frame takes script actions and query reads, not task actions", async () => {
+    expect(
+      await bridgeIssues(
+        bridgeDefinition(
+          {},
+          { mode: "bound", props: { actions: ["run"], expose: ["/queries/allNotes/data"] } },
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      await bridgeIssues(bridgeDefinition({}, { mode: "bound", props: { actions: ["work"] } })),
+    ).toEqual(["elements.frame.elements.f.props.actions.0"]);
+  });
+
+  test("actions and expose given as an expression are rejected", async () => {
+    const names = { $state: "/route/params/names" };
+    expect(await bridgeIssues(bridgeDefinition({ actions: names }))).toEqual([
+      "pages.main.elements.f.props.actions",
+    ]);
+    expect(await bridgeIssues(bridgeDefinition({ expose: names }))).toEqual([
+      "pages.main.elements.f.props.expose",
+    ]);
+    // A bound element also flags the `/route` read itself; the literal-list rule is the one asserted.
+    expect(
+      await bridgeIssues(bridgeDefinition({}, { mode: "bound", props: { actions: names } })),
+    ).toContain("elements.frame.elements.f.props.actions");
+  });
+
+  test("an inherited Object property is not an app action", async () => {
+    expect(await bridgeIssues(bridgeDefinition({ actions: ["constructor"] }))).toEqual([
+      "pages.main.elements.f.props.actions.0",
+    ]);
+  });
+});

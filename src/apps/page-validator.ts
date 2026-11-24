@@ -1800,18 +1800,45 @@ function agentFsPropIssues(
  * The `appContext` allowlists on a PageFrame: `actions` must be declared script
  * actions (a task action would create tasks from page code), `on.message` needs
  * an `id` to root `/ui/<id>/message`. `expose` paths are checked as state reads
- * by the caller as state reads.
+ * by the caller as state reads. Both lists must be literal string arrays: an
+ * expression resolves at runtime past every check here. A pure element's frame
+ * gets no `actions`, the same rule as its `on` steps.
  */
 function pageFrameBridgeIssues(
   definition: AppDefinition,
   element: Record<string, unknown>,
   elementPath: string,
+  elementMode?: "pure" | "bound",
 ): AppValidationIssue[] {
   const issues: AppValidationIssue[] = [];
   const props = isPlainObject(element.props) ? element.props : {};
-  if (Array.isArray(props.actions)) {
+  for (const key of ["actions", "expose"] as const) {
+    const list = props[key];
+    if (!isPlainObject(list)) continue;
+    issues.push(
+      issue(`${elementPath}.props.${key}`, "must be a literal array of strings, not an expression"),
+    );
+  }
+  if (Array.isArray(props.expose)) {
+    for (const [index, path] of props.expose.entries()) {
+      if (typeof path !== "string") {
+        issues.push(issue(`${elementPath}.props.expose.${index}`, "must be a literal state path"));
+      }
+    }
+  }
+  if (elementMode === "pure" && Array.isArray(props.actions) && props.actions.length > 0) {
+    issues.push(
+      issue(
+        `${elementPath}.props.actions`,
+        "pure elements cannot invoke actions — use a bound element",
+      ),
+    );
+  } else if (Array.isArray(props.actions)) {
     for (const [index, name] of props.actions.entries()) {
-      const action = typeof name === "string" ? definition.actions?.[name] : undefined;
+      const action =
+        typeof name === "string" && definition.actions && Object.hasOwn(definition.actions, name)
+          ? definition.actions[name]
+          : undefined;
       if (!action) {
         issues.push(
           issue(`${elementPath}.props.actions.${index}`, `unknown app action "${String(name)}"`),
@@ -2106,7 +2133,9 @@ export function validatePage(
         issues.push(issue(`${elementPath}.props.pageId`, "must be a page id (32 hex characters)"));
       }
       if (type === "PageFrame") {
-        issues.push(...pageFrameBridgeIssues(definition, rawElement, elementPath));
+        issues.push(
+          ...pageFrameBridgeIssues(definition, rawElement, elementPath, options?.elementMode),
+        );
         const expose = isPlainObject(rawElement.props) ? rawElement.props.expose : undefined;
         if (Array.isArray(expose)) {
           for (const [index, statePath] of expose.entries()) {
