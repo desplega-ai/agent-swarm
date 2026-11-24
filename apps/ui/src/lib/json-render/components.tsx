@@ -2862,12 +2862,30 @@ function FormComponent({ props }: { props: FormProps }) {
 
   const initialValues = props.initialValues as Record<string, unknown> | undefined;
   const initialSignature = initialValues ? JSON.stringify(initialValues) : "";
+  // The value each field was last seeded with, per form path. A field whose
+  // current value differs from it holds an unsaved edit.
+  const seededRef = useRef<{ path: string; values: Record<string, unknown> }>({
+    path: basePath,
+    values: {},
+  });
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed only when the prefill changes by value, not on every poll re-render
   useEffect(() => {
     if (!initialValues) return;
+    if (seededRef.current.path !== basePath) seededRef.current = { path: basePath, values: {} };
+    const seeded = seededRef.current.values;
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     for (const field of fields) {
-      if (Object.hasOwn(initialValues, field.name)) {
-        set(`${basePath}/${field.name}`, initialValues[field.name]);
+      if (!Object.hasOwn(initialValues, field.name)) continue;
+      const next = initialValues[field.name];
+      const path = `${basePath}/${field.name}`;
+      const wasSeeded = Object.hasOwn(seeded, field.name);
+      // Re-seed an untouched field, or one whose own prefill changed (the form
+      // now shows another row). A refresh that changes only other fields keeps
+      // the edit.
+      const untouched = !wasSeeded || same(get(path), seeded[field.name]);
+      if (untouched || !same(next, seeded[field.name])) {
+        set(path, next);
+        seeded[field.name] = next;
       }
     }
   }, [initialSignature, basePath]);

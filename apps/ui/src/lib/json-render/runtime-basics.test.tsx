@@ -82,6 +82,46 @@ test("Form.initialValues prefills its fields and re-seeds when the bound row cha
   await act(async () => root.unmount());
 });
 
+test("Form.initialValues: a refresh of another field keeps an unsaved edit", async () => {
+  const Form = swarmComponents.Form as Renderable;
+  const store = createStateStore({});
+  const root = mountRoot();
+  const client = new QueryClient();
+  const fields = [{ name: "name" }, { name: "threshold", kind: "number" }];
+  const render = (initialValues: Record<string, unknown>) =>
+    act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <StateProvider store={store}>
+            <ActionProvider handlers={{}}>
+              <Form props={{ id: "edit", fields, initialValues, onSubmit: [] }} />
+            </ActionProvider>
+          </StateProvider>
+        </QueryClientProvider>,
+      ),
+    );
+  try {
+    await render({ name: "original", threshold: 500 });
+    await act(async () => store.set("/forms/edit/name", "my unsaved edit"));
+    // The same row polls back with a new threshold: the edit stays, the
+    // untouched threshold follows the row.
+    await render({ name: "original", threshold: 501 });
+    expect(store.get("/forms/edit/name")).toBe("my unsaved edit");
+    expect(store.get("/forms/edit/threshold")).toBe(501);
+    // An edited field that the next refresh leaves alone stays edited too.
+    await act(async () => store.set("/forms/edit/threshold", 900));
+    await render({ name: "original", threshold: 501, extra: 1 });
+    expect(store.get("/forms/edit/threshold")).toBe(900);
+    expect(store.get("/forms/edit/name")).toBe("my unsaved edit");
+    // Another row replaces both edits.
+    await render({ name: "error rate", threshold: 5 });
+    expect(store.get("/forms/edit/name")).toBe("error rate");
+    expect(store.get("/forms/edit/threshold")).toBe(5);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 test("Select search ranks token matches first and keeps fuzzy matches", () => {
   expect(tokenFilter("anything", "")).toBe(1);
   const token = tokenFilter("task timeline", "time");
