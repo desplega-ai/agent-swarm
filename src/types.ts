@@ -1915,6 +1915,8 @@ export const AgentCredStatusSchema = z
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
     /** Pi-mono only: the `opencode-go` model ids the worker's pi-ai resolves. */
     opencodeGo: AgentOpencodeGoStatusSchema.nullable().default(null),
+    /** Provider-qualified Pi models available to the worker's model picker. */
+    piModelIds: z.array(z.string()).optional(),
     /** ACP options advertised by the most recently created session. */
     acp: AgentAcpStatusSchema.nullable().default(null),
   })
@@ -3226,6 +3228,56 @@ export const WebhookDeliveryFilterSchema = z
   );
 export type WebhookDeliveryFilter = z.infer<typeof WebhookDeliveryFilterSchema>;
 
+/** Bus events that start workflows with a matching `event` trigger. */
+export const WORKFLOW_EVENT_TRIGGER_NAMES = [
+  "slack.message",
+  "azure-devops.work_item.assigned",
+  "azure-devops.work_item.commented",
+  "github.pull_request.opened",
+  "github.pull_request.ready_for_review",
+  "github.pull_request.synchronize",
+  "github.pull_request.closed",
+  "github.issue.opened",
+  "github.issue.assigned",
+  "github.issue.labeled",
+  "github.issue_comment.created",
+  "github.check_suite.completed",
+  "jira.issue.assigned",
+  "jira.issue.commented",
+  "jira.issue.transitioned",
+] as const;
+export type WorkflowEventTriggerName = (typeof WORKFLOW_EVENT_TRIGGER_NAMES)[number];
+
+const matchValue = (what: string) =>
+  z.string().trim().min(1).describe(`${what} Compared case-insensitively.`);
+
+export const EventTriggerMatchSchema = z
+  .object({
+    repo: matchValue("GitHub repository `owner/name` (payload `repo`)."),
+    project: matchValue("Jira project key (payload `project`)."),
+    label: matchValue(
+      "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`).",
+    ),
+    assignee: matchValue(
+      "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee.",
+    ),
+    status: matchValue("Jira status the issue moved to (payload `status`)."),
+  })
+  .partial()
+  .strict()
+  .describe(
+    "Start a run only when every given field matches the event payload. A field the payload lacks never matches.",
+  );
+export type EventTriggerMatch = z.infer<typeof EventTriggerMatchSchema>;
+export type EventTriggerMatchField = keyof EventTriggerMatch;
+
+/** Match fields an event trigger accepts, by event family. */
+export function eventTriggerMatchFields(eventName: string): EventTriggerMatchField[] {
+  if (eventName.startsWith("github.")) return ["repo", "label", "assignee"];
+  if (eventName.startsWith("jira.")) return ["project", "label", "assignee", "status"];
+  return [];
+}
+
 export const TriggerConfigSchema = z
   .discriminatedUnion("type", [
     z.object({
@@ -3266,14 +3318,25 @@ export const TriggerConfigSchema = z
     }),
     z.object({
       type: z.literal("event"),
-      eventName: z.enum([
-        "slack.message",
-        "azure-devops.work_item.assigned",
-        "azure-devops.work_item.commented",
-      ]),
+      eventName: z.enum(WORKFLOW_EVENT_TRIGGER_NAMES),
+      match: EventTriggerMatchSchema.optional(),
     }),
   ])
   .superRefine((trigger, ctx) => {
+    if (trigger.type === "event" && trigger.match) {
+      const allowed = eventTriggerMatchFields(trigger.eventName);
+      for (const field of Object.keys(trigger.match)) {
+        if (!allowed.includes(field as EventTriggerMatchField)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: allowed.length
+              ? `match.${field} is not supported on ${trigger.eventName}; use ${allowed.join(", ")}`
+              : `${trigger.eventName} takes no match fields`,
+            path: ["match", field],
+          });
+        }
+      }
+    }
     if (trigger.type === "webhook" && trigger.verification && !trigger.hmacSecret) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

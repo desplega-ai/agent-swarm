@@ -35,6 +35,6 @@ fi
 echo "[pre-push-lint] $tool: $(wc -l <<<"$files" | tr -d ' ') changed file(s) (PRE_PUSH_FULL=1 lints the whole scope)"
 case "$tool" in
   biome) tr '\n' '\0' <<<"$files" | xargs -0 bunx biome check --no-errors-on-unmatched --files-ignore-unknown=true ;;
-  oxlint) tr '\n' '\0' <<<"$files" | xargs -0 bun --bun oxlint ;;
+  oxlint) tr '\n' '\0' <<<"$files" | xargs -0 bun --bun oxlint --no-error-on-unmatched-pattern ;;
   *) echo "unknown linter: $tool" >&2 && exit 2 ;;
 esac

@@ -108,7 +108,7 @@ The following events are **suppressed by default** to prevent cascade behavior w
 - **PR synchronize** (new commits pushed) — No automatic task on push
 - **CI check failures** (check_run, check_suite, workflow_run) — No automatic task from CI events
 
-These events still emit to the internal `workflowEventBus` for workflow triggers, but do not create agent tasks.
+These events still emit to the internal `workflowEventBus`, but do not create agent tasks. To start a workflow on a GitHub event (`github.pull_request.opened`, `github.check_suite.completed`, ...), use an `event` trigger with `match` fields: see [Event triggers](/docs/concepts/workflows#event-triggers).
 
 ## Bot Reactions
 

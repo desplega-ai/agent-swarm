@@ -532,6 +532,7 @@ export {
   listPlaintextOAuthSecrets,
   listPlaintextSecretConfigs,
   MEMORY_ID_BATCH_SQL,
+  normalizeScheduleNextRunTimes,
   quoteSqlIdentifier,
   type RetentionSweepStatements,
   readAssetKeyAuditDataSync,
@@ -563,6 +564,8 @@ export async function copySqliteFileToPostgres(options: {
   sqlitePath: string;
   postgresUrl: string;
   embeddingDimensions: number;
+  /** Repair what Postgres cannot store instead of refusing it (`db-copy --repair`). */
+  repair?: boolean;
   log?: (line: string) => void;
 }): Promise<CopyReport> {
   const source = openSqliteCopySource(options.sqlitePath);
@@ -571,6 +574,7 @@ export async function copySqliteFileToPostgres(options: {
       url: options.postgresUrl,
       migrationsDir: postgresMigrationsDir(),
       embeddingDimensions: options.embeddingDimensions,
+      repair: options.repair,
       log: options.log,
     });
   } finally {

@@ -7,6 +7,7 @@
 // Postgres brief), which both engines accept.
 import { constants, Database, type SQLQueryBindings } from "bun:sqlite";
 import { resolve } from "node:path";
+import { SkipError } from "./report";
 
 export type Engine = "sqlite" | "postgres";
 
@@ -263,7 +264,9 @@ export async function dropPostgresDatabase(databaseUrl: string): Promise<void> {
 function adminUrl(): string {
   const url = process.env.E2E_POSTGRES_URL;
   if (!url)
-    throw new Error("--engine postgres needs E2E_POSTGRES_URL (a role that may CREATE DATABASE)");
+    throw new SkipError(
+      "--engine postgres needs E2E_POSTGRES_URL (a role that may CREATE DATABASE)",
+    );
   if (!/^postgres(ql)?:\/\//.test(url))
     throw new Error("E2E_POSTGRES_URL must start with postgres:// or postgresql://");
   return url;
@@ -381,6 +384,31 @@ export async function loadHistoricalTaskFixture(
     const now = new Date().toISOString();
     for (const task of tasks) insert.run(task.id, agentId, task.status, task.source, now, now);
     return { ...fixture, name: "historical-tasks", file: db.serialize() };
+  } finally {
+    db.close();
+  }
+}
+
+export type RefusedRowTasks = { orphan: string; nul: string; surrogate: string };
+
+/**
+ * Leaves a stopped SQLite file as a long-lived deployment does (scenario
+ * data-copy-refused-rows): the two tables Litestream adds to a replicated database, a task
+ * whose requesting user is gone, a NUL byte in a task output, and tags that hold half of an
+ * emoji escape. The API never writes these; a file gets them over months of use.
+ */
+export function plantRefusedRows(path: string, tasks: RefusedRowTasks): void {
+  const db = new Database(path);
+  try {
+    db.run("PRAGMA foreign_keys = OFF");
+    db.run("CREATE TABLE _litestream_seq (id INTEGER PRIMARY KEY, seq INTEGER)");
+    db.run("CREATE TABLE _litestream_lock (id INTEGER)");
+    db.run("INSERT INTO _litestream_seq (id, seq) VALUES (1, 42)");
+    db.run(`UPDATE agent_tasks SET "requestedByUserId" = 'user-that-was-deleted' WHERE id = ?`, [
+      tasks.orphan,
+    ]);
+    db.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["a\u0000b", tasks.nul]);
+    db.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", ['["cut \\ud83d"]', tasks.surrogate]);
   } finally {
     db.close();
   }

@@ -84,6 +84,8 @@ export type ScenarioContext = {
   startAgent: (options?: SimulatedAgentOptions) => Promise<SimulatedAgent>;
   /** Count a request made outside `ctx.api` (raw fetch, WebSocket, SSE) toward coverage. */
   recordHttpCall: typeof recordHttpCall;
+  /** Read a manifest state surface while the scenario holds a transient state. */
+  captureStateSurface: (name: string) => void;
   /** The environment the SUT booted with (ports for stand-ins, feature flags). Read-only. */
   sutEnv: Readonly<Record<string, string>>;
   /** The SUT's stdout/stderr so far (current process only). Compare lengths to read what a step added. */
@@ -116,14 +118,28 @@ export type ScenarioContext = {
    * The data copy of decision D11 (check 20), whatever engine the run uses: boot a new
    * source API on a SQLite file. `copy()` stops it, runs `agent-swarm db-copy` into a new
    * Postgres database (needs E2E_POSTGRES_URL) and boots a target API on the copy with
-   * the source's encryption key. The runner stops both otherwise.
+   * the source's encryption key. The runner stops both otherwise. `env` adds variables to
+   * both APIs (for example `ctx.llm.env`, so memories get embeddings).
    */
-  startDataCopy: () => Promise<DataCopyPair>;
+  startDataCopy: (options?: { env?: Record<string, string> }) => Promise<DataCopyPair>;
   nonce: string;
 };
 export type DataCopyPair = {
   source: ApiClient;
-  copy: () => Promise<{
+  /**
+   * `beforeCopy` runs after the source API stopped and before the copy that the target
+   * boots on: a scenario can change the SQLite file as a deployment would leave it, and
+   * run copies that must be refused (`runCopy`) into the same empty target database.
+   * `args` are more `db-copy` options for the copy that the target boots on.
+   */
+  copy: (step?: {
+    args?: string[];
+    beforeCopy?: (at: {
+      sourcePath: string;
+      targetUrl: string;
+      runCopy: () => Promise<CliResult>;
+    }) => Promise<void>;
+  }) => Promise<{
     cli: CliResult;
     target: ApiClient;
     /** The same copy again into the target database, while the target API holds it. */
@@ -131,6 +147,16 @@ export type DataCopyPair = {
     /** The source SQLite file (its API is stopped) and the target database URL. */
     sourcePath: string;
     targetUrl: string;
+    /** Read-only handles on the source file and on the copy. */
+    sourceDb: ReadOnlyDb;
+    targetDb: ReadOnlyDb;
+    /**
+     * Stop the target API and start it again on the copy, as a later start or a later
+     * release does. `env` applies to that process only.
+     */
+    restartTarget: (env?: Record<string, string>) => Promise<void>;
+    /** The output of the target API process that runs now (each start has its own). */
+    targetLog: () => Promise<string>;
   }>;
   stop: () => Promise<void>;
 };
@@ -291,10 +317,7 @@ function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
   }
 }
 
-async function bootStack(
-  options: Options,
-  journalPath?: string,
-): Promise<{ stack: Stack; sut: Sut; db: ReadOnlyDb; ctx: BaseContext }> {
+async function bootStack(options: Options, manifest: CoverageManifest, journalPath?: string) {
   const stack: Stack = {};
   stacks.add(stack);
   try {
@@ -326,6 +349,7 @@ async function bootStack(
     const connectMcp = createMcpConnector(sut.baseUrl, sut.apiKey);
     const nonce = randomBytes(6).toString("hex");
     await probeToolUniverse(api, connectMcp, nonce);
+    const captured = new Map<string, Set<string>>();
     const ctx: BaseContext = {
       api,
       connectMcp,
@@ -340,6 +364,12 @@ async function bootStack(
         return agent;
       },
       recordHttpCall,
+      captureStateSurface(name) {
+        if (!options.strict && !options.shard) return;
+        const spec = manifest.stateSurfaces.find((surface) => surface.name === name);
+        if (!spec) throw new Error(`Unknown coverage state surface: ${name}`);
+        captured.set(spec.query, readStateValues(db, spec.query, captured.get(spec.query)));
+      },
       sutEnv: sut.env,
       async sutLog() {
         sut.flushLog();
@@ -364,48 +394,59 @@ async function bootStack(
           stop: () => stopStack(fixtureStack, options.keep),
         };
       },
-      async startDataCopy() {
+      async startDataCopy(copyOptions = {}) {
         const sourceStack: Stack = {};
         const targetStack: Stack = {};
         stacks.add(sourceStack);
-        const source = await startSut(
-          options.keep,
-          { SLACK_DISABLE: "true" },
-          options.sutEnv,
-          undefined,
-          "sqlite",
-        );
+        const pairEnv = { SLACK_DISABLE: "true", ...copyOptions.env };
+        const source = await startSut(options.keep, pairEnv, options.sutEnv, undefined, "sqlite");
         sourceStack.sut = source;
-        const copyCli = (databaseUrl: string) =>
-          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl], {
+        const copyCli = (databaseUrl: string, args: string[] = []) =>
+          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl, ...args], {
             env: { DESPLEGA_TELEMETRY_ENV: "test" },
             timeoutMs: 300_000,
           });
         return {
           source: createApiClient(source.baseUrl, source.apiKey),
-          async copy() {
+          async copy(step = {}) {
             await stopSutProcess(source);
             stacks.add(targetStack);
             let cli: CliResult | undefined;
             const target = await startSut(
               options.keep,
-              { SLACK_DISABLE: "true" },
+              pairEnv,
               options.sutEnv,
               undefined,
               "postgres",
               async (prepared) => {
                 await copySutKey(source, prepared);
-                cli = await copyCli(prepared.databaseUrl ?? "");
+                const targetUrl = prepared.databaseUrl ?? "";
+                await step.beforeCopy?.({
+                  sourcePath: source.dbPath,
+                  targetUrl,
+                  runCopy: () => copyCli(targetUrl),
+                });
+                cli = await copyCli(targetUrl, step.args);
               },
             );
             targetStack.sut = target;
             if (!cli) throw new Error("db-copy did not run");
+            // stopStack closes both handles before it deletes the databases.
+            sourceStack.db = openReadOnlyDb(sutDbTarget(source));
+            targetStack.db = openReadOnlyDb(sutDbTarget(target));
             return {
               cli,
               target: createApiClient(target.baseUrl, target.apiKey),
               recopy: () => copyCli(target.databaseUrl ?? ""),
               sourcePath: source.dbPath,
               targetUrl: target.databaseUrl ?? "",
+              sourceDb: sourceStack.db,
+              targetDb: targetStack.db,
+              restartTarget: (env) => restartSut(target, env),
+              async targetLog() {
+                target.flushLog();
+                return Bun.file(target.logPath).text();
+              },
             };
           },
           async stop() {
@@ -433,7 +474,7 @@ async function bootStack(
       log: console.log,
       nonce,
     };
-    return { stack, sut, db, ctx };
+    return { stack, sut, db, ctx, observe: () => observe(db, manifest, captured) };
   } catch (error) {
     await stopStack(stack, options.keep);
     throw error;
@@ -464,13 +505,24 @@ async function printLogTails(sut: Sut): Promise<void> {
 /** Coverage that the final DB read may no longer show: a rerun's DB is gone once it stops, and the main DB is read after the reruns. */
 type RerunObservations = { nodeTypes: Set<string>; stateValues: Map<string, Set<string>> };
 
-function observe(db: ReadOnlyDb, manifest: CoverageManifest): RerunObservations {
+function readStateValues(
+  db: ReadOnlyDb,
+  query: string,
+  captured?: ReadonlySet<string>,
+): Set<string> {
+  const seen = new Set(captured);
+  for (const row of db.query<{ value: unknown }>(query)) seen.add(String(row.value));
+  return seen;
+}
+
+function observe(
+  db: ReadOnlyDb,
+  manifest: CoverageManifest,
+  captured: ReadonlyMap<string, Set<string>>,
+): RerunObservations {
   const stateValues = new Map<string, Set<string>>();
   for (const spec of manifest.stateSurfaces) {
-    stateValues.set(
-      spec.query,
-      new Set(db.query<{ value: unknown }>(spec.query).map((row) => String(row.value))),
-    );
+    stateValues.set(spec.query, readStateValues(db, spec.query, captured.get(spec.query)));
   }
   const nodeTypes = new Set(
     db
@@ -503,7 +555,7 @@ async function rerunScenario(
     console.log(
       `RERUN ${scenario.name} on a fresh API and DB${replay.length > 0 ? ` after ${replay.join(", ")}` : ""}`,
     );
-    booted = await bootStack(options);
+    booted = await bootStack(options, manifest);
     for (const prerequisite of plan.slice(0, -1)) {
       const result = await runInStack(prerequisite, booted.ctx, noThreads);
       if (result.status !== "pass") {
@@ -514,9 +566,9 @@ async function rerunScenario(
     }
     truncateHttpCalls(callMark);
     restoreMcpTools(toolMark);
-    const before = observe(booted.db, manifest);
+    const before = booted.observe();
     const rerun = await runInStack(scenario, booted.ctx, noThreads);
-    const after = observe(booted.db, manifest);
+    const after = booted.observe();
     // Only what the rerun itself added, never what the replay produced.
     for (const type of after.nodeTypes) {
       if (!before.nodeTypes.has(type)) observed.nodeTypes.add(type);
@@ -586,7 +638,7 @@ async function main(): Promise<number> {
   if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
   // CLI children write their lcov next to the API's, so rule 3 sees CLI lines too.
   setCliCoverageDir(options.coverageDir);
-  const { sut, db, ctx } = await bootStack(options, journalPath);
+  const { sut, db, ctx, observe: observeMain } = await bootStack(options, manifest, journalPath);
   const api = ctx.api;
   const scenarioResults: ScenarioResult[] = [];
   const threadMarks: ThreadMark[] = [];
@@ -623,7 +675,7 @@ async function main(): Promise<number> {
   // A failure reruns once, alone, on a fresh API: a pass there is `flaky`, not a failure.
   // Seeded with the main DB as the scenarios left it: a rerun or harness leg keeps the API up
   // past the 5 s boot sweep, which fails the `in_progress` tasks the strict gate needs.
-  const rerunObserved = observe(db, manifest);
+  const rerunObserved = observeMain();
   const byName = new Map(scenarios.map((scenario) => [scenario.name, scenario]));
   for (const [index, first] of scenarioResults.entries()) {
     if (first.status !== "fail") continue;
@@ -682,12 +734,7 @@ async function main(): Promise<number> {
       stateValues: Object.fromEntries(
         manifest.stateSurfaces.map((spec) => [
           spec.query,
-          [
-            ...new Set([
-              ...db.query<{ value: unknown }>(spec.query).map((row) => String(row.value)),
-              ...(rerunObserved.stateValues.get(spec.query) ?? []),
-            ]),
-          ],
+          [...readStateValues(db, spec.query, rerunObserved.stateValues.get(spec.query))],
         ]),
       ),
     };

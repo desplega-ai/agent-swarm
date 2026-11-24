@@ -34,6 +34,31 @@ function live(sections: Record<string, Record<string, object>>): LiveModelsCatal
 
 const effort = (values: string[]) => [{ type: "effort", values }];
 
+describe("Pi worker model picker", () => {
+  test("shows only OpenRouter models reported by the selected worker", () => {
+    const catalog: LiveModelsCatalog = {
+      openrouter: {
+        id: "openrouter",
+        name: "OpenRouter",
+        models: {
+          "acme/available": { id: "acme/available", name: "Available" },
+          "acme/missing": { id: "acme/missing", name: "Missing" },
+        },
+      },
+    };
+    const models = modelGroupsForHarness(
+      "pi",
+      undefined,
+      { OPENROUTER_API_KEY: true },
+      null,
+      catalog,
+      null,
+      ["openrouter/acme/available"],
+    ).find((group) => group.provider === "OpenRouter")?.models;
+    expect(models?.map((model) => model.id)).toEqual(["openrouter/acme/available"]);
+  });
+});
+
 describe("Codex picker credentials", () => {
   test.each([
     [{ CODEX_GATEWAY_BASE_URL: true, CODEX_GATEWAY_API_KEY: true }, true],

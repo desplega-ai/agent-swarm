@@ -51,27 +51,37 @@ export default function AgentsPage() {
     return filtered.sort((a, b) => (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0));
   }, [agents, statusFilter]);
 
-  // The saved runtime settings, which the next task runs on. The last-reported
-  // model and effort (`credStatus.latestModel`) are the fallback only: they lag
-  // a change until the agent runs again.
   const savedByAgentId = useMemo(
     () => savedRuntimeByAgent(agentConfigs, filteredAgents, modelProfiles),
     [agentConfigs, filteredAgents, modelProfiles],
   );
 
+  const modelDisplay = useCallback(
+    (agent: AgentWithTasks) => {
+      const saved = savedByAgentId.get(agent.id);
+      const latest = agent.credStatus?.latestModel;
+      const pi = agent.harnessProvider === "pi";
+      const lastUsed = pi && latest?.harnessProvider !== "pi" ? null : latest;
+      return getAgentModelDisplay(
+        saved?.model,
+        lastUsed?.model,
+        pi && lastUsed ? lastUsed.reasoningEffort : (saved?.effort ?? lastUsed?.reasoningEffort),
+        lastUsed?.source,
+        pi,
+      );
+    },
+    [savedByAgentId],
+  );
+
   const modelSearchText = useCallback(
     (agent: AgentWithTasks) => {
-      const display = getAgentModelDisplay(
-        savedByAgentId.get(agent.id)?.model,
-        agent.credStatus?.latestModel?.model,
-        savedByAgentId.get(agent.id)?.effort ?? agent.credStatus?.latestModel?.reasoningEffort,
-      );
+      const display = modelDisplay(agent);
       const primary = getAgentModelPresentation(display.primary, modelsCatalog?.providers);
       return [primary?.label, primary?.raw, primary?.provider, display.configured, display.lastUsed]
         .filter(Boolean)
         .join(" ");
     },
-    [savedByAgentId, modelsCatalog?.providers],
+    [modelDisplay, modelsCatalog?.providers],
   );
 
   const gridColumns = useDataGridColumns("agents");
@@ -86,13 +96,9 @@ export default function AgentsPage() {
       cellRenderer: (params: { data: AgentWithTasks | undefined }) => {
         const agent = params.data;
         if (!agent) return null;
-        const display = getAgentModelDisplay(
-          savedByAgentId.get(agent.id)?.model,
-          agent.credStatus?.latestModel?.model,
-          savedByAgentId.get(agent.id)?.effort ?? agent.credStatus?.latestModel?.reasoningEffort,
-          agent.credStatus?.latestModel?.source,
+        return (
+          <AgentModelCell display={modelDisplay(agent)} liveCatalog={modelsCatalog?.providers} />
         );
-        return <AgentModelCell display={display} liveCatalog={modelsCatalog?.providers} />;
       },
     };
     return [
@@ -181,7 +187,7 @@ export default function AgentsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ];
-  }, [savedByAgentId, modelColumnGate.supported, modelSearchText, modelsCatalog?.providers]);
+  }, [modelDisplay, modelColumnGate.supported, modelSearchText, modelsCatalog?.providers]);
 
   // One search for both widths, so a phone finds the same agents as the grid.
   const searchedAgents = useMemo(() => {
@@ -246,10 +252,7 @@ export default function AgentsPage() {
         <MobileList label="Agents" loading={isLoading} emptyMessage="No agents found">
           {searchedAgents.map((agent) => {
             const model = getAgentModelPresentation(
-              getAgentModelDisplay(
-                savedByAgentId.get(agent.id)?.model,
-                agent.credStatus?.latestModel?.model,
-              ).primary,
+              modelDisplay(agent).primary,
               modelsCatalog?.providers,
             );
             return (

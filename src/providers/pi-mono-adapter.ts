@@ -31,7 +31,7 @@ import {
   providerKeyFromEnv,
   providerKeyVars,
 } from "@desplega/model-catalog";
-import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { InMemoryCredentialStore, InMemoryModelsStore } from "@earendil-works/pi-ai";
 import { findEnvKeys } from "@earendil-works/pi-ai/compat";
 import {
   getBuiltinProviders,
@@ -226,8 +226,8 @@ function getHarnessDrivableBedrockModels(): Array<{ id: string; name: string }> 
 
 /**
  * The `opencode-go` model ids this pi-ai build resolves. models.dev can list
- * ids pi-ai does not know yet, and pi runs its default model for those, so the
- * worker reports this list and the picker offers only these ids.
+ * ids pi-ai does not know yet, so the worker reports the bundled ids for
+ * the picker.
  */
 export function listPiOpencodeGoModelIds(): string[] {
   try {
@@ -659,6 +659,8 @@ function piRuntimeApiKeys(): ReadonlyArray<readonly [string, string]> {
   return piRuntimeApiKeysCache;
 }
 
+const MODEL_REFRESH_TIMEOUT_MS = 3_000;
+
 /**
  * Build pi-coding-agent auth services from the runner's per-task resolved env.
  *
@@ -671,10 +673,13 @@ export async function createPiRuntimeAuth(
   env: Record<string, string | undefined> = process.env,
   modelsPath?: string,
   subscription?: CodexOAuthCredentials,
+  isolateCatalog = false,
 ): Promise<ModelRuntime> {
   // A per-session models.json (`writeSessionModelsJson`) still shares the
   // agent dir's catalog cache, which only holds built-in provider catalogs.
   const modelRuntime = await ModelRuntime.create({
+    // OpenRouter refreshes can carry key-specific prices and model limits.
+    ...(isolateCatalog ? { modelsStore: new InMemoryModelsStore() } : {}),
     ...(modelsPath
       ? { modelsPath, modelsStorePath: join(getAgentDir(), "models-store.json") }
       : {}),
@@ -688,6 +693,42 @@ export async function createPiRuntimeAuth(
   }
 
   return modelRuntime;
+}
+
+/** Model IDs for the standard provider groups in the worker's dashboard picker. */
+export async function listPiPickerModelIds(
+  env: Record<string, string | undefined>,
+): Promise<string[]> {
+  const sessionModels = await writeSessionModelsJson(getAgentDir(), env);
+  try {
+    const runtime = await createPiRuntimeAuth(env, sessionModels.modelsPath, undefined, true);
+    const providers = [
+      "openrouter",
+      "anthropic",
+      "openai",
+      ...openAICompatibleProviders().map((provider) => provider.id),
+    ];
+    if (piModelNetworkAllowed(env)) {
+      await refreshPiModels(runtime, providers);
+    }
+    return providers.flatMap((provider) =>
+      runtime.getModels(provider).map((model) => `${provider}/${model.id}`),
+    );
+  } finally {
+    await sessionModels.dispose();
+  }
+}
+
+function piModelNetworkAllowed(env: Record<string, string | undefined>): boolean {
+  return env.PI_OFFLINE === undefined && process.env.PI_OFFLINE === undefined;
+}
+
+async function refreshPiModels(runtime: ModelRuntime, providers: string[]): Promise<void> {
+  await runtime.refresh({
+    allowNetwork: true,
+    providers,
+    signal: AbortSignal.timeout(MODEL_REFRESH_TIMEOUT_MS),
+  });
 }
 
 /**
@@ -932,32 +973,12 @@ export async function writeSessionModelsJson(
  * "No API key found for anthropic" — see task 37a4a87a and the chronic
  * weekly-fire pattern (2026-04-13 → 2026-05-11) tracked in HEARTBEAT.md.
  *
- * `provider/id` strings that pi-ai's builtin catalog does not know (the
- * models.json custom providers of the registry, `nan` / `helmcode`) fall back to
- * `modelRuntime.getModel(provider, id)` when a runtime is passed. When nothing
- * resolves, a scrubbed warning names the model: the session then silently runs
- * pi's own default model, which is otherwise invisible.
+ * The runtime includes the refreshed catalog and models.json overrides.
  */
 export function resolveModel(
   modelStr: string,
   env: Record<string, string | undefined> = process.env,
   modelRuntime?: Pick<ModelRuntime, "getModel">,
-) {
-  const model = resolveModelInner(modelStr, env, modelRuntime);
-  if (modelStr && !model) {
-    console.warn(
-      scrubSecrets(
-        `[pi-mono] Model "${modelStr}" did not resolve to a builtin or models.json model; pi will fall back to its default model`,
-      ),
-    );
-  }
-  return model;
-}
-
-function resolveModelInner(
-  modelStr: string,
-  env: Record<string, string | undefined>,
-  modelRuntime: Pick<ModelRuntime, "getModel"> | undefined,
 ) {
   if (!modelStr) return undefined;
 
@@ -975,7 +996,10 @@ function resolveModelInner(
     const orModelId = ANTHROPIC_SHORTNAME_OPENROUTER_MIRROR[lower];
     if (orModelId) {
       try {
-        return getModel("openrouter" as "anthropic", orModelId as never);
+        const model =
+          modelRuntime?.getModel("openrouter", orModelId) ??
+          getModel("openrouter", orModelId as never);
+        if (model) return model;
       } catch {
         // Fall through to native anthropic mapping below.
       }
@@ -993,7 +1017,10 @@ function resolveModelInner(
   const mapping = shortnames[lower];
   if (mapping) {
     try {
-      return getModel(mapping[0] as "anthropic", mapping[1] as never);
+      return (
+        modelRuntime?.getModel(mapping[0], mapping[1]) ??
+        getModel(mapping[0] as "anthropic", mapping[1] as never)
+      );
     } catch {
       return undefined;
     }
@@ -1005,24 +1032,19 @@ function resolveModelInner(
     const slashIdx = modelStr.indexOf("/");
     const provider = modelStr.slice(0, slashIdx);
     const modelId = modelStr.slice(slashIdx + 1);
-    let builtin: ReturnType<typeof getModel> | undefined;
-    try {
-      // pi-ai returns undefined (does not throw) for an unknown provider/id.
-      builtin = getModel(provider as "anthropic", modelId as never);
-    } catch {
-      builtin = undefined;
-    }
-    if (builtin) return builtin;
-    // Custom providers live only in models.json, so only the runtime's
-    // composed store knows them.
-    return modelRuntime?.getModel(provider, modelId);
+    return (
+      modelRuntime?.getModel(provider, modelId) ??
+      getModel(provider as "anthropic", modelId as never)
+    );
   }
 
   // Try as a full model ID with common providers. getModel returns undefined
   // for an unknown id, so keep looking instead of returning the first miss.
   for (const provider of ["anthropic", "openai", "google"]) {
     try {
-      const model = getModel(provider as "anthropic", modelStr as never);
+      const model =
+        modelRuntime?.getModel(provider, modelStr) ??
+        getModel(provider as "anthropic", modelStr as never);
       if (model) return model;
     } catch {}
   }
@@ -1042,7 +1064,7 @@ function resolveSubscriptionModel(
   modelRuntime: Pick<ModelRuntime, "getModel"> | undefined,
 ) {
   const provider = CHATGPT_SUBSCRIPTION_PROVIDER as "openai-codex";
-  const known = getModel(provider, modelId as never) ?? modelRuntime?.getModel(provider, modelId);
+  const known = modelRuntime?.getModel(provider, modelId) ?? getModel(provider, modelId as never);
   if (known) return known;
   const template = getModels(provider)[0];
   return template ? { ...template, id: modelId, name: modelId } : undefined;
@@ -2216,8 +2238,9 @@ export class PiMonoAdapter implements ProviderAdapter {
     // the registry's custom provider blocks from sessionEnv. Written BEFORE
     // ModelRuntime.create, which loads it exactly once. Nothing writes the
     // shared file, so concurrent sessions never read each other's endpoints.
-    const sessionModels = await writeSessionModelsJson(getAgentDir(), sessionEnv, config.model);
+    let sessionModels: SessionModelsJson | undefined;
     try {
+      sessionModels = await writeSessionModelsJson(getAgentDir(), sessionEnv, config.model);
       return await this.createSessionWithModels(config, sessionEnv, sessionModels, {
         createdSymlink,
         customTools,
@@ -2225,7 +2248,8 @@ export class PiMonoAdapter implements ProviderAdapter {
         piMcpServers,
       });
     } catch (err) {
-      await sessionModels.dispose();
+      if (createdSymlink) cleanupAgentsMdSymlink(config.cwd);
+      await sessionModels?.dispose();
       throw err;
     }
   }
@@ -2247,19 +2271,34 @@ export class PiMonoAdapter implements ProviderAdapter {
     const subscription = chatgptSubscriptionModelId(config.model)
       ? await loadChatgptSubscriptionCredential(config)
       : undefined;
-    const modelRuntime = await createPiRuntimeAuth(
+    let modelRuntime = await createPiRuntimeAuth(
       sessionEnv,
       sessionModels.modelsPath,
       subscription,
     );
-    const resolvedModel = resolveModel(config.model, sessionEnv, modelRuntime);
-    // models.json overrides (e.g. the OpenRouter gateway baseUrl) only apply
-    // to models resolved through the runtime's composed store; the builtin
-    // catalog object from `resolveModel` carries the hardcoded upstream URL
-    // and would be used verbatim by the session.
-    const model = resolvedModel
-      ? (modelRuntime.getModel(resolvedModel.provider, resolvedModel.id) ?? resolvedModel)
-      : resolvedModel;
+    const requestedModel = config.model.trim();
+    let model = resolveModel(requestedModel, sessionEnv, modelRuntime);
+    if (requestedModel && !model && piModelNetworkAllowed(sessionEnv)) {
+      // Refresh only on a miss, after installing the per-task runtime keys.
+      const providers = requestedModel.includes("/")
+        ? [requestedModel.slice(0, requestedModel.indexOf("/"))]
+        : ["anthropic", "openai", "google", "openrouter"];
+      modelRuntime = await createPiRuntimeAuth(
+        sessionEnv,
+        sessionModels.modelsPath,
+        subscription,
+        true,
+      );
+      await refreshPiModels(modelRuntime, providers);
+      model = resolveModel(requestedModel, sessionEnv, modelRuntime);
+    }
+    if (requestedModel && !model) {
+      throw new Error(
+        scrubSecrets(
+          `Pi model "${requestedModel}" could not be resolved. Choose an available model or configure it in Pi's models.json.`,
+        ),
+      );
+    }
 
     // 4. Create swarm hooks extension
     const swarmExtension = createSwarmHooksExtension({

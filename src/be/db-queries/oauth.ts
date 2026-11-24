@@ -856,3 +856,8 @@ export async function acquireOAuthRefreshLock(
 export async function releaseOAuthRefreshLock(lockKey: string, owner: string): Promise<void> {
   await oauthRepo().releaseRefreshLock(lockKey, owner);
 }
+
+/** True while `owner` still holds an unexpired refresh lock on `lockKey`. */
+export async function isOAuthRefreshLockHeld(lockKey: string, owner: string): Promise<boolean> {
+  return oauthRepo().isRefreshLockHeld(lockKey, owner, new Date().toISOString());
+}

@@ -138,6 +138,8 @@ export function assertNotEmptySqliteDatabase(db: Database, reason: string): void
 export type SqliteMigrationOptions = {
   /** Directory of the `.sql` files; `null` when none could be located. */
   migrationsDir: string | null;
+  /** Data migrations keyed by filename without .sql, run in the same transaction as the SQL. */
+  dataMigrations?: Readonly<Record<string, (db: Database) => void>>;
   /** Runs after the migrations (also on the no-files paths), on the same handle. */
   afterMigrations?: (db: Database) => void;
 };
@@ -259,6 +261,7 @@ export function runSqliteMigrations(db: Database, options: SqliteMigrationOption
     try {
       db.transaction(() => {
         db.exec(migration.sql);
+        options.dataMigrations?.[migration.name]?.(db);
         db.run(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
           [migration.version, migration.name, new Date().toISOString(), migration.checksum],

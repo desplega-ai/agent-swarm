@@ -105,7 +105,10 @@ async function insertScriptVersion(args: {
   });
 }
 
-export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord> {
+async function insertScriptWithVersion(
+  args: ScriptWriteArgs,
+  onNameConflict?: "ignore",
+): Promise<ScriptRecord | null> {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
@@ -115,7 +118,7 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
   const storage = getStorage();
 
   return await storage.transaction(async () => {
-    const row = await storage.repos.scripts.insertScript({
+    const newScript = {
       id,
       key: defaultAssetKey("script", id),
       name: args.name,
@@ -134,9 +137,10 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
       agentId: args.agentId ?? null,
       actor: args.createdBy ?? null,
       now,
-    });
+    };
+    const row = await storage.repos.scripts.insertScript(newScript, onNameConflict);
 
-    if (!row) throw new Error("Failed to insert script");
+    if (!row) return null;
 
     await insertScriptVersion({
       scriptId: row.id,
@@ -154,6 +158,12 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
   });
 }
 
+export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord> {
+  const script = await insertScriptWithVersion(args);
+  if (!script) throw new Error("Failed to insert script");
+  return script;
+}
+
 /**
  * Scratch saves skip embedding; they become searchable only after explicit promotion via upsert
  * OR after a `scripts reembed` pass. Explicit upserts embed synchronously so search is
@@ -161,17 +171,23 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
  */
 export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertScriptResult> {
   const shouldEmbed = args.embeddingMode !== "skip";
-  const existing = await getScript(args);
+  let existing = await getScript(args);
   if (!existing) {
-    const script = await insertScript(args);
-    if (!script.isScratch && shouldEmbed) {
-      await embedScript(script);
+    const script = await insertScriptWithVersion(args, "ignore");
+    if (script) {
+      if (!script.isScratch && shouldEmbed) {
+        await embedScript(script);
+      }
+      return {
+        script,
+        isNew: true,
+        contentDeduped: false,
+      };
     }
-    return {
-      script,
-      isNew: true,
-      contentDeduped: false,
-    };
+
+    // Another writer inserted the script and its first version after our lookup.
+    existing = await getScript(args);
+    if (!existing) throw new Error("Failed to find script after name conflict");
   }
 
   const contentHash = computeContentHash(args.source);

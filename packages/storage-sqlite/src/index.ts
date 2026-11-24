@@ -155,6 +155,7 @@ export {
   applySqliteTemplatePragmas,
   isEmptySqliteDatabase,
 } from "./boot/open";
+export { normalizeScheduleNextRunTimes } from "./boot/schedule-next-run-at";
 export { assertScriptRunSourceSchema, backfillScriptRunSources } from "./boot/script-run-sources";
 export { hasEncryptedSecretRows, type SealedColumn } from "./boot/secrets-probe";
 export { openSqliteCopySource } from "./copy-source";

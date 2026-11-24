@@ -66,6 +66,7 @@ import {
   type SlackReactionChoice,
 } from "./ack";
 import { getSlackApp } from "./app";
+import { slackAskAncestorId, slackAskOf } from "./ask-chain";
 import {
   buildCaptionBlock,
   getTaskLink,
@@ -154,6 +155,11 @@ export function isSlackRenderV2Enabled(): boolean {
 
 export function isSlackDelegationEnabled(): boolean {
   return isEnvFlagEnabled("SLACK_RENDER_V2_DELEGATION", false);
+}
+
+/** Lead threads post the Lead's replies, not its waiting cards or unreplied follow-up results. */
+export function isSlackQuietLeadThreadsEnabled(): boolean {
+  return isEnvFlagEnabled("SLACK_RENDER_V2_QUIET_LEAD_THREADS", false);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -574,6 +580,18 @@ function normalizeV2Text(value: string): string {
 }
 
 /**
+ * True when the work last to end in a settled thread was cancelled, even if the
+ * ask itself finished first and only its delegated work was stopped. A tie with
+ * any other outcome, or a task with no finish time, reads as not stopped.
+ */
+function endedByCancel(tasks: AgentTask[]): boolean {
+  if (tasks.some((task) => !task.finishedAt)) return false;
+  const ends = tasks.map((task) => Date.parse(task.finishedAt!));
+  const last = Math.max(...ends);
+  return tasks.every((task, index) => ends[index] !== last || task.status === "cancelled");
+}
+
+/**
  * The tree's first line, replacing the old constant "🧵 worked for <duration>".
  * A timed-out ask closure outranks a stalled member outranks plain activity —
  * each of those states implies a non-terminal member is still sitting there,
@@ -593,6 +611,7 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
     return `🧵 🔄 working — ${duration}`;
   // A parked deferral is stored `completed`, but the ask is not answered yet.
   if (tasks.some((task) => isAwaitingWake(task, tasks))) return `🧵 ⏳ waiting — ${duration}`;
+  if (endedByCancel(tasks)) return `🧵 🚫 stopped — ${duration}`;
   const hasFailure = tasks.some((task) => task.status === "failed");
   return hasFailure
     ? `🧵 ❌ done with failures — ${duration}`
@@ -1203,34 +1222,6 @@ async function isSlackContinuation(task: AgentTask): Promise<boolean> {
 
 /** Lead review tasks the engine creates when a worker finishes or a session resumes. */
 const SLACK_LEAD_FOLLOW_UP_TYPES = new Set(["follow-up", "resume"]);
-/** Guards the ancestor walk against a corrupt parent cycle or a pathological chain. */
-const SLACK_ANCESTOR_WALK_LIMIT = 50;
-
-/** The nearest task in `task`'s parent chain a person started in Slack, or undefined. */
-async function slackAskAncestorId(
-  task: AgentTask,
-  threadTasks: readonly AgentTask[],
-): Promise<string | undefined> {
-  const byId = new Map(threadTasks.map((candidate) => [candidate.id, candidate]));
-  const seen = new Set<string>([task.id]);
-  let parentId = task.parentTaskId;
-  while (parentId && !seen.has(parentId) && seen.size <= SLACK_ANCESTOR_WALK_LIMIT) {
-    seen.add(parentId);
-    const parent = byId.get(parentId) ?? (await getTaskById(parentId));
-    if (!parent) return undefined;
-    if (parent.source === "slack") return parent.id;
-    parentId = parent.parentTaskId;
-  }
-  return undefined;
-}
-
-/** The Slack ask a task answers: itself when a person started it in Slack, else its nearest such ancestor. */
-async function slackAskOf(
-  task: AgentTask,
-  threadTasks: readonly AgentTask[],
-): Promise<string | undefined> {
-  return task.source === "slack" ? task.id : await slackAskAncestorId(task, threadTasks);
-}
 
 /** True for a Lead review task the engine created (a worker completion or a session resume). */
 function isLeadFollowUpTask(task: AgentTask): boolean {
@@ -1242,7 +1233,7 @@ function isLeadFollowUpTask(task: AgentTask): boolean {
  * started in Slack is "eligible": its output is the answer the thread waits
  * for, so it gets an outcome card like the ask did. Before this, the thread
  * stayed silent until someone asked "status?". A Lead follow-up with Slack
- * context but no Slack ask in its parent chain is an "orphan": it posts
+ * context but no Slack ask in its parent or dispatch chain is an "orphan": it posts
  * nothing, and its card is settled so the thread does not wait on it.
  */
 async function classifyLeadFollowUp(
@@ -1341,6 +1332,16 @@ async function mayPostLeadFollowUpCard(
   ) {
     return false;
   }
+  if (
+    isSlackQuietLeadThreadsEnabled() &&
+    task.taskType === "follow-up" &&
+    task.status === "completed" &&
+    !isDeferredTask(task)
+  ) {
+    // A follow-up's output is a note when the Lead did not reply; a resume's output may be the only answer.
+    await settleOutcomeWithoutCard(task, "quiet_lead_threads: Lead follow-up not posted");
+    return false;
+  }
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs) return false;
   const blockReason = await getChannelBlockReason(app.client, task.slackChannelId);
@@ -1364,6 +1365,12 @@ async function cardOnlyRepeatsSlackReply(task: AgentTask): Promise<boolean> {
   if (await outcomeUiSpec(task)) return false;
   const content = await outcomeContent(task, true);
   return (await outcomeCaptionBlocks(task, content)).length === 0;
+}
+
+/** A Lead deferral that, with quiet Lead threads on, posts no ⏳ card. */
+async function isQuietLeadDeferral(task: AgentTask): Promise<boolean> {
+  if (!isSlackQuietLeadThreadsEnabled() || !isDeferredTask(task) || !task.agentId) return false;
+  return !!(await getAgentById(task.agentId))?.isLead;
 }
 
 /**
@@ -2292,6 +2299,32 @@ export function slackErrorSummary(error: unknown): string {
   return detail.messages.length ? `${head}: ${detail.messages.join(" | ")}` : head;
 }
 
+/**
+ * Deletes a ⏳ deferral card whose wake-up answered with `slack-reply`.
+ * Rewritten, the card would only say "<agent> completed" above that reply.
+ * A card with a ui-spec card, sources or links is rewritten as before.
+ * Returns false, with the card untouched, when it is not deleted.
+ */
+async function removeDeferralCardAnsweredByReply(
+  client: WebClient,
+  card: SlackMessageRecord,
+  wake: AgentTask,
+): Promise<boolean> {
+  if (!(await cardOnlyRepeatsSlackReply(wake))) return false;
+  try {
+    await callSlackWithRetry(client, "chat.delete", { channel: card.channelId, ts: card.ts });
+  } catch (error) {
+    if (slackErrorCode(error) === "message_not_found") return true;
+    console.warn(
+      `[Slack] Could not delete answered deferral card ${card.id}; rewriting it instead:`,
+      slackErrorSummary(error),
+    );
+    return false;
+  }
+  console.log(`[Slack] Deleted deferral card ${card.id}: its wake-up answered in the thread`);
+  return true;
+}
+
 // Everything else reaching the catch has no Slack verdict attached (a socket
 // reset, a DNS blip, a local read that threw), so it is worth retrying — but
 // only a bounded number of times. Without a ceiling a card that fails for a
@@ -2305,7 +2338,8 @@ const deferralRefreshAttempts = new Map<string, number>();
  * Runs after the tree loop and independently of it: resolution needs only
  * the retained outcome `ts`, so it must not be skipped when the thread has
  * no other pending render work. Re-defers update the same card; the final
- * result marks it resolved (`deferral_resolved_at`).
+ * result marks it resolved (`deferral_resolved_at`). A final result that was
+ * already sent with `slack-reply` deletes the card instead.
  *
  * The marker is also burned when Slack refuses the rewrite for good, and when
  * an unclassifiable failure has used up its attempts — a card that can never
@@ -2320,14 +2354,16 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
     try {
       const wake = await getTaskById(wakeTaskId);
       if (!wake) continue;
-      const content = await resolvedDeferralContent(wake);
-      await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
-        callSlackWithRetry(app.client, "chat.update", {
-          channel: card.channelId,
-          ts: card.ts,
-          ...content.build(withCard),
-        }),
-      );
+      if (!(await removeDeferralCardAnsweredByReply(app.client, card, wake))) {
+        const content = await resolvedDeferralContent(wake);
+        await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
+          callSlackWithRetry(app.client, "chat.update", {
+            channel: card.channelId,
+            ts: card.ts,
+            ...content.build(withCard),
+          }),
+        );
+      }
       if (isDeferredTask(wake)) {
         await updateSlackMessageRecord(card.id, {});
       } else {
@@ -2539,6 +2575,11 @@ async function processSlackThread(
       if ((!card || isPendingSlackMessage(card)) && (await cardOnlyRepeatsSlackReply(task))) {
         await settleOutcomeWithoutCard(task, "slack_reply_sent: completed card not posted");
         await finalizeTerminalSlackReactions([task]);
+        continue;
+      }
+      if ((!card || isPendingSlackMessage(card)) && (await isQuietLeadDeferral(task))) {
+        // The tree shows the wait; the ask keeps 👀 until a wake-up answers.
+        await settleOutcomeWithoutCard(task, "quiet_lead_threads: deferral card not posted");
         continue;
       }
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;

@@ -64,6 +64,30 @@ The API holds a session advisory lock on its database for its whole life. A seco
 
 Connection budget per API process: 1 session for the one-process lock, up to 10 for the application pool, and up to 4 for the optional db-query reader (15 in total). Set the role's or the server's connection limit to at least that. With a connection pooler (PgBouncer, a cloud proxy) between the API and Postgres, use session pooling for the API's `DATABASE_URL`. The lock is a session advisory lock, so the lock connection needs session affinity: in transaction pooling the lock lands on a server connection that other clients share, and the write fence cannot see the owner session. Connect directly when the pooler offers only transaction pooling.
 
+## When the database is unreachable
+
+The API does not reconnect in place. When it cannot reach its database, it exits with code 1, and the supervisor (`restart: unless-stopped` in Compose, the Deployment on Kubernetes) starts it again. The new process opens new connections and waits for the one-process lock. The API runs on Postgres only under a supervisor.
+
+The lock watchdog checks the lock session once a second. When a check gets no answer within 10 seconds, the API logs `lost the one-process lock ... (the lock session did not answer within 10000 ms)` and exits. This covers connections that died without a FIN or RST: the database came back on another address (a recreated container), or the network drops packets. Before this rule, the API kept `/health` green and every database request hung until the kernel gave up on the sockets (about 15 minutes on Linux).
+
+Expected times when every connection dies without a close:
+
+| Step | Time |
+|---|---|
+| A request that needs the database fails (the process exits) | about 11 s |
+| `/health` stops answering 200 | about 11 s |
+| The restarted API serves requests, once the database answers again | about 5 s after the database is back, plus the supervisor's restart delay |
+
+Connection settings (all connections of the API, fixed values, no setting):
+
+- The server keeps TCP keepalive on each session (`tcp_keepalives_idle` 10 s, `tcp_keepalives_interval` 5 s, `tcp_keepalives_count` 3). After a network cut, the server ends the old session within about 25 seconds and releases its session lock, so the restarted API can take the lock. Without it the server holds the old session, and the lock, for 2 hours.
+- A new connection waits at most 10 seconds (`connectionTimeout`). A start against an unreachable database fails fast, and the supervisor tries again.
+- The pool closes a connection that is idle for 60 seconds. A NAT gateway or a load balancer drops an idle connection without a FIN after 4 minutes or more, so the pool never sends a request on such a connection.
+
+`/health` checks no database on either engine: it answers 200 while the process runs. On Postgres the exit above keeps it honest, because the process stops within about 11 seconds of losing its database.
+
+Limit: when only a pool connection dies and the lock session stays healthy, a request on that connection can still hang until the kernel gives up on it. The 60-second idle close makes this unlikely.
+
 More than one API replica is not supported on either engine. The parts that a second replica would break are listed, with file and line, in `thoughts/taras/research/2026-11-20-replica-blockers.md`: the in-memory realtime bus (`src/realtime/bus.ts`), the workflow event bus (`src/workflows/event-bus.ts`), in-memory locks (`src/oauth/ensure-mcp-token.ts`), per-process caches, and timers with no leader election.
 
 ## Backups
@@ -78,25 +102,51 @@ Before the window:
 
 1. Deploy the target build on SQLite as usual. Let it start once, so the SQLite file is at this build's migration head.
 2. Create the Postgres database and role (Requirements). Do not start an API on it.
-3. Rehearse: copy a recent backup of the SQLite file into a scratch database with `db-copy`. Fix every refused value it reports in the source (a NUL byte, invalid UTF-8, an invalid timestamp, a flag that is not 0 or 1, invalid JSON). The copy does not replace or drop values for you. Read every `ATTENTION` line too: a saved dashboard query in SQLite SQL that the copy does not know (an edited widget, a hand-written dashboard) does not run on Postgres. The copy rewrites only the stock queries of the starter dashboard and of the old new-dashboard template, and keeps titles and other edits. Plan an edit for each listed query. Set `EMBEDDING_DIMENSIONS` to the value the API uses: the copy refuses embeddings of another width.
+3. Rehearse: copy a recent backup of the SQLite file into a scratch database with `db-copy` (same command as step 3 of the window, with the backup mounted and the scratch database as `--to`). Fix every refused value it reports in the source (a NUL byte, invalid UTF-8, an invalid timestamp, a flag that is not 0 or 1, invalid JSON). The copy does not replace or drop values for you. Read every `ATTENTION` line too: a saved dashboard query in SQLite SQL that the copy does not know (an edited widget, a hand-written dashboard) does not run on Postgres. The copy rewrites only the stock queries of the starter dashboard and of the old new-dashboard template, and keeps titles and other edits. Plan an edit for each listed query. Set `EMBEDDING_DIMENSIONS` to the value the API uses: the copy refuses embeddings of another width.
 4. Start a test API on the scratch copy with the restricted reader configured in `DATABASE_QUERY_URL`. Run each custom dashboard with representative filter values and compare its results with SQLite. The copy uses PostgreSQL `EXPLAIN` to check custom queries. A query can pass that check and then fail when it converts a value in a stored row.
 
 In the window:
 
 1. Stop the API. Keep workers running: they retry until the API is back.
 2. Back up the SQLite file and its `-wal`/`-shm` files, and the encryption key file.
-3. Copy:
+3. Copy. With the API image, run a one-off container from the same image tag as the API. Mount the API data volume, and join a network that reaches Postgres. Arguments after the image name go to `db-copy`. It does not boot the API: no listener, no migrations of the SQLite file.
+   ```bash
+   docker run --rm -v <api data volume>:/app/data --network <network that reaches postgres> \
+     <api image>:<api tag> db-copy --from /app/data/agent-swarm-db.sqlite \
+     --to "postgres://swarm:<password>@<host>:5432/swarm" --json /app/data/db-copy-report.json
+   ```
+   With Compose, `docker compose run --rm --no-deps <api service> db-copy ...` uses the service's image, volumes and network. From a source checkout or the npm package:
    ```bash
    agent-swarm db-copy --from /app/data/agent-swarm-db.sqlite \
      --to "postgres://swarm:<password>@<host>:5432/swarm" --json /app/data/db-copy-report.json
    ```
-   Expect `[db-copy] done: <n> tables, <m> rows, every count and checksum equal` and exit 0. The report lists each table's row counts and checksums, the skipped SQLite-only tables (FTS5 and sqlite-vec indexes, migration bookkeeping) and the rebuilt vector rows. Exit 3 means the copy committed but the report could not be written. Exit 4 means the copy committed but the dashboard check after COMMIT could not run (for example no connection was free): each `NOT CHECKED` line names an unverified saved query. Run each one on Postgres before you start the API.
+   `db-copy --help` lists the options. Without `--from` and `--to`, the copy reads `DATABASE_PATH` and `DATABASE_URL` (plus `DATABASE_PASSWORD`). In the API image, `DATABASE_PATH` is `/app/data/agent-swarm-db.sqlite`.
+   Add `--repair` when the rehearsal listed rows that it can fix (see "Refused rows" below). Expect `[db-copy] done: <n> tables, <m> rows, every count and checksum equal` and exit 0. The report lists each table's row counts and checksums, the skipped SQLite-only tables (FTS5 and sqlite-vec indexes, migration bookkeeping) and the rebuilt vector rows. Exit 3 means the copy committed but the report could not be written. Exit 4 means the copy committed but the dashboard check after COMMIT could not run (for example no connection was free): each `NOT CHECKED` line names an unverified saved query. Run each one on Postgres before you start the API.
 4. Set `DATABASE_URL` (and `DATABASE_QUERY_URL` if the reader role exists). Keep the same encryption key: secrets copy as ciphertext.
 5. Start the API. Check `[db] Postgres engine ready`, `/health`, the dashboard task list, a secret config value, and one memory search.
 
 Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the untouched SQLite file. Writes made on Postgres after the cutover are not copied back.
 
-What the copy does, step by step: opens the SQLite file read-only; refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table.
+What the copy does, step by step: opens the SQLite file read-only; skips the two tables that Litestream adds to a replicated database (`_litestream_seq`, `_litestream_lock`); refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table; after COMMIT, runs `VACUUM (ANALYZE)` so the API starts with planner statistics (a `WARNING` line says so when this step fails: run it by hand before you start the API).
+
+Refused rows: one run lists every row the target cannot store. The copy first reads the orphan rows from SQLite (`PRAGMA foreign_key_check`: a row whose parent row is gone), then checks every value. After the first refused row it writes no more rows, so a refused run takes minutes, not the time of a full copy. Each line names the table, the column and the rowid.
+
+`db-copy --repair` fixes the kinds below during the copy. It lists each fix (`[db-copy] repaired <table>.<column> (rowid N): <what>`, and `repairs` in the `--json` report), compares the repaired values on both sides, and does not change the SQLite file. Without `--repair` the copy changes no value.
+
+| Kind | What `--repair` does |
+|---|---|
+| NUL byte in text | Removes the NUL bytes |
+| Invalid UTF-8 in text | Replaces each invalid sequence with U+FFFD |
+| JSON with `\u0000`, or with an unpaired surrogate escape (text cut in the middle of an emoji) | Removes `\u0000`, replaces the surrogate with U+FFFD |
+| Text in a number or flag column that allows NULL | Stores NULL (no rule knows the number that was meant) |
+| Orphan row, key with `ON DELETE CASCADE` | Does not copy the row |
+| Orphan row, any other key, column allows NULL | Stores NULL in the key column |
+
+Not repaired, so fix these in the SQLite file by hand: invalid JSON syntax, an invalid timestamp, a wrong kind in a NOT NULL column, an orphan whose key column is NOT NULL, an orphan row in a table with no rowid. A row that `--repair` does not copy can leave rows that pointed at it: the foreign key check at the end then stops the copy and names the first one.
+
+To repair by hand instead: SQLite `replace()` does not remove a NUL byte (it reads a pattern that starts with NUL as empty and changes nothing), so rewrite such a value from a program.
+
+Memory and batches: the copy process holds one batch of rows at a time (at most 500 rows or 16 MB of stored text, in both directions), and its checksums need no list of rows.
 
 ## Known differences
 
@@ -109,6 +159,7 @@ What the copy does, step by step: opens the SQLite file read-only; refuses a tar
 
 - A new migration has one file for each engine with the same ordinal: `src/be/migrations/NNN_name.sql` and `src/be/migrations/postgres/NNN_name.sql`. A file may be a no-op for one engine, with a comment that says why. `bun run check:schema-parity` must pass. Never edit an applied migration.
 - No new triggers (`bun run check:no-new-triggers`). Put new rules in repository code.
+- A Postgres migration that changes rows must stay correct under `db-copy` (`bun run check:copy-migrations`): the copy writes the SQLite rows over the migrated target and records every migration as applied. A plain seed passes. For a rewrite of stored rows, list the migration in `after-copy.json`, port the rows in the copy, or write the reason in `scripts/storage-checks/copy-migrations-allowlist.txt`. A new column type needs a conversion in `packages/storage-postgres/src/data-copy.ts` and a sample in `packages/storage-postgres/test/data-copy-chain.test.ts`.
 - SQL lives in the storage packages (`packages/storage*`) only (`bun run check:storage-boundary`). Write portable SQL with the dialect helpers; SQLite-only syntax stays in `packages/storage-sqlite` (`bun run check:sql-portability`). Quote each identifier that has an uppercase letter.
 - Code tests a capability (`fullTextSearch`, `vectorSearch`, `dbQuery`), never the engine name.
 - A transaction callback may run twice on Postgres. Side effects go in `afterCommit` (`bun run check:tx-callbacks`; prove it with `bun run e2e --tx-replay`).
@@ -132,13 +183,20 @@ These assertion groups stay, with the reason:
 | Symptom | Cause and fix |
 |---|---|
 | `another API process holds this Postgres database` | A second API (or a running `db-copy`) holds the lock. Stop it. |
+| `lost the one-process lock ... did not answer within 10000 ms`, then a restart | The API could not reach its database for 10 s. Check the network path and the database. After a network cut, the next start can wait for the lock for up to about 25 s while the server ends the old session. |
 | `db-query is off: DATABASE_QUERY_URL is not set` / `failed its probe` | Create the reader role (above). The log names the failed probe rule. |
 | `type "vector" does not exist` at the first start | Create the pgvector extension as a superuser, then start again. |
 | `db-copy: migration heads differ` | Start this build once on the SQLite file, stop it, copy again. |
 | `db-copy: the target database already holds tables` | Copy into a new, empty database. The copy runs the migrations itself. A migrated database (an API started on it, a restored dump) may hold edited seed rows (a renamed channel, a retitled widget) that the copy would replace, so it is refused. |
 | `db-copy: the target database is at migration N, this build at M` | Same cause: the target already holds tables. Copy into a new, empty database. |
 | `db-copy: the source embeddings have N dimensions` | Set `EMBEDDING_DIMENSIONS=N` (the API's value) and copy again. Nothing was written. |
+| `[db-copy] N orphan row(s) in the source: checking values only` | The SQLite file holds rows whose parent row is gone. The run lists each one and writes nothing. Repair them (cutover section, "Refused rows"), then copy again. |
+| `<table>: checked, not written` | A row before this table was refused. The copy still checks the table, so that one run lists every refused row. |
 | `db-copy: --json ... is the SQLite source` | Write the report to another path. |
+| `db-copy: no SQLite file at /app/data/...` (API image) | The container has no API data volume. Mount the volume of the API (`-v <api data volume>:/app/data`). |
+| `db-copy needs the target: --to postgres://...` | Pass `--to`, or set `DATABASE_URL` in the container. |
+| `[db-copy] FAILED: cannot connect to the target database` | The copy cannot reach Postgres, or the URL is wrong. In the API image: run the container on the network of the API (`--network`), or use an address that the container can reach. Nothing was written. |
+| `=== Agent Swarm API` banner, then the server starts | The image is older than `db-copy` support in the API image, or `db-copy` is not the first argument after the image name. Use the API image tag of this build. A Compose service that sets its own `entrypoint` ignores the arguments, so `docker compose run <api service> db-copy ...` boots the API there: use `docker run --entrypoint /usr/local/bin/agent-swarm-api <api image>:<api tag> db-copy ...`. |
 | `[db-copy] ATTENTION metrics ...` | Edit that dashboard query into Postgres SQL (`$n` placeholders, quoted camelCase columns) after the cutover. |
 | `db-copy: cannot store <table>.<column> (rowid N): ...` | Fix that value in the SQLite file, then copy again. Nothing was written. |
 

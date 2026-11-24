@@ -134,18 +134,22 @@
       "excluded": [
         {
           "value": "draft",
+          "transient": true,
           "reason": "transient: a draft is promoted to pending or unassigned when its attachment batch settles, before the suite reads the table"
         },
         {
           "value": "reviewing",
+          "transient": true,
           "reason": "transient: an offered task is reviewing only between claim-for-review and accept or decline inside one poll"
         },
         {
           "value": "resume",
+          "transient": true,
           "reason": "transient: set by crash recovery for the duration of one resume dispatch, which the heartbeat sweep (disabled here) drives"
         },
         {
           "value": "unassigned",
+          "transient": true,
           "reason": "transient once a lead exists: a pool task is assigned to the lead at creation, and mcp-surface asserts the unassigned listing before claiming it"
         }
       ]
@@ -166,10 +170,6 @@
       "query": "SELECT DISTINCT status AS value FROM workflow_run_steps",
       "universe": ["pending", "running", "waiting", "completed", "failed", "skipped", "cancelled"],
       "excluded": [
-        {
-          "value": "running",
-          "reason": "transient: instant executors finish inside the request; async ones move to waiting"
-        },
         {
           "value": "skipped",
           "reason": "no engine path writes a skipped step: only a cooldown-skipped run carries skipped (src/workflows/engine.ts), and foreach-join reads the step value defensively"
@@ -231,14 +231,18 @@
         "tasks-historical-values",
         "storage-recovery",
         "data-copy",
+        "data-copy-later-release",
+        "data-copy-refused-rows",
         "divergence-fulltext-search",
         "divergence-vector-search",
         "divergence-like-case",
+        "divergence-seeded-schedule-sql",
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
         "stress-task-finish",
         "stress-task-create",
+        "stress-token-touch",
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
@@ -255,7 +259,8 @@
         "trigger-rbac-default-role",
         "trigger-cascades",
         "postgres-chain-layouts",
-        "postgres-password-env"
+        "postgres-password-env",
+        "postgres-dead-connections"
       ]
     },
     "live-task-claim": {
@@ -447,6 +452,10 @@
       "description": "store, search (fts/vec), get with links, edit with versions, rate with the explicit-self guard, delete by ACL",
       "scenarios": ["knowledge-memory"]
     },
+    "memory-search-demotion": {
+      "description": "search and list with a query keep returning memories when one has a net-negative rating (beta > alpha), on every engine",
+      "scenarios": ["memory-demotion-search"]
+    },
     "mention-wakeup": {
       "description": "post-message with a mention produces an unread_mentions poll trigger",
       "scenarios": ["core-messaging"]
@@ -463,6 +472,10 @@
       "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards; groups resolve at create, claim, pool and fallback hops",
       "scenarios": ["platformb-model-groups", "model-group-resolution"]
     },
+    "codex-structured-output": {
+      "description": "A real codex worker against the mock Responses API: the task outputSchema reaches the request in strict mode, a prose turn gets one reprompt that completes or fails the task, and a task without a schema sends none",
+      "scenarios": ["codex-structured-output"]
+    },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
       "scenarios": ["model-harness-guard"]
@@ -474,6 +487,10 @@
     "oauth-refresh-locks": {
       "description": "Refresh lock acquire, contention, wrong-owner release, expiry takeover",
       "scenarios": ["platform-oauth-locks"]
+    },
+    "codex-oauth-slot-store": {
+      "description": "A non-lead worker token persists and quarantines a refreshed codex_oauth_<slot> only while holding its refresh lock, and PUT /api/config still refuses it",
+      "scenarios": ["platform-codex-oauth-slot-store"]
     },
     "page-publishing": {
       "description": "create page, serve public/authed/password, version history, feedback task, delete, and a dashboard launch that acts as the picked user",
@@ -510,6 +527,10 @@
     "prompt-template-override": {
       "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
       "scenarios": ["knowledge-prompt-templates"]
+    },
+    "request-body-json": {
+      "description": "A request body that is not valid JSON gets 400 with the shared error envelope on the route factory's routes, the JSON-RPC parse error on MCP, and 400 on a signed Linear webhook.",
+      "scenarios": ["http-malformed-json", "linear-emulate-flows"]
     },
     "provider-webhooks": {
       "description": "GitHub, GitLab, Azure DevOps, Bitbucket, AgentMail and Kapso webhooks: disabled contract, signature verification, restore. Linear, Jira, workflow, GitHub, AgentMail and Kapso receivers refuse a body over 5 MiB.",
@@ -548,8 +569,8 @@
       "scenarios": ["platform-secret-egress"]
     },
     "script-inline-run": {
-      "description": "Inline (args, ctx) script run returns its result, auto-saves a scratch script only on success, records an inline run, persists idempotent output to KV.",
-      "scenarios": ["script-inline-run"]
+      "description": "Inline (args, ctx) runs return their results, auto-save a scratch script only on success, record each run, and persist idempotent output to KV. Concurrent runs of the same new source share one scratch script and one initial version.",
+      "scenarios": ["script-inline-run", "script-parallel-inline-runs"]
     },
     "script-tool-usage": {
       "description": "The seeded tool-usage script counts tool_use lines from session_logs, filters by the task owner's agent, and binds every argument as a SQL parameter.",
@@ -634,7 +655,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -647,8 +668,10 @@
         "slack-relay-restart",
         "slack-task-output-citations",
         "slack-task-tree-toggle",
+        "slack-stop-button",
         "slack-task-output-ui-spec",
-        "slack-pre-task-create-block"
+        "slack-pre-task-create-block",
+        "slack-cancelled-task"
       ]
     },
     "slack-deferrals": {
@@ -657,7 +680,8 @@
         "slack-defer-eta-legacy",
         "slack-defer-eta-v2",
         "slack-defer-wake-v2",
-        "slack-redefer"
+        "slack-redefer",
+        "slack-defer-wake-reply-v2"
       ]
     },
     "slack-delegation": {
@@ -670,7 +694,8 @@
         "slack-delegation-child-result",
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
-        "slack-delegation-band-entry"
+        "slack-delegation-band-entry",
+        "slack-quiet-lead-threads"
       ]
     },
     "slack-http-native": {
@@ -685,8 +710,8 @@
       ]
     },
     "slack-inbound-gates": {
-      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, and reserved action ids in agent blocks",
-      "scenarios": ["slack-inbound-gates"]
+      "description": "Sender allowlist after a config reload on mentions and Assistant threads, the Cancel button gate, reserved action ids in agent blocks, and SLACK_WORKFLOW_BOT_IDS bot posts that start workflows but never tasks",
+      "scenarios": ["slack-inbound-gates", "slack-workflow-bot-ids"]
     },
     "slack-skipped-tasks": {
       "description": "Skip a task without a thread reply, preserving its reason and reaction on both Slack renderers",
@@ -785,11 +810,12 @@
       "scenarios": ["workflow-definitions", "workflow-input-refs", "authz-workflow-env"]
     },
     "workflow-engine-control": {
-      "description": "Idempotency keys, trigger schema, event subscriber isolation, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
+      "description": "Idempotency keys, trigger schema, event subscriber isolation, GitHub and Jira event triggers with match filters and redelivery dedupe, cooldown, webhook trigger, signature verification and delivery filter, failure policies, node retries, run retry, cancel of waiting, task, approval, fan-out and sub-workflow runs, crash recovery of an agent-task step without a second task",
       "scenarios": [
         "workflow-engine-control",
         "workflow-retry-deadline",
         "workflow-event-subscriber-isolation",
+        "workflow-github-jira-event-triggers",
         "workflow-engine-cancel",
         "workflow-webhook-filter",
         "workflow-webhook-hmac-sha1",

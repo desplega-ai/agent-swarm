@@ -19,6 +19,9 @@ export interface PullRequestEvent extends GitHubWebhookEvent {
     merged: boolean;
     merged_by?: { login: string };
     changed_files?: number;
+    draft?: boolean;
+    labels?: Array<{ name: string }>;
+    assignees?: Array<{ login: string }>;
   };
   requested_reviewer?: { login: string; id: number }; // Added for review_requested/review_request_removed events
   label?: { id: number; name: string; color: string }; // Added for labeled/unlabeled events
@@ -32,6 +35,8 @@ export interface IssueEvent extends GitHubWebhookEvent {
     html_url: string;
     user: { login: string };
     author_association?: string;
+    labels?: Array<{ name: string }>;
+    assignees?: Array<{ login: string }>;
   };
   label?: { id: number; name: string; color: string }; // Added for labeled/unlabeled events
 }
@@ -45,7 +50,15 @@ export interface CommentEvent extends GitHubWebhookEvent {
     user: { login: string };
     author_association?: string;
   };
-  issue?: { number: number; title: string; html_url: string };
+  issue?: {
+    number: number;
+    title: string;
+    html_url: string;
+    /** Present when the commented issue is a pull request. */
+    pull_request?: unknown;
+    labels?: Array<{ name: string }>;
+    assignees?: Array<{ login: string }>;
+  };
   pull_request?: { number: number; title: string; html_url: string };
 }
 

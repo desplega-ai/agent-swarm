@@ -169,6 +169,7 @@ shard 4 runs in the state it had inside shard 3. Two rules follow:
 | `ctx.recordHttpCall(method, path, status)` | Count a raw `fetch`, WebSocket upgrade or SSE request toward route coverage. |
 | `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
 | `ctx.restartSut({ env })` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. `env` adds variables to that one process (a test-only crash point); the next restart drops them. |
+| `ctx.startDataCopy({ env })` | A second API on a new SQLite file (`source`). `copy()` stops it, runs `agent-swarm db-copy` into a new Postgres database and boots an API on the copy (`target`). It also returns read-only `sourceDb` and `targetDb`, `restartTarget(env)` (a later start of the API on the copy, for example with `POSTGRES_MIGRATIONS_DIR` set to a later chain) and `targetLog()`. Needs `E2E_POSTGRES_URL` on both engines. See `data-copy` and `data-copy-later-release`. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
 | `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. A scenario that proves a visible Slack change joins a visuals group (`groups: ["visuals-v2"]`, `"visuals-legacy"`) and marks each thread a reviewer must see: the Slack Visuals PR comment and the PR's `## Before / after` frames come from those marks. On the Chat SDK mock, use `flip.ctx.markThread` (that mock has its own journal). Mark the thread root, with a label that matches `^[a-z0-9-]+$`. |
@@ -211,9 +212,13 @@ After the scenarios, `coverage.ts`:
    that is covered anyway is **stale**; one that matches nothing is **dead**. Both fail strict.
 4. Reads every `stateSurfaces` entry: one read-only `SELECT ... AS value` on the SUT database
    (task statuses, workflow run and step statuses, script run statuses, script step types,
-   script scopes, fs modes, executors). Every value in the declared universe must have been
+   script scopes, fs modes, executors). A scenario can call `ctx.captureStateSurface(name)`
+   to run the same query while a transient state is held. The report includes both reads.
+   Every value in the declared universe must have been
    produced unless excluded with a reason; a value in the database that the universe does not
-   list is a new engine state and fails strict until it is declared.
+   list is a new engine state and fails strict until it is declared. A state exclusion marked
+   `"transient": true` (a state the engine leaves within one heartbeat or poll) is never
+   stale: a final read, or a scenario rerun on a fresh database, may catch it by chance.
 5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the
    registry must belong to at least one flow.
 6. Runs `bun run src/cli.tsx help` for the CLI command universe and counts the commands

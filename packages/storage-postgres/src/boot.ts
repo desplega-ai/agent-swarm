@@ -89,7 +89,30 @@ export type ProcessLockOptions = {
   onLost?: (reason: string) => void;
   /** How often the watch checks the lock session (default 1000 ms). */
   watchMs?: number;
+  /**
+   * How long one check may wait for its answer before the lock counts as lost
+   * (default 10000 ms). A connection that died without a FIN or RST (the
+   * database came back on another address, the network drops packets) never
+   * answers, and the kernel gives up on it only after about 15 minutes.
+   */
+  watchTimeoutMs?: number;
 };
+
+/**
+ * Server-side TCP keepalive of a session, as startup parameters (seconds).
+ * When the API's side of a connection is gone without a FIN (a network cut),
+ * the server ends the backend after about 25 s of silence, so its session
+ * lock is released and a restarted API can take it. Without them, the server
+ * keeps the backend for the operating system default (2 hours on Linux).
+ */
+export const POSTGRES_KEEPALIVE_PARAMS = {
+  tcp_keepalives_idle: "10",
+  tcp_keepalives_interval: "5",
+  tcp_keepalives_count: "3",
+} as const;
+
+/** Seconds to wait for a new connection (Bun's default is 30). */
+export const POSTGRES_CONNECT_TIMEOUT_S = 10;
 
 export type ProcessLock = {
   /** Backend pid of the lock session (the write fence checks it, owner-fence.ts). */
@@ -121,7 +144,14 @@ export async function acquireProcessLock(
 ): Promise<ProcessLock> {
   const pollMs = options.pollMs ?? 500;
   // A dedicated one-connection pool: the lock lives as long as this session.
-  const conn = new Bun.SQL({ url, max: 1, idleTimeout: 0, maxLifetime: 0 });
+  const conn = new Bun.SQL({
+    url,
+    max: 1,
+    idleTimeout: 0,
+    maxLifetime: 0,
+    connectionTimeout: POSTGRES_CONNECT_TIMEOUT_S,
+    connection: POSTGRES_KEEPALIVE_PARAMS,
+  });
   const started = Date.now();
   let lockPid = 0;
   let lockBackendStart = "";
@@ -158,6 +188,7 @@ export async function acquireProcessLock(
     // holds no lock: check the backend pid and the granted lock, not only
     // that a query succeeds.
     let checking = false;
+    const watchTimeoutMs = options.watchTimeoutMs ?? 10_000;
     const lost = (reason: string) => {
       if (released || watch === undefined) return;
       clearInterval(watch);
@@ -167,6 +198,18 @@ export async function acquireProcessLock(
     watch = setInterval(() => {
       if (checking || released) return;
       checking = true;
+      // A dead connection never answers: the lock counts as lost after the
+      // deadline. After an event-loop stall the timer can run before the
+      // answer that waits in the socket is read, so the deadline gives I/O
+      // one more turn (500 ms) before it decides.
+      let settled = false;
+      const deadline = setTimeout(() => {
+        const confirm = setTimeout(() => {
+          if (!settled) lost(`the lock session did not answer within ${watchTimeoutMs} ms`);
+        }, 500);
+        confirm.unref?.();
+      }, watchTimeoutMs);
+      deadline.unref?.();
       (
         conn.unsafe(
           `SELECT pg_backend_pid() AS pid, EXISTS (
@@ -183,6 +226,8 @@ export async function acquireProcessLock(
         })
         .catch((err: unknown) => lost(`the lock session failed: ${(err instanceof Error ? err.message : String(err))}`))
         .finally(() => {
+          settled = true;
+          clearTimeout(deadline);
           checking = false;
         });
     }, options.watchMs ?? 1000);
@@ -195,7 +240,16 @@ export async function acquireProcessLock(
       if (released) return;
       released = true;
       if (watch) clearInterval(watch);
-      await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});
+      // Bounded: on a dead connection the unlock never answers. Closing the
+      // session releases the lock anyway.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {}),
+        new Promise((done) => {
+          timer = setTimeout(done, 2_000);
+        }),
+      ]);
+      clearTimeout(timer);
       await conn.close({ timeout: 1 }).catch(() => {});
     },
   };

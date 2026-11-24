@@ -235,7 +235,7 @@ import {
 } from "../utils/subscription-plans";
 import { auditAssetKeys, auditAssetKeysAsync } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
-import { normalizeDate, normalizeDateRequired } from "./date-utils";
+import { normalizeDate, normalizeDateRequired, serializeNextRunAt } from "./date-utils";
 import {
   configureAgentDependencies,
   ExtensionAgentAssignmentError,
@@ -4928,7 +4928,7 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
     priority: data.priority ?? 50,
     targetAgentId: data.targetAgentId ?? null,
     enabled: data.enabled !== false,
-    nextRunAt: data.nextRunAt ?? null,
+    nextRunAt: serializeNextRunAt(data.nextRunAt),
     createdByAgentId: data.createdByAgentId ?? null,
     parentTaskId: data.parentTaskId ?? null,
     requestedDelayMs: data.requestedDelayMs ?? null,
@@ -5016,7 +5016,7 @@ export async function updateScheduledTask(
     targetAgentId: data.targetAgentId,
     enabled: data.enabled,
     lastRunAt: data.lastRunAt,
-    nextRunAt: data.nextRunAt,
+    nextRunAt: opt(data.nextRunAt, serializeNextRunAt),
     timezone: data.timezone,
     consecutiveErrors: data.consecutiveErrors,
     lastErrorAt: data.lastErrorAt,

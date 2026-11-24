@@ -6,7 +6,7 @@ import { MAX_PERSISTED_SESSION_TASKS, shouldPersistQuery } from "./query-persist
 const connection = { apiUrl: "http://swarm.test", apiKey: "operator-key" };
 
 describe("shouldPersistQuery", () => {
-  test("agent-fs, Cmd+K search and favorites queries are not dehydrated, other successful queries are", () => {
+  test("agent-fs, Cmd+K search, favorites and page body queries are not dehydrated, other successful queries are", () => {
     const client = new QueryClient();
     client.setQueryData(["agent-fs", "http://fs.test", "user-1", "org-1", "drive-1", "ls", "/"], {
       entries: [],
@@ -16,6 +16,7 @@ describe("shouldPersistQuery", () => {
     });
     client.setQueryData(paletteSearchKey(connection, "tasks", "deploy", 8), []);
     client.setQueryData(["favorites", "key", undefined], { favoriteIds: ["group-1"] });
+    client.setQueryData(["page-metadata", "page-1"], { id: "page-1", body: "{}" });
     client.setQueryData(["tasks"], []);
     client.setQueryData(["status"], { ok: true });
 

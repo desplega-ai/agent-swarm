@@ -61,10 +61,35 @@ export interface CopySource {
    * refuses to rebuild an index that would drop a searchable memory.
    */
   vectorIndex?(): { dimensions: number | null; ids: string[] | null } | null;
-  /** Every row of `table`, in insertion order, in batches of at most `batchSize`. */
-  rows(table: CopyTable, batchSize: number): Iterable<CopyRow[]>;
+  /**
+   * Rows whose foreign key names no parent row (SQLite `PRAGMA foreign_key_check`).
+   * A source that never enforced a key, or lost rows with enforcement off, holds
+   * them; the target refuses each one.
+   */
+  foreignKeyViolations?(): CopyOrphan[];
+  /**
+   * Every row of `table`, in insertion order, in batches of at most `batchSize`
+   * rows. With `batchBytes`, a batch also ends once its text and blob cells hold
+   * that many bytes (one larger row still forms a batch by itself).
+   */
+  rows(table: CopyTable, batchSize: number, batchBytes?: number): Iterable<CopyRow[]>;
   close(): void;
 }
+
+/**
+ * A row whose foreign key columns name no row of `parent`. `onDelete` is the
+ * action of that key in the source (`CASCADE`, `SET NULL`, `NO ACTION`, ...).
+ */
+export type CopyOrphan = {
+  table: string;
+  row: string;
+  parent: string;
+  columns: string[];
+  onDelete: string;
+};
+
+/** One value or row that `--repair` changed, and how. */
+export type CopyRepair = { table: string; column: string; row: string; action: string };
 
 /** A value the target cannot store as it is. The copy writes nothing when any exists. */
 export type CopyProblem = { table: string; column: string; row: string; reason: string };
@@ -97,6 +122,14 @@ export type CopyReport = {
    * queries is unverified, so an operator runs it once on Postgres.
    */
   unchecked?: CopyProblem[];
+  /** What `--repair` changed (the list holds every one unless a cap was set). */
+  repairs?: CopyRepair[];
+  repairCount?: number;
+  /**
+   * Steps after COMMIT that did not run (planner statistics). The copy is
+   * committed and complete; each line says what the operator runs by hand.
+   */
+  warnings?: string[];
   /** A failure that stopped the copy (refused target, constraint at commit). */
   error?: string;
   tables: CopyTableReport[];

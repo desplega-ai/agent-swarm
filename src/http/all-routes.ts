@@ -18,6 +18,7 @@ import "./budgets";
 import "./codex-oauth-device";
 import "./codex-oauth-accounts";
 import "./codex-oauth-keep-warm";
+import "./codex-oauth-slots";
 import "./comb";
 import "./config";
 import "./pool-keys";
