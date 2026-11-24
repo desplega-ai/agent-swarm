@@ -134,6 +134,7 @@ const linearWebhook = route({
   auth: { apiKey: false },
   responses: {
     200: { description: "Event accepted", schema: LinearWebhookAcceptedSchema },
+    400: { description: "Signed body is not valid JSON" },
     401: { description: "Invalid signature" },
     413: { description: "Body exceeds 5 MiB" },
     503: { description: "Linear integration not configured" },
@@ -304,7 +305,7 @@ export async function handleLinearTracker(
 
     const result = await handleLinearWebhook(rawBody, headers);
     // handleLinearWebhook's return type is `{ status: number; body: unknown }` (it
-    // can send 503/401/200 — all declared on this route); narrow to the literal
+    // can send 503/401/400/200, all declared on this route); narrow to the literal
     // 200 code to use the typed egress for the one 2xx case, keep the raw
     // passthrough (same status/body/header as before) for 401/503.
     if (result.status === 200) {

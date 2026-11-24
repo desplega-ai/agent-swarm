@@ -5,6 +5,7 @@ export {
   type DbParam,
   DbTransactionDeadlineError,
   type StatementObserver,
+  type TransactionObservation,
   type TransactionOptions,
 } from "./client";
 export type {

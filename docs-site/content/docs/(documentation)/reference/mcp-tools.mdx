@@ -904,7 +904,7 @@ Set `theme` to a preset id, or pass `themeTokens`, to restyle the whole page. `t
 | `themeTokens` | object | No | Token overrides: `light` and `dark` maps of token names to values, or `format: "css"` with a `css` variable block. Stored normalized. Names outside the token contract come back in `ignoredTokens`. `null` clears them |
 | `designVersion` | number | No | `2` (the default for new pages) uses the design system. `1` keeps the old head. An upsert that omits it keeps the stored value |
 
-Returns the page id, an `app_url` (`${APP_URL}/pages/:id` — opens in the SPA), and an `api_url` (`${MCP_BASE_URL}/p/:id` — direct HTML render or JSON 302→SPA). Append `?mode=full` to the app URL for a maximized chrome-light view. The returned `version` is a monotonic edit counter (`MAX(page_versions.version) + 1`).
+Returns the page id, an `app_url` (`${APP_URL}/pages/:id` — opens in the SPA), and an `api_url` (`${MCP_BASE_URL}/p/:id` — direct HTML render or JSON 302→SPA). Append `?mode=full` to the app URL for a maximized chrome-light view, or `?mode=chromeless` for the page alone with no title bar. The returned `version` is a monotonic edit counter (`MAX(page_versions.version) + 1`).
 
 ### delete-page
 

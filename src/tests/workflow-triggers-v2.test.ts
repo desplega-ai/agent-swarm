@@ -1466,7 +1466,7 @@ describe("TriggerConfigSchema", () => {
     ).toBe(true);
     expect(TriggerConfigSchema.safeParse({ type: "event", eventName: "" }).success).toBe(false);
     expect(
-      TriggerConfigSchema.safeParse({ type: "event", eventName: "github.issue.opened" }).success,
+      TriggerConfigSchema.safeParse({ type: "event", eventName: "github.issue.closed" }).success,
     ).toBe(false);
   });
 

@@ -13,6 +13,7 @@
 //     carries the task output.
 //   - status sync: moving a tracked issue to Canceled sends `Issue.update`; the task is
 //     cancelled.
+import { createHmac } from "node:crypto";
 import { createEmulator } from "emulate";
 import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
@@ -173,6 +174,18 @@ export const linearEmulateFlows: Scenario = {
         return asRecord(response.json);
       };
       expect((await status()).connected === false, "Linear must start disconnected");
+
+      // ── a signed body that is not valid JSON is a client error, not a 500 ──
+      const truncated = '{"type":';
+      const malformed = await ctx.api("POST", "/api/trackers/linear/webhook", {
+        apiKey: null,
+        rawBody: truncated,
+        headers: {
+          "Content-Type": "application/json",
+          "linear-signature": createHmac("sha256", signingSecret).update(truncated).digest("hex"),
+        },
+      });
+      expectStatus(malformed, [400], "a signed Linear webhook with a truncated body");
 
       // ── OAuth: consent page, actor=app install, code exchange ──
       const authorize = await ctx.api("GET", "/api/trackers/linear/authorize?format=json");

@@ -3262,28 +3262,22 @@ export async function detectVcsForTask(
         })),
       );
     } else if (isBitbucketUrl(remoteUrl)) {
-      // Checked before the loose "github" substring match below, so a
-      // Bitbucket repo with "github" in its slug is not sent to `gh`.
       bitbucketRepo = bitbucketFullName(remoteUrl);
       if (!bitbucketRepo) return;
       vcsProvider = "bitbucket";
       const pr = await findBitbucketOpenPullRequest(remoteUrl, branch);
       prJson = JSON.stringify(pr ? [pr] : []);
-    } else if (
-      remoteUrl.includes("github.com") ||
-      remoteUrl.includes("github") ||
-      isGitHubUrl(remoteUrl)
-    ) {
-      vcsProvider = "github";
-      prJson = (
-        await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
-      ).trim();
-    } else if (remoteUrl.includes("gitlab")) {
+    } else if (detectVcsProvider(remoteUrl) === "gitlab") {
       vcsProvider = "gitlab";
       prJson = (
         await Bun.$`glab mr list --source-branch ${branch} --json iid,web_url --per-page 1`
           .quiet()
           .text()
+      ).trim();
+    } else if (remoteUrl.includes("github") || isGitHubUrl(remoteUrl)) {
+      vcsProvider = "github";
+      prJson = (
+        await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
       ).trim();
     } else {
       return; // Unknown provider
