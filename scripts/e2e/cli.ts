@@ -27,9 +27,10 @@ export type CliOptions = {
   timeoutMs?: number;
   /**
    * For a command that serves until stopped (`api`): runs while the child does, then the
-   * child gets SIGTERM. Its error fails the run after the child is stopped.
+   * child gets SIGTERM. Its error fails the run after the child is stopped. `stdout()` is the
+   * output so far, to wait for a line before the stop (Ink writes frames throttled).
    */
-  whileRunning?: () => Promise<void>;
+  whileRunning?: (child: { stdout: () => string }) => Promise<void>;
 };
 
 const calledCommands = new Set<string>();
@@ -126,14 +127,18 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
     timedOut = true;
     child.kill("SIGKILL");
   }, options.timeoutMs ?? 60_000);
-  const output = Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
+  let stdoutSoFar = "";
+  const readStdout = (async () => {
+    const decoder = new TextDecoder();
+    for await (const chunk of child.stdout) stdoutSoFar += decoder.decode(chunk, { stream: true });
+    stdoutSoFar += decoder.decode();
+    return stdoutSoFar;
+  })();
+  const output = Promise.all([readStdout, new Response(child.stderr).text()]);
   let duringError: unknown;
   if (options.whileRunning) {
     try {
-      await options.whileRunning();
+      await options.whileRunning({ stdout: () => stdoutSoFar });
     } catch (error) {
       duringError = error;
     }
