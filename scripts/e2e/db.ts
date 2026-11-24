@@ -7,6 +7,7 @@
 // Postgres brief), which both engines accept.
 import { constants, Database, type SQLQueryBindings } from "bun:sqlite";
 import { resolve } from "node:path";
+import { SkipError } from "./report";
 
 export type Engine = "sqlite" | "postgres";
 
@@ -263,7 +264,9 @@ export async function dropPostgresDatabase(databaseUrl: string): Promise<void> {
 function adminUrl(): string {
   const url = process.env.E2E_POSTGRES_URL;
   if (!url)
-    throw new Error("--engine postgres needs E2E_POSTGRES_URL (a role that may CREATE DATABASE)");
+    throw new SkipError(
+      "--engine postgres needs E2E_POSTGRES_URL (a role that may CREATE DATABASE)",
+    );
   if (!/^postgres(ql)?:\/\//.test(url))
     throw new Error("E2E_POSTGRES_URL must start with postgres:// or postgresql://");
   return url;

@@ -75,6 +75,8 @@ import {
   updateScheduledTask,
 } from "../db";
 import { getScript } from "../scripts/db";
+import { renderDialectSections } from "../seed-skills/render";
+import { getStorage } from "../storage";
 import { resolveSeededEnabled } from "./automation-toggle";
 import { isSeedScriptsEnabled, isSeedWorkflowsEnabled } from "./seed-toggle";
 import type { Seeder, SeedItem } from "./types";
@@ -370,8 +372,14 @@ export function createSchedulesSeeder(
     kind: "schedule",
 
     async items(): Promise<ScheduleSeedItem[]> {
+      // A prompt keeps only the `<!-- dialect:... -->` sections of the active
+      // db-query dialect, as seeded skills do. The hash covers the rendered text.
+      const dialect = getStorage().capabilities.dbQueryDialect;
       const items: ScheduleSeedItem[] = [];
-      for (const schedule of schedules) {
+      for (const template of schedules) {
+        const schedule = template.taskTemplate
+          ? { ...template, taskTemplate: renderDialectSections(template.taskTemplate, dialect) }
+          : template;
         // An opted-out catalog may be supplied externally. Defer only missing
         // targets, checking again on the next seed pass; keep unrelated schedules.
         if (
