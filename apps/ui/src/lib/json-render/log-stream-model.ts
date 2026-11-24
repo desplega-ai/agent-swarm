@@ -65,6 +65,47 @@ export function lineTime(value: unknown): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 }
 
+/** Fields a line reads from its row. */
+export type LineFields = {
+  timeField: string;
+  bodyField: string;
+  severityField?: string;
+  serviceField?: string;
+  attributesField?: string;
+  resourceField?: string;
+  traceField?: string;
+};
+
+/** What a collapsed line shows, derived once per entry. */
+export type LineView = { time: string; level: SeverityLevel; service: string; body: string };
+
+export function lineView(row: Record<string, unknown>, fields: LineFields): LineView {
+  const service = fields.serviceField ? row[fields.serviceField] : undefined;
+  return {
+    time: lineTime(row[fields.timeField]),
+    level: severityLevel(fields.severityField ? row[fields.severityField] : undefined),
+    service: service == null ? "" : String(service),
+    body: lineBody(row[fields.bodyField]),
+  };
+}
+
+/** Rows kept when `maxRows` is not set. */
+export const DEFAULT_MAX_ROWS = 10_000;
+
+/**
+ * The newest `max` rows (data is newest first) and how many older ones were
+ * dropped. A non-positive or non-finite `max` keeps the default.
+ */
+export function capRows<T>(
+  rows: readonly T[],
+  max: number,
+): { rows: readonly T[]; dropped: number } {
+  const cap = Number.isFinite(max) && max > 0 ? Math.floor(max) : DEFAULT_MAX_ROWS;
+  return rows.length > cap
+    ? { rows: rows.slice(0, cap), dropped: rows.length - cap }
+    : { rows, dropped: 0 };
+}
+
 /** One-line body: objects as JSON, newlines folded to spaces. */
 export function lineBody(value: unknown): string {
   if (value === undefined || value === null) return "";

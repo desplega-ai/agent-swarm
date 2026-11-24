@@ -586,7 +586,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `File` | `path` | `height`, `fill`; one agent-fs file (Markdown, image, PDF, text) read as the viewer; see below. |
 | `DateRange` | `id` | `presets` (any of `7d`, `30d`, `90d`, `mtd`, `custom`; default all five), `defaultPreset` (default the first), `label`; writes `/ui/<id>/from` and `/ui/<id>/to`; see below. |
 | `Timeline` | `timeField`, `titleField` | `data`, `loading`, `descriptionField`, `statusField`, `tones`, `icon`, `emptyMessage`, `onSelect`; vertical event list, newest first, grouped by day; see below. |
-| `LogStream` | `timeField`, `bodyField` | `data`, `loading`, `severityField`, `serviceField`, `attributesField`, `resourceField`, `traceField`, `keyField`, `follow`, `height`, `fill`, `emptyMessage`, `onTrace`; a dense log tail, one line per entry; see below. |
+| `LogStream` | `timeField`, `bodyField` | `data`, `loading`, `severityField`, `serviceField`, `attributesField`, `resourceField`, `traceField`, `keyField`, `follow`, `maxRows`, `height`, `fill`, `emptyMessage`, `onTrace`; a dense log tail, one line per entry; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 | `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 | `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`, `attachments`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
@@ -664,10 +664,11 @@ DateRange and Timeline details:
 - `DateRange` writes inclusive `YYYY-MM-DD` dates (the viewer's local calendar) to `/ui/<id>/from` and `/ui/<id>/to`, and the active preset to `/ui/<id>/preset`. On first load it writes `defaultPreset` unless the state already holds a range. Bind query params with `{ "$state": "/ui/<id>/from" }` so the query refetches when the range changes. `7d` is today and the six days before it; `mtd` starts on the 1st. `custom` opens two date inputs in a popover; Apply needs both dates, from not after to. `id` must match `[A-Za-z0-9_-]+`, and `defaultPreset` must be one of `presets`.
 - `Timeline` reads `timeField` as an ISO date or epoch ms (rows that do not parse are left out), sorts newest first and groups under day headings: Today, Yesterday, then the date. Each event shows `titleField`, the time, `descriptionField` (two lines at most) and a `statusField` pill (`tones` maps value to tone; lifecycle values get the status chip). `icon` replaces the marker dot. `onSelect` runs with `$row` (the row) and `$rowIndex` (its index in `data`); without it events are not clickable.
 
-SchemaLogStream details — logs as a tail, not a table:
+LogStream details — logs as a tail, not a table:
 
 - One monospace line per entry, newest first: `HH:mm:ss.SSS`, a 3 px severity bar (text like `WARN` or an OTel number), the service, the body on one line. Click a line to expand the full body, `attributesField` and `resourceField` (objects or JSON strings) and a trace link that runs `onTrace` with `$row`.
-- Virtualized: thousands of entries stay fast. Set `keyField` to a unique id so expanded lines stay open across refreshes.
+- Virtualized and memoized: 50k entries scroll smoothly, and a refresh re-renders only the lines it adds. Set `keyField` to a unique id so expanded lines stay open across refreshes and a refetched entry is reused, not redrawn.
+- `maxRows` (default 10,000, at most 100,000) keeps the newest entries; the oldest past it drop with a notice at the bottom. Keep the source query bounded too (a `limit` or a `since` window).
 - Live tail: refresh the source with `OnEnter.everyMs` (and a `since` cursor in the action) and set `follow: true`. The newest entry stays in view; once the viewer scrolls down, new entries show an "N new" pill instead of moving the view.
 - Pair it with a severity histogram (`Chart` kind `bar`, stacked per severity) on top and facets (`Chips` or `Select` over service and severity) beside it.
 

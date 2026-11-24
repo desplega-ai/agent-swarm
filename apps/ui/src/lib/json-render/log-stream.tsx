@@ -1,24 +1,28 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowUp, ChevronRight, ScrollText } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { LogStreamProps } from "./catalog";
 import {
   attributePairs,
-  lineBody,
-  lineTime,
+  capRows,
+  DEFAULT_MAX_ROWS,
+  type LineFields,
+  type LineView,
+  lineView,
   newOnTop,
   rowKeys,
   SEVERITY_BAR_CLASS,
-  severityLevel,
 } from "./log-stream-model";
 
 /** Collapsed line height in px (the virtualizer's estimate; expanded rows are measured). */
 const LINE_PX = 22;
 /** Scrolled less than this from the top still counts as "following". */
 const AT_TOP_PX = 4;
+/** Line views kept between renders; past this the cache starts over (it only holds lines that were on screen). */
+const LINE_CACHE_MAX = 5_000;
 
 type Row = Record<string, unknown>;
 
@@ -39,11 +43,100 @@ function AttributeGrid({ title, pairs }: { title: string; pairs: [string, string
   );
 }
 
+type LineProps = {
+  row: Row;
+  rowKey: string;
+  view: LineView;
+  open: boolean;
+  fields: LineFields;
+  onToggle: (key: string) => void;
+  onTrace?: (row: Row, key: string) => void;
+};
+
+/**
+ * One entry. Memoized on its key: a refresh that refetches the same entries
+ * (new objects, same ids) re-renders no visible line. A log entry does not
+ * change under its id, so `row` and `view` are not compared.
+ */
+const LogLine = memo(
+  function LogLine({ row, rowKey, view, open, fields, onToggle, onTrace }: LineProps) {
+    const traceId = fields.traceField ? row[fields.traceField] : undefined;
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => onToggle(rowKey)}
+          aria-expanded={open}
+          data-testid="log-stream-line"
+          data-level={view.level}
+          className={cn(
+            "grid w-full grid-cols-[3px_6.5rem_minmax(0,9rem)_1fr] items-center gap-x-2 pr-2 text-left",
+            "hover:bg-muted/60",
+            open && "bg-muted/40",
+          )}
+          // Fixed box: the line's layout never reaches past itself.
+          style={{ height: LINE_PX, contain: "strict" }}
+        >
+          <span className={cn("h-full", SEVERITY_BAR_CLASS[view.level])} title={view.level} />
+          <span className="text-muted-foreground tabular-nums">{view.time}</span>
+          <span className="truncate text-muted-foreground">{view.service}</span>
+          <span className="flex min-w-0 items-center gap-1">
+            <ChevronRight
+              className={cn(
+                "size-3 shrink-0 text-muted-foreground transition-transform",
+                open && "rotate-90",
+              )}
+            />
+            <span className="truncate">{view.body}</span>
+          </span>
+        </button>
+        {open ? (
+          <div className="space-y-2 border-l-[3px] border-border bg-muted/20 py-2 pr-2 pl-[calc(6.5rem+1.25rem)]">
+            <div className="whitespace-pre-wrap break-all">
+              {typeof row[fields.bodyField] === "string"
+                ? (row[fields.bodyField] as string)
+                : JSON.stringify(row[fields.bodyField], null, 2)}
+            </div>
+            <AttributeGrid
+              title="Attributes"
+              pairs={fields.attributesField ? attributePairs(row[fields.attributesField]) : []}
+            />
+            <AttributeGrid
+              title="Resource"
+              pairs={fields.resourceField ? attributePairs(row[fields.resourceField]) : []}
+            />
+            {typeof traceId === "string" && traceId !== "" && onTrace ? (
+              <button
+                type="button"
+                className="text-primary underline-offset-2 hover:underline"
+                onClick={() => onTrace(row, rowKey)}
+              >
+                Open trace {traceId}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </>
+    );
+  },
+  (a, b) =>
+    a.rowKey === b.rowKey &&
+    a.open === b.open &&
+    a.fields === b.fields &&
+    a.onToggle === b.onToggle &&
+    a.onTrace === b.onTrace,
+);
+
 /**
  * `LogStream`: one dense monospace line per entry (time, severity bar,
  * service, body), newest first. A click expands the entry's attributes and a
  * trace link. `follow` keeps the newest entry in view and, once the viewer
  * scrolls away, counts the entries a refresh added on top.
+ *
+ * Built for 50k-entry tails: only the lines on screen mount (virtualized),
+ * each line's text is derived once per entry key and reused across scrolls
+ * and refreshes, and a line re-renders only when it opens or closes. Past
+ * `maxRows` the oldest entries are dropped with a notice.
  */
 export function LogStreamView({
   props,
@@ -52,12 +145,32 @@ export function LogStreamView({
   props: LogStreamProps;
   onTrace?: (row: Row, index: number) => void;
 }) {
-  const rows = useMemo<Row[]>(
-    () =>
-      Array.isArray(props.data)
-        ? props.data.filter((r): r is Row => !!r && typeof r === "object")
-        : [],
-    [props.data],
+  const maxRows = props.maxRows ?? DEFAULT_MAX_ROWS;
+  const { rows, dropped } = useMemo(() => {
+    const valid = Array.isArray(props.data)
+      ? props.data.filter((r): r is Row => !!r && typeof r === "object")
+      : [];
+    return capRows(valid, maxRows);
+  }, [props.data, maxRows]);
+  const fields = useMemo<LineFields>(
+    () => ({
+      timeField: props.timeField,
+      bodyField: props.bodyField,
+      severityField: props.severityField,
+      serviceField: props.serviceField,
+      attributesField: props.attributesField,
+      resourceField: props.resourceField,
+      traceField: props.traceField,
+    }),
+    [
+      props.timeField,
+      props.bodyField,
+      props.severityField,
+      props.serviceField,
+      props.attributesField,
+      props.resourceField,
+      props.traceField,
+    ],
   );
   const keys = useMemo(
     () =>
@@ -68,18 +181,42 @@ export function LogStreamView({
       }),
     [rows, props.keyField, props.timeField, props.bodyField],
   );
+  // Line text (time, level, service, one-line body) per entry key, built the
+  // first time a line is on screen. Field changes start it over.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `fields` is the trigger: other fields mean other text
+  const lineCache = useMemo(() => new Map<string, LineView>(), [fields]);
+  const viewOf = (key: string, row: Row): LineView => {
+    let view = lineCache.get(key);
+    if (!view) {
+      if (lineCache.size >= LINE_CACHE_MAX) lineCache.clear();
+      view = lineView(row, fields);
+      lineCache.set(key, view);
+    }
+    return view;
+  };
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [awayFromTop, setAwayFromTop] = useState(false);
   const [unseen, setUnseen] = useState(0);
   const firstKeyRef = useRef<string | undefined>(undefined);
 
+  // Stable per data change: the virtualizer memoizes its measurements on this
+  // function, and a new one each render rebuilt all of them on every scroll frame.
+  const getItemKey = useCallback((index: number) => keys[index] ?? index, [keys]);
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => LINE_PX,
-    overscan: 20,
-    getItemKey: (index) => keys[index] ?? index,
+    overscan: 8,
+    getItemKey,
+    // A collapsed line is LINE_PX by construction: reading its box would force a
+    // style and layout pass for every line that scrolls in. Only an open line is
+    // measured, from the ResizeObserver entry when there is one.
+    measureElement: (element, entry) => {
+      if (!element.hasAttribute("data-open")) return LINE_PX;
+      const box = entry?.borderBoxSize?.[0];
+      return box ? Math.round(box.blockSize) : Math.round(element.getBoundingClientRect().height);
+    },
     // First paint before the scroller is measured (and a layout-less test DOM).
     initialRect: { width: 960, height: 480 },
   });
@@ -101,13 +238,24 @@ export function LogStreamView({
     if (follow && !awayFromTop) scrollRef.current?.scrollTo({ top: 0 });
   }, [follow, awayFromTop, keys]);
 
-  const toggle = (key: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  const toggle = useCallback(
+    (key: string) =>
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }),
+    [],
+  );
+  // Stable for the memoized lines: the latest keys and handler are read at click time.
+  const latest = useRef({ keys, onTrace });
+  latest.current = { keys, onTrace };
+  const hasTrace = onTrace !== undefined;
+  const traceLine = useCallback(
+    (row: Row, key: string) => latest.current.onTrace?.(row, latest.current.keys.indexOf(key)),
+    [],
+  );
 
   const fill = props.fill === true;
   let body: ReactNode;
@@ -117,82 +265,44 @@ export function LogStreamView({
     body = <EmptyState compact icon={ScrollText} title={props.emptyMessage ?? "No log entries"} />;
   } else {
     body = (
-      <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-        {virtualizer.getVirtualItems().map((item) => {
-          const row = rows[item.index] as Row;
-          const key = keys[item.index] ?? String(item.index);
-          const open = expanded.has(key);
-          const level = severityLevel(props.severityField ? row[props.severityField] : undefined);
-          const service = props.serviceField ? row[props.serviceField] : undefined;
-          const traceId = props.traceField ? row[props.traceField] : undefined;
-          return (
-            <div
-              key={item.key}
-              data-index={item.index}
-              ref={virtualizer.measureElement}
-              className="absolute left-0 top-0 w-full"
-              style={{ transform: `translateY(${item.start}px)` }}
-            >
-              <button
-                type="button"
-                onClick={() => toggle(key)}
-                aria-expanded={open}
-                data-testid="log-stream-line"
-                data-level={level}
-                className={cn(
-                  "grid w-full grid-cols-[3px_6.5rem_minmax(0,9rem)_1fr] items-center gap-x-2 pr-2 text-left",
-                  "hover:bg-muted/60",
-                  open && "bg-muted/40",
-                )}
-                style={{ height: LINE_PX }}
+      <>
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((item) => {
+            const row = rows[item.index] as Row;
+            const key = keys[item.index] ?? String(item.index);
+            const open = expanded.has(key);
+            return (
+              <div
+                key={item.key}
+                data-index={item.index}
+                data-open={open ? "" : undefined}
+                ref={virtualizer.measureElement}
+                className="absolute left-0 top-0 w-full"
+                style={{ transform: `translateY(${item.start}px)`, contain: "layout paint" }}
               >
-                <span className={cn("h-full", SEVERITY_BAR_CLASS[level])} title={level} />
-                <span className="text-muted-foreground tabular-nums">
-                  {lineTime(row[props.timeField])}
-                </span>
-                <span className="truncate text-muted-foreground">
-                  {service == null ? "" : String(service)}
-                </span>
-                <span className="flex min-w-0 items-center gap-1">
-                  <ChevronRight
-                    className={cn(
-                      "size-3 shrink-0 text-muted-foreground transition-transform",
-                      open && "rotate-90",
-                    )}
-                  />
-                  <span className="truncate">{lineBody(row[props.bodyField])}</span>
-                </span>
-              </button>
-              {open ? (
-                <div className="space-y-2 border-l-[3px] border-border bg-muted/20 py-2 pr-2 pl-[calc(6.5rem+1.25rem)]">
-                  <div className="whitespace-pre-wrap break-all">
-                    {typeof row[props.bodyField] === "string"
-                      ? (row[props.bodyField] as string)
-                      : JSON.stringify(row[props.bodyField], null, 2)}
-                  </div>
-                  <AttributeGrid
-                    title="Attributes"
-                    pairs={props.attributesField ? attributePairs(row[props.attributesField]) : []}
-                  />
-                  <AttributeGrid
-                    title="Resource"
-                    pairs={props.resourceField ? attributePairs(row[props.resourceField]) : []}
-                  />
-                  {typeof traceId === "string" && traceId !== "" && onTrace ? (
-                    <button
-                      type="button"
-                      className="text-primary underline-offset-2 hover:underline"
-                      onClick={() => onTrace(row, item.index)}
-                    >
-                      Open trace {traceId}
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
+                <LogLine
+                  row={row}
+                  rowKey={key}
+                  view={viewOf(key, row)}
+                  open={open}
+                  fields={fields}
+                  onToggle={toggle}
+                  onTrace={hasTrace ? traceLine : undefined}
+                />
+              </div>
+            );
+          })}
+        </div>
+        {dropped > 0 ? (
+          <div
+            className="border-t border-border px-3 py-2 font-sans text-muted-foreground"
+            data-testid="log-stream-dropped"
+          >
+            {dropped.toLocaleString()} oldest {dropped === 1 ? "entry" : "entries"} dropped: showing
+            the newest {rows.length.toLocaleString()}.
+          </div>
+        ) : null}
+      </>
     );
   }
 

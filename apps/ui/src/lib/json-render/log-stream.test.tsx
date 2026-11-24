@@ -203,3 +203,39 @@ test("a refresh that adds entries on top while scrolled away shows N new, and th
     false,
   );
 });
+
+test("capRows keeps the newest entries and counts the dropped ones", () => {
+  expect(model.capRows([1, 2, 3, 4], 2)).toEqual({ rows: [1, 2], dropped: 2 });
+  expect(model.capRows([1, 2], 5)).toEqual({ rows: [1, 2], dropped: 0 });
+  // A bad cap falls back to the default instead of hiding everything.
+  expect(model.capRows([1, 2], 0)).toEqual({ rows: [1, 2], dropped: 0 });
+});
+
+test("past maxRows the oldest entries drop with a notice", async () => {
+  const data = Array.from({ length: 5 }, (_, i) => ({ ts: i, body: `line ${i}`, id: String(i) }));
+  const { host } = await mount({ data, maxRows: 3 });
+  expect(host.querySelectorAll('[data-testid="log-stream-line"]').length).toBe(3);
+  expect(host.querySelector('[data-testid="log-stream-dropped"]')?.textContent).toContain(
+    "2 oldest entries dropped",
+  );
+  expect(host.textContent).not.toContain("line 4");
+});
+
+test("a refetch of the same entries derives no line text again", async () => {
+  const { render } = await mount({ data: ROWS });
+  const RealDate = globalThis.Date;
+  let made = 0;
+  // Counts `new Date(...)`: lineTime builds one per line it formats.
+  globalThis.Date = class extends RealDate {
+    constructor(...args: ConstructorParameters<typeof Date>) {
+      super(...args);
+      made++;
+    }
+  } as DateConstructor;
+  try {
+    await render({ data: ROWS.map((row) => ({ ...row })) });
+  } finally {
+    globalThis.Date = RealDate;
+  }
+  expect(made).toBe(0);
+});

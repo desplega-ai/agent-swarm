@@ -635,6 +635,8 @@ const logStreamProps = z.object({
   keyField: z.string().optional(),
   /** Keep the newest entry in view; when the viewer scrolls away, show "N new". */
   follow: z.boolean().optional(),
+  /** Newest entries kept (default 10,000, at most 100,000); older ones are dropped with a notice. */
+  maxRows: z.number().int().positive().max(100_000).optional(),
   height: z.string().optional(),
   fill: z.boolean().optional(),
   emptyMessage: z.string().optional(),
@@ -1761,7 +1763,7 @@ export const swarmCatalogSpec = {
     LogStream: {
       props: logStreamProps,
       description:
-        'A log tail, not a table: one dense monospace line per entry, newest first, with the time (HH:mm:ss.SSS), a severity colour bar (OTel text or number), the service and the one-line body. Click a line to expand the full body, `attributesField` and `resourceField` as key/value lists, and a trace link that runs `onTrace` with `$row`. Virtualized, so thousands of rows stay fast. `follow: true` keeps the newest entry in view; once the viewer scrolls down, a refresh that adds entries on top shows an "N new" pill. 480 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. Feed it from a query or an action result, and refresh with `OnEnter.everyMs` for a live tail.',
+        'A log tail, not a table: one dense monospace line per entry, newest first, with the time (HH:mm:ss.SSS), a severity colour bar (OTel text or number), the service and the one-line body. Click a line to expand the full body, `attributesField` and `resourceField` as key/value lists, and a trace link that runs `onTrace` with `$row`. Virtualized and memoized, so tens of thousands of rows scroll smoothly; past `maxRows` (default 10,000) the oldest entries are dropped with a notice. `follow: true` keeps the newest entry in view; once the viewer scrolls down, a refresh that adds entries on top shows an "N new" pill. 480 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. Feed it from a query or an action result, and refresh with `OnEnter.everyMs` for a live tail.',
     },
     SchemaForm: {
       props: schemaFormProps,
