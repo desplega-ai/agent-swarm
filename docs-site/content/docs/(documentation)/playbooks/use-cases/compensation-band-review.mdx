@@ -1,0 +1,107 @@
+---
+title: 'How AI agents prepare compensation band evidence for a human decision'
+description: "Agent Swarm assembles a sourced band-review packet for a named compensation owner. People validate job matching and make every pay decision."
+agent:
+  offer: false
+  when: "Someone wants people and engineering leaders to assemble the sourced evidence for a compensation band review before a named compensation owner decides"
+---
+
+Agent Swarm can coordinate a configured, human-reviewed evidence review for compensation bands. Configured steps assemble the dated sources for a defined set of roles and locations and flag what is missing, stale or inconsistent. A qualified person validates job matching and makes every pay, fairness and policy decision. What it takes off the team is the assembly: role definitions, current bands and licensed benchmark data held in different systems and by different owners.
+
+The scope is one band review cycle for a defined set of roles and locations: the inputs a compensation owner needs in front of them, where each one came from, and which ones do not line up. It is not payroll discrepancy investigation ([unmatched pay records](/docs/playbooks/use-cases/ai-payroll-discrepancy-review)), not employee onboarding ([first-day readiness](/docs/playbooks/use-cases/employee-onboarding-readiness-review)), and not training completion ([training evidence](/docs/playbooks/use-cases/ai-training-completion-evidence-review)) or expense review. Each is a different handoff with a different owner.
+
+## When another tool fits better
+
+**A specialist compensation platform.** When the team needs built-in benchmark data, band modelling or pay-equity analytics, a platform built for compensation is the answer. It carries the data and the modelling in one place; a workflow that rebuilds that is a second copy to maintain.
+
+**A compensation adviser or consultant.** When the questions are job architecture, pay-equity methodology, or legal and multi-country rules, the work needs someone qualified to answer it. A workflow can hand them a packet. It cannot supply the judgement the packet is for.
+
+**The HRIS compensation module.** When the approved bands and the data behind the review already live in the HR system and its module shows who owns each band, that module is the cheaper control. Rebuilding its band view duplicates a tool the team already pays for.
+
+Agent Swarm fits a different shape: the inputs sit in several systems with different owners, and the person who decides is not the person who holds the data. Role definitions live with the people team, the approved current bands in a spreadsheet or the HR system, the licensed benchmark data with whoever bought the subscription, and the review criteria in a document the compensation owner wrote. Nobody holds the whole picture, and the cycle starts with assembling it. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out where that work belongs.
+
+## An illustrative workflow
+
+This is a fictional, custom workflow. It is not a built-in compensation feature, not a prebuilt HRIS or benchmark integration, and not a customer result. Any compensation-data integration depends on how the customer configures it and what permissions the customer grants.
+
+<Mermaid title="Illustrative compensation band review flow, from inputs provided by people to a decision recorded by a named compensation owner." chart={`flowchart LR
+  A["Inputs provided by people:<br/>role definitions, approved<br/>current bands, licensed<br/>benchmark data"] --> B["Configured collection"]
+  B --> C["Deterministic checks<br/>swarm-script to JSON"]
+  C --> D["Agent assembles a<br/>source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>named compensation owner"}}
+  G -- "sources incomplete" --> B
+  G -- "decide" --> R["Decision recorded<br/>by a person"]
+`} />
+
+**1. People provide the inputs, and the benchmark data is licensed by the customer.** The role definitions, the approved current bands and the licensed benchmark export are inputs the team supplies or connects. Agent Swarm ships no benchmark data, so the packet is only as good as the subscription behind it.
+
+**2. Configured connections collect them.** Scripts read each source through [script connections](/docs/guides/script-connections), with credentials from the [scripts credential broker](/docs/guides/scripts-credential-broker), so a raw secret stays out of script source, arguments and logs.
+
+**3. Deterministic steps compare the sources.** A `swarm-script` step lists every source it read with its date and version, applies the comparable role and location criteria the compensation owner defined, and flags the cases that need attention: a source that is missing, a benchmark older than the owner's freshness rule, a role with no clean match, and a band that sits outside or at the edge of the benchmark range. The output is JSON, so no model does the arithmetic and the same inputs produce the same flags every run. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that collection-then-comparison split.
+
+**4. An agent writes the packet.** It describes what each source says, links each row to the record it came from, and names the gaps it could not fill. It makes no pay recommendation. A packet that recommends a band has moved a human decision into the agent.
+
+**5. A person decides.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the run and resumes only on a human response. A qualified person validates the job matching before anything else in the packet matters. The workflow has no path to change a band, a salary or an HRIS record: its last step is a decision a person records.
+
+## Worked example: one cycle, two locations
+
+This example is fictional. The company, the role titles, the figures and the dates are invented, and every number below is a placeholder, not market data. It shows the shape of a packet.
+
+A fictional software company with about 60 engineers runs a band review for the Senior Backend Engineer role in two locations, and includes one adjacent role that has no clean benchmark match.
+
+| Check | What the deterministic step compared | Result | Source, read 2027-02-09 |
+| --- | --- | --- | --- |
+| Source date against the freshness rule | Publication date of each licensed benchmark report against the 12-month rule the owner wrote | One report dated 2025-11-30 is outside the rule | Licensed benchmark report, revision 2 |
+| Role match | Role definition family and level against the benchmark's job family and level | Senior Backend Engineer maps to the benchmark's senior software engineering level in both locations | Role definition v3 |
+| Location match | Location on each band record against the locations the benchmark reports | Both locations covered, but one location only at country level, not city | Benchmark report, revisions 2 and 3 |
+| Approved band against benchmark range | Approved range per location against the benchmark range for the same level and location | One location's approved range sits entirely below the placeholder benchmark range; the other sits inside it | Approved band register v5 |
+| Required input present, and a match for the adjacent role | The owner's list of required inputs against what was collected, and the adjacent role against the benchmark's job families | No approved band exists yet for the adjacent role, and the benchmark has no equivalent family for it | Approved band register v5, benchmark report revision 3 |
+
+The packet states each figure, the source it came from, the revision and the date it was read. It lists three gaps with an owner for each: the report outside the freshness rule, the city-level cut the benchmark does not publish, and the missing band for the adjacent role. It does not say what the band should be. Setting one needs the owner's reading of the benchmark, the company's level definitions and whatever constraints apply locally.
+
+## Access, sensitive data and retention
+
+These are operator responsibilities, and the workflow inherits whatever the operator decides. Each one belongs in the workflow's [governance record](/docs/playbooks/use-cases/ai-operations-governance) before the first run.
+
+**Who may read pay data.** Name the people and the roles allowed to see band data, and the smaller set allowed to read anything below a band. The [governance guide](/docs/playbooks/use-cases/ai-operations-governance) covers the documented limit in its access and least privilege section: role-based access gates requests made with user tokens, while operator-key calls and agent calls are not affected, so a login is a door rather than per-user authorization.
+
+**How access is restricted.** Each source gets the narrowest permission that lets the collection run: read-only where the system offers it, scoped to the folders, tables or exports the review needs.
+
+**What the packet may contain.** Aggregate band data and source references by default. Individual salaries stay out unless the compensation owner approves them for a named packet, because a packet gets copied, forwarded and archived in ways its author does not control.
+
+**Retention.** Decide how long run outputs, the packet and the run logs are kept, who owns deleting them, and where they live. A band review packet ages into a record of what people were paid, so the retention period should be the shortest one that still supports an audit.
+
+**Gate timeout and fallback.** The [HITL gates](/docs/playbooks/patterns/hitl-gates) guide recommends a timeout with a named fallback owner: a reminder before the timeout, then a named backup, then an explicit hold. The workflow never proceeds on silence.
+
+## Limits
+
+**Not unbiased by default.** The packet reflects the sources it read and the criteria the owner wrote. A benchmark that under-represents a role or a market produces a packet that inherits that gap, and the flags make the gap visible rather than correcting it.
+
+**Not a pay-equity or legal-compliance assessment.** Nothing here tests pay equity, produces a compliance opinion, or establishes that a band is lawful in a jurisdiction. Those are separate analyses by qualified people.
+
+**Only as current as the licensed data.** A packet built on a report outside the freshness rule is a packet built on stale data. The check flags the date. It does not substitute newer data.
+
+**Job matching needs a qualified person.** Whether a role maps to a benchmark's level is a judgement about the work, and it decides whether every other number in the packet is relevant. The workflow surfaces the mapping it applied. It does not validate it.
+
+**No benchmark data is built in.** Every figure comes from a source the customer licenses.
+
+**No customer result.** This page documents a configuration you build. No published result stands behind it yet.
+
+## What stays human-owned
+
+- **Job matching.** Mapping a role to a benchmark level, and deciding when the mapping is wrong.
+- **Band changes.** Whether a band moves, and to what.
+- **Individual pay.** Every offer, raise and adjustment, and every conversation about one.
+- **Fairness and policy decisions.** What the company's pay policy says and whether it holds.
+- **Employee communication.** What people are told about their pay and when.
+
+## Building blocks
+
+Each piece below ships in agent-swarm and is documented. Pointing it at a compensation band review is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` collection that emits JSON, then an agent that synthesizes it.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the gate that suspends a run and waits for a human response, with a timeout and a named backup so an unanswered gate cannot wedge the cycle.
+- [Script connections](/docs/guides/script-connections): declares an HR system or a benchmark export once, so later runs call it through a generated client rather than hand-written requests.
+- [Scripts credential broker](/docs/guides/scripts-credential-broker): hands the outbound call a credential the broker holds, so the value stays out of script code, call parameters and the run record.
+- [AI operations governance](/docs/playbooks/use-cases/ai-operations-governance): the access decisions an operator records ahead of the first run, from who can see band data to what needs sign-off.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): when a specialist compensation platform, an adviser or the HRIS module is the better answer.

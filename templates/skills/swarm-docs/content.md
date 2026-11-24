@@ -96,6 +96,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [AI operations governance for small companies](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-operations-governance). Reference.
 - [Coordinating delivery delay investigations between operations and support with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-delivery-delay-handoff). Reference.
 - [Investigating a payroll discrepancy for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-payroll-discrepancy-review). Reference.
+- [How AI agents prepare compensation band evidence for a human decision](https://docs.agent-swarm.dev/docs/playbooks/use-cases/compensation-band-review). Reference.
 - [Preparing a service capacity planning brief with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/ai-service-capacity-planning). Reference.
 - [Preparing a property maintenance request for human triage with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/maintenance-work-order-triage). Reference.
 - [Preparing an unusual facility energy reading for human review with AI agents](https://docs.agent-swarm.dev/docs/playbooks/use-cases/facility-energy-anomaly-review). Reference.
