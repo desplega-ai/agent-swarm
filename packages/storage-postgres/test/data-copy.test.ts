@@ -513,6 +513,39 @@ CREATE TABLE kids (
       expect(lines).toContain("[db-copy] kids: 2 rows, 1 orphan row(s) dropped");
     });
 
+    test("refuses an orphan in a table with no rowid: no row identity to repair by", async () => {
+      // The source labels every such violation alike, so the copy must not match
+      // it to a row. All three rows are valid here; only the report names an orphan.
+      const report = await runFamily(
+        family(
+          [
+            item(1, [text("k1"), text("p1"), text("p1"), text("p1")]),
+            item(2, [text("k2"), text("p1"), text("p1"), text("p1")]),
+          ],
+          [
+            {
+              table: "kids",
+              row: "a WITHOUT ROWID row",
+              parent: "parents",
+              columns: ["owner"],
+              onDelete: "CASCADE",
+            },
+          ],
+        ),
+      );
+      expect(report.ok).toBe(false);
+      expect(report.repairs).toBeUndefined();
+      expect(report.problems).toEqual([
+        {
+          table: "kids",
+          column: "owner",
+          row: "a WITHOUT ROWID row",
+          reason: "orphan row: no row in parents for this foreign key",
+        },
+      ]);
+      expect(await tableCount()).toBe(0);
+    });
+
     test("refuses an orphan whose key column is NOT NULL", async () => {
       const report = await runFamily(
         family(
