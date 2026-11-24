@@ -291,3 +291,68 @@ test.each([
   });
   port.close();
 });
+
+// A borrowed frame reads its `expose` paths where the assembler pointed them
+// (`$exposeRead`, the defining app's `/refs/...`), never the consumer's own state.
+test("a borrowed frame's exposed state comes from the $exposeRead paths", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  roots.push(root);
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <ThemeProvider>
+          <MemoryRouter>
+            <StateProvider
+              initialState={{
+                queries: { q: { data: "consumer" } },
+                refs: { appA: { queries: { q: { data: "defining" } } } },
+              }}
+            >
+              <ActionProvider handlers={{}}>
+                <AppScopeProvider value="app1">
+                  {(
+                    swarmComponents.PageFrame as (arg: {
+                      props: unknown;
+                      emit: (e: string) => void;
+                    }) => ReactNode
+                  )({
+                    props: {
+                      pageId: PAGE_ID,
+                      id: "waterfall",
+                      expose: ["/queries/q/data"],
+                      $exposeRead: ["/refs/appA/queries/q/data"],
+                      $app: "appA",
+                    },
+                    emit: () => {},
+                  })}
+                </AppScopeProvider>
+              </ActionProvider>
+            </StateProvider>
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>,
+    ),
+  );
+  const frame = await settle(host, updatedAt);
+  const src = new URL(frame!.getAttribute("src")!);
+  const inits: { data: Record<string, unknown>; port: MessagePort }[] = [];
+  const target = {
+    postMessage: (data: Record<string, unknown>, _origin: string, ports: MessagePort[]) => {
+      inits.push({ data, port: ports[0]! });
+    },
+  } as unknown as Window;
+  Object.defineProperty(frame!, "contentWindow", { value: target, configurable: true });
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      data: { type: "swarm-app:hello", appId: "app1" },
+      origin: src.origin,
+      source: target,
+    }),
+  );
+  expect(inits.length).toBe(1);
+  const snapshot = inits[0]!.data.snapshot as Record<string, unknown>;
+  expect(snapshot.state).toEqual({ "/queries/q/data": "defining" });
+  inits[0]!.port.close();
+});

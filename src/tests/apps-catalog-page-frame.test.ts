@@ -144,8 +144,10 @@ describe("PageFrame appContext bridge validation", () => {
   });
 
   test("an inherited Object property is not an app action", async () => {
-    expect(await bridgeIssues(bridgeDefinition({ actions: ["constructor"] }))).toEqual([
-      "pages.main.elements.f.props.actions.0",
-    ]);
+    const parsed = await parseAppDefinition(bridgeDefinition({ actions: ["constructor"] }));
+    const issues = parsed.success ? [] : parsed.issues;
+    expect(issues.map((entry) => `${entry.path}: ${entry.message}`)).toContain(
+      'pages.main.elements.f.props.actions.0: unknown app action "constructor"',
+    );
   });
 });
