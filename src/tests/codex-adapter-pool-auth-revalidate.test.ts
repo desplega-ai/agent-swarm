@@ -139,10 +139,12 @@ function installMockTransport(store: { creds: CodexOAuthCredentials }): void {
         { status: 200 },
       );
     }
-    if (method === "PUT" && urlStr.includes("/api/config")) {
-      const body = JSON.parse((init?.body as string) ?? "{}") as { value: string };
-      store.creds = JSON.parse(body.value) as CodexOAuthCredentials;
-      return new Response(JSON.stringify({ id: "cfg-1" }), { status: 200 });
+    if (method === "PUT" && urlStr.includes("/api/codex-oauth/slots/0/credentials")) {
+      const body = JSON.parse((init?.body as string) ?? "{}") as {
+        credentials: CodexOAuthCredentials;
+      };
+      store.creds = body.credentials;
+      return new Response(JSON.stringify({ slot: 0, key: "codex_oauth_0" }), { status: 200 });
     }
     throw new Error(`Unexpected fetch in test: ${method} ${urlStr}`);
   };

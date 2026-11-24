@@ -488,6 +488,10 @@
       "description": "Refresh lock acquire, contention, wrong-owner release, expiry takeover",
       "scenarios": ["platform-oauth-locks"]
     },
+    "codex-oauth-slot-store": {
+      "description": "A non-lead worker token persists and quarantines a refreshed codex_oauth_<slot> only while holding its refresh lock, and PUT /api/config still refuses it",
+      "scenarios": ["platform-codex-oauth-slot-store"]
+    },
     "page-publishing": {
       "description": "create page, serve public/authed/password, version history, feedback task, delete, and a dashboard launch that acts as the picked user",
       "scenarios": ["knowledge-pages", "knowledge-page-dashboard-user"]

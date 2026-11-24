@@ -98,10 +98,12 @@ function installMockTransport(store: { creds: CodexOAuthCredentials }): void {
       );
     }
 
-    if (method === "PUT" && urlStr.includes("/api/config")) {
-      const body = JSON.parse((init?.body as string) ?? "{}") as { value: string };
-      store.creds = JSON.parse(body.value) as CodexOAuthCredentials;
-      return new Response(JSON.stringify({ id: "cfg-1" }), { status: 200 });
+    if (method === "PUT" && urlStr.includes("/api/codex-oauth/slots/0/credentials")) {
+      const body = JSON.parse((init?.body as string) ?? "{}") as {
+        credentials: CodexOAuthCredentials;
+      };
+      store.creds = body.credentials;
+      return new Response(JSON.stringify({ slot: 0, key: "codex_oauth_0" }), { status: 200 });
     }
 
     throw new Error(`Unexpected fetch in test: ${method} ${urlStr}`);
@@ -275,15 +277,17 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
           { status: 200 },
         );
       }
-      if (method === "PUT" && urlStr.includes("/api/config")) {
+      if (method === "PUT" && urlStr.includes("/api/codex-oauth/slots/0/credentials")) {
         // Simulate a persist failure — the config store is unreachable.
         return new Response("Server Error", { status: 500 });
       }
-      if (method === "DELETE" && urlStr.includes("/api/config/cfg-1")) {
+      if (method === "DELETE" && urlStr.includes("/api/codex-oauth/slots/0/credentials")) {
         // The quarantine path: delete the slot from the config store so the
         // next caller's `loadCodexOAuth` finds nothing.
         store.creds = null;
-        return new Response(null, { status: 204 });
+        return new Response(JSON.stringify({ slot: 0, key: "codex_oauth_0", deleted: true }), {
+          status: 200,
+        });
       }
       throw new Error(`Unexpected fetch in test: ${method} ${urlStr}`);
     };

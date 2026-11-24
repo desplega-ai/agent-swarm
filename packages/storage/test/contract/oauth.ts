@@ -287,6 +287,10 @@ export function oauthContract(engine: ContractEngine): void {
           "2026-01-01T00:11:00.000Z",
         ),
       ).toBe("o3");
+      expect(await repo.isRefreshLockHeld("k", "o3", "2026-01-01T00:12:00.000Z")).toBe(true);
+      expect(await repo.isRefreshLockHeld("k", "o2", "2026-01-01T00:12:00.000Z")).toBe(false);
+      expect(await repo.isRefreshLockHeld("k", "o3", "2026-01-01T00:30:00.000Z")).toBe(false);
+      expect(await repo.isRefreshLockHeld("other", "o3", "2026-01-01T00:12:00.000Z")).toBe(false);
     });
 
     test("codex device flows upsert and expire", async () => {

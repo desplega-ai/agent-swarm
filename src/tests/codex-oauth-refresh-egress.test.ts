@@ -47,8 +47,8 @@ function installConfigStore(putResponse: () => Response): void {
     if (method === "GET" && href.includes("/api/config/resolved")) {
       return Response.json({ configs: [{ key: "codex_oauth_0", value: JSON.stringify(creds) }] });
     }
-    if (method === "PUT" && href.includes("/api/config")) return putResponse();
-    if (method === "DELETE" && href.includes("/api/config")) return Response.json({});
+    if (method === "PUT" && href.includes("/api/codex-oauth/slots/")) return putResponse();
+    if (method === "DELETE" && href.includes("/api/codex-oauth/slots/")) return Response.json({});
     throw new Error(`Unexpected fetch: ${method} ${href}`);
   }) as typeof fetch;
 }
