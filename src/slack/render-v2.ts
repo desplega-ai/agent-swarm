@@ -593,6 +593,11 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
     return `🧵 🔄 working — ${duration}`;
   // A parked deferral is stored `completed`, but the ask is not answered yet.
   if (tasks.some((task) => isAwaitingWake(task, tasks))) return `🧵 ⏳ waiting — ${duration}`;
+  // A cancel ends the thread even when the ask itself finished first and only its delegated work was stopped.
+  const lastEnded = tasks.reduce((latest, task) =>
+    terminalEnd(task, now) >= terminalEnd(latest, now) ? task : latest,
+  );
+  if (lastEnded.status === "cancelled") return `🧵 🚫 stopped — ${duration}`;
   const hasFailure = tasks.some((task) => task.status === "failed");
   return hasFailure
     ? `🧵 ❌ done with failures — ${duration}`
