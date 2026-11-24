@@ -257,7 +257,8 @@
         "trigger-rbac-default-role",
         "trigger-cascades",
         "postgres-chain-layouts",
-        "postgres-password-env"
+        "postgres-password-env",
+        "postgres-dead-connections"
       ]
     },
     "live-task-claim": {
