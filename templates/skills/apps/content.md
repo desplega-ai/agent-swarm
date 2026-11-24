@@ -204,7 +204,7 @@ Top-level `elements` are versioned inside the app definition and can be reused f
 ```
 
 - `pure` elements may read only their declared `/props/<name>` state; `$item` and `$index` are also legal inside repeated nodes. They cannot invoke any action step. A pure tree may contain at most one leaf `ElementSlot` where consumer children are inserted.
-- `bound` elements may additionally read the defining app's declared queries and actions and use its models. Those references are validated against the defining app, including hidden-column rules. Exported bound elements cannot use `app.navigate`; private bound elements may navigate within their defining app.
+- `bound` elements may additionally read the defining app's declared queries and actions and use its models. Those references are validated against the defining app, including hidden-column rules. Reusable elements cannot read `/app` directly, including private elements nested in an exported tree; pass app-wide state through a declared prop from the consuming page. Exported bound elements cannot use `app.navigate`; private bound elements may navigate within their defining app.
 - Prop kinds are `string`, `number`, `boolean`, `date`, or `enum`. An enum prop requires a non-empty `enum: ["value", ...]` values array. A literal default and each literal consumer value must match the kind and, for enums, be one of those values. A required prop without a default must be supplied.
 
 Reference an element with an `ElementRef` node. Omit `app` for same-app reuse; cross-app references name the defining app id and require `export: true`. `instanceKey` is optional. Consumer `children` are accepted only when the target has an `ElementSlot`:
@@ -559,7 +559,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
 | `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). `sparkline`: a small trend line under the value in the `tone` color, from an array of numbers (`null` is a gap) or from rows (bind `/queries/<name>/data`) read through `sparklineKey`; fewer than two points draws nothing. `format: "number"`, `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (a ratio: 0.42 is 42%) formats a numeric `value`, like Chart; a string value shows as is. |
-| `Chart` | `kind`, `x`, `series` | `kind: "line", "area", "bar", "pie" or "donut"`; bind `data` / `loading` / `error` to a named query like Table. `x` is the row field on the x axis; `xType: "category"` (default, row order) or `"time"` (ISO date or epoch ms, sorted, date ticks; rows whose `x` does not parse are dropped). `series`: 1-8 `{ key, label?, color? }`, `color` one of `chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted` (default palette, in order: `primary`, `chart-2`..`chart-5`). `stacked` stacks area and bar series (lines never stack). `format: "number"` (default), `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (values are ratios: 0.42 is 42%). Tooltip on hover; the legend shows with two or more series (`legend` forces it on or off). `height` 120-640 px (default 240); `emptyMessage` (default "No data yet"). `x` and every `series[].key` must be columns of the bound query's model. `pie` and `donut` take exactly one series: `x` is the slice label, each row with a positive value is a slice labelled with its share, the tooltip adds the share to the formatted value, and the legend defaults on (`xType` and `stacked` do not apply). Wrap it in a `Card` for a title. |
+| `Chart` | `kind`, `x`, `series` | `kind: "line", "area", "bar", "pie" or "donut"`; bind `data` / `loading` / `error` to a named query like Table. `x` is the row field on the x axis; `xType: "category"` (default, row order) or `"time"` (ISO date or epoch ms, sorted, date ticks; rows whose `x` does not parse are dropped). `series`: 1-8 `{ key, label?, color? }`, `color` one of `chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted` (default palette, in order: `primary`, `chart-2`..`chart-5`). `stacked` stacks area and bar series (lines never stack). `format: "number"` (default), `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (values are ratios: 0.42 is 42%). Tooltip on hover; the legend shows with two or more series (`legend` forces it on or off). `height` 120-640 px (default 240); `emptyMessage` (default "No data yet"). `x` and every `series[].key` must be columns of the bound query's model. `data` can also bind to a script action's result (`{ "$state": "/actions/<a>/result/rows" }`, an array of flat objects; the keys are then not checked, and `loading` takes `{ "$eq": [{ "$state": "/actions/<a>/status" }, "running"] }`): use it for any time window or a query the stored models cannot answer. `pie` and `donut` take exactly one series: `x` is the slice label, each row with a positive value is a slice labelled with its share, the tooltip adds the share to the formatted value, and the legend defaults on (`xType` and `stacked` do not apply). Wrap it in a `Card` for a title. |
 | `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`, `icon` (overrides the tone icon), `actionLabel` (a button inside the callout that emits `press`; wire it with `on.press`). |
 | `Badge` | `text` | `text` is string or number; `tone`; `icon` replaces the dot; `variant: "tag"` (default uppercase chip), `"status"` (sentence-case pill), `"count"` (numeric pill), or `"beta"` (the BETA tag); `status` (a lifecycle value renders the dashboard status chip); `hint` (tooltip; the beta tag's explanation). |
 | `Icon` | `name` | `size: "sm", "md", or "lg"`, `tone: "default", "muted", "success", "warning", "error", or "info"`, `label` (accessible name; decorative without it). |
@@ -913,6 +913,8 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 
 **Page state.** `pages.<page>.state` maps names to initial JSON values. The page reads them at `{ "$state": "/local/<name>/..." }` and only this root is writable. Each page has its own `/local`, even when two pages declare the same name. The values are seeded on first render and survive navigation; patching `pages.<page>.state.<name>` replaces that entry. Reusable elements cannot read or write `/local`.
 
+**App state.** The definition's top-level `state` maps names to initial JSON values shared by every page: read `{ "$state": "/app/<name>" }`, write with `ui.set` (`/app/<name>/...`) or bind a `Select`/`Input` through `$bindState`. Use it for one time window that every page follows. It is seeded once and survives navigation between the app's pages; a reload starts from the initial values.
+
 **Input.** `value: { "$bindState": "/local/<name>/..." }` binds two-way; inside a `repeat` over a `/local` list, `{ "$bindItem": "" }` binds the item itself (`"field"` binds a field of it). `$bindState` and `$bindItem` are valid only on `Input.value`. Event chains are props, run by the Input:
 
 - `onInput`: after every edit; `{ "$chain": "value" }` is the new text.
@@ -922,6 +924,8 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 `$state` reads inside these chains resolve at render time. To read the newest value, use `$chain`, or put the chain in a `watch`.
 
 **`watch` rules.** A `watch` skips the value it sees on first render: it only fires on a later change, so it never loads data on page open. Any state write while a `watch` chain runs cancels the steps after it, and `app.action` always writes (`/actions/<name>`), so a `watch` chain runs at most one `app.action` or `ui.set`, and it must be the last step. Put multi-step loads in `OnEnter` instead.
+
+**Live data.** `OnEnter.everyMs` (1000 or more) re-runs the chain on an interval while the tab is visible; a tick is skipped while any earlier run (a tick or a `deps` change) is still going. Bind it to a toggle (`{ "$if": [{ "$state": "/local/live" }, 2000, null] }`) for a pausable live tail.
 
 **`OnEnter`: load on open.** An `OnEnter` element renders nothing. It runs its `on.enter` chain on mount, then again each time its resolved `deps` value changes. Its steps always run to the end (no `watch` cancel). Use `deps: { "$state": "/route" }` to re-run it when the page or a route param changes; omit `deps` to run it once per mount. Put it anywhere in the page tree.
 
@@ -989,6 +993,49 @@ The page loads its data on open and when the `traceId` param changes, runs two a
             "initialValues": { "traceId": { "$state": "/route/params/traceId" } },
             "resetKey": { "$state": "/route/params/traceId" },
             "onSubmit": []
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Example: Shared window and action-fed chart
+
+Every page follows `/app/window`. The chart reads a script action's result, so it can draw any window; it reloads when the window changes and every 30 s.
+
+```json
+{
+  "models": {},
+  "defaultPage": "overview",
+  "state": { "window": "1h" },
+  "actions": { "red": { "kind": "task", "prompt": "Replace with a script action that returns { rows: [{ t, p95 }] }" } },
+  "pages": {
+    "overview": {
+      "title": "Overview",
+      "root": "main",
+      "elements": {
+        "main": { "type": "Stack", "props": { "direction": "column" }, "children": ["window", "load", "chart"] },
+        "window": {
+          "type": "Tabs",
+          "props": { "id": "w", "tabs": [{ "key": "1h", "label": "1h" }, { "key": "24h", "label": "24h" }] },
+          "watch": { "/ui/w/tab": [{ "action": "ui.set", "params": { "path": "/app/window", "value": { "$state": "/ui/w/tab" } } }] }
+        },
+        "load": {
+          "type": "OnEnter",
+          "props": { "deps": { "$state": "/app/window" }, "everyMs": 30000 },
+          "on": { "enter": [{ "action": "app.action", "params": { "name": "red", "input": { "window": { "$state": "/app/window" } } } }] }
+        },
+        "chart": {
+          "type": "Chart",
+          "props": {
+            "kind": "line",
+            "x": "t",
+            "xType": "time",
+            "series": [{ "key": "p95", "label": "p95 ms" }],
+            "data": { "$state": "/actions/red/result/rows" },
+            "loading": { "$eq": [{ "$state": "/actions/red/status" }, "running"] }
           }
         }
       }

@@ -753,6 +753,8 @@ const spinnerProps = z.object({
 const onEnterProps = z.object({
   /** Re-runs `on.enter` whenever this resolved value changes (for example `{ "$state": "/route" }`). */
   deps: z.unknown().optional(),
+  /** Also re-runs `on.enter` every `everyMs` (>= 1000) while the tab is visible. Bind it to a toggle for a live tail. */
+  everyMs: z.number().int().min(1000).optional(),
 });
 
 const avatarStackProps = z.object({
@@ -1620,7 +1622,7 @@ export const swarmCatalogSpec = {
     OnEnter: {
       props: onEnterProps,
       description:
-        'Renders nothing. Runs its `on.enter` chain once when mounted, and again each time the resolved `deps` value changes (`{ "$state": "/route" }` re-runs it on every page or route-param change). Unlike `watch`, a state write by a step does not cancel the remaining steps.',
+        'Renders nothing. Runs its `on.enter` chain once when mounted, and again each time the resolved `deps` value changes (`{ "$state": "/route" }` re-runs it on every page or route-param change). `everyMs` also re-runs it on an interval while the tab is visible, skipping a tick while the previous run is still going. Unlike `watch`, a state write by a step does not cancel the remaining steps.',
     },
     AvatarStack: {
       props: avatarStackProps,

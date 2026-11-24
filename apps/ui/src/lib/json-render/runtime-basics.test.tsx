@@ -171,3 +171,104 @@ test("Select search ranks token matches first and keeps fuzzy matches", () => {
   expect(tokenFilter("lead worker", "lea worker")).toBeGreaterThan(0.5);
   expect(tokenFilter("traces", "zzqxj")).toBe(0);
 });
+
+test("OnEnter.everyMs re-runs the chain on an interval while the tab is visible", async () => {
+  const OnEnter = swarmComponents.OnEnter as Renderable;
+  const events: string[] = [];
+  const root = mountRoot();
+  await act(async () =>
+    root.render(<OnEnter props={{ everyMs: 1000 }} emit={(event) => events.push(event)} />),
+  );
+  expect(events).toEqual(["enter"]);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1150));
+  });
+  expect(events).toEqual(["enter", "enter"]);
+  await act(async () => root.unmount());
+});
+
+test("OnEnter.everyMs starts no timer for a non-numeric or sub-second value", async () => {
+  const OnEnter = swarmComponents.OnEnter as Renderable;
+  const realSetInterval = globalThis.setInterval;
+  const delays: unknown[] = [];
+  globalThis.setInterval = ((_fn: () => void, ms?: unknown) => {
+    delays.push(ms);
+    return 1;
+  }) as never;
+  const root = mountRoot();
+  try {
+    for (const everyMs of ["fast", "5000", Number.NaN, Number.POSITIVE_INFINITY, 999, { n: 1 }]) {
+      await act(async () => root.render(<OnEnter props={{ everyMs }} emit={() => {}} />));
+    }
+    expect(delays).toEqual([]);
+    await act(async () => root.render(<OnEnter props={{ everyMs: 1000 }} emit={() => {}} />));
+    expect(delays).toEqual([1000]);
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.setInterval = realSetInterval;
+  }
+});
+
+// Each case: which pending runs settle (by start index) before the tick, and
+// whether that tick may start a new run.
+const tickGateCases: Array<{ name: string; settle: number[]; deps: string[]; ticks: boolean }> = [
+  { name: "slow chain still pending", settle: [], deps: ["1h"], ticks: false },
+  { name: "slow chain settled", settle: [0], deps: ["1h"], ticks: true },
+  {
+    name: "older run settles first, newer pending",
+    settle: [0],
+    deps: ["1h", "24h"],
+    ticks: false,
+  },
+  {
+    name: "newer run settles first, older pending",
+    settle: [1],
+    deps: ["1h", "24h"],
+    ticks: false,
+  },
+  { name: "both runs settled", settle: [1, 0], deps: ["1h", "24h"], ticks: true },
+];
+
+for (const c of tickGateCases) {
+  test(`OnEnter.everyMs tick gate: ${c.name}`, async () => {
+    const OnEnter = swarmComponents.OnEnter as Renderable;
+    const root = mountRoot();
+    const resolvers: Array<() => void> = [];
+    let runs = 0;
+    let tick: () => void = () => {};
+    const realSetInterval = globalThis.setInterval;
+    const realClearInterval = globalThis.clearInterval;
+    globalThis.setInterval = ((fn: () => void) => {
+      tick = fn;
+      return 1;
+    }) as never;
+    globalThis.clearInterval = (() => {}) as never;
+    const emit = () => {
+      runs++;
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    };
+    try {
+      for (const deps of c.deps) {
+        await act(async () => root.render(<OnEnter props={{ deps, everyMs: 1000 }} emit={emit} />));
+      }
+      expect(runs).toBe(c.deps.length);
+      for (const index of c.settle) await act(async () => resolvers[index]?.());
+      await act(async () => tick());
+      expect(runs).toBe(c.deps.length + (c.ticks ? 1 : 0));
+    } finally {
+      await act(async () => {
+        for (const resolve of resolvers) resolve();
+      });
+      await act(async () => root.unmount());
+      globalThis.setInterval = realSetInterval;
+      globalThis.clearInterval = realClearInterval;
+    }
+  });
+}
+
+test("ui.set writes app-wide /app/<name> state as well as /local", async () => {
+  const { isLocalStatePath } = await import("./ui-actions");
+  expect(isLocalStatePath("/app/window")).toBe(true);
+  expect(isLocalStatePath("/app/__proto__")).toBe(false);
+  expect(isLocalStatePath("/apps/x")).toBe(false);
+});

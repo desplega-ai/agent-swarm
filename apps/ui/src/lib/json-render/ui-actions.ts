@@ -6,8 +6,8 @@
 import type { StateStore } from "@json-render/core";
 import { ChainHaltError } from "./chain-halt";
 
-/** A writable page-local path: `/local/<name>` or below, no prototype keys. */
-const LOCAL_PATH = /^\/local(\/[^/]+)+$/;
+/** A writable path: page-local `/local/<name>` or app-wide `/app/<name>`, no prototype keys. */
+const LOCAL_PATH = /^\/(local|app)(\/[^/]+)+$/;
 const UNSAFE_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
 
 export function isLocalStatePath(path: unknown): path is string {
@@ -57,7 +57,7 @@ export function createUiActionHandlers(deps: {
     "ui.set": async (params: Record<string, unknown> | undefined) => {
       if (!isLocalStatePath(params?.path)) {
         deps.onError(
-          `ui.set can only write /local/<name> paths (got ${JSON.stringify(params?.path)})`,
+          `ui.set can only write /local/<name> or /app/<name> paths (got ${JSON.stringify(params?.path)})`,
         );
         throw new ChainSkip("ui.set path rejected");
       }

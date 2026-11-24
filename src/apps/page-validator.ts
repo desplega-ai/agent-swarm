@@ -36,6 +36,25 @@ interface StateRef {
   value: string;
   /** A write target (`$bindState`, `ui.set`): only page-local `/local/<name>` state. */
   write?: boolean;
+  /** A `${/path}` read inside a `$template` string: checked only by the element-mode bans. */
+  template?: boolean;
+}
+
+/**
+ * `${path}` reads inside a `{ "$template": "..." }` object, as state refs. json-render resolves a
+ * bare `${app/x}` as `/app/x`, so a missing leading slash is added before the bans see it.
+ */
+function templateStateRefs(value: unknown, path: string): StateRef[] {
+  if (!isPlainObject(value) || typeof value.$template !== "string") return [];
+  const templatePath = appendPath(path, "$template");
+  return [...value.$template.matchAll(/\$\{([^}]+)\}/g)].map((match) => {
+    const read = match[1]!;
+    return {
+      path: templatePath,
+      value: read.startsWith("/") ? read : `/${read}`,
+      template: true,
+    };
+  });
 }
 
 export const ELEMENT_KEYS = new Set([
@@ -485,7 +504,7 @@ function validateSchema(
     return { issues: [issue(path, `must be ${types.join(" or ")}`)], stateRefs: [] };
   }
 
-  const result: SchemaValidationResult = { issues: [], stateRefs: [] };
+  const result: SchemaValidationResult = { issues: [], stateRefs: templateStateRefs(value, path) };
   if (isPlainObject(value)) {
     const properties = schema.properties ?? {};
     for (const required of schema.required ?? []) {
@@ -713,7 +732,10 @@ function actionParams(
       });
     } else if (!expressionOp(params.path)) {
       result.issues.push(
-        issue(appendPath(paramsPath, "path"), "must be a /local/<name> path or an expression"),
+        issue(
+          appendPath(paramsPath, "path"),
+          "must be a /local/<name> or /app/<name> path, or an expression",
+        ),
       );
     }
   } else if (step.action === "ui.toast") {
@@ -789,6 +811,18 @@ function validateStateRef(
   pageParams: Record<string, unknown>,
   pageState: Record<string, unknown>,
 ): AppValidationIssue | null {
+  const appMatch = /^\/app\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+  if (appMatch) {
+    if (!Object.hasOwn(definition.state ?? {}, appMatch[1]!)) {
+      return issue(
+        ref.path,
+        `state reference targets undeclared app state "${appMatch[1]}"; declare it in the definition's \`state\``,
+      );
+    }
+    return ref.value.split("/").some((segment) => RESERVED_UI_IDS.has(segment))
+      ? issue(ref.path, `invalid state reference "${ref.value}"`)
+      : null;
+  }
   const localMatch = /^\/local\/([^/]+)(?:\/.*)?$/.exec(ref.value);
   if (localMatch) {
     const name = localMatch[1]!;
@@ -803,7 +837,10 @@ function validateStateRef(
       : null;
   }
   if (ref.write) {
-    return issue(ref.path, `only page-local /local/<name> state is writable (got "${ref.value}")`);
+    return issue(
+      ref.path,
+      `only page-local /local/<name> or app-wide /app/<name> state is writable (got "${ref.value}")`,
+    );
   }
   // The whole route (`{ page, params }`) or params object: `OnEnter.deps` re-runs on any change.
   if (ref.value === "/route/page" || ref.value === "/route" || ref.value === "/route/params") {
@@ -925,6 +962,7 @@ function collectStateRefs(value: unknown, path: string, refs: StateRef[]): void 
   if (isStateBinding(value) || isStateCondition(value)) {
     refs.push({ path, value: value.$state });
   }
+  refs.push(...templateStateRefs(value, path));
   if (Array.isArray(value)) {
     for (const [index, child] of value.entries()) {
       collectStateRefs(child, appendPath(path, index), refs);
@@ -2480,8 +2518,13 @@ export function validatePage(
   for (const ref of stateRefs) {
     const propMatch = /^\/props\/([^/]+)(?:\/.*)?$/.exec(ref.value);
     const userConfigRef = ref.value === "/user" || ref.value.startsWith("/user/");
+    const appRef = ref.value === "/app" || ref.value.startsWith("/app/");
     let stateIssue: AppValidationIssue | null;
-    if (options?.elementMode && ref.write) {
+    if (ref.template && !(options?.elementMode && (userConfigRef || appRef))) {
+      // shortcut: template reads skip full path validation (pages never checked them); only the
+      // element-mode /user and /app bans apply. Widen if templates need path checks too.
+      stateIssue = null;
+    } else if (options?.elementMode && ref.write) {
       stateIssue = issue(
         ref.path,
         `${options.elementMode} elements cannot write state; bind page-local state at page level`,
@@ -2490,6 +2533,11 @@ export function validatePage(
       stateIssue = issue(
         ref.path,
         `${options.elementMode} elements cannot read /user state; read userConfig via a prop or bind it at page level`,
+      );
+    } else if (options?.elementMode && appRef) {
+      stateIssue = issue(
+        ref.path,
+        `${options.elementMode} elements cannot read /app state; pass app-wide state via a declared prop from the consuming page`,
       );
     } else if (options?.elementMode && propMatch) {
       stateIssue = Object.hasOwn(options.elementProps ?? {}, propMatch[1]!)

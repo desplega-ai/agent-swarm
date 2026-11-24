@@ -4435,7 +4435,9 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
     </span>
   ),
   Skeleton: ({ props }) => <SkeletonComponent props={props} />,
-  OnEnter: ({ props, emit }) => <OnEnterRunner deps={props.deps} emit={emit} />,
+  OnEnter: ({ props, emit }) => (
+    <OnEnterRunner deps={props.deps} everyMs={props.everyMs} emit={emit} />
+  ),
   Spinner: ({ props }) => (
     // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a busy indicator
     <span role="status" className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -4480,13 +4482,44 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
  * `emit` runs the chain without the cancel flag `watch` has, so a state write
  * by one step never stops the next.
  */
-function OnEnterRunner({ deps, emit }: { deps: unknown; emit: (event: string) => void }) {
+function OnEnterRunner({
+  deps,
+  everyMs,
+  emit,
+}: {
+  deps: unknown;
+  everyMs?: number;
+  emit: (event: string) => void | Promise<void>;
+}) {
   const signature = JSON.stringify(deps ?? null);
   const emitRef = useRef(emit);
   emitRef.current = emit;
+  // Runs still pending. A count, not a flag: a deps change can start a run
+  // while an older one is pending, and the older one settling must not open
+  // the tick gate while the newer one still runs.
+  const pendingRef = useRef(0);
+  const run = useCallback(async (tick: boolean) => {
+    // An interval tick never stacks behind a slow chain; a deps change always runs.
+    if (tick && pendingRef.current > 0) return;
+    pendingRef.current += 1;
+    try {
+      await emitRef.current("enter");
+    } finally {
+      pendingRef.current -= 1;
+    }
+  }, []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger; emit is read live through the ref
   useEffect(() => {
-    emitRef.current("enter");
+    void run(false);
   }, [signature]);
+  useEffect(() => {
+    // `everyMs` may be an expression: anything but a finite number >= 1000
+    // starts no timer (a string would make setInterval fire every ~0 ms).
+    if (typeof everyMs !== "number" || !Number.isFinite(everyMs) || everyMs < 1000) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void run(true);
+    }, everyMs);
+    return () => clearInterval(timer);
+  }, [everyMs, run]);
   return null;
 }

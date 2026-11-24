@@ -772,6 +772,11 @@ export function AppSurface({
   // by `getPageStoreView`): never clobbered, so typed values survive navigation
   // like forms do. Every page is seeded on the first render, before the
   // renderer subscribes, so navigating later writes nothing mid-render.
+  // App-wide state (`state` → `/app/<name>`): one slot shared by every page, seeded the same way.
+  for (const [name, initial] of Object.entries(definition.state ?? {})) {
+    if (store.get(`/app/${name}`) === undefined)
+      store.set(`/app/${name}`, structuredClone(initial));
+  }
   for (const [page, { state }] of Object.entries(pages)) {
     if (!state) continue;
     const view = getPageStoreView(app.id, page);
