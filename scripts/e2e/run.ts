@@ -130,8 +130,10 @@ export type DataCopyPair = {
    * `beforeCopy` runs after the source API stopped and before the copy that the target
    * boots on: a scenario can change the SQLite file as a deployment would leave it, and
    * run copies that must be refused (`runCopy`) into the same empty target database.
+   * `args` are more `db-copy` options for the copy that the target boots on.
    */
   copy: (step?: {
+    args?: string[];
     beforeCopy?: (at: {
       sourcePath: string;
       targetUrl: string;
@@ -399,8 +401,8 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
         const pairEnv = { SLACK_DISABLE: "true", ...copyOptions.env };
         const source = await startSut(options.keep, pairEnv, options.sutEnv, undefined, "sqlite");
         sourceStack.sut = source;
-        const copyCli = (databaseUrl: string) =>
-          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl], {
+        const copyCli = (databaseUrl: string, args: string[] = []) =>
+          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl, ...args], {
             env: { DESPLEGA_TELEMETRY_ENV: "test" },
             timeoutMs: 300_000,
           });
@@ -424,7 +426,7 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
                   targetUrl,
                   runCopy: () => copyCli(targetUrl),
                 });
-                cli = await copyCli(targetUrl);
+                cli = await copyCli(targetUrl, step.args);
               },
             );
             targetStack.sut = target;

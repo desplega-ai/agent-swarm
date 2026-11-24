@@ -121,7 +121,7 @@ In the window:
      --to "postgres://swarm:<password>@<host>:5432/swarm" --json /app/data/db-copy-report.json
    ```
    `db-copy --help` lists the options. Without `--from` and `--to`, the copy reads `DATABASE_PATH` and `DATABASE_URL` (plus `DATABASE_PASSWORD`). In the API image, `DATABASE_PATH` is `/app/data/agent-swarm-db.sqlite`.
-   Expect `[db-copy] done: <n> tables, <m> rows, every count and checksum equal` and exit 0. The report lists each table's row counts and checksums, the skipped SQLite-only tables (FTS5 and sqlite-vec indexes, migration bookkeeping) and the rebuilt vector rows. Exit 3 means the copy committed but the report could not be written. Exit 4 means the copy committed but the dashboard check after COMMIT could not run (for example no connection was free): each `NOT CHECKED` line names an unverified saved query. Run each one on Postgres before you start the API.
+   Add `--repair` when the rehearsal listed rows that it can fix (see "Refused rows" below). Expect `[db-copy] done: <n> tables, <m> rows, every count and checksum equal` and exit 0. The report lists each table's row counts and checksums, the skipped SQLite-only tables (FTS5 and sqlite-vec indexes, migration bookkeeping) and the rebuilt vector rows. Exit 3 means the copy committed but the report could not be written. Exit 4 means the copy committed but the dashboard check after COMMIT could not run (for example no connection was free): each `NOT CHECKED` line names an unverified saved query. Run each one on Postgres before you start the API.
 4. Set `DATABASE_URL` (and `DATABASE_QUERY_URL` if the reader role exists). Keep the same encryption key: secrets copy as ciphertext.
 5. Start the API. Check `[db] Postgres engine ready`, `/health`, the dashboard task list, a secret config value, and one memory search.
 
@@ -129,11 +129,22 @@ Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the unt
 
 What the copy does, step by step: opens the SQLite file read-only; skips the two tables that Litestream adds to a replicated database (`_litestream_seq`, `_litestream_lock`); refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table; after COMMIT, runs `VACUUM (ANALYZE)` so the API starts with planner statistics (a `WARNING` line says so when this step fails: run it by hand before you start the API).
 
-Refused rows: one run lists every row the target cannot store. The copy first reads the orphan rows from SQLite (`PRAGMA foreign_key_check`: a row whose parent row is gone), then checks every value. After the first refused row it writes no more rows, so a refused run takes minutes, not the time of a full copy. Each line names the table, the column and the rowid. Repair each row in the SQLite file (in a copy of the file for the rehearsal), then copy again:
+Refused rows: one run lists every row the target cannot store. The copy first reads the orphan rows from SQLite (`PRAGMA foreign_key_check`: a row whose parent row is gone), then checks every value. After the first refused row it writes no more rows, so a refused run takes minutes, not the time of a full copy. Each line names the table, the column and the rowid.
 
-- An orphan row: apply the action of its foreign key. Delete the row for `ON DELETE CASCADE`. Set the column to NULL for `ON DELETE SET NULL`, and for a key with no action when the column allows NULL.
-- A NUL byte in text: rewrite the value from a program. SQLite `replace()` does not remove a NUL byte, because it reads a pattern that starts with NUL as empty and changes nothing.
-- JSON with an unpaired surrogate escape (text that was cut in the middle of an emoji, for example `\ud83d` with no `\udXXX` after it): replace that escape. JavaScript reads such JSON, Postgres `jsonb` refuses it.
+`db-copy --repair` fixes the kinds below during the copy. It lists each fix (`[db-copy] repaired <table>.<column> (rowid N): <what>`, and `repairs` in the `--json` report), compares the repaired values on both sides, and does not change the SQLite file. Without `--repair` the copy changes no value.
+
+| Kind | What `--repair` does |
+|---|---|
+| NUL byte in text | Removes the NUL bytes |
+| Invalid UTF-8 in text | Replaces each invalid sequence with U+FFFD |
+| JSON with `\u0000`, or with an unpaired surrogate escape (text cut in the middle of an emoji) | Removes `\u0000`, replaces the surrogate with U+FFFD |
+| Text in a number or flag column that allows NULL | Stores NULL (no rule knows the number that was meant) |
+| Orphan row, key with `ON DELETE CASCADE` | Does not copy the row |
+| Orphan row, any other key, column allows NULL | Stores NULL in the key column |
+
+Not repaired, so fix these in the SQLite file by hand: invalid JSON syntax, an invalid timestamp, a wrong kind in a NOT NULL column, an orphan whose key column is NOT NULL, an orphan row in a table with no rowid. A row that `--repair` does not copy can leave rows that pointed at it: the foreign key check at the end then stops the copy and names the first one.
+
+To repair by hand instead: SQLite `replace()` does not remove a NUL byte (it reads a pattern that starts with NUL as empty and changes nothing), so rewrite such a value from a program.
 
 Memory and batches: the copy process holds one batch of rows at a time (at most 500 rows or 16 MB of stored text, in both directions), and its checksums need no list of rows.
 
@@ -185,7 +196,7 @@ These assertion groups stay, with the reason:
 | `db-copy: no SQLite file at /app/data/...` (API image) | The container has no API data volume. Mount the volume of the API (`-v <api data volume>:/app/data`). |
 | `db-copy needs the target: --to postgres://...` | Pass `--to`, or set `DATABASE_URL` in the container. |
 | `[db-copy] FAILED: cannot connect to the target database` | The copy cannot reach Postgres, or the URL is wrong. In the API image: run the container on the network of the API (`--network`), or use an address that the container can reach. Nothing was written. |
-| `=== Agent Swarm API` banner, then the server starts | The image is older than `db-copy` support in the API image, or `db-copy` is not the first argument after the image name. Use the API image tag of this build. |
+| `=== Agent Swarm API` banner, then the server starts | The image is older than `db-copy` support in the API image, or `db-copy` is not the first argument after the image name. Use the API image tag of this build. A Compose service that sets its own `entrypoint` ignores the arguments, so `docker compose run <api service> db-copy ...` boots the API there: use `docker run --entrypoint /usr/local/bin/agent-swarm-api <api image>:<api tag> db-copy ...`. |
 | `[db-copy] ATTENTION metrics ...` | Edit that dashboard query into Postgres SQL (`$n` placeholders, quoted camelCase columns) after the cutover. |
 | `db-copy: cannot store <table>.<column> (rowid N): ...` | Fix that value in the SQLite file, then copy again. Nothing was written. |
 
