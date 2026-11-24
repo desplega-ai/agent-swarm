@@ -2292,6 +2292,32 @@ export function slackErrorSummary(error: unknown): string {
   return detail.messages.length ? `${head}: ${detail.messages.join(" | ")}` : head;
 }
 
+/**
+ * Deletes a ⏳ deferral card whose wake-up answered with `slack-reply`.
+ * Rewritten, the card would only say "<agent> completed" above that reply.
+ * A card with a ui-spec card, sources or links is rewritten as before.
+ * Returns false, with the card untouched, when it is not deleted.
+ */
+async function removeDeferralCardAnsweredByReply(
+  client: WebClient,
+  card: SlackMessageRecord,
+  wake: AgentTask,
+): Promise<boolean> {
+  if (!(await cardOnlyRepeatsSlackReply(wake))) return false;
+  try {
+    await callSlackWithRetry(client, "chat.delete", { channel: card.channelId, ts: card.ts });
+  } catch (error) {
+    if (slackErrorCode(error) === "message_not_found") return true;
+    console.warn(
+      `[Slack] Could not delete answered deferral card ${card.id}; rewriting it instead:`,
+      slackErrorSummary(error),
+    );
+    return false;
+  }
+  console.log(`[Slack] Deleted deferral card ${card.id}: its wake-up answered in the thread`);
+  return true;
+}
+
 // Everything else reaching the catch has no Slack verdict attached (a socket
 // reset, a DNS blip, a local read that threw), so it is worth retrying — but
 // only a bounded number of times. Without a ceiling a card that fails for a
@@ -2305,7 +2331,8 @@ const deferralRefreshAttempts = new Map<string, number>();
  * Runs after the tree loop and independently of it: resolution needs only
  * the retained outcome `ts`, so it must not be skipped when the thread has
  * no other pending render work. Re-defers update the same card; the final
- * result marks it resolved (`deferral_resolved_at`).
+ * result marks it resolved (`deferral_resolved_at`). A final result that was
+ * already sent with `slack-reply` deletes the card instead.
  *
  * The marker is also burned when Slack refuses the rewrite for good, and when
  * an unclassifiable failure has used up its attempts — a card that can never
@@ -2320,14 +2347,16 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
     try {
       const wake = await getTaskById(wakeTaskId);
       if (!wake) continue;
-      const content = await resolvedDeferralContent(wake);
-      await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
-        callSlackWithRetry(app.client, "chat.update", {
-          channel: card.channelId,
-          ts: card.ts,
-          ...content.build(withCard),
-        }),
-      );
+      if (!(await removeDeferralCardAnsweredByReply(app.client, card, wake))) {
+        const content = await resolvedDeferralContent(wake);
+        await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
+          callSlackWithRetry(app.client, "chat.update", {
+            channel: card.channelId,
+            ts: card.ts,
+            ...content.build(withCard),
+          }),
+        );
+      }
       if (isDeferredTask(wake)) {
         await updateSlackMessageRecord(card.id, {});
       } else {

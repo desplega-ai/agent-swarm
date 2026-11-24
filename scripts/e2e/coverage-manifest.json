@@ -664,7 +664,8 @@
         "slack-defer-eta-legacy",
         "slack-defer-eta-v2",
         "slack-defer-wake-v2",
-        "slack-redefer"
+        "slack-redefer",
+        "slack-defer-wake-reply-v2"
       ]
     },
     "slack-delegation": {

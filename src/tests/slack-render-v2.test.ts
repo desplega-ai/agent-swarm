@@ -91,6 +91,7 @@ let startStreamFailuresRemaining = 0;
 // A `chat.update` that answers with a Slack verdict other than 404 — the
 // permanent, non-retryable class (`cant_update_message`, `channel_not_found`).
 let rejectedUpdateTs: string | undefined;
+let rejectedDeleteTs: string | undefined;
 let rejectedUpdateCode = "cant_update_message";
 let rejectedUpdateMessages: string[] = [];
 // A `chat.stopStream` that answers with a Slack API verdict (e.g. the
@@ -299,6 +300,12 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     message.text = String(payload.text ?? "");
     return { ok: true };
   }
+  if (method === "chat.delete") {
+    if (rejectedDeleteTs === payload.ts) throw { data: { error: "cant_delete_message" } };
+    const key = remoteKey(String(payload.channel), String(payload.ts));
+    if (!remoteMessages.delete(key)) throw { data: { error: "message_not_found" } };
+    return { ok: true };
+  }
   if (method === "auth.test") return { ok: true, team_id: "T_TEST" };
   return { ok: true };
 });
@@ -353,6 +360,7 @@ beforeEach(async () => {
   missingMessageTs = undefined;
   updateFailuresRemaining = 0;
   rejectedUpdateTs = undefined;
+  rejectedDeleteTs = undefined;
   rejectedUpdateCode = "cant_update_message";
   rejectedUpdateMessages = [];
   rejectedStopTs = undefined;
@@ -3262,7 +3270,7 @@ describe("Slack renderer v2", () => {
    * Sets up a deferral card whose wake-up has already settled, so the next
    * tick is the one that tries to rewrite the card in place.
    */
-  async function resolvableDeferralCard(label: string) {
+  async function resolvableDeferralCard(label: string, { slackReply = false } = {}) {
     const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress(label);
     const ask = await createTaskExtended("answer when the build is done", {
@@ -3294,9 +3302,47 @@ describe("Slack renderer v2", () => {
     });
     const wake = await createStandaloneScheduleTask(schedule);
     await startTask(wake.id);
+    if (slackReply) await markTaskSlackReplySent(wake.id);
     await completeTask(wake.id, "The build passed.");
     return { askId: ask.id, wakeId: wake.id, ts: card!.ts };
   }
+
+  test("a deferral card whose wake-up answered with slack-reply is deleted, not rewritten", async () => {
+    const card = await resolvableDeferralCard("C_DEFER_REPLIED", { slackReply: true });
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    expect(calls).toContainEqual({
+      method: "chat.delete",
+      payload: { channel: expect.any(String), ts: card.ts },
+    });
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card.ts),
+    ).toHaveLength(0);
+    const resolved = await getSlackOutcomeMessage(card.askId);
+    expect(resolved?.deferralResolvedAt).toBeTruthy();
+    expect(resolved?.deferralAbandonedAt).toBeUndefined();
+    // The reply is the answer: the wake-up posts no card of its own either.
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect(await getSlackOutcomeMessage(card.wakeId)).toBeNull();
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.delete")).toHaveLength(0);
+  });
+
+  test("a replied deferral card that Slack will not delete is rewritten instead", async () => {
+    const card = await resolvableDeferralCard("C_DEFER_NO_DELETE", { slackReply: true });
+    rejectedDeleteTs = card.ts;
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const rewrite = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === card.ts,
+    );
+    expect(String(rewrite?.payload.text)).toEndWith("completed");
+    expect((await getSlackOutcomeMessage(card.askId))?.deferralResolvedAt).toBeTruthy();
+  });
 
   test("a deferral card Slack refuses for good stops being retried", async () => {
     const card = await resolvableDeferralCard("C_DEFER_REJECTED");
