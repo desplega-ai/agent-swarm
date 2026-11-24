@@ -12,6 +12,7 @@ import {
   type ModelDef,
 } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
+import { publishAppRowsChanged } from "./realtime-events";
 
 export type AppRow = {
   id: string;
@@ -221,7 +222,14 @@ export function withMutationLock<T>(
 ): Promise<T> {
   const lockKey = `${appId}:${model}`;
   const previous = mutationChains.get(lockKey) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
+  // Every row write runs under this lock: tell open app surfaces once it lands.
+  const current = previous
+    .catch(() => undefined)
+    .then(operation)
+    .then((result) => {
+      if (model !== "*") publishAppRowsChanged(appId, model);
+      return result;
+    });
   mutationChains.set(lockKey, current);
   return current.finally(() => {
     if (mutationChains.get(lockKey) === current) mutationChains.delete(lockKey);

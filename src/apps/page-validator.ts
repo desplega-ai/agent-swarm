@@ -848,6 +848,9 @@ function validateStateRef(
   if (ref.value === "/route/page" || ref.value === "/route" || ref.value === "/route/params") {
     return null;
   }
+  // App realtime: the other viewers of this page (`[{ id, name, avatar? }]`), their names
+  // (for `AvatarStack.users`) and their count.
+  if (["/presence/peers", "/presence/names", "/presence/count"].includes(ref.value)) return null;
   const routeParam = /^\/route\/params\/([^/]+)$/.exec(ref.value);
   if (routeParam) {
     const name = routeParam[1]!;

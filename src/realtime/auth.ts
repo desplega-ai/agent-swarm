@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http";
 import { getAgentById, getTaskById } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
 import { getSessionRoot, sessionAccessForRoot } from "../be/session-shares";
+import { getStorage } from "../be/storage";
 import { getCombConfig } from "../comb/config";
 import { mcpOverflowAuthError } from "../kv-overflow";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
@@ -43,6 +44,12 @@ export type RoomNamespaceOperation =
 const COMB_PRESENCE_NAMESPACE = /^presence:comb:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
 const COMB_PRESENCE_OPERATIONS = new Set<RoomNamespaceOperation>(["join", "leave", "presence"]);
 const SESSION_PRESENCE_NAMESPACE = /^presence:session:([A-Za-z0-9_-]{1,64})$/;
+const APP_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+/** `presence:app:<appId>:<page>`: who has this app page open. */
+const APP_PRESENCE_NAMESPACE = new RegExp(`^presence:app:(${APP_ID}):[A-Za-z0-9_-]{1,64}$`);
+/** `app:<appId>`: server events for the app's open surfaces (`rows`). */
+const APP_CHANNEL_NAMESPACE = new RegExp(`^app:(${APP_ID})$`);
+const APP_CHANNEL_OPERATIONS = new Set<RoomNamespaceOperation>(["subscribe", "unsubscribe"]);
 
 function pageNamespace(pageId: string): string | null {
   try {
@@ -170,6 +177,10 @@ export async function authorizeRoomNamespace(
     return authorizeSessionPresence(namespace, info, access);
   }
 
+  if (namespace.startsWith("presence:app:") || namespace.startsWith("app:")) {
+    return authorizeAppRealtime(namespace, info, access);
+  }
+
   const reservedError = reservedNamespaceError(namespace);
   if (reservedError) return reservedError;
 
@@ -209,6 +220,54 @@ export async function authorizeRoomNamespace(
     if (!allowed) return "writes to another agent's namespace require lead";
   }
 
+  return null;
+}
+
+/**
+ * App realtime: `presence:app:<appId>:<page>` rooms (join, leave, presence) and
+ * the `app:<appId>` channel (subscribe only; the server publishes). Both are
+ * for dashboard viewers who hold `app.use`, and the app must exist. A page
+ * session or an agent socket gets neither; nobody publishes into an app
+ * channel over the socket.
+ */
+async function authorizeAppRealtime(
+  namespace: string,
+  info: RoomAuthorizationInfo,
+  access: boolean | RoomNamespaceOperation,
+): Promise<string | null> {
+  const presence = APP_PRESENCE_NAMESPACE.exec(namespace);
+  const channel = APP_CHANNEL_NAMESPACE.exec(namespace);
+  const appId = presence?.[1] ?? channel?.[1];
+  if (!appId) return "invalid app realtime namespace";
+  if (info.pageId || info.agentId || (!info.isOperator && !info.userId)) {
+    return "App realtime requires dashboard authentication";
+  }
+  const allowedOps = presence ? COMB_PRESENCE_OPERATIONS : APP_CHANNEL_OPERATIONS;
+  if (typeof access !== "string" || !allowedOps.has(access)) {
+    return presence
+      ? "App presence rooms only allow join, leave, and presence"
+      : "App channels only allow subscribe and unsubscribe";
+  }
+  const principal = info.isOperator
+    ? ({ kind: "operator" } as const)
+    : ({ kind: "user", userId: info.userId! } as const);
+  if (
+    !can({
+      principal,
+      verb: "app.use",
+      resource: { kind: "app", appId },
+      source: info.callOrigin === "mcp" ? "mcp" : "http",
+    }).allow
+  ) {
+    return "App realtime requires the app.use permission";
+  }
+  if (info.userId && isRbacEnabled()) {
+    const grant = await getUserGrant(info.userId);
+    if (!grant.grantsAll && !grant.verbs.has("app.use")) {
+      return "App realtime requires the app.use permission";
+    }
+  }
+  if (!(await getStorage().repos.pages.appExists(appId))) return "app not found";
   return null;
 }
 

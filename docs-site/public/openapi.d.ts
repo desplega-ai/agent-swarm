@@ -20375,7 +20375,7 @@ export interface paths {
         put?: never;
         /**
          * Issue a one-shot dashboard realtime ticket
-         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
+         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`), sessions (`session.presence`) and app pages plus app event channels (`app.use`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
          */
         post: {
             parameters: {

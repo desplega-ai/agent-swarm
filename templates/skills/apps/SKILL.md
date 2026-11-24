@@ -1011,6 +1011,8 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 
 **Live data.** `OnEnter.everyMs` (1000 or more) re-runs the chain on an interval while the tab is visible; a tick is skipped while any earlier run (a tick or a `deps` change) is still going. Bind it to a toggle (`{ "$if": [{ "$state": "/local/live" }, 2000, null] }`) for a pausable live tail.
 
+**Realtime.** An open app page holds one realtime socket (the same one pages use). A row write (UI, `app-row-*` tools, a sync pass) refreshes every query over that model on every open page within about 250 ms, with no polling needed; polling stays as the fallback. `/presence/peers` lists the other people on the same app page (`[{ id, name, avatar? }]`), `/presence/names` their names and `/presence/count` how many: `{ "type": "AvatarStack", "props": { "users": { "$state": "/presence/names" } } }`. Viewers need `app.use`. Script query results and action results are not pushed: refresh those with `OnEnter.everyMs`.
+
 **`OnEnter`: load on open.** An `OnEnter` element renders nothing. It runs its `on.enter` chain on mount, then again each time its resolved `deps` value changes. Its steps always run to the end (no `watch` cancel). Use `deps: { "$state": "/route" }` to re-run it when the page or a route param changes; omit `deps` to run it once per mount. Put it anywhere in the page tree.
 
 **Steps.**
