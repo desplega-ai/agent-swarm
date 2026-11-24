@@ -1302,6 +1302,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_RENDER_V2_QUIET_LEAD_THREADS",
+        label: "Quiet Lead threads in Slack",
+        description:
+          "Post only the Lead's replies in Slack threads: no waiting card when the Lead defers, and no card for a Lead follow-up that ends without a reply. The task tree still shows both. Requires Slack thread renderer v2.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#quiet-lead-threads-in-slack`,
+      },
+      {
         key: "UI_SPEC_ENABLED",
         label: "Rich result cards",
         description:
