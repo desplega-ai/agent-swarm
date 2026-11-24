@@ -69741,6 +69741,16 @@
               }
             }
           },
+          "400": {
+            "description": "Signed body is not valid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Invalid signature",
             "content": {
