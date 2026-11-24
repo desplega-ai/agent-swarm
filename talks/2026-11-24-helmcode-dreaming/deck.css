@@ -1027,7 +1027,7 @@ body.presenter #presenter {
   position: absolute;
   left: 0;
   bottom: 0;
-  height: 500px;
+  height: 420px;
 }
 
 /* The footer brand would sit on top of Hexy. */
