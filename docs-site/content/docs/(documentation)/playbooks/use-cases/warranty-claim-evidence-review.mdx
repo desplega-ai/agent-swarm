@@ -1,0 +1,101 @@
+---
+title: 'Preparing warranty claim evidence for a human decision with AI agents'
+description: "Agent Swarm gathers one warranty claim's purchase record, terms, product and service history, then hands a warranty owner a source-linked packet."
+agent:
+  offer: false
+  when: "Someone wants operations and service teams to share source-linked evidence on one warranty claim before a qualified person decides coverage"
+---
+
+Agent Swarm can gather the authorized records for one warranty claim, run deterministic checks for missing documents and conflicting dates, and hand a named warranty owner a source-linked packet, while coverage, the outcome and the customer message stay with qualified people. It works once the team configures the sources and the permissions the workflow needs. What it takes off the team is the assembly: the purchase record, the terms version that applied, the product and serial record, the service history and the customer's description sit in different systems and different teams.
+
+The scope is one warranty claim's evidence and coverage review, prepared before anyone answers the customer. A disputed product return in which a customer and a warehouse disagree over an item's condition is a different handoff ([disputed product return](/docs/playbooks/use-cases/ai-returns-exception-handoff)), and a property maintenance request that has not yet been dispatched to anyone is another ([property maintenance triage](/docs/playbooks/use-cases/maintenance-work-order-triage)).
+
+## When another tool fits better
+
+**Dedicated warranty management or claims software.** When the purchase record, the product registration, the applicable terms and the service history live in one system, and the terms are written as rules a system can settle, that product closes the claim.
+
+**A manual checklist at low volume.** At a handful of claims a month, one person opens the receipt, reads the terms and records the decision.
+
+Agent Swarm fits the cross-team shape: the purchase record with finance or the reseller, the terms version in a document store, the product and serial record in a catalog or ERP, the service history with a field team, the customer's description in support. [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model) sets out that split.
+
+## An illustrative workflow
+
+This is an illustrative design, not a built-in warranty product, integration or customer case. It needs data access, integrations and configuration your team sets up and tests.
+
+<Mermaid title="Illustrative warranty claim flow, from a claim received to a warranty owner recording the outcome and approving the customer reply." chart={`flowchart LR
+  A["Claim received<br/>(support or<br/>service desk)"] --> B["Gather authorized records<br/>(purchase record, terms version,<br/>product and serial, service history,<br/>customer description)"]
+  B --> C["Deterministic checks<br/>swarm-script to JSON"]
+  C --> D["Agent prepares<br/>source-linked packet"]
+  D --> G{{"human-in-the-loop<br/>named warranty owner"}}
+  G -- "approve" --> R["Person records outcome<br/>and approves customer reply"]
+  G -- "reject" --> S["Hold, request<br/>missing documents"]
+`} />
+
+**A claim is received.** Support records the customer's description of the fault, the product, the serial if the customer has it, and the date the fault appeared.
+
+**The swarm gathers the authorized records.** Configured connections pull the purchase record with its date and seller, the terms version that applied on that purchase date, the product and serial record, the service history for that serial, and the customer's description as written. Scripts reach those systems through [script connections](/docs/guides/script-connections), so no raw credential sits in script source.
+
+**Deterministic checks run in code.** A `swarm-script` node compares the failure date the customer reports against the period the applicable terms version states, the purchase date on the receipt against the registration date on file, the serial number in the product record against the one the customer supplied, and the visits in the service history against the visits the description refers to. It flags missing documents and dates that disagree, and no model does the date arithmetic. [Reports from multiple sources](/docs/playbooks/reports-multiple-sources) documents that split.
+
+**An agent writes the packet.** A Researcher agent turns the JSON and the source records into one document: each fact with its source and read time, each missing document with the team that holds it, each conflicting date with both values, and the named owner who decides.
+
+**A person clears the gate.** A [human-in-the-loop gate](/docs/playbooks/patterns/hitl-gates) pauses the workflow, posts to Slack and resumes only when a person responds. The gate message carries the summary and a link to the full packet, so the owner decides without opening every system.
+
+**A person records the outcome and approves the reply.** The owner records the decision in the system that owns it, then approves the wording of the customer message before anything is sent.
+
+Two questions it answers plainly.
+
+**How can operations and service teams prepare a warranty claim for human review with AI agents?** By doing the collection and the comparison: one packet holding the purchase record, the terms version, the product record, the service history and the customer's description, with a source on every line and every gap named.
+
+**How can a company assemble warranty claim evidence across product and service records?** One document, written before anyone decides, so every team reads the same packet instead of whichever system was opened last.
+
+## An illustrative claim
+
+Every detail below is invented. No customer or company is named.
+
+A unit stops heating during its stated warranty period. The customer says the fault appeared in month 14 of a period the terms state as 24 months from the purchase date. The receipt on file carries a purchase date three weeks earlier than the registration date the seller recorded, which moves the start of that period. The service history holds no record of the visit the customer describes in month 11.
+
+The packet lists each item with its source and read time, and marks the gaps.
+
+| Item | What the packet shows | Where it came from, and when it was read | Open question for the owner |
+| --- | --- | --- | --- |
+| Stated warranty period | The period in the terms version that applied on the purchase date | Terms version and effective dates, read at claim intake | "Does this version govern, given the date on the receipt?" |
+| Purchase date | The date on the receipt, and the registration date recorded separately | Purchase record and product registration, both read at claim intake | "Which date starts the period?" |
+| Failure date | The date the customer reports, and the date the claim was created | Customer description and claim record, read at claim intake | "Is there a dated note for the reported fault?" |
+| Service visit | The visits the history holds for the serial | Service history, read at claim intake | "Who holds the record for the visit the customer describes?" |
+| Serial number | The serial on the product record, and the one the customer supplied | Product record and customer description, both read at claim intake | "Do these match after formatting, or is this a different unit?" |
+| Missing document | The document the team expects for this claim and does not have | Record set configured by the owner | "Who can supply it, and by when?" |
+
+The packet states the facts and the gap. It never states coverage.
+
+## Conflicting records, privacy and escalation
+
+**Conflicts are surfaced, not resolved.** When two records state different dates, the packet reports both values with links and does not pick one. It names the owner who settles which governs.
+
+**Access and retention stay with the operator.** Which records the workflow may read, who may see the packet and how long it is kept all belong to the team running it. Personal data stays in the systems that already hold it: the packet links to a customer record rather than copying contact details into a thread. When a record sits behind a system the swarm cannot reach, the packet names it and the owner who can grant access.
+
+**Escalation has a route.** The gate carries a timeout and a fallback the team defines: a reminder to the owner, a named backup, then an explicit hold. If the owner does not respond, the claim stays on the aged list with its reason recorded instead of closing quietly. A terms question, a suspected misrepresentation or a demand that names a regulator goes to the owner first, then to legal or the manufacturer through the team's existing route.
+
+## What stays human-owned
+
+Gating the irreversible steps and letting the reversible ones run is the rule from the [HITL gates](/docs/playbooks/patterns/hitl-gates) guide. Gathering records is reversible. Telling a customer their claim is refused is not.
+
+- **The coverage decision.** Whether the terms cover this fault is a qualified person's call, and so is the reason recorded against it.
+- **The outcome.** Repair, replacement, refund or denial is a decision a person records inside the system that owns it. The agent has no path to a credit, an order or a repair booking.
+- **Any exception to the terms.** A goodwill repair or a period honoured past its end carries a cost, so it is a commercial decision. The agent neither proposes nor applies one.
+- **The customer communication.** The wording, the explanation and the timing belong to the person who will answer.
+- **Escalation to legal or the manufacturer.** The agent does not contact either. It names the owner who does.
+
+## Limits
+
+Agent Swarm ships no warranty management module. Every source system above is a custom integration your team configures and tests, and nothing here is a supported list of warranty, claims, ERP or CRM systems. It performs no fraud detection and no automatic adjudication: it does not decide whether a claim is valid, and it does not approve or pay one. It makes no legal or regulatory compliance claim. Whether a decision, a retention period or a customer message meets a warranty law is a question for the team and its advisers.
+
+## Building blocks
+
+Every piece below ships in agent-swarm and is documented. Pointing them at a warranty claim is the illustrative part.
+
+- [Reports from multiple sources](/docs/playbooks/reports-multiple-sources): deterministic `swarm-script` and `script-run` collection that emits JSON, then a Researcher agent that synthesizes it. Output renders as a hosted [Page](/docs/reference/mcp-tools#pages-tools) or posts as a Slack thread.
+- [HITL gates](/docs/playbooks/patterns/hitl-gates): the blocking `human-in-the-loop` node that posts to Slack and resumes only on a human response, with an approve branch, a reject branch, a timeout and a fallback, and a gate message carrying the summary plus a link to the full artifact.
+- [Choosing an AI operating model](/docs/playbooks/use-cases/choosing-an-ai-operating-model): the claims module, a checklist or a shared agent platform.
+
+A workflow can also ask a person a question with the `request-human-input` tool, which is separate from the `human-in-the-loop` node and fits a decision inside a running task. Use the node when the workflow must stop until someone answers.
