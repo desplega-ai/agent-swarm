@@ -10,6 +10,9 @@ const MEMORY_ONLY = new Set<unknown>([
   // Stars. A restored copy counts as fresh for the 30 s staleTime, so a reload right after
   // a toggle could show the old star until the next fetch.
   "favorites",
+  // Page bodies. The page view never treats them as stale, so a restored copy would hide
+  // an update made through the API until the persisted cache expires.
+  "page-metadata",
 ]);
 
 /**
