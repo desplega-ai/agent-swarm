@@ -76,7 +76,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.8",
+    "@biomejs/biome": "2.4.5",
     "@happy-dom/global-registrator": "^21.0.4",
     "@resvg/resvg-js": "^2.6.2",
     "@testing-library/dom": "^10.4.2",

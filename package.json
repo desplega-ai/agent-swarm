@@ -193,7 +193,7 @@
     "seed:scripts": "bun scripts/seed-scripts.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.8",
+    "@biomejs/biome": "^2.3.10",
     "@desplega.ai/slack-mock": "^0.6.1",
     "@desplega/model-catalog": "workspace:*",
     "@desplega/model-routing": "workspace:*",
@@ -268,7 +268,7 @@
     "e2b": "2.64.0",
     "fractional-indexing": "4.0.0",
     "ink": "^6.8.0",
-    "just-bash": "3.6.1",
+    "just-bash": "3.6.0",
     "oauth4webapi": "^3.8.8",
     "openai": "^6.49.0",
     "quickjs-emscripten-core": "0.32.0",
