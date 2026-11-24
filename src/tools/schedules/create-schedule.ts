@@ -127,7 +127,7 @@ export const createScheduleInputSchema = z.object({
     .min(1)
     .optional()
     .describe(
-      "Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model and modelTier.",
+      "Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model, modelTier and modelGroup.",
     ),
   modelGroup: z
     .string()

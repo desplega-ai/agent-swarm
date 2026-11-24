@@ -103,7 +103,7 @@ export const updateScheduleInputSchema = z.object({
     .nullable()
     .optional()
     .describe(
-      "Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear.",
+      "Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Do not set a profile together with model, modelTier or modelGroup in the same request. Setting a profile clears those stored values, and setting any of them clears the stored profile. Set to null to clear the profile.",
     ),
   modelGroup: z
     .string()

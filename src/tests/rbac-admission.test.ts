@@ -16,6 +16,7 @@ import {
 import {
   closeDb,
   createAgent,
+  createPage,
   createUser,
   createWorkflow,
   createWorkflowRun,
@@ -36,6 +37,7 @@ import { handleDbQuery } from "../http/db-query";
 import { handleFs } from "../http/fs";
 import { handleInboxState } from "../http/inbox-state";
 import { handleMcpOAuth } from "../http/mcp-oauth";
+import { handlePageProxy } from "../http/page-proxy";
 import { handlePromptTemplates } from "../http/prompt-templates";
 import { handleRealtimeTicket } from "../http/realtime";
 import { handleSchedules } from "../http/schedules";
@@ -44,6 +46,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflowEvents } from "../http/workflow-events";
 import { handleWorkflows } from "../http/workflows";
 import { decideAdmission, decideToolAdmission, isRbacEnabled, type PermissionVerb } from "../rbac";
+import { signPageSession } from "../utils/page-session";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rbac-admission.sqlite";
@@ -91,6 +94,7 @@ function createTestServer(): Server {
     if (await handleSchedules(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleWorkflowEvents(req, res, pathSegments, queryParams)) return;
     if (await handleWorkflows(req, res, pathSegments, queryParams, myAgentId)) return;
+    if (await handlePageProxy(req, res)) return;
 
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not Found" }));
@@ -880,7 +884,7 @@ describe("HTTP admission with specific grants", () => {
     );
   }
 
-  test("specific grants admit only the corresponding HTTP routes", async () => {
+  test("specific grants admit only the corresponding routes and pages also need an eligible owner", async () => {
     process.env.RBAC_ENABLED = "true";
     const missingId = crypto.randomUUID();
     const workflow = await createWorkflow({
@@ -906,16 +910,16 @@ describe("HTTP admission with specific grants", () => {
       ["POST", "/api/workflow-events", signal],
     ] as const;
     const cases: [PermissionVerb, (number | null)[]][] = [
-      ["comb.presence", [200, 403]],
+      ["comb.presence", [200, 403, 403]],
       ["session.presence", [200, 403]],
       ["app.use", [200]],
-      ["task.read.own", [403, 403, 403, 403, 403, 403, 403, 403, 403]],
+      ["task.read.own", [403, 403, 403, 403, 403, 403, 403, 403, 403, 403, 403, 403]],
       ["config.reload", [403, 200, 200]],
-      ["config.write.any", [null, 403, 200]],
+      ["config.write.any", [403, 403, 200]],
       ["schedule.write.any", [null, null, null, 404, 404]],
       ["schedule.run.any", [null, null, null, 404, 403]],
       ["prompt-template.write.any", [null, null, null, null, null, 400, 404, 404, 404]],
-      ["prompt-template.write", [null, null, null, null, null, 400, 404, 404, 404]],
+      ["prompt-template.write", [null, null, null, null, 403, 400, 404, 404, 404]],
       ["workflow.trigger", [null, null, null, null, null, null, null, null, null, 201, 403, 403]],
       ["workflow.run.event", [null, null, null, null, null, null, null, null, null, 403, 200, 200]],
       ["workflow.run.any", [null, null, null, null, null, null, null, null, null, 201, 200, 200]],
@@ -935,6 +939,48 @@ describe("HTTP admission with specific grants", () => {
         });
       }
     }
+
+    // Exercise a signed viewer session through the browser proxy, not a direct user bearer.
+    process.env.PORT = String(port);
+    process.env.AGENT_SWARM_API_KEY = API_KEY;
+    process.env.PAGE_SESSION_SECRET = "example-test-admission-page-secret";
+    const page = await createPage({
+      agentId: LEAD_ID,
+      slug: "catalog-admission",
+      title: "Catalog admission",
+      contentType: "text/html",
+      body: "<p>Catalog admission</p>",
+    });
+    const viewer = await createUser({ name: "Catalog Page Viewer" });
+    await narrowUserToRequester(viewer.id);
+    const session = await signPageSession({
+      pageId: page.id,
+      uid: viewer.id,
+      exp: Math.floor(Date.now() / 1000) + 600,
+    });
+    const reloadFromPage = () =>
+      fetch(`http://localhost:${port}/@swarm/api/config/reload`, {
+        method: "POST",
+        headers: { Cookie: `page_session_${page.id}=${session}`, "X-Swarm-Page-Id": page.id },
+      });
+
+    const missingViewerGrant = await reloadFromPage();
+    expect(missingViewerGrant.status).toBe(403);
+    expect(await missingViewerGrant.json()).toEqual({
+      error: "Forbidden: admission: missing permission 'config.reload'",
+    });
+
+    await grantOnly(viewer.id, ["config.write.any"]);
+    const allowed = await reloadFromPage();
+    expect(allowed.status).toBe(200);
+    expect(await allowed.json()).toMatchObject({ success: true });
+
+    await getDbClient().run("UPDATE agents SET isLead = 0 WHERE id = ?", [LEAD_ID]);
+    const ineligibleOwner = await reloadFromPage();
+    expect(ineligibleOwner.status).toBe(403);
+    expect(await ineligibleOwner.json()).toEqual({
+      error: "Reloading config requires the lead agent, operator, or user authentication",
+    });
   });
 });
 

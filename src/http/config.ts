@@ -260,6 +260,8 @@ export async function ensureHttpPermission(
   callerAgentId?: string,
   resource: RbacResource = { kind: "none" },
 ): Promise<boolean> {
+  // With RBAC enabled, handleCore checks the signed-in viewer's route grant first.
+  // A page's catalog operation must separately pass as the page's current owner.
   const pagePrincipal = CATALOG_VERBS.has(verb)
     ? await pageExecutionPrincipal(getRequestAuth(req))
     : null;
