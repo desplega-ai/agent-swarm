@@ -416,7 +416,8 @@ async function remove(box: Box): Promise<void> {
     console.log(`deleted script ${script.name}`);
   }
   // List by recency (no query): a memory search is not needed to find them.
-  let memoryCount = 0;
+  // Collect the ids first: a delete inside the paging loop shifts the next page.
+  const memoryIds: string[] = [];
   for (let offset = 0; offset < 5000; offset += 100) {
     const page = await box.api("POST", "/api/memory/list", {
       agentId: box.leadId,
@@ -424,11 +425,14 @@ async function remove(box: Box): Promise<void> {
       offset,
     });
     const rows: J[] = page.json.results ?? [];
-    for (const memory of rows.filter((row) => String(row.name).startsWith("stress-mem-"))) {
-      const gone = await box.api("DELETE", `/api/memory/${memory.id}`);
-      if (gone.status < 300) memoryCount++;
-    }
+    for (const memory of rows.filter((row) => String(row.name).startsWith("stress-mem-")))
+      memoryIds.push(String(memory.id));
     if (rows.length < 100) break;
+  }
+  let memoryCount = 0;
+  for (const id of memoryIds) {
+    const gone = await box.api("DELETE", `/api/memory/${id}`);
+    if (gone.status < 300) memoryCount++;
   }
   console.log(`deleted ${memoryCount} stress memories`);
 

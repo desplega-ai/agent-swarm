@@ -118,8 +118,14 @@ async function build(ctx: ScriptContext, level: number) {
   }
 
   // 2. Run tables. Three queries at a time at most.
+  // The API allows three db-query calls in flight. Another caller can hold a
+  // slot, so a 429 is retried a few times before it counts as a problem.
   const q = async (label: string, sql: string, params?: unknown[]) => {
-    const res = (await ctx.swarm.db_query(params ? { sql, params } : { sql })) as Sdk;
+    let res = (await ctx.swarm.db_query(params ? { sql, params } : { sql })) as Sdk;
+    for (let attempt = 1; res.status === 429 && attempt <= 3; attempt++) {
+      await new Promise((done) => setTimeout(done, 300 * attempt));
+      res = (await ctx.swarm.db_query(params ? { sql, params } : { sql })) as Sdk;
+    }
     if (!res.success)
       problems.push(`${label}: HTTP ${res.status} ${String(res.data?.error).slice(0, 160)}`);
     return dbRows(res);
@@ -152,7 +158,7 @@ async function build(ctx: ScriptContext, level: number) {
       [new Date(now - STUCK_MS).toISOString()],
     ),
   ]);
-  const [failedSteps, schedules, slowSteps, failedScripts] = await Promise.all([
+  const [failedSteps, schedules, slowSteps] = await Promise.all([
     q(
       "unexpected failed steps",
       `select w.name as name, s."nodeId" as node, count(*) as n, max(s.error) as error from workflow_run_steps s join workflow_runs r on r.id = s."runId" join workflows w on w.id = r."workflowId" where w.name like 'stress-%' and s.status = 'failed' and s."startedAt" >= ${ph(1)} and (s.error is null or s.error not like '%${EXPECTED}%') group by w.name, s."nodeId" order by n desc limit 20`,
@@ -167,12 +173,12 @@ async function build(ctx: ScriptContext, level: number) {
       `select w.name as name, count(*) as n from workflow_runs r join workflows w on w.id = r."workflowId" where w.name like 'stress-%' and r."startedAt" >= ${ph(1)} group by w.name order by w.name`,
       [windowIso],
     ),
-    q(
-      "failed script runs",
-      `select "scriptName" as name, count(*) as n, max(error) as error from script_runs where "scriptName" like 'stress-%' and status = 'failed' and "startedAt" >= ${ph(1)} group by "scriptName" order by n desc`,
-      [sinceIso],
-    ),
   ]);
+  const failedScripts = await q(
+    "failed script runs",
+    `select "scriptName" as name, count(*) as n, max(error) as error from script_runs where "scriptName" like 'stress-%' and status = 'failed' and "startedAt" >= ${ph(1)} group by "scriptName" order by n desc`,
+    [sinceIso],
+  );
   // stress-sandbox-case fails on purpose (its throw and timeout cases).
   const unplannedFailures = failedScripts.filter((row) => row.name !== "stress-sandbox-case");
   if (unplannedFailures.length > 0) {
