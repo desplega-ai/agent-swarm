@@ -426,7 +426,12 @@ export async function handleJiraTracker(
     const rawBody = await readWebhookBody(req, res);
     if (rawBody === null) return true;
 
-    const result = await handleJiraWebhook(parsed.params.token, rawBody);
+    const identifier = req.headers["x-atlassian-webhook-identifier"];
+    const result = await handleJiraWebhook(
+      parsed.params.token,
+      rawBody,
+      typeof identifier === "string" ? identifier : undefined,
+    );
 
     // 401 with empty body — no info leak about valid-vs-missing token.
     if (result.status === 401) {

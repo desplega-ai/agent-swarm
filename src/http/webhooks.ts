@@ -31,6 +31,7 @@ import {
   isAzureDevOpsEnabled,
   verifyAzureDevOpsWebhook,
 } from "../azure-devops";
+import { getWorkflowsByEventName } from "../be/db";
 import {
   pullRequestCommentEventOf as bitbucketCommentEventOf,
   pullRequestEventOf as bitbucketPullRequestEventOf,
@@ -62,6 +63,7 @@ import {
   isGitHubEnabled,
   verifyWebhookSignature,
 } from "../github";
+import { githubWorkflowEvent } from "../github/workflow-events";
 import type {
   IssueEvent as GitLabIssueEvent,
   MergeRequestEvent,
@@ -158,6 +160,14 @@ const GITHUB_VERIFIED_EVENTS = new Set([
   "pull_request_review_comment",
   "pull_request_review",
 ]);
+
+/**
+ * check_suite is read only while an enabled workflow starts on
+ * `github.check_suite.completed`; otherwise it is acked before the body read.
+ */
+async function hasCheckSuiteSubscriber(): Promise<boolean> {
+  return (await getWorkflowsByEventName("github.check_suite.completed")).length > 0;
+}
 
 const GITHUB_IGNORED_SUMMARY_MS = 60_000;
 const githubIgnoredCounts = new Map<string, number>();
@@ -461,7 +471,8 @@ export async function handleWebhooks(
       typeof eventType === "string" &&
       eventType &&
       !GITHUB_VERIFIED_EVENTS.has(eventType) &&
-      !(eventType === "check_run" && (await hasPendingEventWait("github", "vcs.pr.checks_done")))
+      !(eventType === "check_run" && (await hasPendingEventWait("github", "vcs.pr.checks_done"))) &&
+      !(eventType === "check_suite" && (await hasCheckSuiteSubscriber()))
     ) {
       countGithubIgnoredEvent(eventType);
       githubWebhook.respond(res, 200, { created: false });
@@ -539,64 +550,9 @@ export async function handleWebhooks(
         }
       });
 
-      // Emit workflow trigger event for matching event types
-      switch (eventType) {
-        case "pull_request": {
-          const pr = body as PullRequestEvent;
-          workflowEventBus.emit(`github.pull_request.${pr.action}`, {
-            repo: pr.repository.full_name,
-            number: pr.pull_request.number,
-            title: pr.pull_request.title,
-            body: pr.pull_request.body,
-            action: pr.action,
-            merged: pr.pull_request.merged ?? false,
-            html_url: pr.pull_request.html_url,
-            user_login: pr.pull_request.user.login,
-            changed_files: pr.pull_request.changed_files,
-          });
-          break;
-        }
-        case "issues": {
-          const iss = body as IssueEvent;
-          workflowEventBus.emit(`github.issue.${iss.action}`, {
-            repo: iss.repository.full_name,
-            number: iss.issue.number,
-            title: iss.issue.title,
-            action: iss.action,
-          });
-          break;
-        }
-        case "issue_comment": {
-          const ic = body as CommentEvent;
-          workflowEventBus.emit("github.issue_comment.created", {
-            repo: ic.repository.full_name,
-            number: ic.issue?.number,
-            action: ic.action,
-          });
-          break;
-        }
-        case "check_run": {
-          const cr = body as CheckRunEvent;
-          workflowEventBus.emit(`github.check_run.${cr.action}`, {
-            repo: cr.repository.full_name,
-            name: cr.check_run.name,
-            headSha: cr.check_run.check_suite?.head_sha,
-            conclusion: cr.check_run.conclusion,
-            pullRequests: (cr.check_run.pull_requests ?? []).map((pr) => pr.number),
-          });
-          break;
-        }
-        case "pull_request_review": {
-          const prr = body as PullRequestReviewEvent;
-          workflowEventBus.emit("github.pull_request_review.submitted", {
-            repo: prr.repository.full_name,
-            number: prr.pull_request.number,
-            state: prr.review.state,
-            action: prr.action,
-          });
-          break;
-        }
-      }
+      // Publish the workflow bus event: `wait` nodes resume on it, `event` triggers start on it.
+      const workflowEvent = githubWorkflowEvent(eventType, body, deliveryId);
+      if (workflowEvent) workflowEventBus.emit(workflowEvent.name, workflowEvent.payload);
 
       githubWebhook.respond(res, 200, result);
     } catch (err) {

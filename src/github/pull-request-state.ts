@@ -10,16 +10,19 @@ export type PullRequestState = {
 
 /**
  * GET one GitHub REST path. Sends the App installation token when one is
- * configured, otherwise reads unauthenticated (enough for a public repo).
+ * configured, else `GITHUB_TOKEN`, else reads unauthenticated. Unauthenticated
+ * reads share GitHub's 60 requests/hour per IP, which one PR's burst of
+ * check_run candidates spends before its last required check finishes.
  * Throws on any non-2xx so a failed read never counts as an answer.
  */
 async function githubGet<T>(path: string, what: string): Promise<T> {
   const auth = await getWorkerInstallationToken();
+  const token = auth.status === "ok" ? auth.token : process.env.GITHUB_TOKEN?.trim();
   const response = await fetch(githubApiUrl(path), {
     headers: {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
-      ...(auth.status === "ok" ? { Authorization: `Bearer ${auth.token}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     signal: AbortSignal.timeout(10_000),
   });

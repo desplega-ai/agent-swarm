@@ -62,4 +62,16 @@ if [ -n "$MATCHES" ]; then
   exit 1
 fi
 
+# SQLite-only exports of src/be/storage-root.ts throw on Postgres (they call getDb()).
+# Only these files may name them; each guards the engine or runs on the SQLite start path.
+# Engine-neutral code uses getStorage() (for memory reads: getStorage().memoryIndexes.searchReader).
+SQLITE_ONLY=$(grep -rnE --include='*.ts' '\b(memorySearchReader|memorySearchReaderStats|promptTemplateSqliteStart|sqliteDbQuery)\b' src/ \
+  | grep -v '^src/tests/' | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)' \
+  | grep -vE '^src/(be/storage-root|be/memory/search-reader|be/db/prompt-templates|http/db-query-shared|http/db-query-bounded)\.ts:' || true)
+if [ -n "$SQLITE_ONLY" ]; then
+  echo "ERROR: SQLite-only storage export used outside its allowlist (it throws on Postgres):"
+  echo "$SQLITE_ONLY"
+  exit 1
+fi
+
 echo "Async DB seam check passed."

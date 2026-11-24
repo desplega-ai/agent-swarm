@@ -5,9 +5,17 @@ import {
   getWorkflowsByScheduleId,
   listWorkflows,
 } from "../be/db";
+import {
+  findAcceptedWorkflowOperation,
+  IdempotencyKeyTakenError,
+  recordAcceptedWorkflowOperation,
+  type WorkflowIdempotencyClaim,
+  workflowRequestFingerprint,
+} from "../be/db/workflow-idempotency";
 import type { ScheduledTask, TriggerConfig } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { startWorkflowExecution } from "./engine";
+import { workflowEventTriggerMatches } from "./event-trigger-match";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputValue } from "./input";
 import { decideWebhookDelivery, type WebhookDeliverySkip } from "./webhook-filter";
@@ -305,9 +313,15 @@ export async function logOpenWebhookTriggers(): Promise<void> {
 }
 
 /**
- * Start every enabled workflow subscribed to a named in-process event.
- * Returns the workflow run IDs in workflow-list order. A failed subscriber
- * start is logged without preventing delivery to the remaining subscribers.
+ * Start every enabled workflow subscribed to a named in-process event whose
+ * trigger `match` fields accept the payload. Returns the workflow run IDs in
+ * workflow-list order. A failed subscriber start is logged without preventing
+ * delivery to the remaining subscribers.
+ *
+ * A payload with a `delivery_id` (GitHub `X-GitHub-Delivery`, the Jira
+ * webhook identifier) starts at most one run per workflow for that delivery:
+ * the key is recorded in the run's own transaction, so a redelivery, a retry
+ * or a concurrent duplicate finds it and starts nothing.
  */
 export async function handleEventTrigger(
   eventName: string,
@@ -315,15 +329,44 @@ export async function handleEventTrigger(
   registry: ExecutorRegistry,
 ): Promise<string[]> {
   const workflows = await getWorkflowsByEventName(eventName);
+  const deliveryId = eventDeliveryId(payload);
 
   const runIds: string[] = [];
   for (const workflow of workflows) {
+    if (!workflowEventTriggerMatches(workflow, eventName, payload)) continue;
+    const claim: WorkflowIdempotencyClaim | undefined = deliveryId
+      ? {
+          principal: `event:${eventName}`,
+          operation: "workflow.trigger",
+          targetId: workflow.id,
+          key: deliveryId,
+          fingerprint: workflowRequestFingerprint("workflow.trigger", { eventName, deliveryId }),
+        }
+      : undefined;
     try {
+      if (claim && (await findAcceptedWorkflowOperation(claim))) {
+        console.log(
+          `[workflows] ${eventName} delivery ${deliveryId} already started workflow ${workflow.id}; skipping`,
+        );
+        continue;
+      }
       const runId = await startWorkflowExecution(workflow, payload, registry, {
         triggerType: "event",
+        accept: claim
+          ? async (run) => {
+              await recordAcceptedWorkflowOperation(claim, {
+                workflowId: workflow.id,
+                runId: run.runId,
+                status: 201,
+                body: { runId: run.runId, skipped: run.skipped },
+              });
+            }
+          : undefined,
       });
       runIds.push(runId);
     } catch (err) {
+      // A concurrent copy of this delivery committed its run first.
+      if (err instanceof IdempotencyKeyTakenError) continue;
       console.error(
         `[workflows] Failed to start workflow ${workflow.id} for ${eventName} event trigger:`,
         scrubSecrets(err instanceof Error ? err.message : String(err)),
@@ -331,6 +374,12 @@ export async function handleEventTrigger(
     }
   }
   return runIds;
+}
+
+function eventDeliveryId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const id = (payload as { delivery_id?: unknown }).delivery_id;
+  return typeof id === "string" && id ? id : undefined;
 }
 
 /**

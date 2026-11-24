@@ -102,4 +102,15 @@ export type StatementObserver = {
   onStatement?: (sql: string, durationMs: number) => void;
   /** Called with a ready log line for a statement that blocked too long. */
   onSlowStatement?: (sql: string, durationMs: number) => void;
+  /** Called once per outermost transaction when it ends (Postgres). */
+  onTransaction?: (info: TransactionObservation) => void;
+};
+
+export type TransactionObservation = {
+  /** Attempts the callback ran, counting the last one (a `--tx-replay` replay does not count). */
+  attempts: number;
+  /** SQLSTATE of each retried attempt (40001, 40P01). */
+  retries: readonly string[];
+  /** `exhausted`: the last attempt failed retryably and no attempt was left. */
+  outcome: "commit" | "rollback" | "exhausted";
 };
