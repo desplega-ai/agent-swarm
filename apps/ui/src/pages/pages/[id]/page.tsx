@@ -520,6 +520,8 @@ export function PagePreviewBody({
     queryKey: ["page-metadata", id],
     queryFn: () => fetchPageMetadataWithLaunchRetry(id),
     staleTime: Infinity,
+    // Each open shows the cached body, then fetches the current one.
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
@@ -644,6 +646,8 @@ export default function ArtifactPage() {
     // refetch + re-render the iframe while the user is interacting with it
     // (and for password mode this would re-trigger the unlock flow).
     staleTime: Infinity,
+    // A revisit in the same session still fetches the current head once on open.
+    refetchOnMount: "always",
     refetchInterval: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
