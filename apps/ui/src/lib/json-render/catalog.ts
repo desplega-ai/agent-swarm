@@ -750,6 +750,11 @@ const spinnerProps = z.object({
   label: z.string().optional(),
 });
 
+const onEnterProps = z.object({
+  /** Re-runs `on.enter` whenever this resolved value changes (for example `{ "$state": "/route" }`). */
+  deps: z.unknown().optional(),
+});
+
 const avatarStackProps = z.object({
   /** Display names; each becomes an initials avatar. */
   users: z.array(z.string()),
@@ -1113,6 +1118,17 @@ const formProps = z.object({
   title: z.string().optional(),
   fields: z.array(formFieldSchema),
   submitLabel: z.string().optional(),
+  /**
+   * Prefill: `{ <field>: value }`, usually bound to a row (`{ "$state": "/queries/q/data/0" }`).
+   * Written into the fields on mount; a later change re-seeds only fields the user has not
+   * edited. Set `resetKey` so an edit dialog opened for another row shows that row.
+   */
+  initialValues: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Row identity for `initialValues`, usually the row id. When it changes, every field
+   * re-seeds and unsaved edits from the previous row are dropped.
+   */
+  resetKey: z.union([z.string(), z.number()]).optional(),
   /** Action chain run on submit; params may reference `$form`. */
   onSubmit: actionChainSchema,
 });
@@ -1600,6 +1616,11 @@ export const swarmCatalogSpec = {
       props: spinnerProps,
       description:
         'Inline busy indicator with `role=status`. `variant` ring|ellipsis|bars (default: the dashboard spinner), `size` sm|md, `label` shown next to it (and its accessible name; defaults to an sr-only "Loading").',
+    },
+    OnEnter: {
+      props: onEnterProps,
+      description:
+        'Renders nothing. Runs its `on.enter` chain once when mounted, and again each time the resolved `deps` value changes (`{ "$state": "/route" }` re-runs it on every page or route-param change). Unlike `watch`, a state write by a step does not cancel the remaining steps.',
     },
     AvatarStack: {
       props: avatarStackProps,

@@ -537,7 +537,7 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, Dialog, and Svg). `watch` maps state paths to an action step or chain. A page may also declare `state`: page-local values read and written at `/local/<name>` (see Low-level primitives).
 
-## Component catalog (all 52)
+## Component catalog (all 53)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -559,7 +559,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `Text` | `content` | `tone: "default" or "muted"`. |
 | `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. A link to a GitHub PR, issue, commit or repo, a dashboard task, agent, session or app, or an agent-fs file renders as a chip (icon plus short label), like agent output in a session; `[text](url)` keeps its text. |
 | `SearchInput` | `id` | `placeholder`, `label`, `shortcut` (one key, usually `"/"`: shows a keycap and focuses the field); writes debounced text to `/ui/<id>/value`; no children. |
-| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`; a value bound to a query that is still loading seeds when it arrives, unless the viewer already picked); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
+| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`; a value bound to a query that is still loading seeds when it arrives, unless the viewer already picked); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked). Search ranks options that contain every typed word first, then fuzzy subsequence matches ("tmln" finds "timeline"). The typed text is written (debounced 250 ms) to `/ui/<id>/search`: a `watch` on it can run an `app.action` whose result feeds `options`, to load options on type. No children. |
 | `NumberInput` | `id` | `label`, `placeholder`, `min`, `max`; a text field with a decimal keyboard that writes the parsed number to `/ui/<id>/value` on every change (no debounce), or null when the field is empty; non-numeric text (a bare `-` mid-edit, letters) leaves the stored value untouched; `min`/`max` clamp the stored value and the visible text snaps to it when the field loses focus; no children. |
 | `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
@@ -577,7 +577,8 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `AvatarStack` | `users` | `users` are display names (initials avatars); `max` (default 4) before a `+N` count. Hover lists every name. |
 | `Section` | `title` | `description`, `collapsible`, `defaultOpen` (default true); has the `default` child slot. |
 | `Table` | `columns` | `data`, `loading`, `refreshing`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `id`, `selectable`, `bulkActions`, `filterable`, `clearState`, `onRetry`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
-| `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
+| `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`, `initialValues` (`{ <field>: value }`, usually bound to a row; written into the fields on mount, and a refresh re-seeds only fields the user has not edited), `resetKey` (the row id, e.g. `{ "$state": "/route/params/id" }`; when it changes every field re-seeds, so an edit dialog opened for another row shows that row and drops the previous row's edits); see below. |
+| `OnEnter` | none | `deps`. Renders nothing; runs `on.enter` on mount and when `deps` changes by value. See "`OnEnter`: load on open". |
 | `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below), `presentation: "sheet"` (default) or `"split"` (an inline right pane beside the page; see below); has the `default` child slot. |
 | `Dialog` | `param` | A centered modal with the Drawer route contract: open exactly while the page param named by `param` is set; Escape, the X or a click outside clears it. `title`, `description`, `size: "sm", "md" (default), or "lg"`, `actions` (footer buttons, Drawer rules). Use it for a short form opened from `headerActions`; after the write, an `app.navigate` without the param closes it. Has the `default` child slot. |
 | `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls; see below for field kinds. |
@@ -866,9 +867,9 @@ Valid `$state` roots are:
 
 - `/queries/<declaredQuery>/...`
 - `/forms/<formId>/...`, where a `Form` element has that literal `props.id`
-- `/ui/<id>/...`, where a SearchInput, Select, Chips, or Tabs element has that literal `props.id` (SearchInput, Select, and Chips use `/value`; Tabs uses `/tab`)
+- `/ui/<id>/...`, where a SearchInput, Select, Chips, or Tabs element has that literal `props.id` (SearchInput, Select, and Chips use `/value`; Tabs uses `/tab`; Select also writes its typed search to `/search`)
 - `/actions/<declaredAction>/...`
-- `/route/page` for the active page name
+- `/route` (the whole `{ page, params }`), `/route/params` (all params), or `/route/page` for the active page name
 - `/route/params/<declaredParam>` for a param declared on the current page
 - `/local/<name>/...`, where the current page declares `<name>` in its `state`
 
@@ -923,7 +924,11 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 - `onPaste`: instead of the browser paste; `{ "$chain": "text" }` is the clipboard text.
 - `onKeyDown:<Key>`: instead of that key's default. Keys: `Backspace`, `Delete`, `Enter`, `Escape`, `Tab`, `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Home`, `End`.
 
-`$state` reads inside these chains resolve at render time. To read the newest value, use `$chain`, or put the chain in a `watch`. A state write inside a `watch` chain re-runs the watch and cancels the steps after it, so make `ui.set` the last step there.
+`$state` reads inside these chains resolve at render time. To read the newest value, use `$chain`, or put the chain in a `watch`.
+
+**`watch` rules.** A `watch` skips the value it sees on first render: it only fires on a later change, so it never loads data on page open. Any state write while a `watch` chain runs cancels the steps after it, and `app.action` always writes (`/actions/<name>`), so a `watch` chain runs at most one `app.action` or `ui.set`, and it must be the last step. Put multi-step loads in `OnEnter` instead.
+
+**`OnEnter`: load on open.** An `OnEnter` element renders nothing. It runs its `on.enter` chain on mount, then again each time its resolved `deps` value changes. Its steps always run to the end (no `watch` cancel). Use `deps: { "$state": "/route" }` to re-run it when the page or a route param changes; omit `deps` to run it once per mount. Put it anywhere in the page tree.
 
 **Steps.**
 
@@ -940,10 +945,62 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 | `$split` | text, separator (default `""`), optional limit | array of strings |
 | `$join` | array, separator (default `""`) | text |
 | `$length` | 1 value | length of a text or array (`0` for null) |
+| `$eq`, `$neq` | exactly 2 values | `true`/`false`. Strict, except a number equals its numeric string (`"5"` and `5`) |
+| `$not` | 1 value | `true` when the value is falsy |
+| `$if` | condition, then, optional else | `then` when the condition is truthy, else `else` (or no value) |
 
-A non-numeric operand, or a division by zero, yields no value and the attribute is left out.
+`{ "$eq": [{ "$state": "/actions/load/status" }, "running"] }` is a busy flag for a `loading` prop. A non-numeric operand, or a division by zero, yields no value and the attribute is left out.
 
 **Svg.** `Svg` draws in `width` x `height` user units. Shape attributes (`x`, `y`, `width`, `height`, `x1`..`y2`, `cx`, `cy`, `r`, `d`) accept expressions, so a bar is `x = 100 + (start - min) * scale`. A nested `Svg` is a group: put `repeat` on it to draw its shapes once per item. Colors are palette tokens (`chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted`, `foreground`, `background`, `border`, `none`). The validator rejects unknown attributes, raw colors, a `Path.d` with anything but path commands and numbers, shapes outside an Svg, and non-shape Svg children.
+
+### Example: Load on enter
+
+The page loads its data on open and when the `traceId` param changes, runs two actions in a row, and shows a spinner while the first one runs. The edit form is prefilled from the loaded row.
+
+```json
+{
+  "models": {},
+  "defaultPage": "trace",
+  "actions": {
+    "traceDetail": { "kind": "task", "prompt": "Load the trace" },
+    "traceLogs": { "kind": "task", "prompt": "Load its logs" }
+  },
+  "pages": {
+    "trace": {
+      "title": "Trace",
+      "params": { "traceId": { "kind": "string" } },
+      "root": "main",
+      "elements": {
+        "main": { "type": "Stack", "props": { "direction": "column" }, "children": ["enter", "busy", "edit"] },
+        "enter": {
+          "type": "OnEnter",
+          "props": { "deps": { "$state": "/route" } },
+          "on": {
+            "enter": [
+              { "action": "app.action", "params": { "name": "traceDetail", "input": { "traceId": { "$state": "/route/params/traceId" } } } },
+              { "action": "app.action", "params": { "name": "traceLogs", "input": { "traceId": { "$state": "/route/params/traceId" } } } }
+            ]
+          }
+        },
+        "busy": {
+          "type": "Text",
+          "props": { "content": { "$if": [{ "$eq": [{ "$state": "/actions/traceDetail/status" }, "running"] }, "Loading…", "Loaded"] } }
+        },
+        "edit": {
+          "type": "Form",
+          "props": {
+            "id": "note",
+            "fields": [{ "name": "traceId", "label": "Trace id" }],
+            "initialValues": { "traceId": { "$state": "/route/params/traceId" } },
+            "resetKey": { "$state": "/route/params/traceId" },
+            "onSubmit": []
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 ### Example: 6-cell code input
 

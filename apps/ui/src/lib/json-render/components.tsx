@@ -1098,6 +1098,13 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   setRef.current = set;
   // Set while the slot holds the empty seed written before a bound `defaultValue` loaded.
   const awaitingDefaultRef = useRef(false);
+  // `/ui/<id>/search`: the typed text, debounced, so a `watch` can load options on type.
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(searchTimerRef.current), []);
+  const onSearchChange = (text: string) => {
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setRef.current(`/ui/${props.id}/search`, text), 250);
+  };
   useEffect(() => {
     const current = getRef.current(path);
     const seed = props.defaultValue;
@@ -1146,6 +1153,7 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
       searchPlaceholder: props.searchPlaceholder,
       searchable,
       contentAttrs: themeAttr,
+      onSearchChange,
       triggerClassName: cn(
         "w-full min-w-0",
         hasValue && clearable ? "[&>span:first-child]:mr-7" : undefined,
@@ -2852,6 +2860,42 @@ function FormComponent({ props }: { props: FormProps }) {
   // — `app.mutate` sets `/forms/<id>` to `{}` after a create — re-renders.
   const readField = (name: string): unknown => getByPath(state, `${basePath}/${name}`);
 
+  const initialValues = props.initialValues as Record<string, unknown> | undefined;
+  const initialSignature = initialValues ? JSON.stringify(initialValues) : "";
+  const resetKey = props.resetKey as string | number | undefined;
+  // The value each field was last seeded with, for one form path and reset
+  // key. A field whose current value differs from it holds an unsaved edit.
+  const seededRef = useRef<{ scope: string; values: Record<string, unknown> }>({
+    scope: "",
+    values: {},
+  });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed only when the prefill or its row changes by value, not on every poll re-render
+  useEffect(() => {
+    if (!initialValues) return;
+    // A new `resetKey` (the form now edits another row) forgets every seed, so
+    // each field re-seeds and drops the previous row's edits.
+    const scope = JSON.stringify([basePath, resetKey ?? null]);
+    if (seededRef.current.scope !== scope) seededRef.current = { scope, values: {} };
+    const seeded = seededRef.current.values;
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    for (const field of fields) {
+      if (!Object.hasOwn(initialValues, field.name)) continue;
+      const next = initialValues[field.name];
+      // A binding with no value yet (an `app.action` result clears while the
+      // action re-runs) is not a new prefill: skip it, or every refresh would
+      // blank the field and then re-seed it over the edit.
+      if (next === undefined) continue;
+      const path = `${basePath}/${field.name}`;
+      // Same row: a refresh re-seeds only untouched fields, so an edit survives
+      // even when the server value of that field changed.
+      const untouched = !Object.hasOwn(seeded, field.name) || same(get(path), seeded[field.name]);
+      if (untouched) {
+        set(path, next);
+        seeded[field.name] = next;
+      }
+    }
+  }, [initialSignature, basePath, resetKey]);
+
   // Mutate failures scoped to THIS form: the `app.mutate` handler writes them
   // to `/forms/<id>/$error` (keyed by the injected `formId`) instead of the
   // page-level banner. `$` keeps the slot out of the field-value namespace.
@@ -4391,6 +4435,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
     </span>
   ),
   Skeleton: ({ props }) => <SkeletonComponent props={props} />,
+  OnEnter: ({ props, emit }) => <OnEnterRunner deps={props.deps} emit={emit} />,
   Spinner: ({ props }) => (
     // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a busy indicator
     <span role="status" className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -4429,3 +4474,19 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
   PageFrame: ({ props }) => <PageFrameComponent props={props} />,
 };
+
+/**
+ * `OnEnter`: emits `enter` on mount and whenever `deps` changes by value.
+ * `emit` runs the chain without the cancel flag `watch` has, so a state write
+ * by one step never stops the next.
+ */
+function OnEnterRunner({ deps, emit }: { deps: unknown; emit: (event: string) => void }) {
+  const signature = JSON.stringify(deps ?? null);
+  const emitRef = useRef(emit);
+  emitRef.current = emit;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger; emit is read live through the ref
+  useEffect(() => {
+    emitRef.current("enter");
+  }, [signature]);
+  return null;
+}

@@ -26,11 +26,13 @@ export const knowledgeAppsPrimitives: Scenario = {
   async run(ctx) {
     const otp = await skillExample("6-cell code input");
     const gantt = await skillExample("Gantt timeline");
+    const enter = await skillExample("Load on enter");
     const created: string[] = [];
     try {
       for (const [label, definition] of [
         ["otp", otp],
         ["gantt", gantt],
+        ["enter", enter],
       ] as const) {
         const response = await ctx.api("POST", "/api/apps", {
           body: { name: `E2E primitives ${label} ${ctx.nonce}`, definition },
@@ -41,6 +43,7 @@ export const knowledgeAppsPrimitives: Scenario = {
 
       const otpCell = (def: Json) => def.pages.verify.elements.cell.props;
       const ganttEl = (def: Json) => def.pages.plan.elements;
+      const enterEl = (def: Json) => def.pages.trace.elements;
       const cases: [string, Json, (def: Json) => void, string, RegExp][] = [
         [
           "Svg attrs are allowlisted",
@@ -127,6 +130,20 @@ export const knowledgeAppsPrimitives: Scenario = {
           (d) => (otpCell(d).onInput[1].params.index = { $sub: [1] }),
           "pages.verify.elements.cell.props.onInput.1.params.index.$sub",
           /2 operand/,
+        ],
+        [
+          "comparison operand counts",
+          enter,
+          (d) => (enterEl(d).busy.props.content.$if[0] = { $eq: ["a"] }),
+          "pages.trace.elements.busy.props.content.$if.0.$eq",
+          /2 operand/,
+        ],
+        [
+          "OnEnter chains name declared actions",
+          enter,
+          (d) => (enterEl(d).enter.on.enter[1].params.name = "nope"),
+          "pages.trace.elements.enter.on.enter.1.params.name",
+          /./,
         ],
         [
           "key events are allowlisted",
