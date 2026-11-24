@@ -138,9 +138,14 @@ export const platformOtelDbStatements: Scenario = {
         await pollUntil(() => insertSpan() !== undefined, 15_000, 100),
         `no INSERT agent_tasks statement span on ${system}; paths: ${paths()}`,
       );
-      const spans = spansOf(bodies("/v1/traces"));
       const child = insertSpan();
-      const parent = spans.find((s) => s.spanId === child?.parentSpanId);
+      // The request span ends after its statement span, so it can arrive in a later
+      // export batch than the one that brought the child.
+      const parentSpan = () =>
+        spansOf(bodies("/v1/traces")).find((s) => s.spanId === child?.parentSpanId);
+      await pollUntil(() => parentSpan() !== undefined, 15_000, 100);
+      const parent = parentSpan();
+      const spans = spansOf(bodies("/v1/traces"));
       expect(
         child && parent && parent.name.startsWith("POST /api/tasks"),
         `the statement span's parent is ${parent?.name ?? "missing"}, not the POST /api/tasks request span`,
