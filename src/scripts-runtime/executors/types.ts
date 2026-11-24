@@ -1,6 +1,7 @@
 import type { EgressPolicy } from "../../utils/egress-guard";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "../api-types";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "../credential-broker";
+import type { ScriptDbDialect } from "../script-db";
 
 export type ScriptFsMode = "none" | "workspace-rw";
 export type ScriptExecutorName = "native" | "quickjs";
@@ -62,6 +63,8 @@ export type SwarmConfigPayload = {
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
   agentFs?: ScriptAgentFsDescriptor;
+  /** The swarm database, as `ctx.db` exposes it. Absent: `ctx.db.dialect` is "sqlite". */
+  db?: { dialect: ScriptDbDialect };
   caller?: ScriptCaller;
   durable?: DurableInvocation;
 };

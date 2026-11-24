@@ -115,6 +115,7 @@ try {
     apiConnections: payload.apiConnections,
     mcpConnections: payload.mcpConnections,
     agentFs: payload.agentFs,
+    dbDialect: payload.db?.dialect,
     caller:
       payload.durable?.caller ??
       payload.caller ??

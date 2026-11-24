@@ -8,6 +8,7 @@ import type {
 import { buildCtx, type RuntimeCtx } from "../ctx";
 import { Redacted, type Redacted as RedactedValue } from "../redacted";
 import { SCRIPT_SDK_RESPONSE_LIMIT_BYTES } from "../response-limit";
+import type { ScriptDbSql } from "../script-db";
 import { ctxSignatureHintFor } from "../script-error-hints";
 import { SDK_NAMESPACES, type SdkNamespaceRegistry } from "../sdk-allowlist";
 import { runtimeFetch } from "../stdlib/fetch";
@@ -272,6 +273,10 @@ async function dispatchCall(
       `ctx.swarm.${first}`,
     );
     return swarmHostCalls.run(true, () => method(...args));
+  }
+  if (kind === "db" && first === "query" && rest.length === 0) {
+    const [sql, params] = args as [ScriptDbSql, unknown[] | undefined];
+    return swarmHostCalls.run(true, () => hostCtx.db.query(sql, params));
   }
   if (kind && Object.hasOwn(namespaces, kind) && first && rest.length === 0) {
     const method = callable(own(own(hostCtx, kind), first), `ctx.${kind}.${first}`);
@@ -545,6 +550,7 @@ async function evaluateJob(
     apiConnections: job.configPayload.apiConnections,
     mcpConnections: job.configPayload.mcpConnections,
     agentFs: job.configPayload.agentFs,
+    dbDialect: job.configPayload.db?.dialect,
     caller:
       job.configPayload.durable?.caller ??
       job.configPayload.caller ??
@@ -561,6 +567,7 @@ async function evaluateJob(
     api: Object.fromEntries(Object.entries(hostCtx.api).map(([slug, c]) => [slug, Object.keys(c)])),
     mcp: Object.fromEntries(Object.entries(hostCtx.mcp).map(([slug, c]) => [slug, Object.keys(c)])),
     fs: Object.keys(hostCtx.fs),
+    dbDialect: hostCtx.db.dialect,
     namespaces,
   };
   // Accept both shapes, like eval-harness: callers may pass already-serialized JSON.

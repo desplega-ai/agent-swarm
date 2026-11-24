@@ -2,7 +2,7 @@ import { DURABLE_OBJECT_RESERVED_METHODS } from "../durable-object-base";
 
 /**
  * JavaScript that the quickjs runner evaluates inside the sandbox before the
- * user bundle. It rebuilds the script `ctx` (swarm, api, mcp, stdlib, logger)
+ * user bundle. It rebuilds the script `ctx` (swarm, api, mcp, db, stdlib, logger)
  * on top of the host functions:
  *
  *  - `__host_call(path, argsJson)`: async host call, resolves to a JSON envelope.
@@ -16,7 +16,7 @@ import { DURABLE_OBJECT_RESERVED_METHODS } from "../durable-object-base";
  * `SANDBOX_WEB_SHIMS` (quickjs-web-shims.ts) runs first and adds URL,
  * URLSearchParams, TextEncoder and TextDecoder.
  * `__swarm_shape` (injected before this file) lists the configured api/mcp
- * connections, the `ctx.fs` methods and the SDK namespaces, so `ctx` matches the native executor exactly.
+ * connections, the `ctx.fs` methods, the `ctx.db` dialect and the SDK namespaces, so `ctx` matches the native executor exactly.
  */
 export const SANDBOX_PRELUDE = String.raw`(() => {
 "use strict";
@@ -454,8 +454,10 @@ const namespaces = Object.fromEntries(
     Object.freeze(Object.fromEntries(names.map((name) => [name, method(ns + "." + name)]))),
   ]),
 );
+// ctx.db.query runs on the host (script-db.ts) through ctx.swarm.db_query.
+const db = Object.freeze({ dialect: shape.dbDialect, query: (sql, params) => hostCall("db.query", params === undefined ? [sql] : [sql, params]) });
 const caller = globalThis.__swarm_caller;
-const ctx = Object.freeze({ ...namespaces, swarm, api: registry("api"), mcp: registry("mcp"), fs, sh, stdlib, logger: console, caller: caller === null ? null : Object.freeze(caller) });
+const ctx = Object.freeze({ ...namespaces, swarm, api: registry("api"), mcp: registry("mcp"), fs, sh, db, stdlib, logger: console, caller: caller === null ? null : Object.freeze(caller) });
 
 const define = (name, value) =>
   Object.defineProperty(globalThis, name, { value, writable: true, configurable: true, enumerable: false });

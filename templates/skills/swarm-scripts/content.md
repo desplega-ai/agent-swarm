@@ -93,6 +93,7 @@ The route runs the same typecheck and scope rules as the tool.
 - `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for swarm config values, resolved for the agent running the script (agent scope over global, the same rows `get-config` returns for that agent). A key that is not set returns `undefined`, so `config.get("KEY") ?? fallback` works. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
 - `ctx.fs` and `ctx.sh`: files and bash. See "Files and shell" below.
+- `ctx.db`: the swarm database. `ctx.db.dialect` is `"sqlite"` or `"postgres"`, set when the run starts. `ctx.db.query(sql, params?)` runs read-only SQL and returns the rows as objects. See "SQL in scripts" below. Script workflows do not have `ctx.db`.
 - `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `retry`, `Redacted`.
 - Retries: `ctx.swarm` calls retry a 429 on any call, and a 502/503/504 or network error on reads and on writes that send an idempotency key (such as `workflow_trigger` with `idempotencyKey`), within about 5 s. `ctx.stdlib.fetch` retries a 429 on any method and a 502/503/504 or network error on GET, HEAD, OPTIONS, PUT and DELETE. A POST or PATCH retries those only with an `Idempotency-Key` header: pass `retry: { idempotencyKey: true }` to send one UUID on every attempt. The key prevents a duplicate only when the server dedupes by it. `retry: false` makes one attempt. Wrap anything else, sync or async, in `ctx.stdlib.retry(fn, { retries, minDelayMs, maxDelayMs, budgetMs, retryOn })`; it rethrows the last error or returns the last result when attempts run out.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
@@ -201,15 +202,31 @@ Registration is lead-only: `script-connections` and `credential-bindings`. A wor
 
 Full reference: the "Script connections" guide on the docs site.
 
-## `db_query` for aggregation
+## SQL in scripts
 
-Direct SQL beats fetching lists into the script. The parameter is `sql`:
+Direct SQL beats fetching lists into the script. Use `ctx.db.query(sql, params?)`. It returns the rows as objects keyed by column name, and it throws when the query fails (bad SQL, timeout, 429). It goes through `ctx.swarm.db_query`, so it has the same permissions, row cap and errors.
 
 ```typescript
-const res = await ctx.swarm.db_query({ sql: "SELECT status, count(*) AS cnt FROM agent_tasks GROUP BY status" });
+const counts = await ctx.db.query<{ status: string; cnt: number }>(
+  "SELECT status, count(*) AS cnt FROM agent_tasks GROUP BY status",
+);
 ```
 
-`db_query` returns positional rows: `{ rows: unknown[][], columns: string[] }`. Zip them:
+The swarm database is SQLite or PostgreSQL. `ctx.db.dialect` tells which one, with no probe query. When a statement has no portable form, give one text for each dialect. `ctx.db.query` runs the text of the active dialect:
+
+```typescript
+const durations = await ctx.db.query(
+  {
+    sqlite: `SELECT id, (julianday("finishedAt") - julianday("startedAt")) * 86400 AS seconds FROM script_runs WHERE "scriptName" = ? LIMIT 100`,
+    postgres: `SELECT id, extract(epoch FROM "finishedAt" - "startedAt") AS seconds FROM script_runs WHERE "scriptName" = $1 LIMIT 100`,
+  },
+  [args.scriptName],
+);
+```
+
+Give both texts. An object without both strings throws a `TypeError`. The db-query-guidance skill has the dialect notes.
+
+`ctx.swarm.db_query({ sql, params })` is the raw call. It does not throw on a failed query: it returns `{ success, status, data }`. On success, `data` holds positional rows, `{ rows: unknown[][], columns: string[], dialect }`. Zip them:
 
 ```typescript
 function rowsToObjects(res: any): any[] {
@@ -223,7 +240,7 @@ function rowsToObjects(res: any): any[] {
 
 ### Concurrency limit
 
-`ctx.swarm.db_query` throttles at about three concurrent calls. A wider `Promise.all` fan-out can return 429 responses with no `rows` key, so `res?.data?.rows ?? []` misreads throttling as a clean zero. Check the response status and `data.error` before reading `rows`. Serialize queries or cap concurrency at three.
+`ctx.swarm.db_query` throttles at about three concurrent calls. A wider `Promise.all` fan-out can return 429 responses with no `rows` key, so `res?.data?.rows ?? []` misreads throttling as a clean zero. `ctx.db.query` throws on a 429. With the raw call, check the response status and `data.error` before reading `rows`. Serialize queries or cap concurrency at three.
 
 ### Response traps
 
