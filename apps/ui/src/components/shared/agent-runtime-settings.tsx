@@ -263,6 +263,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [agent.credStatus?.bedrock],
   );
   const liveOpencodeGoModels = agent.credStatus?.opencodeGo?.models ?? null;
+  const piModelIds = agent.harnessProvider === "pi" ? (agent.credStatus?.piModelIds ?? null) : null;
   const catalogQuery = useModelsCatalog();
   const snapshotLoaded = useModelsSnapshot();
   const liveCatalog = catalogQuery.data?.providers ?? null;
@@ -275,8 +276,17 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         liveBedrockStatus,
         liveCatalog,
         liveOpencodeGoModels,
+        piModelIds,
       ),
-    [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog, liveOpencodeGoModels],
+    [
+      harness,
+      configs,
+      envPresenceQuery.data,
+      liveBedrockStatus,
+      liveCatalog,
+      liveOpencodeGoModels,
+      piModelIds,
+    ],
   );
   // A model profile picks the model and effort: the controls show its values,
   // and the form's own model and effort stay underneath for "None".
@@ -349,6 +359,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveBedrockStatus,
       liveCatalog,
       liveOpencodeGoModels,
+      piModelIds,
     );
     setHarness(initialHarness);
     setDevinSelected(agent.harnessProvider === "devin");
@@ -372,6 +383,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     liveBedrockStatus,
     liveCatalog,
     liveOpencodeGoModels,
+    piModelIds,
   ]);
 
   // A default picked before the lazily loaded snapshot landed came from the
@@ -419,6 +431,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveBedrockStatus,
       liveCatalog,
       liveOpencodeGoModels,
+      piModelIds,
     );
     setHarness(nextHarness);
     // A model profile runs on one harness, and the picker lists only the
@@ -447,6 +460,8 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     );
   }
 
+  const modelRequired = modelSelectionEnabled && !modelProfileActive && harness !== "pi";
+
   function save() {
     if (devinSelected) {
       setHarnessProvider.mutate(
@@ -458,7 +473,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       );
       return;
     }
-    if (modelSelectionEnabled && !modelProfileActive && !model.trim()) return;
+    if (modelRequired && !model.trim()) return;
     if (modelProfileFails) return;
     if (acpSelected && acpTarget === "custom" && !acpCommand.trim()) return;
     if (claudeBridgeConflict || claudeRuntimeUnavailable) return;
@@ -477,7 +492,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
               // model only a worker probe lists (a live Bedrock id) is in the picker but not in
               // the catalog.
               allowCustomModel:
-                modelSelectionEnabled && !findKnownModel(model.trim(), liveCatalog ?? undefined),
+                modelSelectionEnabled &&
+                Boolean(model.trim()) &&
+                !findKnownModel(model.trim(), liveCatalog ?? undefined),
               reasoningEffort: modelSelectionEnabled ? shownEffort || null : null,
             }),
         ...(acpSelected
@@ -679,8 +696,15 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
                   groups={groups}
                   selected={modelOption}
                   disabled={modelProfileActive}
+                  placeholder={harness === "pi" ? "Default model" : undefined}
+                  clearLabel={harness === "pi" ? "Default model" : undefined}
                 />
               )}
+              {harness === "pi" && !piModelIds && !customMode && !modelProfileActive ? (
+                <p className="text-xs text-muted-foreground">
+                  Pi model options appear after the worker reports its catalog.
+                </p>
+              ) : null}
               {modelProfileActive ? (
                 <p className="text-xs text-muted-foreground">
                   Set by the model profile. Choose None to pick a model.
@@ -833,7 +857,8 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
             claudeRuntimeUnavailable ||
             claudeBridgeConflict ||
             (acpSelected && !acpGate.supported) ||
-            (modelSelectionEnabled && !modelProfileActive && (!model.trim() || disabledChoice)) ||
+            (modelRequired && !model.trim()) ||
+            disabledChoice ||
             modelProfileFails ||
             (acpSelected && acpTarget === "custom" && !acpCommand.trim())
           }

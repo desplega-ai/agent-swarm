@@ -620,6 +620,8 @@ export function modelGroupsForHarness(
   liveBedrockStatus?: LiveBedrockStatus | null,
   liveCatalog?: LiveModelsCatalog | null,
   liveOpencodeGoModels?: readonly string[] | null,
+  // Undefined for catalog-only callers, null while the selected Pi worker has no report.
+  piModelIds?: readonly string[] | null,
 ): ModelGroup[] {
   if (harness === "acp") return [];
 
@@ -733,8 +735,17 @@ export function modelGroupsForHarness(
       disabledReason: bedrockEnabled ? undefined : bedrockDisabledReason,
     };
 
+    const reported = piModelIds === undefined ? null : new Set(piModelIds ?? []);
+    const piGroups = reported
+      ? snapshotGroups
+          .map((group) => ({
+            ...group,
+            models: group.models.filter((model) => reported.has(model.id)),
+          }))
+          .filter((group) => group.models.length > 0)
+      : snapshotGroups;
     return [
-      ...snapshotGroups,
+      ...piGroups,
       ...chatgptSubscriptionGroup("pi", configs, liveCatalog),
       opencodeGoGroup("pi", configs, envPresence, liveCatalog, liveOpencodeGoModels),
       bedrockGroup,
@@ -1287,8 +1298,8 @@ export function pickDefaultModelForHarness(
     (harness === "claude" ? (anthropicShortnameToId(liveCatalog).opus ?? "") : "");
   const enabled = groups.filter((g) => g.enabled);
   if (enabled.some((g) => g.models.some((m) => m.id === preferred))) return preferred;
-  const first = enabled[0]?.models;
-  return (first?.find((m) => !m.status) ?? first?.[0])?.id ?? preferred;
+  const first = enabled.find((group) => group.models.length > 0)?.models;
+  return (first?.find((m) => !m.status) ?? first?.[0])?.id ?? (harness === "pi" ? "" : preferred);
 }
 
 export function isLocalHarness(

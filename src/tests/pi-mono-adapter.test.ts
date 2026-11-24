@@ -85,6 +85,53 @@ describe("PiMonoAdapter.createSession — reasoning_effort", () => {
     }) as typeof piCodingAgent.createAgentSession);
   }
 
+  test("an unresolved explicit model fails before starting a Pi session", async () => {
+    spyOnCreateAgentSession();
+    const refresh = spyOn(piCodingAgent.ModelRuntime.prototype, "refresh").mockResolvedValue({
+      aborted: false,
+      errors: new Map(),
+    });
+    try {
+      await expect(
+        new PiMonoAdapter().createSession(
+          makeReasoningConfig({ model: "openrouter/test/missing" }),
+        ),
+      ).rejects.toThrow('Pi model "openrouter/test/missing" could not be resolved');
+      expect(createAgentSessionSpy).not.toHaveBeenCalled();
+    } finally {
+      refresh.mockRestore();
+    }
+  });
+
+  test("uses an explicit model discovered after a bounded provider refresh", async () => {
+    spyOnCreateAgentSession();
+    const model = resolveModel("openrouter/google/gemini-3-flash-preview", {})!;
+    const modelId = "test/new-model";
+    const getModel = spyOn(piCodingAgent.ModelRuntime.prototype, "getModel");
+    const refresh = spyOn(piCodingAgent.ModelRuntime.prototype, "refresh").mockImplementation(
+      async (options) => {
+        if (options?.allowNetwork) {
+          getModel.mockReturnValue({ ...model, id: modelId });
+        }
+        return { aborted: false, errors: new Map() };
+      },
+    );
+    try {
+      await new PiMonoAdapter().createSession(
+        makeReasoningConfig({ model: `openrouter/${modelId}` }),
+      );
+      expect(refresh).toHaveBeenCalledWith({
+        allowNetwork: true,
+        providers: ["openrouter"],
+        signal: expect.any(AbortSignal),
+      });
+      expect(capturedOptions?.model).toMatchObject({ provider: "openrouter", id: modelId });
+    } finally {
+      getModel.mockRestore();
+      refresh.mockRestore();
+    }
+  });
+
   test("reasoningEffort: 'medium' on an openrouter model sets thinkingLevel", async () => {
     spyOnCreateAgentSession();
     const adapter = new PiMonoAdapter();
@@ -893,17 +940,9 @@ describe("resolveModel — models.json custom providers", () => {
     expect(model?.provider).toBe("anthropic");
   });
 
-  test("an unknown provider returns undefined and logs a scrubbed warning", () => {
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const runtime = { getModel: () => undefined };
-      expect(resolveModel("nope/model-x", {}, runtime)).toBeUndefined();
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(String(warn.mock.calls[0]?.[0])).toContain('"nope/model-x"');
-      expect(String(warn.mock.calls[0]?.[0])).toContain("default model");
-    } finally {
-      warn.mockRestore();
-    }
+  test("an unknown provider returns undefined", () => {
+    const runtime = { getModel: () => undefined };
+    expect(resolveModel("nope/model-x", {}, runtime)).toBeUndefined();
   });
 
   test("without a runtime, nan/<id> does not resolve (pi-ai has no builtin nan)", () => {

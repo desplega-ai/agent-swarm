@@ -158,6 +158,23 @@ async function credentialStatus(ctx: ScenarioContext): Promise<void> {
     [204],
     "close the credentials agent",
   );
+
+  const piAgentId = await registerWorker(ctx, "pi-catalog", { harness_provider: "pi" });
+  const piModelIds = ["openrouter/google/gemini-3-flash-preview"];
+  expectStatus(
+    await ctx.api("PUT", `/api/agents/${piAgentId}/credential-status`, {
+      agentId: piAgentId,
+      body: { cred_status: { ready: true, reportedAt: Date.now(), piModelIds } },
+    }),
+    [200],
+    "report the Pi worker's model catalog",
+  );
+  const piAgent = await readAgent(ctx, piAgentId);
+  expect(
+    JSON.stringify(asRecord(piAgent.credStatus).piModelIds) === JSON.stringify(piModelIds),
+    "Pi worker model IDs did not reach the dashboard agent payload",
+  );
+  await ctx.api("POST", "/close", { agentId: piAgentId, body: {} });
 }
 
 /** Agent-bound worker tokens: mint, act as the agent, rotate, revoke. */

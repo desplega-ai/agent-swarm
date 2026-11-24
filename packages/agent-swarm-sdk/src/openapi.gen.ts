@@ -529,6 +529,7 @@ export interface components {
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
             opencodeGo?: components["schemas"]["AgentOpencodeGoStatus"];
+            piModelIds?: string[];
             acp?: components["schemas"]["AgentAcpStatus"];
         };
         AgentCredStatusKeyResult: {

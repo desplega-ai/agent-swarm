@@ -38,6 +38,22 @@ const liveCatalog: LiveModelsCatalog = {
 };
 
 describe("agents list model display", () => {
+  test("shows the actual Pi model and retains the configured model", () => {
+    expect(
+      getAgentModelDisplay(
+        "openrouter/acme/requested",
+        "openrouter/acme/actual",
+        undefined,
+        "custom",
+        true,
+      ),
+    ).toMatchObject({
+      primary: "openrouter/acme/actual",
+      configured: "openrouter/acme/requested",
+      showingLastUsed: true,
+    });
+  });
+
   test("shows configured and last-used models when they diverge", () => {
     const display = getAgentModelDisplay("claude-opus-4-7", "claude-sonnet-4-6");
 

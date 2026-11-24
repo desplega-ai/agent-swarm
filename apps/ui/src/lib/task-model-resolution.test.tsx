@@ -8,6 +8,18 @@ import {
 } from "./task-model-resolution";
 
 describe("taskDisplayModel", () => {
+  test("prefers the actual harness model over the requested and resolved model", () => {
+    expect(
+      taskDisplayModel(
+        { model: "openrouter/acme/requested", resolvedModel: "openrouter/acme/requested" },
+        [
+          { model: "typesafe/system-one", kind: "system-one" },
+          { model: "openrouter/acme/actual", kind: "harness" },
+        ],
+      ),
+    ).toBe("openrouter/acme/actual");
+  });
+
   test("prefers the claim-time resolution over the requested model", () => {
     expect(taskDisplayModel({ model: "opus", resolvedModel: "claude-opus-5-5" })).toBe(
       "claude-opus-5-5",

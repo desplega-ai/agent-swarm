@@ -335,7 +335,9 @@ The prefix before the first `/` selects the provider and the matching credential
 | `helmcode/<id>` | `helmcode/glm5.3-flash` | `HELMCODE_API_KEY` |
 | `opencode-go/<id>` | `opencode-go/deepseek-v4.1-flash` | `OPENCODE_API_KEY` |
 
-models.dev can list `opencode-go` ids that pi-ai does not ship yet, and pi runs its default model for those. The worker reports the ids its pi-ai resolves (`credStatus.opencodeGo`), and the dashboard picker offers only those.
+Pi checks its bundled and cached catalog and `models.json` for the configured model. On a miss, it gives the provider catalog up to three seconds to refresh. If the model still cannot be resolved, the task fails before the session starts.
+
+The agent runtime picker filters catalog options using the models reported by its Pi worker, including the worker's OpenCode Go list. Custom entries can still be entered manually. The task detail shows the actual model from the harness cost record when available.
 
 ### Reasoning / Effort
 

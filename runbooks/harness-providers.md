@@ -790,6 +790,10 @@ The adapter's actually-applied level flows back through `ProviderResult.appliedR
 
 Refs: [reasoning-effort runtime control research](../thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md).
 
+## Pi model resolution
+
+The Pi adapter resolves an explicit model against the composed runtime and bundled catalog. On a miss, it retries after a provider-catalog refresh bounded to three seconds. An unresolved choice fails before starting the session. The worker reports its picker catalog with credential status so the agent runtime editor can filter the shared model catalog.
+
 ## pi-mono + Amazon Bedrock auth
 
 ### Mode selection

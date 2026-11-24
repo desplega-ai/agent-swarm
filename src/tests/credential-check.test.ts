@@ -1356,13 +1356,14 @@ describe("isCredCheckDisabled", () => {
 describe("buildCredStatusReport", () => {
   const HOME = "/home/worker";
 
-  test("pi reports the opencode-go ids its pi-ai resolves", async () => {
+  test("pi reports the model ids its runtime resolves", async () => {
     const snap = await buildCredStatusReport(
       "pi",
       { HOME },
       { homeDir: HOME, fs: fsWith(new Set([`${HOME}/.pi/agent/auth.json`])) },
       "boot",
     );
+    expect(snap.piModelIds).toContain("anthropic/claude-sonnet-5");
     expect(snap.opencodeGo?.models).toContain("deepseek-v4.1-flash");
     expect(snap.opencodeGo?.models).not.toContain("deepseek-v4-flash");
     const other = await buildCredStatusReport(
@@ -1372,6 +1373,7 @@ describe("buildCredStatusReport", () => {
       "boot",
     );
     expect(other.opencodeGo).toBeNull();
+    expect(other.piModelIds).toBeUndefined();
   });
 
   for (const [provider, authPath] of [
@@ -1380,7 +1382,7 @@ describe("buildCredStatusReport", () => {
   ] as const) {
     test(`${provider}: auth.json gives a successful presence-only live test`, async () => {
       const realFetch = globalThis.fetch;
-      const fetchMock = mock(async () => {
+      const fetchMock = mock(async (_url: string | URL | Request) => {
         throw new Error("file credentials must not be sent to a provider endpoint");
       });
       globalThis.fetch = fetchMock as typeof fetch;
@@ -1396,7 +1398,10 @@ describe("buildCredStatusReport", () => {
           expect(snap.satisfiedBy).toBe("file");
           expect(snap.liveTest).toMatchObject({ ok: true, error: null, latency_ms: 0 });
         }
-        expect(fetchMock).not.toHaveBeenCalled();
+        const probeCalls = fetchMock.mock.calls.filter(([url]) =>
+          /\/(key|models)$/.test(String(url)),
+        );
+        expect(probeCalls).toHaveLength(0);
       } finally {
         globalThis.fetch = realFetch;
       }
@@ -1431,11 +1436,10 @@ describe("buildCredStatusReport", () => {
           expect(failure.ready).toBe(true);
           expect(failure.liveTest?.ok).toBe(false);
           expect(failure.liveTest?.error).toContain("HTTP 401");
-          expect(fetchMock).toHaveBeenCalledTimes(2);
-          // OpenRouter's /models is public, so its key is checked on /key.
-          expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
-            key === "OPENROUTER_API_KEY" ? /\/key$/ : /\/models$/,
-          );
+          // Catalog refresh calls are independent of the credential probe.
+          const endpoint = key === "OPENROUTER_API_KEY" ? /\/key$/ : /\/models$/;
+          const probeCalls = fetchMock.mock.calls.filter(([url]) => endpoint.test(String(url)));
+          expect(probeCalls).toHaveLength(2);
         } finally {
           globalThis.fetch = realFetch;
         }
