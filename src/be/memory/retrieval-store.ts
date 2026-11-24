@@ -13,7 +13,7 @@
  * Server-side only. Route handlers should call these functions instead of
  * preparing SQL directly so the query is reusable and typed in one place.
  */
-import { getDbClient } from "@/be/db";
+import { getStorage } from "@/be/storage";
 
 /** Max chars of `agent_memory.content` returned in retrieval listings. */
 const RETRIEVAL_CONTENT_SNIPPET_CHARS = 500;
@@ -65,44 +65,12 @@ export async function getRetrievalsForAgent(
   agentId: string,
   filter: RetrievalListFilter,
 ): Promise<RetrievalListRow[]> {
-  const conditions: string[] = ["mr.agentId = ?"];
-  const params: (string | number)[] = [agentId];
-  if (filter.taskId) {
-    conditions.push("mr.taskId = ?");
-    params.push(filter.taskId);
-  }
-  if (filter.sessionId) {
-    conditions.push("mr.sessionId = ?");
-    params.push(filter.sessionId);
-  }
-
-  // LEFT JOIN agent_tasks so we can surface `scheduleId` to worker raters —
-  // a non-null `scheduleId` is the precise cron-clone discriminator that
-  // `dedupeRetrievalsForRater` keys on. The LEFT keeps memories with no
-  // source task (manual / file_index) in the result set.
-  const sql = `
-    SELECT am.id        AS id,
-           am.name      AS name,
-           substr(am.content, 1, ?) AS content,
-           am.scope     AS scope,
-           am.source    AS source,
-           at.scheduleId AS scheduleId,
-           mr.similarity AS similarity,
-           mr.retrievalSource AS retrievalSource,
-           mr.retrievedAt AS retrievedAt
-      FROM memory_retrieval mr
-      INNER JOIN agent_memory am ON am.id = mr.memoryId
-      LEFT JOIN  agent_tasks at  ON at.id = am.sourceTaskId
-     WHERE ${conditions.join(" AND ")}
-     ORDER BY mr.retrievedAt DESC
-     LIMIT ?
-  `;
-
-  return getDbClient().query<RetrievalListRow>(sql, [
+  return getStorage().repos.memory.listRetrievalsForAgent(
+    agentId,
+    filter,
     RETRIEVAL_CONTENT_SNIPPET_CHARS,
-    ...params,
     RETRIEVAL_LIST_LIMIT,
-  ]);
+  );
 }
 
 /**
@@ -111,9 +79,5 @@ export async function getRetrievalsForAgent(
  * `explicit-self` ratings for memories the agent never saw.
  */
 export async function hasRetrievalForTask(taskId: string, memoryId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ id: string }>(
-    "SELECT id FROM memory_retrieval WHERE taskId = ? AND memoryId = ? LIMIT 1",
-    [taskId, memoryId],
-  );
-  return row != null;
+  return getStorage().repos.memory.hasRetrievalForTask(taskId, memoryId);
 }

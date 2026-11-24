@@ -12,7 +12,6 @@ import {
   createWorkflowRunStep,
   getCompletedStepNodeIds,
   getCurrentStepForNode,
-  getDbClient,
   getLatestStepForNode,
   getStepByIdempotencyKey,
   getStepCountForNode,
@@ -27,6 +26,7 @@ import {
   getRunLineageBlock,
   isParentStepAttemptCurrent,
 } from "../be/db/workflow-runs";
+import { getStorage } from "../be/storage";
 import { WorkflowReplayStateError } from "../be/workflow-replay";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
@@ -158,7 +158,7 @@ export async function startWorkflowExecution(
     await getAutomationSetupStates(),
   );
   if (preflight.state === "needs_setup" && !options.parentStepId) {
-    const { runId, recorded } = await getDbClient().transaction(async () => {
+    const { runId, recorded } = await getStorage().transaction(async () => {
       const failure = await recordWorkflowPreflightFailure({
         workflowId: workflow.id,
         triggerType: options.triggerType ?? "manual",
@@ -347,7 +347,7 @@ async function createRunWithInitialState(
   preflightAlert?: boolean;
   status?: InitialRunState["status"];
 }> {
-  return getDbClient().transaction(async () => {
+  return getStorage().transaction(async () => {
     const { parentStepId } = options;
     const attempt = options.parentStepAttempt ?? 0;
     if (parentStepId) {
@@ -416,6 +416,17 @@ const activeWalks = new Map<string, number>();
 // yet. Process-local like activeWalks: a crash clears it, so a `running` row
 // left behind is not mistaken for a live execution.
 const executingSteps = new Set<string>();
+
+/**
+ * Mark a step as executed by this process, inside the claim transaction. An
+ * attempt that rolls back gives the mark back, also when the client runs the
+ * callback again (decision D6): a kept mark would make the next attempt read
+ * its own claim as another walker's.
+ */
+function claimExecutingStep(stepId: string): void {
+  executingSteps.add(stepId);
+  getStorage().onAttemptRollback(() => executingSteps.delete(stepId));
+}
 
 /**
  * Fail closed when a run's sealed replay state cannot be opened. Resuming from
@@ -701,7 +712,7 @@ async function walkGraphOwned(
   // overwritten from a stale snapshot, resurrecting the run as `completed` or
   // parking it in `waiting` with no waiting step left to ever finalize it.
   routed();
-  await getDbClient().transaction(async () => {
+  await getStorage().transaction(async () => {
     const run = await getWorkflowRun(runId);
     if (!run || run.status !== "running") return;
     // Inside a cancelled tree the run's outcome is the cancel, not its steps.
@@ -892,7 +903,6 @@ async function executeStep(
   // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
-  let claimedStepId: string | undefined;
   const claimStep = async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) {
@@ -921,8 +931,7 @@ async function executeStep(
       // executor reconnects to the child run or task it already started (a
       // crash between the insert and the step parking) instead of a second one.
       if (current && (node.type === "sub-workflow" || node.type === "agent-task")) {
-        claimedStepId = current.id;
-        executingSteps.add(current.id);
+        claimExecutingStep(current.id);
         return {
           existingStep: current,
           stepId: current.id,
@@ -976,17 +985,12 @@ async function executeStep(
     }
     // Registered before the transaction commits, so no other walker can see
     // this `running` row without also seeing it owned.
-    claimedStepId = stepId;
-    executingSteps.add(stepId);
+    claimExecutingStep(stepId);
     const fence = { retryCount: reusableForeachStep?.retryCount ?? 0 };
     return { existingStep, stepId, fence, deduped: false };
   };
-  const dedup = await getDbClient()
-    .transaction(claimStep)
-    .catch((err) => {
-      if (claimedStepId) executingSteps.delete(claimedStepId);
-      throw err;
-    });
+  // A claim whose transaction fails gives its mark back (claimExecutingStep).
+  const dedup = await getStorage().transaction(claimStep);
 
   if ("halted" in dedup) return { outcome: "completed", successors: [] };
   if ("current" in dedup && dedup.current) {

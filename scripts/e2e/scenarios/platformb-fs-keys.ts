@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { Cleanup } from "./platformb-helpers";
@@ -146,7 +147,9 @@ export const platformbFsKeys: Scenario = {
           identity.driveId === driveId,
         "The filesystem identity differs from the user",
       );
-      const row = ctx.db.get<{ status: string }>("SELECT status FROM users WHERE id = ?", [userId]);
+      const row = ctx.db.get<{ status: string }>(
+        sql`SELECT status FROM users WHERE id = ${userId}`,
+      );
       expect(row?.status === "active", "The filesystem user is not active");
 
       const key = await ctx.api("POST", "/api/fs/keys", {

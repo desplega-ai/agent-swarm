@@ -1,7 +1,7 @@
 import { FilesError } from "@/fs/provider";
 import { buildAgentFsLiveUrl } from "@/utils/constants";
 import { agentFsClientFor } from "../../agent-fs-identity";
-import { getDbClient } from "../../db";
+import { getStorage } from "../../storage";
 import {
   clientFor,
   createObject,
@@ -128,10 +128,7 @@ async function save(
   // shortcut: agent-fs always returns the new version; if it ever stops, guess version + 1 until the next read corrects it.
   const next = saved.version ? Number(saved.version) : version + 1;
   // The row is a cache of the file (see objects.ts): keep its version close to the file's.
-  await getDbClient().run(
-    "UPDATE primitive_objects SET fileVersion = ?, updatedAt = ? WHERE id = ?",
-    [next, new Date().toISOString(), object.id],
-  );
+  await getStorage().repos.pages.setObjectFileVersion(object.id, next, new Date().toISOString());
   return next;
 }
 

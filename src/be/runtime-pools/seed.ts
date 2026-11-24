@@ -1,6 +1,6 @@
 import { createRuntimeProvider } from "../../runtime-providers";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
-import { getDbClient } from "../db";
+import { getStorage } from "../storage";
 import {
   checkE2bControllerConfig,
   createRuntimeController,
@@ -35,7 +35,8 @@ export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Pr
       dockerOnline = false;
     }
   }
-  await getDbClient().transaction(async (tx) => {
+  const repo = getStorage().repos.runtimePools;
+  await getStorage().transaction(async () => {
     const controllers = [
       { id: "builtin-static", kind: "static" as const, status: "online" },
       {
@@ -52,8 +53,7 @@ export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Pr
         if (controller.kind === "docker" && !dockerAvailable) continue;
         // Opt-in: only a deployment that sets BOXD_API_KEY gets a boxd controller.
         if (controller.kind === "boxd" && !env.BOXD_API_KEY) continue;
-        if (await tx.get("SELECT id FROM runtime_controllers WHERE name = ?", [controller.id]))
-          continue;
+        if (await repo.findControllerIdByName(controller.id)) continue;
         await createRuntimeController(
           {
             name: controller.id,
@@ -103,30 +103,16 @@ export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Pr
           ? "online"
           : "offline";
       }
-      await tx.run("UPDATE runtime_controllers SET status = ?, updated_at = ? WHERE id = ?", [
-        controller.status,
-        new Date().toISOString(),
-        controller.id,
-      ]);
+      await repo.setControllerStatus(controller.id, controller.status, new Date().toISOString());
     }
-    if (
-      !(await tx.get(
-        "SELECT key FROM seed_state WHERE kind = 'maintenance' AND key = 'runtime-pools-default-static'",
-      ))
-    ) {
-      if (
-        !(await tx.get(
-          "SELECT id FROM runtime_pools WHERE id = 'default-static' OR name = 'default-static'",
-        ))
-      )
+    if (!(await repo.hasSeedMarker("maintenance", "runtime-pools-default-static"))) {
+      if (!(await repo.findPoolIdByNameOrId("default-static", "default-static")))
         await createRuntimePool(
           { name: "default-static", kind: "static", placements: ["builtin-static"] },
           null,
           "default-static",
         );
-      await tx.run(
-        "INSERT INTO seed_state (kind, key, seededHash) VALUES ('maintenance', 'runtime-pools-default-static', '1')",
-      );
+      await repo.insertSeedMarker("maintenance", "runtime-pools-default-static", "1");
     }
   });
 }

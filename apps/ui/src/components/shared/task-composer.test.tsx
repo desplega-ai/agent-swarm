@@ -472,6 +472,7 @@ describe("TaskComposer on Sessions", () => {
       await type(mounted.container, "alice only");
       await send(mounted.container);
       await waitFor(() => heldCreates.length === 1);
+      await waitFor(() => bubbles(mounted.container).length > 0);
       expect(bubbles(mounted.container)).toEqual(["alice only"]);
       viewerId = "bob";
       await act(async () => rerender());

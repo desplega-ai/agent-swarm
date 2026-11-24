@@ -19,10 +19,10 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // Mirror API boot: new releases are snapshot-seeded, not new migrations.
-  seedPricingFromModelsDev({ quiet: true });
+  await seedPricingFromModelsDev({ quiet: true });
 });
 
 afterAll(async () => {
@@ -165,7 +165,7 @@ describe("migration 046 — budgets and pricing", () => {
 
   test("pricing seed retains Mythos 5 and advances Fable/Mythos shortnames to 5.1 rates", async () => {
     const client = getDbClient();
-    const result = seedPricingFromModelsDev({ quiet: true });
+    const result = await seedPricingFromModelsDev({ quiet: true });
     expect(result.modelsdevFound).toBe(true);
 
     const previousMythosPrices = {
@@ -218,7 +218,7 @@ describe("migration 046 — budgets and pricing", () => {
 
   test("models.dev seed includes Claude Sonnet 5 pricing rows", async () => {
     const client = getDbClient();
-    const result = seedPricingFromModelsDev({ quiet: true });
+    const result = await seedPricingFromModelsDev({ quiet: true });
     expect(result.modelsdevFound).toBe(true);
 
     // Derive expected rates from the vendored snapshot instead of literals —

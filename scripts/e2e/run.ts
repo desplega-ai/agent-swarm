@@ -2,7 +2,13 @@ import { randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type SimulatedAgent, type SimulatedAgentOptions, startSimulatedAgent } from "./agent-sim";
-import { calledCliCommands, cleanupCliTemp, setCliCoverageDir } from "./cli";
+import {
+  type CliResult,
+  calledCliCommands,
+  cleanupCliTemp,
+  runCli,
+  setCliCoverageDir,
+} from "./cli";
 import {
   type CoverageManifest,
   coverageFrom,
@@ -11,7 +17,7 @@ import {
   fetchUniverse,
   loadManifest,
 } from "./coverage";
-import { openReadOnlyDb, type ReadOnlyDb } from "./db";
+import { type DbFixture, openReadOnlyDb, type ReadOnlyDb } from "./db";
 import { runHarnessLeg, stopHarnessChildren } from "./harness";
 import {
   type ApiClient,
@@ -48,7 +54,18 @@ import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
 import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
-import { repoRoot, restartSut, type Sut, startSut, stopSut, tailLog } from "./sut";
+import {
+  copySutKey,
+  repoRoot,
+  restartSut,
+  type Sut,
+  startFixtureSut,
+  startSut,
+  stopSut,
+  stopSutProcess,
+  sutDbTarget,
+  tailLog,
+} from "./sut";
 
 export type ScenarioContext = {
   api: ApiClient;
@@ -86,9 +103,56 @@ export type ScenarioContext = {
   slackJournal: () => SlackJournal | undefined;
   /** `env` adds variables to the restarted process only; the next restart drops them. */
   restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
+  /**
+   * Boot a second API on a named fixture or a prepared SQLite image (Slack off).
+   * The main SUT keeps running. Call `stop` when done; the runner stops it otherwise.
+   * `env` adds variables to this API only.
+   */
+  startFixtureSut: (
+    fixture: string | DbFixture,
+    env?: Record<string, string>,
+  ) => Promise<FixtureSut>;
+  /**
+   * The data copy of decision D11 (check 20), whatever engine the run uses: boot a new
+   * source API on a SQLite file. `copy()` stops it, runs `agent-swarm db-copy` into a new
+   * Postgres database (needs E2E_POSTGRES_URL) and boots a target API on the copy with
+   * the source's encryption key. The runner stops both otherwise. `env` adds variables to
+   * both APIs (for example `ctx.llm.env`, so memories get embeddings).
+   */
+  startDataCopy: (options?: { env?: Record<string, string> }) => Promise<DataCopyPair>;
   nonce: string;
 };
+export type DataCopyPair = {
+  source: ApiClient;
+  copy: () => Promise<{
+    cli: CliResult;
+    target: ApiClient;
+    /** The same copy again into the target database, while the target API holds it. */
+    recopy: () => Promise<CliResult>;
+    /** The source SQLite file (its API is stopped) and the target database URL. */
+    sourcePath: string;
+    targetUrl: string;
+    /** Read-only handles on the source file and on the copy. */
+    sourceDb: ReadOnlyDb;
+    targetDb: ReadOnlyDb;
+    /**
+     * Stop the target API and start it again on the copy, as a later start or a later
+     * release does. `env` applies to that process only.
+     */
+    restartTarget: (env?: Record<string, string>) => Promise<void>;
+    /** The output of the target API process that runs now (each start has its own). */
+    targetLog: () => Promise<string>;
+  }>;
+  stop: () => Promise<void>;
+};
 export type SlackJournal = { file: string; path: string };
+export type FixtureSut = {
+  api: ApiClient;
+  db: ReadOnlyDb;
+  /** The fixture's companion JSON (ids and values it holds). */
+  meta: Record<string, unknown>;
+  stop: () => Promise<void>;
+};
 export type Scenario = {
   name: string;
   /**
@@ -208,6 +272,36 @@ async function cleanup(keep: boolean): Promise<void> {
   await cleanupCliTemp(keep);
 }
 
+/** A SUT that ignores --tx-replay would pass every scenario without replay: refuse that. */
+async function assertSutReplaysTransactions(logPath: string): Promise<void> {
+  const log = await Bun.file(logPath).text();
+  if (!log.includes("[storage] tx-replay on:")) {
+    throw new Error(
+      `--tx-replay: the API never reported replay mode in ${logPath}; it is not replaying transactions`,
+    );
+  }
+}
+
+/** A SUT that ignores DATABASE_URL would pass every scenario on the default engine: refuse that. */
+function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
+  // The runner applies the migration chain before the SUT starts (the db-query
+  // reader role needs the tables), so a migrated schema proves nothing: the boot
+  // seeds the SUT writes do.
+  let seeded: unknown;
+  try {
+    seeded = db.get("SELECT 1 AS present FROM seed_state LIMIT 1");
+  } catch (error) {
+    throw new Error(
+      `--engine ${engine}: the per-run database has no seed_state table (${errorMessage(error)}); the API is not using DATABASE_URL`,
+    );
+  }
+  if (!seeded) {
+    throw new Error(
+      `--engine ${engine}: the API wrote no boot seed into the per-run database; it is not using DATABASE_URL`,
+    );
+  }
+}
+
 async function bootStack(
   options: Options,
   journalPath?: string,
@@ -224,6 +318,7 @@ async function bootStack(
       { ...slack.mock.env, ...llm.env },
       options.sutEnv,
       options.coverageDir,
+      options.engine,
     );
     stack.sut = sut;
     try {
@@ -234,8 +329,10 @@ async function bootStack(
         `Slack socket mode never connected: ${errorMessage(error)}\nLast 40 lines of ${sut.logPath}:\n${await tailLog(sut.logPath, 40)}`,
       );
     }
-    const db = openReadOnlyDb(sut.dbPath);
+    const db = openReadOnlyDb(sutDbTarget(sut));
     stack.db = db;
+    if (options.engine !== "sqlite") assertSutUsesDatabase(db, options.engine);
+    if (options.txReplay) await assertSutReplaysTransactions(sut.logPath);
     const api = createApiClient(sut.baseUrl, sut.apiKey);
     const connectMcp = createMcpConnector(sut.baseUrl, sut.apiKey);
     const nonce = randomBytes(6).toString("hex");
@@ -258,6 +355,80 @@ async function bootStack(
       async sutLog() {
         sut.flushLog();
         return Bun.file(sut.logPath).text();
+      },
+      async startFixtureSut(source, env = {}) {
+        const fixtureStack: Stack = {};
+        stacks.add(fixtureStack);
+        const { sut: fixtureSut, fixture } = await startFixtureSut(
+          options.keep,
+          source,
+          { ...options.sutEnv, ...env },
+          options.engine,
+        );
+        fixtureStack.sut = fixtureSut;
+        const fixtureDb = openReadOnlyDb(sutDbTarget(fixtureSut));
+        fixtureStack.db = fixtureDb;
+        return {
+          api: createApiClient(fixtureSut.baseUrl, fixtureSut.apiKey),
+          db: fixtureDb,
+          meta: fixture.meta,
+          stop: () => stopStack(fixtureStack, options.keep),
+        };
+      },
+      async startDataCopy(copyOptions = {}) {
+        const sourceStack: Stack = {};
+        const targetStack: Stack = {};
+        stacks.add(sourceStack);
+        const pairEnv = { SLACK_DISABLE: "true", ...copyOptions.env };
+        const source = await startSut(options.keep, pairEnv, options.sutEnv, undefined, "sqlite");
+        sourceStack.sut = source;
+        const copyCli = (databaseUrl: string) =>
+          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl], {
+            env: { DESPLEGA_TELEMETRY_ENV: "test" },
+            timeoutMs: 300_000,
+          });
+        return {
+          source: createApiClient(source.baseUrl, source.apiKey),
+          async copy() {
+            await stopSutProcess(source);
+            stacks.add(targetStack);
+            let cli: CliResult | undefined;
+            const target = await startSut(
+              options.keep,
+              pairEnv,
+              options.sutEnv,
+              undefined,
+              "postgres",
+              async (prepared) => {
+                await copySutKey(source, prepared);
+                cli = await copyCli(prepared.databaseUrl ?? "");
+              },
+            );
+            targetStack.sut = target;
+            if (!cli) throw new Error("db-copy did not run");
+            // stopStack closes both handles before it deletes the databases.
+            sourceStack.db = openReadOnlyDb(sutDbTarget(source));
+            targetStack.db = openReadOnlyDb(sutDbTarget(target));
+            return {
+              cli,
+              target: createApiClient(target.baseUrl, target.apiKey),
+              recopy: () => copyCli(target.databaseUrl ?? ""),
+              sourcePath: source.dbPath,
+              targetUrl: target.databaseUrl ?? "",
+              sourceDb: sourceStack.db,
+              targetDb: targetStack.db,
+              restartTarget: (env) => restartSut(target, env),
+              async targetLog() {
+                target.flushLog();
+                return Bun.file(target.logPath).text();
+              },
+            };
+          },
+          async stop() {
+            await stopStack(targetStack, options.keep);
+            await stopStack(sourceStack, options.keep);
+          },
+        };
       },
       async restartSut(options) {
         const connectionCalls = slack.mock.apiCalls("apps.connections.open").length;
@@ -319,7 +490,7 @@ function observe(db: ReadOnlyDb, manifest: CoverageManifest): RerunObservations 
   }
   const nodeTypes = new Set(
     db
-      .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+      .query<{ nodeType: string }>('SELECT DISTINCT "nodeType" FROM workflow_run_steps')
       .map((row) => row.nodeType),
   );
   return { nodeTypes, stateValues };
@@ -516,7 +687,7 @@ async function main(): Promise<number> {
       nodeTypes: [
         ...new Set([
           ...db
-            .query<{ nodeType: string }>("SELECT DISTINCT nodeType FROM workflow_run_steps")
+            .query<{ nodeType: string }>('SELECT DISTINCT "nodeType" FROM workflow_run_steps')
             .map((row) => row.nodeType),
           ...rerunObserved.nodeTypes,
         ]),

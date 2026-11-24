@@ -1,20 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { encryptSecret, getEncryptionKey } from "./crypto";
+import { listPlaintextOAuthSecrets, storeEncryptedOAuthSecrets } from "./storage-root";
 
 export type OAuthEncryptionBackfillResult = {
   appsEncrypted: number;
   authorizationsEncrypted: number;
-};
-
-type PlaintextAppRow = {
-  id: string;
-  clientSecret: string;
-};
-
-type PlaintextAuthorizationRow = {
-  id: string;
-  accessToken: string;
-  refreshToken: string | null;
 };
 
 /**
@@ -27,20 +17,7 @@ type PlaintextAuthorizationRow = {
  * already encrypted and never enter this scan.
  */
 export function autoEncryptLegacyOAuthSecrets(database: Database): OAuthEncryptionBackfillResult {
-  const apps = database
-    .prepare<PlaintextAppRow, []>(
-      `SELECT id, clientSecret
-       FROM oauth_apps
-       WHERE clientSecretEncrypted = 0 AND clientSecret IS NOT NULL`,
-    )
-    .all();
-  const authorizations = database
-    .prepare<PlaintextAuthorizationRow, []>(
-      `SELECT id, accessToken, refreshToken
-       FROM oauth_authorizations
-       WHERE tokensEncrypted = 0`,
-    )
-    .all();
+  const { apps, authorizations } = listPlaintextOAuthSecrets(database);
 
   if (apps.length === 0 && authorizations.length === 0) {
     console.log("[oauth-encryption] No plaintext OAuth secrets to migrate.");
@@ -48,31 +25,16 @@ export function autoEncryptLegacyOAuthSecrets(database: Database): OAuthEncrypti
   }
 
   const key = getEncryptionKey();
-  const updateApp = database.prepare<unknown, [string, string]>(
-    `UPDATE oauth_apps
-     SET clientSecret = ?, clientSecretEncrypted = 1,
-         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-     WHERE id = ? AND clientSecretEncrypted = 0`,
-  );
-  const updateAuthorization = database.prepare<unknown, [string, string | null, string]>(
-    `UPDATE oauth_authorizations
-     SET accessToken = ?, refreshToken = ?, tokensEncrypted = 1,
-         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-     WHERE id = ? AND tokensEncrypted = 0`,
-  );
-
-  database.transaction(() => {
-    for (const app of apps) {
-      updateApp.run(encryptSecret(app.clientSecret, key), app.id);
-    }
-    for (const authorization of authorizations) {
-      updateAuthorization.run(
-        encryptSecret(authorization.accessToken, key),
+  storeEncryptedOAuthSecrets(
+    database,
+    apps.map((app) => ({ id: app.id, clientSecret: encryptSecret(app.clientSecret, key) })),
+    authorizations.map((authorization) => ({
+      id: authorization.id,
+      accessToken: encryptSecret(authorization.accessToken, key),
+      refreshToken:
         authorization.refreshToken == null ? null : encryptSecret(authorization.refreshToken, key),
-        authorization.id,
-      );
-    }
-  })();
+    })),
+  );
 
   console.log(
     `[oauth-encryption] Migrated ${apps.length} app secret(s) and ${authorizations.length} authorization token set(s).`,

@@ -1,0 +1,158 @@
+{
+  "$comment": "SQLite metric queries that db-copy rewrites to their Postgres form, matched on the exact SQL and params of a widget query or a variable options query: the starter dashboard (migration 092, Postgres form in 370) and the new-dashboard template of the UI before it became portable. Any other title, layout or query stays as the operator saved it.",
+  "format": 2,
+  "ports": [
+    {
+      "source": "starter dashboard widget tasks-created-per-day",
+      "sqlite": {
+        "sql": "SELECT date(createdAt) AS day, COUNT(*) AS tasks FROM agent_tasks WHERE createdAt >= datetime('now', ?) GROUP BY day ORDER BY day",
+        "params": ["{{rangeModifier}}"]
+      },
+      "postgres": {
+        "sql": "SELECT to_char(\"createdAt\" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*) AS tasks FROM agent_tasks WHERE \"createdAt\" >= statement_timestamp() + $1::interval GROUP BY day ORDER BY day",
+        "params": ["{{rangeModifier}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget usage-by-user",
+      "sqlite": {
+        "sql": "SELECT COALESCE(u.name, 'Unassigned') AS user, COUNT(DISTINCT t.id) AS tasks, ROUND(COALESCE(SUM(sc.totalCostUsd), 0), 4) AS cost_usd FROM agent_tasks t LEFT JOIN users u ON u.id = t.requestedByUserId LEFT JOIN session_costs sc ON sc.taskId = t.id WHERE t.createdAt >= datetime('now', ?) AND (? = 'all' OR COALESCE(u.id, '') = ? OR COALESCE(u.name, '') LIKE '%' || ? || '%') AND (? = 'all' OR COALESCE(t.agentId, '') = ?) GROUP BY COALESCE(u.name, 'Unassigned') ORDER BY cost_usd DESC, tasks DESC",
+        "params": [
+          "{{rangeModifier}}",
+          "{{userFilter}}",
+          "{{userFilter}}",
+          "{{userFilter}}",
+          "{{agentFilter}}",
+          "{{agentFilter}}"
+        ]
+      },
+      "postgres": {
+        "sql": "SELECT COALESCE(u.name, 'Unassigned') AS \"user\", COUNT(DISTINCT t.id) AS tasks, ROUND((COALESCE(SUM(sc.\"totalCostUsd\"), 0))::numeric, 4)::float8 AS cost_usd FROM agent_tasks t LEFT JOIN users u ON u.id = t.\"requestedByUserId\" LEFT JOIN session_costs sc ON sc.\"taskId\" = t.id WHERE t.\"createdAt\" >= statement_timestamp() + $1::interval AND ($2 = 'all' OR COALESCE(u.id, '') = $2 OR COALESCE(u.name, '') LIKE '%' || $2 || '%') AND ($3 = 'all' OR COALESCE(t.\"agentId\", '') = $3) GROUP BY COALESCE(u.name, 'Unassigned') ORDER BY cost_usd DESC, tasks DESC",
+        "params": ["{{rangeModifier}}", "{{userFilter}}", "{{agentFilter}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget usage-by-model",
+      "sqlite": {
+        "sql": "SELECT model, COUNT(DISTINCT taskId) AS tasks, COUNT(*) AS sessions, SUM(inputTokens + outputTokens) AS tokens, ROUND(SUM(totalCostUsd), 2) AS cost_usd FROM session_costs WHERE createdAt >= datetime('now', ?) AND (? = 'all' OR agentId = ?) GROUP BY model ORDER BY cost_usd DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}", "{{agentFilter}}"]
+      },
+      "postgres": {
+        "sql": "SELECT model, COUNT(DISTINCT \"taskId\") AS tasks, COUNT(*) AS sessions, SUM(\"inputTokens\" + \"outputTokens\")::bigint AS tokens, ROUND((SUM(\"totalCostUsd\"))::numeric, 2)::float8 AS cost_usd FROM session_costs WHERE \"createdAt\" >= statement_timestamp() + $1::interval AND ($2 = 'all' OR COALESCE(\"agentId\", '') = $2) GROUP BY model ORDER BY cost_usd DESC NULLS LAST",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget avg-cost-per-task-by-model",
+      "sqlite": {
+        "sql": "SELECT model, COUNT(DISTINCT taskId) AS tasks, ROUND(SUM(totalCostUsd) * 1.0 / NULLIF(COUNT(DISTINCT taskId), 0), 4) AS avg_cost_per_task FROM session_costs WHERE createdAt >= datetime('now', ?) AND (? = 'all' OR agentId = ?) GROUP BY model ORDER BY avg_cost_per_task DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}", "{{agentFilter}}"]
+      },
+      "postgres": {
+        "sql": "SELECT model, COUNT(DISTINCT \"taskId\") AS tasks, ROUND((SUM(\"totalCostUsd\") / NULLIF(COUNT(DISTINCT \"taskId\"), 0))::numeric, 4)::float8 AS avg_cost_per_task FROM session_costs WHERE \"createdAt\" >= statement_timestamp() + $1::interval AND ($2 = 'all' OR COALESCE(\"agentId\", '') = $2) GROUP BY model ORDER BY avg_cost_per_task DESC NULLS LAST",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget avg-task-time-by-model",
+      "sqlite": {
+        "sql": "SELECT model, COUNT(*) AS tasks, ROUND(AVG((julianday(finishedAt) - julianday(createdAt)) * 1440), 1) AS avg_minutes FROM agent_tasks WHERE finishedAt IS NOT NULL AND model IS NOT NULL AND createdAt >= datetime('now', ?) AND (? = 'all' OR agentId = ?) GROUP BY model ORDER BY tasks DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}", "{{agentFilter}}"]
+      },
+      "postgres": {
+        "sql": "SELECT model, COUNT(*) AS tasks, ROUND((AVG(EXTRACT(EPOCH FROM (\"finishedAt\" - \"createdAt\"))) / 60)::numeric, 1)::float8 AS avg_minutes FROM agent_tasks WHERE \"finishedAt\" IS NOT NULL AND model IS NOT NULL AND \"createdAt\" >= statement_timestamp() + $1::interval AND ($2 = 'all' OR COALESCE(\"agentId\", '') = $2) GROUP BY model ORDER BY tasks DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget cost-per-minute-by-model",
+      "sqlite": {
+        "sql": "SELECT model, ROUND(SUM(durationMs) / 60000.0, 1) AS active_minutes, ROUND(SUM(totalCostUsd), 2) AS cost_usd, ROUND(SUM(totalCostUsd) / NULLIF(SUM(durationMs) / 60000.0, 0), 4) AS cost_per_minute FROM session_costs WHERE createdAt >= datetime('now', ?) AND (? = 'all' OR agentId = ?) AND durationMs > 0 GROUP BY model ORDER BY cost_per_minute DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}", "{{agentFilter}}"]
+      },
+      "postgres": {
+        "sql": "SELECT model, ROUND((SUM(\"durationMs\") / 60000.0)::numeric, 1)::float8 AS active_minutes, ROUND((SUM(\"totalCostUsd\"))::numeric, 2)::float8 AS cost_usd, ROUND((SUM(\"totalCostUsd\") / NULLIF(SUM(\"durationMs\") / 60000.0, 0))::numeric, 4)::float8 AS cost_per_minute FROM session_costs WHERE \"createdAt\" >= statement_timestamp() + $1::interval AND ($2 = 'all' OR COALESCE(\"agentId\", '') = $2) AND \"durationMs\" > 0 GROUP BY model ORDER BY cost_per_minute DESC NULLS LAST",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget cost-per-minute-by-agent",
+      "sqlite": {
+        "sql": "SELECT COALESCE(a.name, sc.agentId, 'unknown') AS agent, ROUND(SUM(sc.durationMs) / 60000.0, 1) AS active_minutes, ROUND(SUM(sc.totalCostUsd), 2) AS cost_usd, ROUND(SUM(sc.totalCostUsd) / NULLIF(SUM(sc.durationMs) / 60000.0, 0), 4) AS cost_per_minute FROM session_costs sc LEFT JOIN agents a ON a.id = sc.agentId WHERE sc.createdAt >= datetime('now', ?) AND (? = 'all' OR sc.agentId = ?) AND sc.durationMs > 0 GROUP BY agent ORDER BY cost_per_minute DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}", "{{agentFilter}}"]
+      },
+      "postgres": {
+        "sql": "SELECT COALESCE(a.name, sc.\"agentId\", 'unknown') AS agent, ROUND((SUM(sc.\"durationMs\") / 60000.0)::numeric, 1)::float8 AS active_minutes, ROUND((SUM(sc.\"totalCostUsd\"))::numeric, 2)::float8 AS cost_usd, ROUND((SUM(sc.\"totalCostUsd\") / NULLIF(SUM(sc.\"durationMs\") / 60000.0, 0))::numeric, 4)::float8 AS cost_per_minute FROM session_costs sc LEFT JOIN agents a ON a.id = sc.\"agentId\" WHERE sc.\"createdAt\" >= statement_timestamp() + $1::interval AND ($2 = 'all' OR COALESCE(sc.\"agentId\", '') = $2) AND sc.\"durationMs\" > 0 GROUP BY agent ORDER BY cost_per_minute DESC NULLS LAST",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget agent-performance",
+      "sqlite": {
+        "sql": "SELECT COALESCE(a.name, t.agentId, 'unassigned') AS agent, COUNT(*) AS tasks, ROUND(AVG((julianday(t.finishedAt) - julianday(t.createdAt)) * 1440), 1) AS avg_minutes, ROUND(COALESCE(SUM(sc.cost), 0), 2) AS cost_usd, ROUND(COALESCE(SUM(sc.cost), 0) / COUNT(*), 4) AS avg_cost_per_task, ROUND(COALESCE(SUM(sc.cost), 0) / NULLIF(SUM(sc.dur) / 60000.0, 0), 4) AS cost_per_minute FROM agent_tasks t LEFT JOIN agents a ON a.id = t.agentId LEFT JOIN (SELECT taskId, SUM(totalCostUsd) AS cost, SUM(durationMs) AS dur FROM session_costs GROUP BY taskId) sc ON sc.taskId = t.id WHERE t.finishedAt IS NOT NULL AND t.createdAt >= datetime('now', ?) AND (? = 'all' OR COALESCE(t.agentId, '') = ?) GROUP BY agent ORDER BY tasks DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}", "{{agentFilter}}"]
+      },
+      "postgres": {
+        "sql": "SELECT COALESCE(a.name, t.\"agentId\", 'unassigned') AS agent, COUNT(*) AS tasks, ROUND((AVG(EXTRACT(EPOCH FROM (t.\"finishedAt\" - t.\"createdAt\"))) / 60)::numeric, 1)::float8 AS avg_minutes, ROUND((COALESCE(SUM(sc.cost), 0))::numeric, 2)::float8 AS cost_usd, ROUND((COALESCE(SUM(sc.cost), 0) / COUNT(*))::numeric, 4)::float8 AS avg_cost_per_task, ROUND((COALESCE(SUM(sc.cost), 0) / NULLIF(SUM(sc.dur) / 60000.0, 0))::numeric, 4)::float8 AS cost_per_minute FROM agent_tasks t LEFT JOIN agents a ON a.id = t.\"agentId\" LEFT JOIN (SELECT \"taskId\", SUM(\"totalCostUsd\") AS cost, SUM(\"durationMs\") AS dur FROM session_costs GROUP BY \"taskId\") sc ON sc.\"taskId\" = t.id WHERE t.\"finishedAt\" IS NOT NULL AND t.\"createdAt\" >= statement_timestamp() + $1::interval AND ($2 = 'all' OR COALESCE(t.\"agentId\", '') = $2) GROUP BY agent ORDER BY tasks DESC",
+        "params": ["{{rangeModifier}}", "{{agentFilter}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget task-outcomes-by-day",
+      "sqlite": {
+        "sql": "SELECT date(finishedAt) AS day, SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed, SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed FROM agent_tasks WHERE finishedAt IS NOT NULL AND finishedAt >= datetime('now', ?) GROUP BY day ORDER BY day",
+        "params": ["{{rangeModifier}}"]
+      },
+      "postgres": {
+        "sql": "SELECT to_char(\"finishedAt\" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed, SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed FROM agent_tasks WHERE \"finishedAt\" IS NOT NULL AND \"finishedAt\" >= statement_timestamp() + $1::interval GROUP BY day ORDER BY day",
+        "params": ["{{rangeModifier}}"]
+      }
+    },
+    {
+      "source": "starter dashboard widget recent-task-outcomes",
+      "sqlite": {
+        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE createdAt >= datetime('now', ?) GROUP BY status ORDER BY tasks DESC",
+        "params": ["{{rangeModifier}}"]
+      },
+      "postgres": {
+        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE \"createdAt\" >= statement_timestamp() + $1::interval GROUP BY status ORDER BY tasks DESC",
+        "params": ["{{rangeModifier}}"]
+      }
+    },
+    {
+      "source": "starter dashboard variable userFilter",
+      "sqlite": {
+        "sql": "SELECT id, label FROM (SELECT 'all' AS id, 'All requesters' AS label, 0 AS sort_key UNION ALL SELECT id, COALESCE(NULLIF(name, ''), email, id) AS label, 1 AS sort_key FROM users WHERE id IS NOT NULL) ORDER BY sort_key, label COLLATE NOCASE"
+      },
+      "postgres": {
+        "sql": "SELECT id, label FROM (SELECT 'all' AS id, 'All requesters' AS label, 0 AS sort_key UNION ALL SELECT id, COALESCE(NULLIF(name, ''), email, id) AS label, 1 AS sort_key FROM users WHERE id IS NOT NULL) AS options ORDER BY sort_key, lower(label)"
+      }
+    },
+    {
+      "source": "starter dashboard variable agentFilter",
+      "sqlite": {
+        "sql": "SELECT id, label FROM (SELECT 'all' AS id, 'All agents' AS label, 0 AS sort_key UNION ALL SELECT id, COALESCE(NULLIF(name, ''), id) AS label, 1 AS sort_key FROM agents WHERE id IS NOT NULL) ORDER BY sort_key, label COLLATE NOCASE"
+      },
+      "postgres": {
+        "sql": "SELECT id, label FROM (SELECT 'all' AS id, 'All agents' AS label, 0 AS sort_key UNION ALL SELECT id, COALESCE(NULLIF(name, ''), id) AS label, 1 AS sort_key FROM agents WHERE id IS NOT NULL) AS options ORDER BY sort_key, lower(label)"
+      }
+    },
+    {
+      "source": "new-dashboard template widget task-statuses (before the portable template)",
+      "sqlite": {
+        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE createdAt >= datetime('now', ?) AND (? = '' OR COALESCE(requestedByUserId, '') = ?) AND (? = '' OR COALESCE(agentId, '') = ?) GROUP BY status ORDER BY tasks DESC",
+        "params": [
+          "{{rangeModifier}}",
+          "{{userFilter}}",
+          "{{userFilter}}",
+          "{{agentFilter}}",
+          "{{agentFilter}}"
+        ]
+      },
+      "postgres": {
+        "sql": "SELECT status, COUNT(*) AS tasks FROM agent_tasks WHERE \"createdAt\" >= $1 AND ($2 = '' OR COALESCE(\"requestedByUserId\", '') = $2) AND ($3 = '' OR COALESCE(\"agentId\", '') = $3) GROUP BY status ORDER BY tasks DESC",
+        "params": ["{{rangeModifier:since}}", "{{userFilter}}", "{{agentFilter}}"]
+      }
+    }
+  ]
+}

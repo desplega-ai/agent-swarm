@@ -162,7 +162,11 @@ const CODE_CASES: CodeCase[] = [
     trigger: { p: { batches: [{ batchId: "x" }, { batchId: "x" }] } },
     port: "skip",
   },
-  { label: "nullish chain default", code: "(i) => i.tickRoute ?? i.startRoute ?? 'done'", port: "done" },
+  {
+    label: "nullish chain default",
+    code: "(i) => i.tickRoute ?? i.startRoute ?? 'done'",
+    port: "done",
+  },
   // Failures.
   {
     label: "port not declared",
@@ -198,8 +202,12 @@ const CODE_CASES: CodeCase[] = [
 
 const BASE_TRIGGER = { n: 3, s: "hi", flag: true, arr: [1, 2, { k: "v" }] };
 
+/**
+ * Same JSON value, every key and element compared strictly. Not text equality:
+ * jsonb (Postgres) reorders object keys, accepted by Daniel on 2026-11-21.
+ */
 function sameJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return Bun.deepEquals(a, b, true);
 }
 
 async function runCodeCase(ctx: ScenarioContext, c: CodeCase, index: number): Promise<void> {
@@ -286,7 +294,11 @@ const FILTER_CASES: FilterCase[] = [
   },
   { label: "function expression", filter: "function (p) { return p.n > 1; }", match: true },
   { label: "regex", filter: "(p) => /^h/.test(p.s)", match: true },
-  { label: "console stays callable", filter: "(p) => { console.log(p); return true; }", match: true },
+  {
+    label: "console stays callable",
+    filter: "(p) => { console.log(p); return true; }",
+    match: true,
+  },
   { label: "thrown Error", filter: "() => { throw new Error('x'); }", match: false },
   { label: "missing field TypeError", filter: "(p) => p.missing.x", match: false },
   { label: "async filter", filter: "async () => true", match: false },
@@ -345,7 +357,11 @@ async function runFilterCase(ctx: ScenarioContext, c: FilterCase, index: number)
 async function runMutationCase(ctx: ScenarioContext): Promise<void> {
   await runFilterCase(
     ctx,
-    { label: "mutating filter", filter: "(p) => { p.go = false; p.n = 0; return true; }", match: true },
+    {
+      label: "mutating filter",
+      filter: "(p) => { p.go = false; p.n = 0; return true; }",
+      match: true,
+    },
     FILTER_CASES.length,
   );
 }

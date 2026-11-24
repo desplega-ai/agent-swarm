@@ -1,10 +1,5 @@
-import {
-  createWorkflowVersion,
-  getDbClient,
-  getWorkflow,
-  getWorkflowVersions,
-  updateWorkflow,
-} from "../be/db";
+import { createWorkflowVersion, getWorkflow, getWorkflowVersions, updateWorkflow } from "../be/db";
+import { getStorage } from "../be/storage";
 import type { Workflow, WorkflowSnapshot, WorkflowVersion } from "../types";
 
 /**
@@ -84,7 +79,7 @@ export async function snapshotAndUpdateWorkflow(
   updates: Parameters<typeof updateWorkflow>[1],
   opts: { changedByAgentId?: string; snapshotOptional?: boolean } = {},
 ): Promise<{ workflow: Workflow | null; version: WorkflowVersion | null }> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     let version: WorkflowVersion | null = null;
     if (opts.snapshotOptional) {
       try {

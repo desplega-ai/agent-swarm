@@ -3,7 +3,13 @@ import { z } from "zod";
 import type { PermissionVerb } from "../rbac";
 import { getNodeEnv } from "../utils/node-env";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { jsonError, matchRoute, parseBody, RequestBodyTooLargeError } from "./utils";
+import {
+  jsonError,
+  matchRoute,
+  parseBody,
+  RequestBodyParseError,
+  RequestBodyTooLargeError,
+} from "./utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -465,6 +471,10 @@ export function route<
         }
         if (err instanceof RequestBodyTooLargeError) {
           jsonError(res, err.message, 413);
+          return null;
+        }
+        if (err instanceof RequestBodyParseError) {
+          jsonError(res, err.message, 400);
           return null;
         }
         throw err;

@@ -8,9 +8,9 @@
  *   (not `users.role`: the dashboard reads an empty or `admin` role as admin-like)
  *
  * This file must not import `./be/db` (`be/db.ts` imports the trigger module
- * that imports this one). It reads through the DB client and lazy-imports RBAC.
+ * that imports this one). It reads through the storage and lazy-imports RBAC.
  */
-import { getDbClient } from "./be/db/runtime";
+import { getStorage } from "./be/storage";
 import { setTelemetryOrgDomain } from "./telemetry";
 import { emailDomain, type TelemetryUserRole } from "./telemetry-context";
 import { reportedUserFunction } from "./utils/company-profile";
@@ -34,13 +34,10 @@ async function loadUserRole(userId: string): Promise<UserRoleEntry | undefined> 
     const { getUserGrant } = await import("./be/rbac-roles");
     const grant = await getUserGrant(userId);
     const role: TelemetryUserRole = grant.grantsAll ? "admin" : "member";
-    const user = await getDbClient().get<{ jobFunction: string | null }>(
-      "SELECT json_extract(metadata, '$.jobFunction') AS jobFunction FROM users WHERE id = ? AND json_valid(metadata)",
-      [userId],
-    );
+    const jobFunction = await getStorage().repos.users.getUserJobFunction(userId);
     return {
       role,
-      userFunction: reportedUserFunction(user?.jobFunction),
+      userFunction: reportedUserFunction(jobFunction),
       at: Date.now(),
     };
   } catch {
@@ -103,19 +100,9 @@ export function invalidateTelemetryUserRole(userId: string): void {
  * valid hostname (`admin@localhost`) is skipped. Undefined when none qualifies.
  */
 export async function computeOrgDomain(): Promise<string | undefined> {
-  const rows = await getDbClient().query<{ email: string }>(
-    `SELECT u.email AS email
-       FROM users u
-      WHERE u.status = 'active' AND u.email IS NOT NULL AND TRIM(u.email) <> ''
-      ORDER BY EXISTS (
-                 SELECT 1 FROM principal_roles pr JOIN roles r ON r.id = pr.roleId
-                  WHERE pr.principalType = 'user' AND pr.principalId = u.id AND r.grantsAll = 1
-               ) DESC,
-               u.createdAt ASC, u.id ASC
-      LIMIT 20`,
-  );
-  for (const row of rows) {
-    const domain = emailDomain(row.email);
+  const emails = await getStorage().repos.users.listOrgDomainCandidateEmails(20);
+  for (const email of emails) {
+    const domain = emailDomain(email);
     if (domain) return domain;
   }
   return undefined;

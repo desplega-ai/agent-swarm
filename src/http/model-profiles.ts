@@ -9,7 +9,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAlias } from "@desplega/model-catalog";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getDbClient } from "../be/db";
 import {
   createModelProfile,
   deleteModelProfile,
@@ -22,6 +21,7 @@ import {
   updateModelProfile,
 } from "../be/db/model-profiles";
 import { explicitModelError } from "../be/model-validation";
+import { getStorage } from "../be/storage";
 import { supportedReasoningLevels } from "../providers/reasoning-effort";
 import { can } from "../rbac";
 import {
@@ -267,7 +267,7 @@ export async function handleModelProfiles(
     const userId = await resolveHttpAuditUserId(req, myAgentId);
     // The fallback graph check and the write share one transaction, so two
     // concurrent saves cannot each pass and together form a cycle.
-    const outcome = await getDbClient()
+    const outcome = await getStorage()
       .transaction(async () => {
         const fallbackError = body.fallbacks
           ? await modelProfileFallbacksError(body.name, body.harness, body.fallbacks)
@@ -323,7 +323,7 @@ export async function handleModelProfiles(
       return true;
     }
     const userId = await resolveHttpAuditUserId(req, myAgentId);
-    const outcome = await getDbClient().transaction(async () => {
+    const outcome = await getStorage().transaction(async () => {
       const fallbackError = body.fallbacks
         ? await modelProfileFallbacksError(current.name, current.harness, body.fallbacks)
         : null;

@@ -1,3 +1,4 @@
+import type { ExtensionRow } from "@desplega/storage";
 import type {
   Extension,
   ExtensionManifest,
@@ -5,11 +6,10 @@ import type {
   ExtensionStatus,
   ExtensionVersion,
 } from "../../types";
-import { computeContentHash, getDbClient } from "../db";
+import { computeContentHash } from "../db";
+import { getStorage } from "../storage";
 
-type ExtensionRow = Omit<Extension, "enabled"> & { enabled: number };
-type ExtensionVersionRow = ExtensionVersion;
-type ExtensionRunRow = ExtensionRun;
+const repo = () => getStorage().repos.extensions;
 
 export type InstallExtensionArgs = {
   manifest: ExtensionManifest;
@@ -39,7 +39,7 @@ function rowToExtension(row: ExtensionRow): Extension {
     lastError: row.lastError ?? null,
     agentId: row.agentId ?? null,
     createdByAgentId: row.createdByAgentId ?? null,
-  };
+  } as Extension;
 }
 
 function canonicalFiles(files: Record<string, string>): Record<string, string> {
@@ -58,11 +58,24 @@ export async function installExtension(
   const filesJson = JSON.stringify(files);
   const contentHash = bundleContentHash(args.manifest, files);
   const actor = args.createdBy ?? null;
+  const storage = getStorage();
+  const extensions = storage.repos.extensions;
 
-  return await getDbClient().transaction(async (tx) => {
-    const existingRow = await tx.get<ExtensionRow>("SELECT * FROM extensions WHERE name = ?", [
-      args.manifest.name,
-    ]);
+  const insertFiles = async (extensionId: string) => {
+    for (const [path, content] of Object.entries(files)) {
+      await extensions.insertFile({
+        id: crypto.randomUUID(),
+        extensionId,
+        path,
+        content,
+        contentHash: computeContentHash(content),
+        actor,
+      });
+    }
+  };
+
+  return await storage.transaction(async () => {
+    const existingRow = await extensions.findByName(args.manifest.name);
     const existing = existingRow ? rowToExtension(existingRow) : null;
     if (existing && args.ownerOnly && existing.createdByAgentId !== args.ownerOnly) {
       throw new ExtensionOwnershipError("Forbidden: extension belongs to another owner");
@@ -81,191 +94,113 @@ export async function installExtension(
 
     if (!existing) {
       const id = crypto.randomUUID();
-      const row = await tx.get<ExtensionRow>(
-        `INSERT INTO extensions (
-          id, name, description, runtime, manifestJson, contentHash, version,
-          activeVersion, enabled, priority, configJson, status,
-          consecutiveFailures, lastError, agentId, createdByAgentId,
-          created_by, updated_by, createdAt, updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, 'disabled', 0, NULL, NULL, ?, ?, ?, ?, ?)
-        RETURNING *`,
-        [
-          id,
-          args.manifest.name,
-          args.manifest.description,
-          args.manifest.runtime,
-          manifestJson,
-          contentHash,
-          args.priority ?? 100,
-          JSON.stringify(args.config ?? {}),
-          args.agentId ?? null,
-          actor,
-          actor,
-          now,
-          now,
-        ],
-      );
+      const row = await extensions.insert({
+        id,
+        name: args.manifest.name,
+        description: args.manifest.description,
+        runtime: args.manifest.runtime,
+        manifestJson,
+        contentHash,
+        priority: args.priority ?? 100,
+        configJson: JSON.stringify(args.config ?? {}),
+        createdByAgentId: args.agentId ?? null,
+        actor,
+        now,
+      });
       if (!row) throw new Error("Failed to insert extension");
 
-      for (const [path, content] of Object.entries(files)) {
-        await tx.run(
-          `INSERT INTO extension_files (
-            id, extensionId, path, content, contentHash, created_by, updated_by
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [crypto.randomUUID(), id, path, content, computeContentHash(content), actor, actor],
-        );
-      }
-
-      await tx.run(
-        `INSERT INTO extension_versions (
-          id, extensionId, version, manifestJson, filesJson, contentHash,
-          changedByAgentId, changedAt, changeReason, created_by, updated_by
-        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          id,
-          manifestJson,
-          filesJson,
-          contentHash,
-          args.agentId ?? null,
-          now,
-          args.changeReason ?? "Initial installation",
-          actor,
-          actor,
-        ],
-      );
+      await insertFiles(id);
+      await extensions.insertVersion({
+        id: crypto.randomUUID(),
+        extensionId: id,
+        version: 1,
+        manifestJson,
+        filesJson,
+        contentHash,
+        changedByAgentId: args.agentId ?? null,
+        changedAt: now,
+        changeReason: args.changeReason ?? "Initial installation",
+        actor,
+      });
 
       return { extension: rowToExtension(row), isNew: true, contentDeduped: false };
     }
 
     if (existing.contentHash === contentHash) {
-      const row = await tx.get<ExtensionRow>(
-        `UPDATE extensions SET
-          priority = ?, configJson = ?, activeVersion = ?, updated_by = ?, updatedAt = ?
-        WHERE id = ?
-        RETURNING *`,
-        [
-          args.priority ?? existing.priority,
-          args.config === undefined ? existing.configJson : JSON.stringify(args.config),
-          args.activate ? existing.version : existing.activeVersion,
-          actor,
-          now,
-          existing.id,
-        ],
-      );
+      const row = await extensions.updateMetadata(existing.id, {
+        priority: args.priority ?? existing.priority,
+        configJson: args.config === undefined ? existing.configJson : JSON.stringify(args.config),
+        activeVersion: args.activate ? existing.version : existing.activeVersion,
+        actor,
+        now,
+      });
       if (!row) throw new Error("Failed to update extension metadata");
       return { extension: rowToExtension(row), isNew: false, contentDeduped: true };
     }
 
     const newVersion = existing.version + 1;
-    const row = await tx.get<ExtensionRow>(
-      `UPDATE extensions SET
-        description = ?, runtime = ?, manifestJson = ?, contentHash = ?, version = ?,
-        activeVersion = ?, priority = ?, configJson = ?, updated_by = ?, updatedAt = ?
-      WHERE id = ?
-      RETURNING *`,
-      [
-        args.manifest.description,
-        args.manifest.runtime,
-        manifestJson,
-        contentHash,
-        newVersion,
-        args.activate ? newVersion : existing.activeVersion,
-        args.priority ?? existing.priority,
-        args.config === undefined ? existing.configJson : JSON.stringify(args.config),
-        actor,
-        now,
-        existing.id,
-      ],
-    );
+    const row = await extensions.updateContent(existing.id, {
+      description: args.manifest.description,
+      runtime: args.manifest.runtime,
+      manifestJson,
+      contentHash,
+      version: newVersion,
+      activeVersion: args.activate ? newVersion : existing.activeVersion,
+      priority: args.priority ?? existing.priority,
+      configJson: args.config === undefined ? existing.configJson : JSON.stringify(args.config),
+      actor,
+      now,
+    });
     if (!row) throw new Error("Failed to update extension");
 
-    await tx.run("DELETE FROM extension_files WHERE extensionId = ?", [existing.id]);
-    for (const [path, content] of Object.entries(files)) {
-      await tx.run(
-        `INSERT INTO extension_files (
-          id, extensionId, path, content, contentHash, created_by, updated_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          existing.id,
-          path,
-          content,
-          computeContentHash(content),
-          actor,
-          actor,
-        ],
-      );
-    }
-
-    await tx.run(
-      `INSERT INTO extension_versions (
-        id, extensionId, version, manifestJson, filesJson, contentHash,
-        changedByAgentId, changedAt, changeReason, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        crypto.randomUUID(),
-        existing.id,
-        newVersion,
-        manifestJson,
-        filesJson,
-        contentHash,
-        args.agentId ?? null,
-        now,
-        args.changeReason ?? null,
-        actor,
-        actor,
-      ],
-    );
+    await extensions.deleteFiles(existing.id);
+    await insertFiles(existing.id);
+    await extensions.insertVersion({
+      id: crypto.randomUUID(),
+      extensionId: existing.id,
+      version: newVersion,
+      manifestJson,
+      filesJson,
+      contentHash,
+      changedByAgentId: args.agentId ?? null,
+      changedAt: now,
+      changeReason: args.changeReason ?? null,
+      actor,
+    });
 
     return { extension: rowToExtension(row), isNew: false, contentDeduped: false };
   });
 }
 
 export async function getExtensionFiles(extensionId: string): Promise<Record<string, string>> {
-  const rows = await getDbClient().query<{ path: string; content: string }>(
-    "SELECT path, content FROM extension_files WHERE extensionId = ? ORDER BY path",
-    [extensionId],
-  );
+  const rows = await repo().listFiles(extensionId);
   return Object.fromEntries(rows.map((row) => [row.path, row.content]));
 }
 
 export async function getExtensionById(id: string): Promise<Extension | null> {
-  const row = await getDbClient().get<ExtensionRow>("SELECT * FROM extensions WHERE id = ?", [id]);
+  const row = await repo().findById(id);
   return row ? rowToExtension(row) : null;
 }
 
 export async function getExtensionByName(name: string): Promise<Extension | null> {
-  const row = await getDbClient().get<ExtensionRow>("SELECT * FROM extensions WHERE name = ?", [
-    name,
-  ]);
+  const row = await repo().findByName(name);
   return row ? rowToExtension(row) : null;
 }
 
 export async function listExtensions(): Promise<Extension[]> {
-  const rows = await getDbClient().query<ExtensionRow>(
-    "SELECT * FROM extensions ORDER BY priority ASC, name ASC",
-  );
+  const rows = await repo().list();
   return rows.map(rowToExtension);
 }
 
 export async function listExtensionVersions(extensionId: string): Promise<ExtensionVersion[]> {
-  return await getDbClient().query<ExtensionVersionRow>(
-    "SELECT * FROM extension_versions WHERE extensionId = ? ORDER BY version DESC",
-    [extensionId],
-  );
+  return (await repo().listVersions(extensionId)) as ExtensionVersion[];
 }
 
 export async function getExtensionVersion(
   extensionId: string,
   version: number,
 ): Promise<ExtensionVersion | null> {
-  return (
-    (await getDbClient().get<ExtensionVersionRow>(
-      "SELECT * FROM extension_versions WHERE extensionId = ? AND version = ?",
-      [extensionId, version],
-    )) ?? null
-  );
+  return ((await repo().getVersion(extensionId, version)) as ExtensionVersion | null) ?? null;
 }
 
 export async function activateExtensionVersionSnapshot(
@@ -273,51 +208,36 @@ export async function activateExtensionVersionSnapshot(
   version: number,
   updatedBy?: string | null,
 ): Promise<Extension | null> {
-  return await getDbClient().transaction(async (tx) => {
-    const snapshot = await tx.get<ExtensionVersionRow>(
-      "SELECT * FROM extension_versions WHERE extensionId = ? AND version = ?",
-      [extensionId, version],
-    );
+  const storage = getStorage();
+  const extensions = storage.repos.extensions;
+  return await storage.transaction(async () => {
+    const snapshot = await extensions.getVersion(extensionId, version);
     if (!snapshot) return null;
 
     const manifest = JSON.parse(snapshot.manifestJson) as ExtensionManifest;
     const files = JSON.parse(snapshot.filesJson) as Record<string, string>;
     const now = new Date().toISOString();
-    const row = await tx.get<ExtensionRow>(
-      `UPDATE extensions SET
-        description = ?, runtime = ?, manifestJson = ?, contentHash = ?, activeVersion = ?,
-        updated_by = ?, updatedAt = ?
-       WHERE id = ?
-       RETURNING *`,
-      [
-        manifest.description,
-        manifest.runtime,
-        snapshot.manifestJson,
-        snapshot.contentHash,
-        version,
-        updatedBy ?? null,
-        now,
-        extensionId,
-      ],
-    );
+    const row = await extensions.activateSnapshot(extensionId, {
+      description: manifest.description,
+      runtime: manifest.runtime,
+      manifestJson: snapshot.manifestJson,
+      contentHash: snapshot.contentHash,
+      activeVersion: version,
+      actor: updatedBy ?? null,
+      now,
+    });
     if (!row) return null;
 
-    await tx.run("DELETE FROM extension_files WHERE extensionId = ?", [extensionId]);
+    await extensions.deleteFiles(extensionId);
     for (const [path, content] of Object.entries(files)) {
-      await tx.run(
-        `INSERT INTO extension_files (
-          id, extensionId, path, content, contentHash, created_by, updated_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          extensionId,
-          path,
-          content,
-          computeContentHash(content),
-          updatedBy ?? null,
-          updatedBy ?? null,
-        ],
-      );
+      await extensions.insertFile({
+        id: crypto.randomUUID(),
+        extensionId,
+        path,
+        content,
+        contentHash: computeContentHash(content),
+        actor: updatedBy ?? null,
+      });
     }
     return rowToExtension(row);
   });
@@ -333,31 +253,19 @@ export async function updateExtensionMeta(
     ownerOnly?: string;
   },
 ): Promise<Extension | null> {
-  const sets: string[] = [];
-  const values: Array<string | number | null> = [];
-  if (args.priority !== undefined) {
-    sets.push("priority = ?");
-    values.push(args.priority);
-  }
-  if (args.config !== undefined) {
-    sets.push("configJson = ?");
-    values.push(JSON.stringify(args.config));
-  }
-  if (args.description !== undefined) {
-    sets.push("description = ?");
-    values.push(args.description);
-  }
-  if (sets.length === 0 && !args.ownerOnly) return getExtensionById(id);
+  const update = {
+    priority: args.priority,
+    configJson: args.config === undefined ? undefined : JSON.stringify(args.config),
+    description: args.description,
+  };
+  const hasChange = Object.values(update).some((value) => value !== undefined);
+  if (!hasChange && !args.ownerOnly) return getExtensionById(id);
 
-  sets.push("updated_by = ?", "updatedAt = ?");
-  values.push(args.updatedBy ?? null, new Date().toISOString(), id);
-  // The enabled check must be part of the write: a lead may enable the draft
-  // after the HTTP handler has authorized it but before this UPDATE executes.
-  const ownerCondition = args.ownerOnly ? " AND createdByAgentId = ? AND enabled = 0" : "";
-  if (args.ownerOnly) values.push(args.ownerOnly);
-  const row = await getDbClient().get<ExtensionRow>(
-    `UPDATE extensions SET ${sets.join(", ")} WHERE id = ?${ownerCondition} RETURNING *`,
-    values,
+  const row = await repo().updateColumns(
+    id,
+    update,
+    { actor: args.updatedBy ?? null, now: new Date().toISOString() },
+    args.ownerOnly,
   );
   if (!row && args.ownerOnly) {
     throw new ExtensionOwnershipError("Forbidden: extension must be your own disabled draft");
@@ -377,30 +285,20 @@ export async function setExtensionState(
     updatedBy?: string | null;
   },
 ): Promise<Extension | null> {
-  const sets: string[] = [];
-  const values: Array<string | number | null> = [];
-  const fields = [
-    ["enabled", args.enabled === undefined ? undefined : args.enabled ? 1 : 0],
-    ["status", args.status],
-    ["activeVersion", args.activeVersion],
-    ["agentId", args.agentId],
-    ["consecutiveFailures", args.consecutiveFailures],
-    ["lastError", args.lastError],
-  ] as const;
-  for (const [column, value] of fields) {
-    if (value !== undefined) {
-      sets.push(`${column} = ?`);
-      values.push(value);
-    }
-  }
-  if (sets.length === 0) return getExtensionById(id);
+  const update = {
+    enabled: args.enabled,
+    status: args.status,
+    activeVersion: args.activeVersion,
+    agentId: args.agentId,
+    consecutiveFailures: args.consecutiveFailures,
+    lastError: args.lastError,
+  };
+  if (Object.values(update).every((value) => value === undefined)) return getExtensionById(id);
 
-  sets.push("updated_by = ?", "updatedAt = ?");
-  values.push(args.updatedBy ?? null, new Date().toISOString(), id);
-  const row = await getDbClient().get<ExtensionRow>(
-    `UPDATE extensions SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    values,
-  );
+  const row = await repo().updateColumns(id, update, {
+    actor: args.updatedBy ?? null,
+    now: new Date().toISOString(),
+  });
   return row ? rowToExtension(row) : null;
 }
 
@@ -409,32 +307,21 @@ export async function recordExtensionFailure(
   lastError: string,
   maxConsecutiveFailures: number,
 ): Promise<Extension | null> {
-  const row = await getDbClient().get<ExtensionRow>(
-    `UPDATE extensions SET
-      consecutiveFailures = consecutiveFailures + 1,
-      lastError = ?,
-      enabled = CASE WHEN consecutiveFailures + 1 >= ? THEN 0 ELSE enabled END,
-      status = CASE
-        WHEN consecutiveFailures + 1 >= ? THEN 'auto-disabled'
-        ELSE status
-      END,
-      updatedAt = ?
-     WHERE id = ?
-     RETURNING *`,
-    [lastError, maxConsecutiveFailures, maxConsecutiveFailures, new Date().toISOString(), id],
+  const row = await repo().recordFailure(
+    id,
+    lastError,
+    maxConsecutiveFailures,
+    new Date().toISOString(),
   );
   return row ? rowToExtension(row) : null;
 }
 
 export async function deleteExtension(id: string, ownerOnly?: string): Promise<boolean> {
-  const result = await getDbClient().run(
-    `DELETE FROM extensions WHERE id = ?${ownerOnly ? " AND createdByAgentId = ? AND enabled = 0" : ""}`,
-    ownerOnly ? [id, ownerOnly] : [id],
-  );
-  if (result.changes === 0 && ownerOnly) {
+  const changes = await repo().delete(id, ownerOnly);
+  if (changes === 0 && ownerOnly) {
     throw new ExtensionOwnershipError("Forbidden: extension must be your own disabled draft");
   }
-  return result.changes > 0;
+  return changes > 0;
 }
 
 export async function insertExtensionRun(args: {
@@ -447,46 +334,26 @@ export async function insertExtensionRun(args: {
   agentId?: string | null;
   subject?: string | null;
 }): Promise<ExtensionRun> {
-  const row = await getDbClient().get<ExtensionRunRow>(
-    `INSERT INTO extension_runs (
-      id, extensionId, version, event, action, durationMs, message, agentId, subject, createdAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      crypto.randomUUID(),
-      args.extensionId,
-      args.version,
-      args.event,
-      args.action,
-      args.durationMs ?? null,
-      args.message ?? null,
-      args.agentId ?? null,
-      args.subject ?? null,
-      new Date().toISOString(),
-    ],
-  );
+  const row = await repo().insertRun({
+    id: crypto.randomUUID(),
+    extensionId: args.extensionId,
+    version: args.version,
+    event: args.event,
+    action: args.action,
+    durationMs: args.durationMs ?? null,
+    message: args.message ?? null,
+    agentId: args.agentId ?? null,
+    subject: args.subject ?? null,
+    createdAt: new Date().toISOString(),
+  });
   if (!row) throw new Error("Failed to insert extension run");
-  return row;
+  return row as ExtensionRun;
 }
 
 export async function pruneExtensionRuns(extensionId: string, keep = 500): Promise<void> {
-  await getDbClient().run(
-    `DELETE FROM extension_runs
-     WHERE extensionId = ? AND id IN (
-       SELECT id FROM extension_runs
-       WHERE extensionId = ?
-       ORDER BY createdAt DESC, rowid DESC
-       LIMIT -1 OFFSET ?
-     )`,
-    [extensionId, extensionId, keep],
-  );
+  await repo().pruneRuns(extensionId, keep);
 }
 
 export async function listExtensionRuns(extensionId: string, limit = 100): Promise<ExtensionRun[]> {
-  return await getDbClient().query<ExtensionRunRow>(
-    `SELECT * FROM extension_runs
-     WHERE extensionId = ?
-     ORDER BY createdAt DESC, rowid DESC
-     LIMIT ?`,
-    [extensionId, Math.max(1, Math.min(500, limit))],
-  );
+  return (await repo().listRuns(extensionId, Math.max(1, Math.min(500, limit)))) as ExtensionRun[];
 }

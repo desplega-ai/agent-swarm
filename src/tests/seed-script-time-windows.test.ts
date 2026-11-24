@@ -1,9 +1,12 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
 import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
 import toolUsage from "../be/seed-scripts/catalog/tool-usage";
 
+afterEach(() => setSystemTime());
+
 test("seeded reports respect the millisecond cutoff on the cutoff date", async () => {
+  setSystemTime(new Date("2026-11-19T12:00:00.500Z"));
   using db = new Database(":memory:");
   db.exec(`
     CREATE TABLE session_logs (content TEXT, createdAt TEXT);
@@ -39,10 +42,9 @@ test("seeded reports respect the millisecond cutoff on the cutoff date", async (
   const ctx = {
     swarm: {
       async db_query({ sql, params = [] }: { sql: string; params?: SQLQueryBindings[] }) {
-        // Fix SQLite's clock so the inputs straddle the same cutoff in every query.
-        const stmt = db.query(sql.replaceAll("'now'", "'2026-11-19T12:00:00.500Z'"));
+        const stmt = db.query(sql);
         const rows = stmt.values(...params);
-        return { columns: stmt.columnNames, rows };
+        return { dialect: "sqlite", columns: stmt.columnNames, rows };
       },
     },
   };

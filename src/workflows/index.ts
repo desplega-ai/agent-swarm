@@ -23,6 +23,7 @@ export { snapshotWorkflow } from "./version";
 export { startWaitPoller, stopWaitPoller } from "./wait-poller";
 
 import * as db from "../be/db";
+import { WORKFLOW_EVENT_TRIGGER_NAMES } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -39,12 +40,8 @@ import { startWaitPoller } from "./wait-poller";
 let _registry: ExecutorRegistry | null = null;
 let eventTriggerListenersInitialized = false;
 
-/** Bus events that start workflows with a matching `event` trigger. Keep in sync with `TriggerConfigSchema`. */
-const EVENT_TRIGGER_NAMES = [
-  "slack.message",
-  "azure-devops.work_item.assigned",
-  "azure-devops.work_item.commented",
-] as const;
+/** Bus events that start workflows with a matching `event` trigger; `TriggerConfigSchema` reads the same list. */
+const EVENT_TRIGGER_NAMES = WORKFLOW_EVENT_TRIGGER_NAMES;
 
 function createBuiltInExecutorRegistry(): ExecutorRegistry {
   return createExecutorRegistry({

@@ -189,6 +189,15 @@ veto demotion. Rating events are
 commutative (Beta updates compose by addition) so racing applies converge
 without idempotency checks.
 
+The evidence lookup runs on the engine's memory search reader
+(`getStorage().memoryIndexes.searchReader`), like every other search read. It
+is an enrichment. If it fails, search logs one
+`[memory-search] demotion evidence lookup failed` line and ranks the
+candidates without evidence, so none of them is demoted.
+
+`POST /api/memory/search` and `POST /api/memory/list` answer HTTP 500 when the
+search itself fails. They never answer an empty 200 for a failed search.
+
 ### New endpoints
 
 | Endpoint | Purpose |
@@ -274,8 +283,9 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
 ## Key files
 
 - `src/be/memory/types.ts` — interfaces.
-- `src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
-- `src/be/memory/search-reader.ts` + `search-read-worker.ts` — search SELECTs run in 2 Bun workers with their own read-only connection, so a slow vec/bm25 statement never blocks the API loop. Reads inside a transaction, on a non-file DB, or after a worker fails stay on the main connection. Writes always stay on the main connection.
+- `src/be/memory/providers/` — OpenAI embeddings + the memory store (`storage-store.ts`, `StorageMemoryStore`; `sqlite-store.ts` re-exports it under its old name `SqliteMemoryStore`). The store runs on either engine through `getStorage()`: the memory repository, and `memoryIndexes` for the engine's search indexes.
+- `memoryIndexes` (`packages/storage-sqlite/src/memory/indexes.ts`, `packages/storage-postgres/src/memory-indexes.ts`) — SQLite creates `memory_fts` (FTS5) and `memory_vec` (sqlite-vec) at run time and fills them; Postgres has both from migration 369 (expression GIN index, pgvector table).
+- `packages/storage-sqlite/src/memory/search-reader.ts` (re-exported by `src/be/memory/search-reader.ts`) — on SQLite, search SELECTs run in 2 Bun workers (started from a Blob URL) with their own read-only connection, so a slow vec/bm25 statement never blocks the API loop. Reads inside a transaction, on a non-file DB, or after a worker fails stay on the main connection. Writes always stay on the main connection. Postgres has no such reader (`memoryIndexes.searchReader` is absent): its pool reads are async.
 - `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` and `pathWeight` factors.
 - `src/be/memory/key-paths.ts` — logical-path key pattern, the closed `/longterm` root allowlist, the lead-only roots and `tierSource`.
 - `src/be/memory/key-guard.ts` — `assertKeyWritable`: the shared key gate for MCP and HTTP writes.
@@ -304,6 +314,8 @@ fall back to bounded text. The query uses a conservative 8191 UTF-8 byte cap,
 preserving Unicode code points,
 to stay below the embedding input token limit without a tokenizer dependency.
 An empty content query returns no results without recording retrievals.
+A failed search answers 500. The runner then starts the task with no recalled
+memories, as before.
 
 ## Review tasks skip review completions
 
@@ -322,11 +334,11 @@ source tasks that no longer exist are unchanged.
 ## Health on the search path
 
 `store.search` routes on `getHealth().retrievalMode`. The health counts are
-synchronous `COUNT(*)` scans of `agent_memory` and `memory_vec`, so search reuses
+`COUNT(*)` scans of `agent_memory` and `memory_vec` (synchronous on SQLite), so search reuses
 one result for `SEARCH_HEALTH_TTL_MS` (60 s). A populate drops the cached result,
 and a vec write drops a cached fallback, so the first vector switches search to
 the vec path at once. A cached `vec` result survives writes and can be up to 60 s
-stale. `GET /api/memory/health` calls `getHealth()` and returns fresh counts on
+stale. `GET /api/memory/health` awaits `getHealth()` and returns fresh counts on
 every call. `missingFromVec` is `validEmbedding` minus a `memory_vec`-driven join
 (one primary-key lookup per vec row). The old `agent_memory`-driven anti-join
 probed vec0 once per memory and took about 1.1 s at 57k memories.

@@ -930,7 +930,7 @@ async function modelSourceIssues(
       });
     }
     if (source.connection !== undefined) {
-      const reachable = listScriptConnections({ agentId: runAs });
+      const reachable = await listScriptConnections({ agentId: runAs });
       if (!reachable.some((connection) => connection.slug === source.connection)) {
         issues.push({
           path: `${path}.connection`,

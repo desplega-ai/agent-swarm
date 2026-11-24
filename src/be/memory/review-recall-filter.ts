@@ -15,8 +15,10 @@
  * that no longer exists is kept: its kind is unknown.
  */
 
+import type { ReviewTaskRule } from "@desplega/storage";
 import type { AgentMemory } from "@/types";
-import { getDbClient, getTaskById } from "../db";
+import { getTaskById } from "../db";
+import { getStorage } from "../storage";
 
 export const REVIEW_TASK_TYPE = "review";
 export const REVIEW_TASK_TAGS: readonly string[] = ["re-review", "pr-review-demo"];
@@ -38,26 +40,13 @@ function parseTags(raw: string | null): string[] {
 }
 
 /**
- * `isReviewTask` + the drop rule as a WHERE condition on agent_memory, so a
- * store excludes the rows before its LIMIT. `memoryAlias` is the agent_memory
- * alias in the query ("" for none). The CASE keeps json_each off malformed or
- * non-array tags, which `parseTags` reads as no tags.
+ * `isReviewTask` as the rule a store applies in SQL (the memory repository's
+ * review exclusion), so it excludes the rows before its LIMIT.
  */
-export function notReviewTaskCompletionSql(memoryAlias = ""): { sql: string; params: string[] } {
-  const col = (name: string) => (memoryAlias ? `${memoryAlias}.${name}` : name);
-  return {
-    sql: `NOT (${col("source")} = 'task_completion' AND EXISTS (
-            SELECT 1 FROM agent_tasks rt
-            WHERE rt.id = ${col("sourceTaskId")}
-              AND (rt.taskType = ?
-                OR CASE WHEN json_valid(rt.tags)
-                     THEN json_type(rt.tags) = 'array' AND EXISTS (
-                       SELECT 1 FROM json_each(rt.tags)
-                       WHERE value IN (${REVIEW_TASK_TAGS.map(() => "?").join(",")}))
-                     ELSE 0 END)))`,
-    params: [REVIEW_TASK_TYPE, ...REVIEW_TASK_TAGS],
-  };
-}
+export const REVIEW_TASK_RULE: ReviewTaskRule = {
+  taskType: REVIEW_TASK_TYPE,
+  tags: REVIEW_TASK_TAGS,
+};
 
 /** True when `taskId` names a review task. Unknown or missing ids are not review tasks. */
 export async function isReviewTaskId(taskId: string | undefined | null): Promise<boolean> {
@@ -85,14 +74,7 @@ export async function dropReviewTaskCompletions<T extends AgentMemory>(
   const reviewIds = new Set<string>();
   for (let i = 0; i < sourceIds.length; i += ID_CHUNK) {
     const chunk = sourceIds.slice(i, i + ID_CHUNK);
-    const rows = await getDbClient().query<{
-      id: string;
-      taskType: string | null;
-      tags: string | null;
-    }>(
-      `SELECT id, taskType, tags FROM agent_tasks WHERE id IN (${chunk.map(() => "?").join(",")})`,
-      chunk,
-    );
+    const rows = await getStorage().repos.memory.listTaskKinds(chunk);
     for (const row of rows) {
       if (isReviewTask({ taskType: row.taskType, tags: parseTags(row.tags) }))
         reviewIds.add(row.id);

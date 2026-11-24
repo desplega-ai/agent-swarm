@@ -28,6 +28,21 @@ export interface SpanOptions {
 import type { SessionCostMetric } from "./otel-impl";
 export type { SessionCostMetric };
 
+export type DbSystem = "sqlite" | "postgresql";
+
+export interface DbStatementMetric {
+  system: DbSystem;
+  sql: string;
+  durationMs: number;
+}
+
+export interface DbTransactionMetric {
+  system: DbSystem;
+  attempts: number;
+  retries: readonly string[];
+  outcome: "commit" | "rollback" | "exhausted";
+}
+
 export interface DbRetentionSweepMetric {
   table: string;
   dryRun: boolean;
@@ -89,6 +104,8 @@ let realRecordDbRetentionStatement:
   | ((table: string, dryRun: boolean, durationMs: number) => void)
   | undefined;
 let realRecordSlackReactionInvalidName: ((event: string) => void) | undefined;
+let realRecordDbStatement: ((m: DbStatementMetric) => void) | undefined;
+let realRecordDbTransaction: ((m: DbTransactionMetric) => void) | undefined;
 
 export function isOtelEnabled(): boolean {
   return otelConfigured();
@@ -101,6 +118,11 @@ function envFlagEnabled(name: string): boolean {
 
 export function isPollTracingEnabled(): boolean {
   return envFlagEnabled("OTEL_TRACE_POLL");
+}
+
+/** A span per database statement under the request span. Off by default: high volume. */
+export function isDbStatementTracingEnabled(): boolean {
+  return envFlagEnabled("OTEL_TRACE_DB_STATEMENTS");
 }
 
 /** Mirror the API's console output to the OTLP collector as log records. Off by default. */
@@ -127,6 +149,8 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realRecordDbRetentionSweep = impl.recordDbRetentionSweep;
     realRecordDbRetentionStatement = impl.recordDbRetentionStatement;
     realRecordSlackReactionInvalidName = impl.recordSlackReactionInvalidName;
+    realRecordDbStatement = impl.recordDbStatement;
+    realRecordDbTransaction = impl.recordDbTransaction;
     console.log(`[OTel] enabled for ${impl.resolveServiceName(serviceRole)} (${serviceRole})`);
   } catch (error) {
     console.warn(`[OTel] disabled after initialization failure: ${error}`);
@@ -204,6 +228,20 @@ export function recordSlackReactionInvalidName(event: string): void {
   realRecordSlackReactionInvalidName(event);
 }
 
+/**
+ * Called after every database statement, so the disabled path is one variable
+ * check: no env read, no SQL parsing, no object allocation by the caller.
+ */
+export function recordDbStatement(system: DbSystem, sql: string, durationMs: number): void {
+  if (!realRecordDbStatement || !otelConfigured()) return;
+  realRecordDbStatement({ system, sql, durationMs });
+}
+
+export function recordDbTransaction(m: DbTransactionMetric): void {
+  if (!realRecordDbTransaction || !otelConfigured()) return;
+  realRecordDbTransaction(m);
+}
+
 export function _resetOtelForTests() {
   initialized = false;
   realWithSpan = undefined;
@@ -216,4 +254,6 @@ export function _resetOtelForTests() {
   realRecordDbRetentionSweep = undefined;
   realRecordDbRetentionStatement = undefined;
   realRecordSlackReactionInvalidName = undefined;
+  realRecordDbStatement = undefined;
+  realRecordDbTransaction = undefined;
 }

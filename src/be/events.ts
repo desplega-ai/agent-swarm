@@ -1,10 +1,8 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
 import { type ScrubbedText, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
-import { readableSessionCondition } from "./db/tasks/read";
-import type { DbExecutor } from "./db-client";
 import { breaksJsonValidity } from "./scrub-json";
 import { recordSkillInvocation } from "./skill-invocations";
+import { getStorage } from "./storage";
 
 // -- Events --
 
@@ -42,10 +40,6 @@ function rowToSwarmEvent(row: EventRow): SwarmEvent {
   };
 }
 
-const INSERT_EVENT_SQL = `INSERT INTO events (id, category, event, status, source, agentId, taskId,
-       sessionId, parentEventId, numericValue, durationMs, data, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
-
 // ─── Create ─────────────────────────────────────────────────────────────────
 
 export interface CreateEventInput {
@@ -76,31 +70,32 @@ function serializeEventData(data: Record<string, unknown>): ScrubbedText {
   return JSON.stringify(scrubObject(data)) as ScrubbedText;
 }
 
-async function insertEvent(db: DbExecutor, id: string, input: CreateEventInput): Promise<void> {
-  await db.run(INSERT_EVENT_SQL, [
+async function insertEvent(id: string, input: CreateEventInput): Promise<void> {
+  await getStorage().repos.events.insert({
     id,
-    input.category,
-    input.event,
-    input.status ?? "ok",
-    input.source,
-    input.agentId ?? null,
-    input.taskId ?? null,
-    input.sessionId ?? null,
-    input.parentEventId ?? null,
-    input.numericValue ?? null,
-    input.durationMs ?? null,
-    input.data ? serializeEventData(input.data) : null,
-  ]);
-  // `skill.invoke` also feeds the per-skill counter and invocation history.
-  await recordSkillInvocation(db, input, id);
+    category: input.category,
+    event: input.event,
+    status: input.status ?? "ok",
+    source: input.source,
+    agentId: input.agentId ?? null,
+    taskId: input.taskId ?? null,
+    sessionId: input.sessionId ?? null,
+    parentEventId: input.parentEventId ?? null,
+    numericValue: input.numericValue ?? null,
+    durationMs: input.durationMs ?? null,
+    data: input.data ? serializeEventData(input.data) : null,
+  });
+  // `skill.invoke` also feeds the per-skill counter and invocation history
+  // (skills repository; inside a transaction it joins it).
+  await recordSkillInvocation(input, id);
 }
 
 export async function createEvent(input: CreateEventInput): Promise<SwarmEvent> {
   const id = crypto.randomUUID();
   if (input.event === "skill.invoke") {
-    await getDbClient().transaction((tx) => insertEvent(tx, id, input));
+    await getStorage().transaction(() => insertEvent(id, input));
   } else {
-    await insertEvent(getDbClient(), id, input);
+    await insertEvent(id, input);
   }
   return {
     id,
@@ -120,9 +115,9 @@ export async function createEvent(input: CreateEventInput): Promise<SwarmEvent> 
 }
 
 export async function createEventsBatch(inputs: CreateEventInput[]): Promise<number> {
-  await getDbClient().transaction(async (tx) => {
+  await getStorage().transaction(async () => {
     for (const input of inputs) {
-      await insertEvent(tx, crypto.randomUUID(), input);
+      await insertEvent(crypto.randomUUID(), input);
     }
   });
   return inputs.length;
@@ -134,66 +129,46 @@ export async function getEventsByCategory(
   category: EventCategory,
   limit = 100,
 ): Promise<SwarmEvent[]> {
-  const rows = await getDbClient().query<EventRow>(
-    "SELECT * FROM events WHERE category = ? ORDER BY createdAt DESC LIMIT ?",
-    [category, limit],
-  );
+  const rows = await getStorage().repos.events.list(limit, { column: "category", value: category });
   return rows.map(rowToSwarmEvent);
 }
 
 export async function getEventsByEvent(event: EventName, limit = 100): Promise<SwarmEvent[]> {
-  const rows = await getDbClient().query<EventRow>(
-    "SELECT * FROM events WHERE event = ? ORDER BY createdAt DESC LIMIT ?",
-    [event, limit],
-  );
+  const rows = await getStorage().repos.events.list(limit, { column: "event", value: event });
   return rows.map(rowToSwarmEvent);
 }
 
 export async function getEventsByAgentId(agentId: string, limit = 100): Promise<SwarmEvent[]> {
-  const rows = await getDbClient().query<EventRow>(
-    "SELECT * FROM events WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
-    [agentId, limit],
-  );
+  const rows = await getStorage().repos.events.list(limit, { column: "agentId", value: agentId });
   return rows.map(rowToSwarmEvent);
 }
 
 export async function getEventsByTaskId(taskId: string, limit = 100): Promise<SwarmEvent[]> {
-  const rows = await getDbClient().query<EventRow>(
-    "SELECT * FROM events WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
-    [taskId, limit],
-  );
+  const rows = await getStorage().repos.events.list(limit, { column: "taskId", value: taskId });
   return rows.map(rowToSwarmEvent);
 }
 
 export async function getEventsBySessionId(sessionId: string, limit = 100): Promise<SwarmEvent[]> {
-  const rows = await getDbClient().query<EventRow>(
-    "SELECT * FROM events WHERE sessionId = ? ORDER BY createdAt DESC LIMIT ?",
-    [sessionId, limit],
-  );
+  const rows = await getStorage().repos.events.list(limit, {
+    column: "sessionId",
+    value: sessionId,
+  });
   return rows.map(rowToSwarmEvent);
 }
 
 export async function getAllEvents(limit = 100): Promise<SwarmEvent[]> {
-  const rows = await getDbClient().query<EventRow>(
-    "SELECT * FROM events ORDER BY createdAt DESC LIMIT ?",
-    [limit],
-  );
+  const rows = await getStorage().repos.events.list(limit);
   return rows.map(rowToSwarmEvent);
 }
 
 export async function getEventCounts(): Promise<Array<{ event: string; count: number }>> {
-  return await getDbClient().query<{ event: string; count: number }>(
-    "SELECT event, COUNT(*) as count FROM events GROUP BY event ORDER BY count DESC",
-  );
+  return await getStorage().repos.events.countByEvent({});
 }
 
 export async function getEventCountsForAgent(
   agentId: string,
 ): Promise<Array<{ event: string; count: number }>> {
-  return await getDbClient().query<{ event: string; count: number }>(
-    "SELECT event, COUNT(*) as count FROM events WHERE agentId = ? GROUP BY event ORDER BY count DESC",
-    [agentId],
-  );
+  return await getStorage().repos.events.countByEvent({ agentId });
 }
 
 export async function getEventCountsFiltered(filters: {
@@ -205,41 +180,7 @@ export async function getEventCountsFiltered(filters: {
   since?: string;
   until?: string;
 }): Promise<Array<{ event: string; count: number }>> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters.category) {
-    conditions.push("category = ?");
-    params.push(filters.category);
-  }
-  if (filters.source) {
-    conditions.push("source = ?");
-    params.push(filters.source);
-  }
-  if (filters.agentId) {
-    conditions.push("agentId = ?");
-    params.push(filters.agentId);
-  }
-  if (filters.taskId) {
-    conditions.push("taskId = ?");
-    params.push(filters.taskId);
-  }
-  if (filters.sessionId) {
-    conditions.push("sessionId = ?");
-    params.push(filters.sessionId);
-  }
-  if (filters.since) {
-    conditions.push("createdAt >= ?");
-    params.push(filters.since);
-  }
-  if (filters.until) {
-    conditions.push("createdAt <= ?");
-    params.push(filters.until);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const sql = `SELECT event, COUNT(*) as count FROM events ${where} GROUP BY event ORDER BY count DESC`;
-  return await getDbClient().query<{ event: string; count: number }>(sql, params);
+  return await getStorage().repos.events.countByEvent(filters);
 }
 
 export async function getEventsFiltered(filters: {
@@ -266,86 +207,9 @@ export async function getEventsFiltered(filters: {
   /** Only events outside sessions this user may not read; `userId: null` is a guest. */
   readableBy?: { userId: string | null };
 }): Promise<SwarmEvent[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters.readableBy) {
-    const readable = readableSessionCondition(filters.readableBy.userId, "events.taskId", {
-      nullable: true,
-    });
-    conditions.push(readable.sql);
-    params.push(...readable.params);
-  }
-
-  if (filters.category) {
-    conditions.push("category = ?");
-    params.push(filters.category);
-  }
-  if (filters.event) {
-    conditions.push("event = ?");
-    params.push(filters.event);
-  }
-  if (filters.events && filters.events.length > 0) {
-    conditions.push(`event IN (${filters.events.map(() => "?").join(", ")})`);
-    params.push(...filters.events);
-  }
-  if (filters.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-  if (filters.source) {
-    conditions.push("source = ?");
-    params.push(filters.source);
-  }
-  if (filters.agentId) {
-    conditions.push("agentId = ?");
-    params.push(filters.agentId);
-  }
-  if (filters.taskId) {
-    conditions.push("taskId = ?");
-    params.push(filters.taskId);
-  }
-  if (filters.sessionId) {
-    conditions.push("sessionId = ?");
-    params.push(filters.sessionId);
-  }
-  if (filters.dataField) {
-    conditions.push("json_extract(data, '$.field') = ?");
-    params.push(filters.dataField);
-  }
-  if (filters.since) {
-    conditions.push("createdAt >= ?");
-    params.push(filters.since);
-  }
-  if (filters.until) {
-    conditions.push("createdAt <= ?");
-    params.push(filters.until);
-  }
-
-  const limit = filters.limit ?? 100;
-
-  if (filters.latestPerDataField) {
-    const lookups: string[] = [];
-    const lookupParams: (string | number)[] = [];
-    for (const event of filters.latestPerDataField.events) {
-      for (const field of filters.latestPerDataField.dataFields) {
-        const where = [...conditions, "event = ?", "json_extract(data, '$.field') = ?"];
-        lookups.push(
-          `SELECT * FROM (SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY createdAt DESC LIMIT 1)`,
-        );
-        lookupParams.push(...params, event, field);
-      }
-    }
-    if (lookups.length === 0) return [];
-    const sql = `${lookups.join(" UNION ALL ")} ORDER BY createdAt DESC LIMIT ?`;
-    const rows = await getDbClient().query<EventRow>(sql, [...lookupParams, limit]);
-    return rows.map(rowToSwarmEvent);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  params.push(limit);
-
-  const sql = `SELECT * FROM events ${where} ORDER BY createdAt DESC LIMIT ?`;
-  const rows = await getDbClient().query<EventRow>(sql, params);
+  const rows = await getStorage().repos.events.listFiltered({
+    ...filters,
+    limit: filters.limit ?? 100,
+  });
   return rows.map(rowToSwarmEvent);
 }

@@ -1,4 +1,5 @@
 import type { SimulatedTrigger } from "../agent-sim";
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { asUser, createAssignedTask, createUser, retireAgent } from "./core-helpers";
@@ -101,7 +102,7 @@ export const platformChecklist: Scenario = {
       "Completion attribution",
     );
     expect(
-      ctx.db.get<{ status: string }>("SELECT status FROM checklist_items WHERE id = ?", [itemId])
+      ctx.db.get<{ status: string }>(sql`SELECT status FROM checklist_items WHERE id = ${itemId}`)
         ?.status === "done",
       "Completion persisted",
     );

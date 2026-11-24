@@ -11,8 +11,8 @@
  *
  * Nothing here writes: reads do not bump `accessCount` / `accessedAt`.
  */
-import { getDbClient } from "@/be/db";
-import type { AgentMemoryRow } from "./providers/sqlite-store";
+import type { AgentMemoryRow } from "@desplega/storage";
+import { getStorage } from "@/be/storage";
 
 export const MEMORY_KEYS_DEFAULT_PREFIX = "/longterm/";
 export const MEMORY_KEYS_MAX_LIMIT = 2000;
@@ -78,55 +78,10 @@ export async function listMemoryKeys(
   const prefix = options.prefix ?? MEMORY_KEYS_DEFAULT_PREFIX;
   const limit = Math.min(options.limit ?? MEMORY_KEYS_MAX_LIMIT, MEMORY_KEYS_MAX_LIMIT);
   // Set for an agent viewer: only its own rows plus swarm-scope rows.
-  const visibility =
-    options.visibleToAgentId !== undefined ? "AND (m.agentId = ? OR m.scope = 'swarm')" : "";
-  const visibilityParams = options.visibleToAgentId !== undefined ? [options.visibleToAgentId] : [];
-
-  // substr/length: literal prefix match, so `%`, `_`, `*` in a key are text.
-  const rows = await getDbClient().query<KeySummaryRow>(
-    `WITH docs AS (
-       SELECT m.*,
-              ROW_NUMBER() OVER (
-                PARTITION BY m.key, m.scope, COALESCE(m.agentId, '')
-                ORDER BY m.chunkIndex, m.createdAt, m.id
-              ) AS rn
-         FROM agent_memory m
-        WHERE m.key IS NOT NULL AND substr(m.key, 1, length(?)) = ? ${visibility}
-     ),
-     ratings AS (
-       SELECT memoryId,
-              SUM(CASE WHEN signal > 0 THEN 1 ELSE 0 END) AS useful,
-              SUM(CASE WHEN signal < 0 THEN 1 ELSE 0 END) AS notUseful
-         FROM memory_rating
-        WHERE memoryId IN (SELECT id FROM docs)
-        GROUP BY memoryId
-     )
-     SELECT d.key AS key,
-            d.scope AS scope,
-            d.agentId AS agentId,
-            MAX(CASE WHEN d.rn = 1 THEN d.id END) AS memoryId,
-            MAX(CASE WHEN d.rn = 1 THEN d.name END) AS name,
-            MAX(CASE WHEN d.rn = 1 THEN d.source END) AS source,
-            COUNT(*) AS chunkRows,
-            MAX(d.totalChunks) AS totalChunks,
-            MIN(d.totalChunks) AS minTotalChunks,
-            COUNT(DISTINCT d.chunkIndex) AS distinctIndexes,
-            MAX(d.chunkIndex) AS maxIndex,
-            SUM(length(d.content)) AS chars,
-            SUM(d.accessCount) AS accessCount,
-            MAX(d.accessedAt) AS lastAccessedAt,
-            SUM(d.alpha) AS alpha,
-            SUM(d.beta) AS beta,
-            COALESCE(SUM(r.useful), 0) AS usefulRatings,
-            COALESCE(SUM(r.notUseful), 0) AS notUsefulRatings,
-            MIN(d.createdAt) AS createdAt,
-            MAX(COALESCE(d.updatedAt, d.createdAt)) AS updatedAt
-       FROM docs d
-       LEFT JOIN ratings r ON r.memoryId = d.id
-      GROUP BY d.key, d.scope, COALESCE(d.agentId, '')
-      ORDER BY d.key, d.scope, COALESCE(d.agentId, '')
-      LIMIT ?`,
-    [prefix, prefix, ...visibilityParams, limit + 1],
+  const rows: KeySummaryRow[] = await getStorage().repos.memory.listKeySummaries(
+    prefix,
+    options.visibleToAgentId,
+    limit + 1,
   );
 
   const truncated = rows.length > limit;
@@ -227,10 +182,7 @@ export async function getMemoryChunks(
   agentId: string | null;
   chunks: MemoryChunkRow[];
 } | null> {
-  const db = getDbClient();
-  const columns = `id, agentId, scope, key, name, content, summary, source, sourceTaskId,
-    sourcePath, chunkIndex, totalChunks, tags, createdAt, updatedAt, accessedAt, expiresAt,
-    accessCount, embeddingModel, alpha, beta, contentHash, version`;
+  const repo = getStorage().repos.memory;
   type Row = Omit<AgentMemoryRow, "embedding">;
 
   const visible = (row: Row) =>
@@ -240,39 +192,23 @@ export async function getMemoryChunks(
 
   let rows: Row[];
   if ("memoryId" in target) {
-    const anchor = await db.get<Row>(`SELECT ${columns} FROM agent_memory WHERE id = ?`, [
-      target.memoryId,
-    ]);
+    const anchor = await repo.findChunkRowById(target.memoryId);
     if (!anchor || !visible(anchor)) return null;
     rows =
       anchor.key === null
         ? [anchor]
-        : await db.query<Row>(
-            `SELECT ${columns} FROM agent_memory
-              WHERE key = ? AND scope = ? AND COALESCE(agentId, '') = ?
-              ORDER BY chunkIndex, createdAt, id`,
-            [anchor.key, anchor.scope, anchor.agentId ?? ""],
-          );
+        : await repo.listChunkRowsOfDocument({
+            key: anchor.key,
+            scope: anchor.scope,
+            agentId: anchor.agentId,
+          });
   } else {
-    const conditions = ["key = ?"];
-    const params: string[] = [target.key];
-    if (target.scope) {
-      conditions.push("scope = ?");
-      params.push(target.scope);
-    }
-    if (target.agentId !== undefined) {
-      conditions.push("COALESCE(agentId, '') = ?");
-      params.push(target.agentId ?? "");
-    }
-    if (options.visibleToAgentId !== undefined) {
-      conditions.push("(agentId = ? OR scope = 'swarm')");
-      params.push(options.visibleToAgentId);
-    }
-    const matches = await db.query<Row>(
-      `SELECT ${columns} FROM agent_memory WHERE ${conditions.join(" AND ")}
-        ORDER BY scope, COALESCE(agentId, ''), chunkIndex, createdAt, id`,
-      params,
-    );
+    const matches = await repo.listChunkRowsByKey({
+      key: target.key,
+      scope: target.scope,
+      agentId: target.agentId,
+      visibleToAgentId: options.visibleToAgentId,
+    });
     const doc = matches[0];
     rows = doc
       ? matches.filter(
@@ -296,9 +232,6 @@ export async function getPosteriorsByIds(
   ids: string[],
 ): Promise<Map<string, { alpha: number; beta: number }>> {
   if (ids.length === 0) return new Map();
-  const rows = await getDbClient().query<{ id: string; alpha: number; beta: number }>(
-    `SELECT id, alpha, beta FROM agent_memory WHERE id IN (${ids.map(() => "?").join(", ")})`,
-    ids,
-  );
+  const rows = await getStorage().repos.memory.getPosteriorsByIds(ids);
   return new Map(rows.map(({ id, ...rest }) => [id, rest]));
 }

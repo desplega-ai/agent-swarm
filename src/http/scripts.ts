@@ -4,7 +4,7 @@ import { type AppValidationIssue, collectScriptReferences } from "../apps/defini
 import { getScriptAppTypes } from "../apps/script-types";
 import { listAppRecords } from "../apps/store";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById, getDbClient, recordInlineScriptRun, upsertKv } from "../be/db";
+import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import {
   getScriptApiConnectionDescriptors,
@@ -41,6 +41,7 @@ import {
   typecheckScript,
 } from "../be/scripts/typecheck";
 import { toScriptSearchResults } from "../be/scripts/user-code-mode";
+import { getStorage } from "../be/storage";
 import { isScriptRunToken } from "../be/users";
 import { can } from "../rbac";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
@@ -903,8 +904,8 @@ export async function handleScripts(
       failedBindings: credentials.failedBindings,
       userConfig: credentials.userConfig,
       agentFs: credentials.agentFs,
-      apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
-      mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+      apiConnections: await getScriptApiConnectionDescriptors({ agentId: agent.id }),
+      mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     };
     let output: RunScriptOutput;
     let object: { id: string; stateVersion: number; destroyed: boolean } | undefined;
@@ -1132,8 +1133,8 @@ export async function handleScripts(
   // Must be matched before getScriptByIdRoute — its ["api", "scripts", null]
   // pattern would otherwise swallow the literal "type-defs" segment.
   if (typeDefsRoute.match(req.method, pathSegments)) {
-    const apiTypes = getScriptApiTypes();
-    const mcpTypes = getScriptMcpTypes();
+    const apiTypes = await getScriptApiTypes();
+    const mcpTypes = await getScriptMcpTypes();
     const appTypes = await getScriptAppTypes();
     typeDefsRoute.respond(res, 200, {
       sdkTypes: await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
@@ -1191,13 +1192,13 @@ export async function handleScripts(
         ? (JSON.parse(script.argsJsonSchema) as Record<string, unknown>)
         : null,
       sdkTypes: await scriptSdkTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypes({ agentId: agent.id }),
+        await getScriptMcpTypes({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
       stdlibTypes: await scriptStdlibTypesWithGeneratedApis(
-        getScriptApiTypes({ agentId: agent.id }),
-        getScriptMcpTypes({ agentId: agent.id }),
+        await getScriptApiTypes({ agentId: agent.id }),
+        await getScriptMcpTypes({ agentId: agent.id }),
         await getScriptAppTypes({ agentId: agent.id }),
       ),
     });
@@ -1235,7 +1236,7 @@ export async function handleScripts(
     // definition referencing it would otherwise slip between a check outside
     // the transaction and the DELETE, leaving the app with a dangling
     // scriptId that only an operator can edit out.
-    const outcome = await getDbClient().transaction(async () => {
+    const outcome = await getStorage().transaction(async () => {
       const existing = await getScript(identity);
       if (existing) {
         // An app that wires this script as a source or a script action would be

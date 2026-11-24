@@ -1,0 +1,86 @@
+---
+title: Postgres Storage Engine
+description: Run the API on Postgres 16 with pgvector instead of SQLite, set up the db-query reader role, and move an existing SQLite database
+agent:
+  offer: true
+  when: "Someone asks how to run the swarm on Postgres, or how to move from SQLite to Postgres"
+---
+
+The API server stores its data in SQLite by default. Set `DATABASE_URL` to a `postgres://` URL to run it on Postgres instead. The same black-box test suite passes on both engines. An install that does not set `DATABASE_URL` behaves as before.
+
+## When to choose Postgres
+
+- You run managed Postgres already and want its backups, monitoring and point-in-time recovery.
+- Your SQLite file is large, and long writes stall the API.
+
+Both engines run **one API process per database**. More than one API replica needs later work: the realtime bus, the workflow event bus, some locks, caches and timers live in one process.
+
+## Requirements
+
+- Postgres 16 with the pgvector extension (memory vector search).
+- A database with the `C` collation, so text order and case folding match SQLite:
+
+```sql
+CREATE DATABASE swarm TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';
+```
+
+The first start runs `CREATE EXTENSION IF NOT EXISTS vector`. If your role may not create extensions, run it once as a superuser.
+
+## Configuration
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | `postgres://user:pass@host:5432/swarm` selects Postgres. |
+| `DATABASE_PASSWORD` | Optional raw password of the `DATABASE_URL` role. The API URL-encodes it, so it may hold `/`, `@` or `#`. |
+| `DATABASE_QUERY_URL` | Optional URL of a read-only role for the `db-query` tool. |
+| `SWARM_DATA_DIR` | Directory of the encryption key file and the page-session secret. Default: the directory of `DATABASE_PATH`. |
+
+These are deployment settings: the dashboard cannot change them. Keep the API data volume on Postgres too, because it holds the encryption key.
+
+**Docker Compose:**
+
+```bash
+# .env: POSTGRES_PASSWORD=<strong password>
+docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml --env-file .env up -d
+```
+
+**Helm:** set `database.url`, or `database.existingSecret` with a `DATABASE_URL` key (and optional `DATABASE_QUERY_URL`). The chart turns the Litestream sidecar off on Postgres. Keep `api.replicas: 1`.
+
+**Connections and poolers:** one API process uses 1 connection for its one-process lock, up to 10 for queries, and up to 4 for the optional `db-query` reader. Allow at least 15 for the role. The lock is a session advisory lock, so the lock connection needs session affinity: behind PgBouncer or a cloud proxy, use session pooling for `DATABASE_URL`, or connect directly. Transaction pooling is not supported.
+
+## db-query reader role
+
+On Postgres, `db-query` runs agent SQL as a separate role with read access to the permitted tables only. Create it after the first start:
+
+```sql
+CREATE ROLE swarm_reader LOGIN PASSWORD '<password>';
+GRANT CONNECT ON DATABASE swarm TO swarm_reader;
+GRANT USAGE ON SCHEMA public TO swarm_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO swarm_reader;
+REVOKE SELECT ON oauth_authorizations, oauth_apps, oauth_pending, user_tokens,
+  session_tokens, script_apis, codex_oauth_device_flows FROM swarm_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE swarm IN SCHEMA public GRANT SELECT ON TABLES TO swarm_reader;
+```
+
+Then set `DATABASE_QUERY_URL` and restart. At start the API probes the role: it must not read the denied tables or write. If the probe fails, `db-query` is off and the log says why.
+
+## Move a SQLite database to Postgres
+
+`agent-swarm db-copy` copies the SQLite file into an empty Postgres database in one transaction, then compares the row count and a checksum of each table.
+
+Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API and run every custom dashboard against the copied data. Compare its results with SQLite. A query can pass the copy's planning check and still fail on a value in a stored row.
+
+1. Start the new version once on SQLite, so the file has the latest migrations. Stop it.
+2. Back up the SQLite file and the encryption key file.
+3. Run `agent-swarm db-copy --from <sqlite file> --to <postgres url>`. Expect `every count and checksum equal`.
+4. Set `DATABASE_URL`, keep the same encryption key, and start the API.
+
+If the copy reports values that Postgres cannot store (a NUL byte, invalid UTF-8, an invalid timestamp), it writes nothing. Fix those rows in the SQLite file and copy again. To roll back, unset `DATABASE_URL`: the API starts on the untouched SQLite file.
+
+## Differences between engines
+
+- Full-text search returns the same matches; ranked order can differ slightly.
+- JSON object keys can come back in another order.
+- Back up Postgres with your provider or `pg_dump`. Litestream is for SQLite only.
+
+The operator runbook, with troubleshooting and the rules for code changes, is [`runbooks/postgres.md`](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/postgres.md).

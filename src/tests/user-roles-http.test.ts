@@ -61,7 +61,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse) {
 
 beforeAll(async () => {
   initDb(":memory:");
-  ensureRbacSeedsSynced({ quiet: true });
+  await ensureRbacSeedsSynced({ quiet: true });
   leadId = (await createAgent({ name: "roles-lead", isLead: true, status: "idle" })).id;
   server = createServer((req, res) => {
     void dispatch(req, res).catch(() => res.writeHead(500).end());

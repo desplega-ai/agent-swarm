@@ -4,10 +4,10 @@ import { isRbacEnabled } from "../rbac";
 import type { ChecklistItem } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getAutomationSetupStates, setupIntegrationFlags } from "./automation-preflight";
-import { getDbClient } from "./db";
-import { sessionSummaryQuery } from "./db/session-tree";
+import { hasReadSession } from "./db/session-tree";
 import { hasOAuthTokens } from "./db-queries/oauth";
 import { getUserGrant } from "./rbac-roles";
+import { getStorage } from "./storage";
 
 type ChecklistRow = Omit<ChecklistItem, "meta" | "signal" | "done" | "editable"> & {
   meta: string | null;
@@ -101,30 +101,12 @@ function defaultRows(userId: string | null): ChecklistRow[] {
 
 /** Write paths only: reads merge the defaults in memory and take no write lock. */
 async function seedChecklist(userId: string | null): Promise<void> {
-  const db = getDbClient();
-  await db.run(
-    `INSERT OR IGNORE INTO checklist_items (id, scope, kind, label, href, sortOrder)
-     VALUES ('swarm:channel', 'swarm', 'channel', 'Connect a chat channel', '/integrations/channels', 0),
-            ('swarm:tool', 'swarm', 'tool', 'Connect work tools', '/integrations/tools', 1)`,
-  );
-  if (userId) {
-    await db.run(
-      `INSERT OR IGNORE INTO checklist_items
-       (id, scope, userId, kind, label, href, sortOrder, created_by, updated_by)
-       VALUES (?, 'user', ?, 'use_case', 'Plan your first use case', '/sessions', 2, ?, ?)`,
-      [`user:${userId}:use_case`, userId, userId, userId],
-    );
-  }
+  await getStorage().repos.tasks.seedChecklistDefaults(userId);
 }
 
 /** Stored rows plus any default not stored yet, in list order. */
 async function checklistRows(userId: string | null): Promise<ChecklistRow[]> {
-  const rows = await getDbClient().query<ChecklistRow>(
-    `SELECT c.*, CASE WHEN c.statusChangedBy LIKE 'lead:%' THEN 'Lead' ELSE u.name END AS statusChangedByName
-     FROM checklist_items c LEFT JOIN users u ON u.id = c.statusChangedBy
-     WHERE c.scope = 'swarm' OR (c.scope = 'user' AND c.userId = ?)`,
-    [userId],
-  );
+  const rows = (await getStorage().repos.tasks.listChecklistRows(userId)) as ChecklistRow[];
   const stored = new Set(rows.map((row) => row.id));
   const all = [...rows, ...defaultRows(userId).filter((row) => !stored.has(row.id))];
   // Same order as `ORDER BY sortOrder, createdAt, id`.
@@ -152,25 +134,10 @@ async function getUseCaseSignal(userId: string | null): Promise<boolean> {
   // Apps have keys but no creator column. See .non-audit-tables.
   // Bound the check to the user's 100 most recently created group keys.
   // The SQL LIMIT bounds the distinct keys read before the group-key filter.
-  const keys = await getDbClient().query<{ key: string }>(
-    `SELECT "key", MAX(createdAt) AS newest FROM (
-       SELECT "key", createdAt FROM scheduled_tasks WHERE created_by = ?
-       UNION ALL SELECT "key", createdAt FROM pages WHERE created_by = ?
-       UNION ALL SELECT "key", createdAt FROM workflows WHERE created_by = ?
-     ) GROUP BY "key" ORDER BY newest DESC, "key" LIMIT 500`,
-    [userId, userId, userId],
-  );
-  const groups = keys
-    .map(({ key }) => key)
-    .filter(isGroupKey)
-    .slice(0, 100);
+  const keys = await getStorage().repos.assets.listUserCreatedKeys(userId, 500);
+  const groups = keys.filter(isGroupKey).slice(0, 100);
   if (groups.length === 0) return false;
-  const query = sessionSummaryQuery({ keyPrefixes: groups, viewer: { userId, scope: "all" } });
-  const read = await getDbClient().get<{ found: number }>(
-    `SELECT 1 AS found FROM (${query.sql}) WHERE readState = 'read' LIMIT 1`,
-    query.params,
-  );
-  return read !== null;
+  return hasReadSession({ keyPrefixes: groups, viewer: { userId, scope: "all" } });
 }
 
 /** Each signal is computed at most once per call, and only when a row needs it. */
@@ -258,13 +225,14 @@ export async function mutateChecklist(
   actor: ChecklistActor,
   action: ChecklistAction,
 ): Promise<ChecklistItem> {
-  const id = await getDbClient().transaction(async (tx) => {
+  const repo = getStorage().repos.tasks;
+  const id = await getStorage().transaction(async () => {
     await seedChecklist(actor.userId);
     const id = action.action === "add" ? crypto.randomUUID() : action.id;
     const row =
       action.action === "add"
         ? action
-        : await tx.get<ChecklistRow>("SELECT * FROM checklist_items WHERE id = ?", [id]);
+        : ((await repo.findChecklistItem(id)) as ChecklistRow | null);
     if (!row) throw new ChecklistError("Checklist item not found", 404);
     if (row.scope === "swarm" && !actor.canEditSwarm) {
       throw new ChecklistError("Swarm checklist items require config.write.any", 403);
@@ -284,58 +252,34 @@ export async function mutateChecklist(
       const userId = action.scope === "user" ? actor.userId : null;
       const adapter = action.kind === "channel" ? action.meta?.adapter : undefined;
       if (typeof adapter === "string") {
-        const open = await tx.get<{ id: string }>(
-          `SELECT id FROM checklist_items
-           WHERE kind = 'channel' AND status = 'open' AND scope = ? AND userId IS ?
-             AND CASE WHEN json_valid(meta) THEN json_extract(meta, '$.adapter') END = ?`,
-          [action.scope, userId, adapter],
-        );
+        const open = await repo.findOpenChannelChecklistItem(action.scope, userId, adapter);
         if (open) throw new ChecklistError(`An open item already connects ${adapter}`, 409);
       }
-      const max = await tx.get<{ sortOrder: number }>(
-        "SELECT COALESCE(MAX(sortOrder), -1) + 1 AS sortOrder FROM checklist_items WHERE scope = ? AND userId IS ?",
-        [action.scope, userId],
-      );
-      await tx.run(
-        `INSERT INTO checklist_items
-         (id, scope, userId, kind, label, href, meta, sortOrder, createdAt, lastUpdatedAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          action.scope,
-          userId,
-          action.kind,
-          // Free text from users and the Lead: keep recognisable secrets out at rest.
-          scrubSecrets(action.label),
-          action.href ? scrubSecrets(action.href) : null,
-          action.meta ? scrubSecrets(JSON.stringify(action.meta)) : null,
-          max!.sortOrder,
-          now,
-          now,
-          actor.id,
-          actor.id,
-        ],
-      );
+      const sortOrder = await repo.nextChecklistSortOrder(action.scope, userId);
+      await repo.insertChecklistItem({
+        id,
+        scope: action.scope,
+        userId,
+        kind: action.kind,
+        // Free text from users and the Lead: keep recognisable secrets out at rest.
+        label: scrubSecrets(action.label),
+        href: action.href ? scrubSecrets(action.href) : null,
+        meta: action.meta ? scrubSecrets(JSON.stringify(action.meta)) : null,
+        sortOrder,
+        now,
+        actor: actor.id,
+      });
     } else if (action.action === "reorder") {
-      await tx.run(
-        "UPDATE checklist_items SET sortOrder = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?",
-        [action.sortOrder, now, actor.id, id],
-      );
+      await repo.setChecklistSortOrder(id, action.sortOrder, now, actor.id);
     } else {
       const status =
         action.action === "remove" ? "removed" : action.action === "done" ? "done" : "open";
-      await tx.run(
-        `UPDATE checklist_items SET status = ?, statusChangedAt = ?, statusChangedBy = ?,
-         statusReason = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?`,
-        [
-          status,
-          now,
-          actor.id,
-          action.action === "restore" || !action.reason ? null : scrubSecrets(action.reason),
-          now,
-          actor.id,
-          id,
-        ],
+      await repo.setChecklistStatus(
+        id,
+        status,
+        action.action === "restore" || !action.reason ? null : scrubSecrets(action.reason),
+        now,
+        actor.id,
       );
     }
     return id;
@@ -368,8 +312,5 @@ export async function markNudged(
 ): Promise<void> {
   await seedChecklist(userId);
   const now = new Date().toISOString();
-  await getDbClient().run(
-    "UPDATE checklist_items SET nudgedAt = ?, nudgedTaskId = ?, lastUpdatedAt = ? WHERE id = ?",
-    [now, taskId, now, itemId],
-  );
+  await getStorage().repos.tasks.markChecklistNudged(itemId, taskId, now);
 }

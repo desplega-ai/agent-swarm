@@ -1,5 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { detectVcsProvider } from "../vcs";
+
+const originalGitLabUrl = process.env.GITLAB_URL;
+
+beforeEach(() => {
+  delete process.env.GITLAB_URL;
+});
+
+afterEach(() => {
+  if (originalGitLabUrl === undefined) delete process.env.GITLAB_URL;
+  else process.env.GITLAB_URL = originalGitLabUrl;
+});
 
 describe("detectVcsProvider", () => {
   test("detects github.com URLs", () => {
@@ -42,6 +53,28 @@ describe("detectVcsProvider", () => {
     "ssh://git@GITLAB.example.com:2222/group/project.git",
   ])("detects GitLab hosts in HTTPS and SSH remotes: %s", (url) => {
     expect(detectVcsProvider(url)).toBe("gitlab");
+  });
+
+  test.each([
+    ["https://code.acme.io/group/project", "gitlab"],
+    ["ssh://git@CODE.acme.io:2222/group/project.git", "gitlab"],
+    ["git@Code.Acme.io:group/project.git", "gitlab"],
+    ["https://code.acme.io.example.com/group/project", null],
+    ["https://gitlab.acme.io/group/project", "gitlab"],
+  ] as const)("compares the configured GitLab hostname against %s", (url, expected) => {
+    process.env.GITLAB_URL = "https://CODE.acme.io:8443/gitlab/";
+    expect(detectVcsProvider(url)).toBe(expected);
+  });
+
+  test("keeps github.com recognized with the default GitLab URL configured", () => {
+    process.env.GITLAB_URL = "https://gitlab.com";
+    expect(detectVcsProvider("https://github.com/org/repo")).toBe("github");
+  });
+
+  test("ignores a malformed GitLab URL", () => {
+    process.env.GITLAB_URL = "https://[";
+    expect(detectVcsProvider("https://gitlab.acme.io/group/project")).toBe("gitlab");
+    expect(detectVcsProvider("https://code.acme.io/group/project")).toBeNull();
   });
 
   test("detects bitbucket.org URLs in https, ssh and .git forms", () => {

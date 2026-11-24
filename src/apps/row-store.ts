@@ -1,6 +1,7 @@
-import { deleteKv, getDbClient, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import { deleteKv, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
 import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
+import { getStorage } from "../be/storage";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -242,19 +243,13 @@ async function writeRow(
 }
 
 async function appExists(appId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ present: number }>(
-    "SELECT 1 AS present FROM apps WHERE id = ?",
-    [appId],
-  );
-  return row !== null;
+  return getStorage().repos.pages.appExists(appId);
 }
 
 async function currentModelDefinition(appId: string, model: string): Promise<ModelDef | null> {
-  const row = await getDbClient().get<{ definition: string }>(
-    "SELECT definition FROM apps WHERE id = ?",
-    [appId],
-  );
-  if (!row) return null;
+  const definitionJson = await getStorage().repos.pages.getAppDefinition(appId);
+  if (definitionJson === null) return null;
+  const row = { definition: definitionJson };
   try {
     const definition = AppDefinitionSchema.safeParse(
       upgradeAppDefinition(JSON.parse(row.definition)),
@@ -379,17 +374,16 @@ async function indexedRowIds(
     const definition = Object.hasOwn(columns, column) ? columns[column] : undefined;
     if (!definition || !isIndexed(definition)) continue;
     const prefix = appIndexKey(model, column, value, "");
-    const keys = await getDbClient().query<{ key: string }>(
-      `SELECT key FROM kv_entries
-          WHERE namespace = ? AND key >= ? AND key < ?
-            AND (expires_at IS NULL OR expires_at > ?)
-          ORDER BY key
-          LIMIT ?`,
-      [namespace, prefix, kvPrefixUpperBound(prefix)!, Date.now(), INDEX_LIST_MAX_KEYS + 1],
+    const keys = await getStorage().repos.kv.listLiveKeys(
+      namespace,
+      prefix,
+      kvPrefixUpperBound(prefix)!,
+      Date.now(),
+      INDEX_LIST_MAX_KEYS + 1,
     );
     if (keys.length > INDEX_LIST_MAX_KEYS) continue;
     if (best === null || keys.length < best.length) {
-      best = keys.map((entry) => entry.key.slice(entry.key.lastIndexOf("/") + 1));
+      best = keys.map((key) => key.slice(key.lastIndexOf("/") + 1));
     }
   }
   return best;
@@ -420,12 +414,10 @@ export async function listAppRows(
     const rows: AppRow[] = [];
     for (let start = 0; start < ids.length; start += INDEX_FETCH_BATCH) {
       const batch = ids.slice(start, start + INDEX_FETCH_BATCH);
-      const entries = await getDbClient().query<{ value: string; value_type: string }>(
-        `SELECT value, value_type FROM kv_entries
-            WHERE namespace = ? AND key IN (${batch.map(() => "?").join(",")})
-              AND (expires_at IS NULL OR expires_at > ?)
-            ORDER BY key`,
-        [namespace, ...batch.map((id) => rowKey(model, id)), Date.now()],
+      const entries = await getStorage().repos.kv.listLiveValues(
+        namespace,
+        batch.map((id) => rowKey(model, id)),
+        Date.now(),
       );
       for (const entry of entries) {
         if (entry.value_type !== "json") continue;
@@ -485,13 +477,13 @@ export async function listAllAppRowsForMigrationUnlocked(
   // skipped row on each page. Same rows, order and TTL filter as `listKv`.
   let afterKey = "";
   while (true) {
-    const page = await getDbClient().query<{ key: string; value: string; value_type: string }>(
-      `SELECT key, value, value_type FROM kv_entries
-          WHERE namespace = ? AND key >= ? AND key < ? AND key > ?
-            AND (expires_at IS NULL OR expires_at > ?)
-          ORDER BY key
-          LIMIT ?`,
-      [namespace, prefix, upper, afterKey, Date.now(), MIGRATION_KV_BATCH_SIZE],
+    const page = await getStorage().repos.kv.listLiveEntriesAfter(
+      namespace,
+      prefix,
+      upper,
+      afterKey,
+      Date.now(),
+      MIGRATION_KV_BATCH_SIZE,
     );
     for (const entry of page) {
       if (entry.value_type !== "json") continue;
@@ -659,13 +651,8 @@ const PURGE_BATCH_SIZE = 1000;
 async function purgeNamespace(appId: string): Promise<void> {
   const namespace = appsNamespace(appId);
   while (true) {
-    const result = await getDbClient().run(
-      `DELETE FROM kv_entries
-          WHERE namespace = ?
-            AND key IN (SELECT key FROM kv_entries WHERE namespace = ? ORDER BY key LIMIT ?)`,
-      [namespace, namespace, PURGE_BATCH_SIZE],
-    );
-    if (result.changes === 0) return;
+    const changes = await getStorage().repos.kv.deleteNamespaceBatch(namespace, PURGE_BATCH_SIZE);
+    if (changes === 0) return;
     await yieldToEventLoop();
   }
 }

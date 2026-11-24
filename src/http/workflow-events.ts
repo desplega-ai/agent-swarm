@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getWorkflowRun } from "../be/db";
 import { isReservedProviderEvent } from "../event-waits";
 import { isExtensionBridgedEvent } from "../extensions/post-bridge";
+import { WORKFLOW_EVENT_TRIGGER_NAMES } from "../types";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -89,12 +90,15 @@ const globalSignalRoute = route({
 
 const RESERVED_EVENT_MESSAGE = "Event name is reserved for provider webhooks";
 const SERVER_EVENT_MESSAGE = "Event name is reserved for server-emitted events";
+// Trigger names start runs from authenticated integration deliveries (the Jira webhook, ...).
+const TRIGGER_EVENT_NAMES: ReadonlySet<string> = new Set(WORKFLOW_EVENT_TRIGGER_NAMES);
 
 /** The refusal message for a name only the server may emit, or null when callers may emit it. */
 function reservedEventError(name: string): string | null {
   if (isReservedProviderEvent(name)) return RESERVED_EVENT_MESSAGE;
   // Extension handlers trust bridged payloads (approval outcomes, task and chat events).
   if (isExtensionBridgedEvent(name)) return SERVER_EVENT_MESSAGE;
+  if (TRIGGER_EVENT_NAMES.has(name)) return RESERVED_EVENT_MESSAGE;
   return null;
 }
 

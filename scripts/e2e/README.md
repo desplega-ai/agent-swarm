@@ -43,7 +43,7 @@ This file is the authoring guide.
 | `agent-sim.ts` | Simulated agent: polls `/api/poll` and settles tasks over HTTP. |
 | `http.ts` | `ctx.api` client, assertions (`expect`, `expectStatus`, `asRecord`, `asRecords`, `asString`), call recorder with latency. |
 | `mcp.ts` | `ctx.connectMcp(agentId)` over Streamable HTTP, tool-call recorder. |
-| `db.ts` | The only file allowed to import `bun:sqlite`. Read-only. |
+| `db.ts` | Owns `bun:sqlite`. Provides read-only assertions and prepares offline fixtures. |
 | `coverage.ts` | Route, tool and node-type coverage, manifest exclusions, flows, latency, the strict contract. |
 | `coverage-manifest.json` | Deliberate exclusions with reasons, pinned flows. |
 | `report.ts` | CLI options, result JSON and Markdown summary. |
@@ -82,8 +82,9 @@ Rules, enforced by the registry, the boundary check, or review:
    exports no scenario goes in `NON_SCENARIO_FILES` in `scenarios/registry.ts`.
 2. **Black box only.** Import from `../http`, `../mcp`, `../run`, `../report`, Bun and node
    builtins. Never from `src/`, `apps/`, `packages/`. `bun:sqlite` belongs to `db.ts`.
-3. **Seed through the API.** `ctx.db` is read-only and exists for assertions
-   (`SELECT ... FROM ...`). A write throws.
+3. **Seed through the API.** Use the read-only `ctx.db` for assertions. For state the API
+   cannot create, prepare a separate database fixture before boot. For example, the metrics
+   scenario gives `ctx.startFixtureSut` a fixture with historical task timestamps.
 4. **Assert the documented contract.** Check the status code `openapi.json` declares, the
    response shape, and the persisted effect. A `2xx` with no shape check is a smoke test,
    not coverage. Negative paths (401, 403, 404, 400 on bad input) are part of the contract.
@@ -136,6 +137,7 @@ routes only it would have reached uncovered, so the strict gate can still name t
 | 400-499 | scripts: scripts, script runs, connections, kv, db-query, internal script-run routes |
 | 500-599 | knowledge: memory, skills, prompt templates, pages, assets, apps, rooms |
 | 600-699 | platform: users, invites, keys, oauth, mcp servers, config, integrations, webhooks, repos, trackers, models, pricing, extensions, runtime, fs |
+| 9000-9499 | storage-engine parity: upgrade from a base-commit database, divergence, trigger and stress scenarios |
 | 9000+ | Reserved for ordering-sensitive tail scenarios |
 
 ### Shards
@@ -167,6 +169,7 @@ shard 4 runs in the state it had inside shard 3. Two rules follow:
 | `ctx.recordHttpCall(method, path, status)` | Count a raw `fetch`, WebSocket upgrade or SSE request toward route coverage. |
 | `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
 | `ctx.restartSut({ env })` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. `env` adds variables to that one process (a test-only crash point); the next restart drops them. |
+| `ctx.startDataCopy({ env })` | A second API on a new SQLite file (`source`). `copy()` stops it, runs `agent-swarm db-copy` into a new Postgres database and boots an API on the copy (`target`). It also returns read-only `sourceDb` and `targetDb`, `restartTarget(env)` (a later start of the API on the copy, for example with `POSTGRES_MIGRATIONS_DIR` set to a later chain) and `targetLog()`. Needs `E2E_POSTGRES_URL` on both engines. See `data-copy` and `data-copy-later-release`. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
 | `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. A scenario that proves a visible Slack change joins a visuals group (`groups: ["visuals-v2"]`, `"visuals-legacy"`) and marks each thread a reviewer must see: the Slack Visuals PR comment and the PR's `## Before / after` frames come from those marks. On the Chat SDK mock, use `flip.ctx.markThread` (that mock has its own journal). Mark the thread root, with a label that matches `^[a-z0-9-]+$`. |

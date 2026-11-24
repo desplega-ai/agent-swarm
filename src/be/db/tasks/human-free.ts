@@ -1,4 +1,5 @@
-import { getDbClient } from "../runtime";
+import { HUMAN_FREE_TAGS } from "@desplega/storage";
+import { getStorage } from "../../storage";
 
 /**
  * Structurally-human-free tasks: the swarm maintaining itself, with no human
@@ -34,62 +35,15 @@ import { getDbClient } from "../runtime";
  */
 
 /**
- * The tags the classification reads. The SQL below is generated from this list
- * and `tagWriteChangesHumanFree` reads it too, so the guard on tag writes cannot
- * drift from the classifier. Keep each entry to plain word characters: the SQL
- * matches it with `LIKE`, where `%` and `_` are wildcards.
+ * The tags the classification reads. The repository's SQL is generated from
+ * this list and `tagWriteChangesHumanFree` reads it too, so the guard on tag
+ * writes cannot drift from the classifier. The rule itself (base predicate,
+ * propagation to unattributed children) lives in the tasks repository.
  */
-export const HUMAN_FREE_TAGS = ["heartbeat"] as const;
+export { HUMAN_FREE_TAGS };
 
-const HUMAN_FREE_TAG_SQL = HUMAN_FREE_TAGS.map(
-  (tag) => `COALESCE(task.tags, '[]') LIKE '%"${tag}"%'`,
-).join("\n        OR ");
-
-/**
- * Non-propagated part of the classification, over the alias `task` (the row)
- * and `parent` (a LEFT JOIN of `agent_tasks` on `task.parentTaskId`).
- */
-const HUMAN_FREE_BASE_SQL = `(
-        COALESCE(task.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-        OR ${HUMAN_FREE_TAG_SQL}
-        OR (COALESCE(task.source, '') = 'schedule' AND task.requestedByUserId IS NULL)
-        OR (
-          task.parentTaskId IS NULL
-          AND COALESCE(task.source, '') = 'workflow'
-          AND task.requestedByUserId IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM workflow_runs run
-            WHERE run.id = task.workflowRunId
-              AND run.triggerType = 'schedule'
-              AND run.created_by IS NULL
-          )
-        )
-        OR (
-          COALESCE(task.source, '') = 'system'
-          AND parent.id IS NOT NULL
-          AND parent.requestedByUserId IS NULL
-        )
-      )`;
-
-/**
- * Whether a task stays unattributed, so the parent's classification propagates
- * to it: no requester, or one copied from the parent. Over the alias `task`.
- */
-const UNATTRIBUTED_SQL = "(task.requestedByUserId IS NULL OR task.requestedByUserIdInherited = 1)";
-
-/**
- * The classification as a 0/1 expression over the aliases `task` (the row) and
- * `parent` (see above). `parentFlag` is the SQL expression for the parent's
- * already-decided flag: the stored column for a task classified on its own, the
- * freshly computed value while reclassifying a tree top-down.
- */
-function humanFreeCase(parentFlag: string): string {
-  return `CASE
-        WHEN ${HUMAN_FREE_BASE_SQL} THEN 1
-        WHEN ${parentFlag} = 1 AND ${UNATTRIBUTED_SQL} THEN 1
-        ELSE 0
-      END`;
+function tasksRepo() {
+  return getStorage().repos.tasks;
 }
 
 function carriesHumanFreeTag(tagsJson: string | null | undefined): boolean {
@@ -130,24 +84,15 @@ export interface HumanFreeInput {
  * the backfill can never disagree. The parent must already be stored.
  */
 export async function classifyTaskHumanFree(input: HumanFreeInput): Promise<boolean> {
-  const row = await getDbClient().get<{ humanFree: number }>(
-    `WITH task(taskType, tags, source, requestedByUserId, requestedByUserIdInherited, parentTaskId, workflowRunId) AS (
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      )
-      SELECT ${humanFreeCase("parent.isHumanFree")} AS humanFree
-      FROM task
-      LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId`,
-    [
-      input.taskType ?? null,
-      input.tags ?? null,
-      input.source ?? null,
-      input.requestedByUserId ?? null,
-      input.requestedByUserIdInherited ? 1 : 0,
-      input.parentTaskId ?? null,
-      input.workflowRunId ?? null,
-    ],
-  );
-  return row?.humanFree === 1;
+  return tasksRepo().classifyHumanFree({
+    taskType: input.taskType ?? null,
+    tags: input.tags ?? null,
+    source: input.source ?? null,
+    requestedByUserId: input.requestedByUserId ?? null,
+    requestedByUserIdInherited: input.requestedByUserIdInherited === true,
+    parentTaskId: input.parentTaskId ?? null,
+    workflowRunId: input.workflowRunId ?? null,
+  });
 }
 
 /**
@@ -192,19 +137,11 @@ async function enqueueHumanFreeWork(
     );
     return;
   }
-  // `WHERE true` keeps the parser from reading ON CONFLICT as a join clause.
   // A repeat enqueue restarts the row: its subtree was reclassified again, so
   // the pages already walked are stale.
-  await getDbClient().run(
-    `INSERT INTO human_free_reclassify_queue (taskId, scope, afterRowid, hops)
-       SELECT value, ?, 0, ? FROM json_each(?) WHERE true
-       ON CONFLICT (taskId, scope) DO UPDATE SET
-         afterRowid = 0,
-         hops = MAX(hops, excluded.hops)`,
-    [scope, hops, JSON.stringify(taskIds)],
-  );
+  await tasksRepo().enqueueHumanFreeWork(taskIds, scope, hops);
   // afterCommit: a rolled-back mutation queues nothing, so it must not wake the drain.
-  getDbClient().afterCommit(() => queueListener?.());
+  getStorage().afterCommit(() => queueListener?.());
 }
 
 /**
@@ -232,90 +169,19 @@ async function reclassifyBatch(
   batchSize: number,
   hops: number,
 ): Promise<number> {
-  const client = getDbClient();
-
-  // The recursive walk over task ids alone, like the rule itself, so it still
-  // terminates on a parent cycle. LIMIT stops the recursion once the batch is full.
-  const affected = (
-    await client.query<{ id: string }>(
-      `WITH RECURSIVE affected(id) AS (
-          SELECT value FROM json_each(?)
-
-          UNION
-
-          SELECT task.id
-          FROM affected
-          JOIN agent_tasks task ON task.parentTaskId = affected.id
-          LIMIT ?
-        )
-        SELECT id FROM affected`,
-      [JSON.stringify(seedTaskIds), batchSize],
-    )
-  ).map((row) => row.id);
-
-  // The "WITH RECURSIVE affected" prefix is what the tests count subtree
-  // recomputations by. The unary plus in the recursive step keeps the planner
-  // from probing `task` by id once per batch member for every free row (a
-  // quadratic scan of the batch, ~100ms at 500 tasks); it walks the
-  // `parentTaskId` index instead, and the IN only filters what that finds.
-  const result = await client.run(
-    `WITH RECURSIVE affected(id) AS (
-        SELECT value FROM json_each(?)
-      ),
-      free(id) AS (
-        SELECT task.id
-        FROM agent_tasks task
-        LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
-        WHERE task.id IN (SELECT id FROM affected)
-          AND (
-            ${HUMAN_FREE_BASE_SQL}
-            OR (
-              parent.isHumanFree = 1
-              AND parent.id NOT IN (SELECT id FROM affected)
-              AND ${UNATTRIBUTED_SQL}
-            )
-          )
-
-        UNION
-
-        SELECT task.id
-        FROM free
-        JOIN agent_tasks task ON task.parentTaskId = free.id
-        WHERE +task.id IN (SELECT id FROM affected)
-          AND ${UNATTRIBUTED_SQL}
-      )
-      UPDATE agent_tasks
-      SET isHumanFree = CASE WHEN id IN (SELECT id FROM free) THEN 1 ELSE 0 END
-      WHERE id IN (SELECT id FROM affected)
-        AND isHumanFree != CASE WHEN id IN (SELECT id FROM free) THEN 1 ELSE 0 END`,
-    [JSON.stringify(affected)],
-  );
+  const repo = tasksRepo();
+  // Breadth first from the seeds; the walk stops once the batch is full.
+  const affected = await repo.humanFreeAffected(seedTaskIds, batchSize);
+  const changes = await repo.applyHumanFreeBatch(affected);
 
   // A short batch means the walk ran out of tree. A full one may have stopped
   // early, so find the affected tasks with a child outside the batch. EXISTS
   // stops at the first such child, so the cost tracks the batch, not the fan-out.
   if (affected.length >= batchSize) {
-    const unfinished = await client.query<{ id: string }>(
-      `WITH batch(id) AS (
-          SELECT value FROM json_each(?)
-        )
-        SELECT batch.id
-        FROM batch
-        WHERE EXISTS (
-          SELECT 1
-          FROM agent_tasks child
-          WHERE child.parentTaskId = batch.id
-            AND child.id NOT IN (SELECT id FROM batch)
-        )`,
-      [JSON.stringify(affected)],
-    );
-    await enqueueHumanFreeWork(
-      unfinished.map((row) => row.id),
-      "children",
-      hops,
-    );
+    const unfinished = await repo.humanFreeUnfinished(affected);
+    await enqueueHumanFreeWork(unfinished, "children", hops);
   }
-  return result.changes;
+  return changes;
 }
 
 /**
@@ -345,55 +211,33 @@ export async function reclassifyTaskHumanFree(
   return await reclassifyBatch(seeds.slice(0, batchSize), batchSize, 1);
 }
 
-interface QueueRow {
-  seq: number;
-  taskId: string;
-  scope: "self" | "children";
-  afterRowid: number;
-  hops: number;
-}
-
 /** One batch of queued work, in its own transaction. Null when the queue is empty. */
 async function drainOneBatch(batchSize: number): Promise<number | null> {
-  return await getDbClient().transaction(async (tx) => {
-    const head = await tx.get<QueueRow>(
-      "SELECT * FROM human_free_reclassify_queue ORDER BY seq LIMIT 1",
-    );
+  const repo = tasksRepo();
+  return await getStorage().transaction(async () => {
+    const head = await repo.humanFreeQueueHead();
     if (!head) return null;
 
     if (head.scope === "self") {
-      const rows = await tx.query<QueueRow>(
-        "SELECT * FROM human_free_reclassify_queue WHERE scope = 'self' ORDER BY seq LIMIT ?",
-        [batchSize],
-      );
+      const rows = await repo.humanFreeQueueSelfRows(batchSize);
       const seeds = rows.map((row) => row.taskId);
       const hops = Math.max(...rows.map((row) => row.hops)) + 1;
-      await tx.run(
-        "DELETE FROM human_free_reclassify_queue WHERE seq IN (SELECT value FROM json_each(?))",
-        [JSON.stringify(rows.map((row) => row.seq))],
-      );
+      await repo.deleteHumanFreeQueueRows(rows.map((row) => row.seq));
       return await reclassifyBatch(seeds, batchSize, hops);
     }
 
-    // Children are paged by rowid: the parentTaskId index is ordered by it, so
-    // each page is an index range scan however wide the parent is.
-    const page = await tx.query<{ id: string; position: number }>(
-      `SELECT id, rowid AS position
-       FROM agent_tasks
-       WHERE parentTaskId = ? AND rowid > ?
-       ORDER BY rowid
-       LIMIT ?`,
-      [head.taskId, head.afterRowid, batchSize],
-    );
+    // Children are paged by insertion order: each page is an index range scan
+    // however wide the parent is.
+    const page = await repo.listChildPage(head.taskId, head.afterRowid, batchSize);
     // Move the cursor before reclassifying: the batch may queue this very row
     // again (a parent cycle), and that restart must win.
     if (page.length < batchSize) {
-      await tx.run("DELETE FROM human_free_reclassify_queue WHERE seq = ?", [head.seq]);
+      await repo.deleteHumanFreeQueueRows([head.seq]);
     } else {
-      await tx.run("UPDATE human_free_reclassify_queue SET afterRowid = ? WHERE seq = ?", [
-        page[page.length - 1]?.position ?? head.afterRowid,
+      await repo.setHumanFreeQueueCursor(
         head.seq,
-      ]);
+        page[page.length - 1]?.position ?? head.afterRowid,
+      );
     }
     if (page.length === 0) return 0;
     return await reclassifyBatch(
@@ -414,10 +258,7 @@ export interface DrainResult {
 }
 
 export async function pendingHumanFreeReclassifications(): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM human_free_reclassify_queue",
-  );
-  return row?.count ?? 0;
+  return tasksRepo().countHumanFreeQueue();
 }
 
 /**
