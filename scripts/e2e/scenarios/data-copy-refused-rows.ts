@@ -1,5 +1,5 @@
-import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
+import { plantRefusedRows, repairRefusedRows } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -7,8 +7,6 @@ import type { Scenario } from "../run";
 // replication tool (Litestream) adds, a row whose parent is gone, a NUL byte in text, and
 // JSON with half of an emoji escape. The copy skips the tool's tables, names every refused
 // row in one run without a write, and copies the file once those rows are repaired.
-
-const LONE_SURROGATE_TAGS = '["cut \\ud83d"]';
 
 export const dataCopyRefusedRows: Scenario = {
   name: "data-copy-refused-rows",
@@ -37,28 +35,11 @@ export const dataCopyRefusedRows: Scenario = {
         taskIds.push(String(asRecord(created.json).id));
       }
       const [orphanTask, nulTask, surrogateTask] = taskIds as [string, string, string];
+      const planted = { orphan: orphanTask, nul: nulTask, surrogate: surrogateTask };
 
       const { cli, target } = await pair.copy({
         async beforeCopy({ sourcePath, runCopy }) {
-          const db = new Database(sourcePath);
-          try {
-            db.run("PRAGMA foreign_keys = OFF");
-            // Litestream creates both tables in every database it replicates.
-            db.run("CREATE TABLE _litestream_seq (id INTEGER PRIMARY KEY, seq INTEGER)");
-            db.run("CREATE TABLE _litestream_lock (id INTEGER)");
-            db.run("INSERT INTO _litestream_seq (id, seq) VALUES (1, 42)");
-            db.run(
-              `UPDATE agent_tasks SET "requestedByUserId" = 'user-that-was-deleted' WHERE id = ?`,
-              [orphanTask],
-            );
-            db.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["a\u0000b", nulTask]);
-            db.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", [
-              LONE_SURROGATE_TAGS,
-              surrogateTask,
-            ]);
-          } finally {
-            db.close();
-          }
+          plantRefusedRows(sourcePath, planted);
 
           const refused = await runCopy();
           const output = `${refused.stderr}\n${refused.stdout}`;
@@ -94,17 +75,7 @@ export const dataCopyRefusedRows: Scenario = {
           );
 
           // Repair the three rows, as an operator does. The Litestream tables stay.
-          const repair = new Database(sourcePath);
-          try {
-            repair.run("PRAGMA foreign_keys = OFF");
-            repair.run(`UPDATE agent_tasks SET "requestedByUserId" = NULL WHERE id = ?`, [
-              orphanTask,
-            ]);
-            repair.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["ab", nulTask]);
-            repair.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", ['["cut"]', surrogateTask]);
-          } finally {
-            repair.close();
-          }
+          repairRefusedRows(sourcePath, planted);
         },
       });
 

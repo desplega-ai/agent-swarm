@@ -385,3 +385,41 @@ export async function loadHistoricalTaskFixture(
     db.close();
   }
 }
+
+export type RefusedRowTasks = { orphan: string; nul: string; surrogate: string };
+
+/**
+ * Leaves a stopped SQLite file as a long-lived deployment does (scenario
+ * data-copy-refused-rows): the two tables Litestream adds to a replicated database, a task
+ * whose requesting user is gone, a NUL byte in a task output, and tags that hold half of an
+ * emoji escape. The API never writes these; a file gets them over months of use.
+ */
+export function plantRefusedRows(path: string, tasks: RefusedRowTasks): void {
+  const db = new Database(path);
+  try {
+    db.run("PRAGMA foreign_keys = OFF");
+    db.run("CREATE TABLE _litestream_seq (id INTEGER PRIMARY KEY, seq INTEGER)");
+    db.run("CREATE TABLE _litestream_lock (id INTEGER)");
+    db.run("INSERT INTO _litestream_seq (id, seq) VALUES (1, 42)");
+    db.run(`UPDATE agent_tasks SET "requestedByUserId" = 'user-that-was-deleted' WHERE id = ?`, [
+      tasks.orphan,
+    ]);
+    db.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["a\u0000b", tasks.nul]);
+    db.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", ['["cut \\ud83d"]', tasks.surrogate]);
+  } finally {
+    db.close();
+  }
+}
+
+/** The repair an operator makes for each planted row. The Litestream tables stay. */
+export function repairRefusedRows(path: string, tasks: RefusedRowTasks): void {
+  const db = new Database(path);
+  try {
+    db.run("PRAGMA foreign_keys = OFF");
+    db.run(`UPDATE agent_tasks SET "requestedByUserId" = NULL WHERE id = ?`, [tasks.orphan]);
+    db.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["ab", tasks.nul]);
+    db.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", ['["cut"]', tasks.surrogate]);
+  } finally {
+    db.close();
+  }
+}
