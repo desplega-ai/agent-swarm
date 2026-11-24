@@ -28,7 +28,9 @@ export function detectVcsProvider(url: string): VcsProvider | null {
       .match(/^[^@/\s:]+@([^:/\s]+):/)?.[1]
       ?.toLowerCase();
   }
-  if (hostname?.startsWith("gitlab.")) return "gitlab";
+  // Self-managed hosts may use a first label like gitlab-ee or acme-gitlab.
+  const hostLabel = hostname?.split(".", 1)[0];
+  if (hostLabel?.split("-").includes("gitlab")) return "gitlab";
   const gitlabUrl = process.env.GITLAB_URL;
   if (hostname && gitlabUrl && hostname === URL.parse(gitlabUrl)?.hostname.toLowerCase()) {
     return "gitlab";
