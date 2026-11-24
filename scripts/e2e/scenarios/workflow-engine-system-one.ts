@@ -7,8 +7,9 @@ import { sql } from "../db";
 // Extraction uses the existing Cloudflare provider against a local Workers AI mock.
 // The test-only origin override preserves the account path and Cloudflare response envelope.
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
-import { registerLead } from "./core-helpers";
+import { registerLead, retireAgent } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -72,7 +73,7 @@ export const workflowEngineSystemOne: Scenario = {
     const workerId = await registerWorker(ctx, "wf-s1");
     // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
     const leadId = await registerLead(ctx, "wf-mcp");
-    const connection = await ctx.connectMcp(leadId);
+    let connection: McpConnection | undefined;
     const cleanups: Array<() => Promise<void>> = [];
     const workflows: string[] = [];
     const track = async (name: string, definition: WorkflowDef) => {
@@ -82,6 +83,7 @@ export const workflowEngineSystemOne: Scenario = {
     };
 
     try {
+      connection = await ctx.connectMcp(leadId);
       // ── not configured: warn at save, refuse at run start ───────────────────
       const decisionOnly: WorkflowDef = { nodes: [decisionNode()] };
       const unconfigured = await ctx.api("POST", "/api/workflows", {
@@ -648,9 +650,9 @@ export const workflowEngineSystemOne: Scenario = {
       );
     } finally {
       ctx.llm.setSystemOneResponder(undefined);
+      await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
       for (const cleanup of cleanups.reverse()) await cleanup();
       for (const id of workflows) await ctx.api("DELETE", `/api/workflows/${id}`);
-      await connection.close();
     }
   },
 };

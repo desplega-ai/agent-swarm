@@ -156,7 +156,7 @@ const createSchedule = route({
     201: { description: "Schedule created", schema: ScheduledTaskSchema },
     400: { description: "Validation error" },
     409: { description: "Duplicate name" },
-    403: { description: "Caller is not a lead agent, operator, or user" },
+    403: { description: "Caller lacks permission to create schedules" },
   },
 });
 
@@ -179,7 +179,7 @@ const runScheduleNow = route({
     },
     400: { description: "Schedule is disabled" },
     404: { description: "Schedule not found" },
-    403: { description: "Caller is not a lead agent, operator, or user" },
+    403: { description: "Caller lacks permission to run the schedule" },
   },
 });
 
@@ -253,7 +253,7 @@ const updateSchedule = route({
     400: { description: "Validation error" },
     403: {
       description:
-        "Caller may not change schedules, or the deferral or target is owned by another agent",
+        "Caller lacks permission to change schedules, or the deferral or target is owned by another agent",
     },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
@@ -276,7 +276,7 @@ const patchSchedule = route({
     400: { description: "Validation error" },
     403: {
       description:
-        "Caller may not change schedules, or the deferral or target is owned by another agent",
+        "Caller lacks permission to change schedules, or the deferral or target is owned by another agent",
     },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
@@ -294,7 +294,7 @@ const deleteSchedule = route({
   responses: {
     200: { description: "Schedule deleted", schema: z.object({ success: z.literal(true) }) },
     404: { description: "Schedule not found" },
-    403: { description: "Caller is not a lead agent, operator, or user" },
+    403: { description: "Caller lacks permission to delete schedules" },
   },
 });
 

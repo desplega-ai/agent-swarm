@@ -476,6 +476,45 @@ export async function loadHistoricalTaskFixture(
   }
 }
 
+/** Restore historical workflow authorship in a private fixture, never through a worker write. */
+export async function loadHistoricalWorkflowFixture(input: {
+  creatorId: string;
+  editorId: string;
+  workflows: readonly {
+    id: string;
+    name: string;
+    definition: object;
+    historicalEdit: boolean;
+  }[];
+}): Promise<DbFixture> {
+  const fixture = await loadDbFixture("base-db");
+  const db = Database.deserialize(fixture.file);
+  try {
+    const insertAgent = db.prepare(
+      `INSERT INTO agents (id, name, status, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'offline', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    );
+    insertAgent.run(input.creatorId, "historical workflow creator");
+    insertAgent.run(input.editorId, "historical workflow editor");
+    const insertWorkflow = db.prepare(
+      `INSERT INTO workflows (id, name, definition, createdByAgentId, updatedByAgentId)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const row of input.workflows) {
+      insertWorkflow.run(
+        row.id,
+        row.name,
+        JSON.stringify(row.definition),
+        row.historicalEdit ? input.creatorId : null,
+        row.historicalEdit ? input.editorId : null,
+      );
+    }
+    return { ...fixture, name: "historical-workflow-edits", file: db.serialize() };
+  } finally {
+    db.close();
+  }
+}
+
 export type RefusedRowTasks = { orphan: string; nul: string; surrogate: string };
 
 /**

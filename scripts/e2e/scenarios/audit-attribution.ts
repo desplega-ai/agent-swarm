@@ -46,6 +46,18 @@ async function actor(ctx: ScenarioContext, agentId: string, label: string): Prom
   return { agentId, userId, taskId };
 }
 
+async function leadActor(
+  ctx: ScenarioContext,
+  label: string,
+  cleanup: { leads: string[]; tasks: string[] },
+): Promise<Actor> {
+  const agentId = await registerLead(ctx, `audit-${label}`);
+  cleanup.leads.push(agentId);
+  const who = await actor(ctx, agentId, label);
+  cleanup.tasks.push(who.taskId);
+  return who;
+}
+
 const onTask = (who: Actor) => ({ "X-Source-Task-Id": who.taskId });
 
 async function mcpAs<T>(
@@ -122,10 +134,11 @@ export const auditAttributionWorkflows: Scenario = {
   name: "audit-attribution-workflows",
   order: 345,
   async run(ctx) {
-    const a = await actor(ctx, await registerLead(ctx, "audit-wf-a"), "wf-a");
-    const b = await actor(ctx, await registerLead(ctx, "audit-wf-b"), "wf-b");
+    const cleanup = { leads: [] as string[], tasks: [] as string[] };
     const workflowIds: string[] = [];
     try {
+      const a = await leadActor(ctx, "wf-a", cleanup);
+      const b = await leadActor(ctx, "wf-b", cleanup);
       // ── HTTP create by A, MCP update by B, HTTP update with no person ───────────────────
       const posted = await ctx.api("POST", "/api/workflows", {
         agentId: a.agentId,
@@ -246,9 +259,12 @@ export const auditAttributionWorkflows: Scenario = {
         `GET /api/workflows/:id audit fields: ${read.text.slice(0, 400)}`,
       );
     } finally {
-      for (const id of workflowIds) await ctx.api("DELETE", `/api/workflows/${id}`);
-      await cancelQuietly(ctx, a.taskId);
-      await cancelQuietly(ctx, b.taskId);
+      try {
+        for (const id of workflowIds) await ctx.api("DELETE", `/api/workflows/${id}`);
+        for (const id of cleanup.tasks) await cancelQuietly(ctx, id);
+      } finally {
+        await Promise.all(cleanup.leads.map((id) => retireAgent(ctx, id)));
+      }
     }
   },
 };
@@ -257,10 +273,11 @@ export const auditAttributionSchedules: Scenario = {
   name: "audit-attribution-schedules",
   order: 356,
   async run(ctx) {
-    const a = await actor(ctx, await registerLead(ctx, "audit-sched-a"), "sched-a");
-    const b = await actor(ctx, await registerLead(ctx, "audit-sched-b"), "sched-b");
+    const cleanup = { leads: [] as string[], tasks: [] as string[] };
     const scheduleIds: string[] = [];
     try {
+      const a = await leadActor(ctx, "sched-a", cleanup);
+      const b = await leadActor(ctx, "sched-b", cleanup);
       // ── HTTP create by A, MCP update by B, HTTP PATCH with no person ───────────────────
       const posted = await ctx.api("POST", "/api/schedules", {
         agentId: a.agentId,
@@ -356,9 +373,12 @@ export const auditAttributionSchedules: Scenario = {
         "MCP patch-schedule with no source task",
       );
     } finally {
-      for (const id of scheduleIds) await ctx.api("DELETE", `/api/schedules/${id}`);
-      await cancelQuietly(ctx, a.taskId);
-      await cancelQuietly(ctx, b.taskId);
+      try {
+        for (const id of scheduleIds) await ctx.api("DELETE", `/api/schedules/${id}`);
+        for (const id of cleanup.tasks) await cancelQuietly(ctx, id);
+      } finally {
+        await Promise.all(cleanup.leads.map((id) => retireAgent(ctx, id)));
+      }
     }
   },
 };

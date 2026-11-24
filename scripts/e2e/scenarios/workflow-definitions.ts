@@ -3,8 +3,9 @@ import { sql } from "../db";
 // history, executor types, trigger payload validation, and the authoring errors each
 // surface answers with. Run behaviour lives in workflow-engine-*.
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
-import { registerLead } from "./core-helpers";
+import { registerLead, retireAgent } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -535,8 +536,9 @@ export const workflowDefinitions: Scenario = {
     // ── MCP: the same lifecycle through the tools ─────────────────────────────
     // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
     const leadId = await registerLead(ctx, "wf-mcp");
-    const connection = await ctx.connectMcp(leadId);
+    let connection: McpConnection | undefined;
     try {
+      connection = await ctx.connectMcp(leadId);
       const mcpName = `wf-mcp-${ctx.nonce}`;
       const createBad = await callToolErr(
         connection,
@@ -693,7 +695,7 @@ export const workflowDefinitions: Scenario = {
       await callToolErr(connection, "delete-workflow", { id: mcpId }, "not found");
       expectStatus(await ctx.api("GET", `/api/workflows/${mcpId}`), [404], "tool-deleted workflow");
     } finally {
-      await connection.close();
+      await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
     }
 
     for (const workflowId of created) {

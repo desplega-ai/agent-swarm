@@ -3,8 +3,9 @@
 // definition of a workflow that stores them, needs config.read.secrets. The
 // operator key has it; a non-lead worker does not. Dummy values only.
 import { asRecord, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
-import { registerLead } from "./core-helpers";
+import { registerLead, retireAgent } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -28,8 +29,8 @@ export const workflowInputRefs: Scenario = {
     const workerId = await registerWorker(ctx, "wf-input-refs");
     // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
     const leadId = await registerLead(ctx, "wf-mcp");
-    const connection = await ctx.connectMcp(leadId);
-    const workerConnection = await ctx.connectMcp(workerId);
+    let connection: McpConnection | undefined;
+    let workerConnection: McpConnection | undefined;
     // The operator key through the script bridge with an agent id nobody registered: the
     // operator, which passes the workflow write gate but holds no config.read.secrets as an agent.
     const ghostId = crypto.randomUUID();
@@ -58,6 +59,8 @@ export const workflowInputRefs: Scenario = {
     };
 
     try {
+      connection = await ctx.connectMcp(leadId);
+      workerConnection = await ctx.connectMcp(workerId);
       // Control: the operator key may store a secret ref, and the run resolves it.
       const created = await ctx.api("POST", "/api/workflows", {
         body: {
@@ -292,8 +295,7 @@ export const workflowInputRefs: Scenario = {
         "worker HTTP definition update over a param-borne secret",
       );
     } finally {
-      await connection.close();
-      await workerConnection.close();
+      await Promise.all([connection?.close(), workerConnection?.close(), retireAgent(ctx, leadId)]);
       for (const id of workflowIds) await deleteWorkflowQuietly(ctx, id);
       await dropSecret();
     }

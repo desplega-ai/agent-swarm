@@ -3,8 +3,9 @@ import { sql } from "../db";
 // read, list filters, full and partial update, run-now, delete, and every validation
 // each surface enforces. Far-future timings keep the real scheduler from firing them.
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
-import { registerLead } from "./core-helpers";
+import { registerLead, retireAgent } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -28,11 +29,12 @@ export const workflowSchedules: Scenario = {
     const idleId = await registerWorker(ctx, "wf-sched-idle");
     // Schedule tools are lead-only for agents, so the MCP calls go through a lead.
     const leadId = await registerLead(ctx, "wf-sched-mcp");
-    const connection = await ctx.connectMcp(leadId);
+    let connection: McpConnection | undefined;
     const schedules: string[] = [];
     const name = (suffix: string) => `e2e-${suffix}-${ctx.nonce}`;
 
     try {
+      connection = await ctx.connectMcp(leadId);
       const targetWorkflow = await createWorkflow(
         ctx,
         "sched-target",
@@ -877,10 +879,10 @@ export const workflowSchedules: Scenario = {
       expect(toolDeletedById.text.includes(tool.once), "delete-schedule by id");
       schedules.splice(schedules.indexOf(toolOnceId), 1);
     } finally {
+      await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
       // Disable what is left so a stray tick can never fire it.
       for (const id of schedules)
         await ctx.api("PATCH", `/api/schedules/${id}`, { body: { enabled: false } });
-      await connection.close();
     }
   },
 };

@@ -34,7 +34,7 @@ export const authzTemplatesConfig: Scenario = {
     const keyedWorkerMcp = await ctx.connectMcp(workerId);
     const leadMcp = await ctx.connectMcp(leadId);
     const cleanupSchedules: string[] = [];
-    const cleanupTemplates: string[] = [];
+    const cleanupTemplates = new Set<string>();
 
     const worker = (method: string, path: string, body?: Record<string, unknown>) =>
       ctx.api(method, path, { apiKey: token, body });
@@ -61,7 +61,7 @@ export const authzTemplatesConfig: Scenario = {
       );
       expectStatus(created, [200], "the lead token creates an override");
       const templateId = asString(asRecord(asRecord(created.json).template).id, "template id");
-      cleanupTemplates.push(templateId);
+      cleanupTemplates.add(templateId);
 
       const own = await worker(
         "PUT",
@@ -70,7 +70,7 @@ export const authzTemplatesConfig: Scenario = {
       );
       expectStatus(own, [200], "worker token PUT own prompt template");
       const ownId = asString(asRecord(asRecord(own.json).template).id, "worker template id");
-      cleanupTemplates.push(ownId);
+      cleanupTemplates.add(ownId);
       expectStatus(
         await worker("POST", `/api/prompt-templates/${ownId}/checkout`, { version: 1 }),
         [200],
@@ -130,13 +130,13 @@ export const authzTemplatesConfig: Scenario = {
         body: "lead mcp override",
       });
       await callToolOk(leadMcp, "delete-prompt-template", { id: templateId });
-      cleanupTemplates.pop();
+      cleanupTemplates.delete(templateId);
       const operatorTemplate = await ctx.api("PUT", "/api/prompt-templates", {
         agentId: workerId,
         body: override(leadId, "operator override"),
       });
       expectStatus(operatorTemplate, [200], "direct HTTP operator with worker header may upsert");
-      cleanupTemplates.push(
+      cleanupTemplates.add(
         asString(asRecord(asRecord(operatorTemplate.json).template).id, "operator template id"),
       );
 
@@ -323,7 +323,7 @@ export const authzTemplatesConfig: Scenario = {
         [200],
         "worker token deletes its own prompt template",
       );
-      cleanupTemplates.splice(cleanupTemplates.indexOf(ownId), 1);
+      cleanupTemplates.delete(ownId);
 
       // ── A user token: no grant is refused, a grant passes (RBAC on) ───────────────────────
       // The e2e API boots with RBAC off, which grants every user everything.

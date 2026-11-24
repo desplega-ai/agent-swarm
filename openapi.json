@@ -16326,7 +16326,7 @@
             }
           },
           "403": {
-            "description": "Caller is not a lead agent, operator, or user",
+            "description": "Caller lacks permission to reload config",
             "content": {
               "application/json": {
                 "schema": {
@@ -49786,7 +49786,7 @@
             }
           },
           "403": {
-            "description": "Caller is not a lead agent, operator, or user",
+            "description": "Caller lacks permission to create schedules",
             "content": {
               "application/json": {
                 "schema": {
@@ -50629,7 +50629,7 @@
             }
           },
           "403": {
-            "description": "Caller is not a lead agent, operator, or user",
+            "description": "Caller lacks permission to run the schedule",
             "content": {
               "application/json": {
                 "schema": {
@@ -51278,7 +51278,7 @@
             }
           },
           "403": {
-            "description": "Caller may not change schedules, or the deferral or target is owned by another agent",
+            "description": "Caller lacks permission to change schedules, or the deferral or target is owned by another agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -51703,7 +51703,7 @@
             }
           },
           "403": {
-            "description": "Caller may not change schedules, or the deferral or target is owned by another agent",
+            "description": "Caller lacks permission to change schedules, or the deferral or target is owned by another agent",
             "content": {
               "application/json": {
                 "schema": {
@@ -51777,7 +51777,7 @@
             }
           },
           "403": {
-            "description": "Caller is not a lead agent, operator, or user",
+            "description": "Caller lacks permission to delete schedules",
             "content": {
               "application/json": {
                 "schema": {

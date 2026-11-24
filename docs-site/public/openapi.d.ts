@@ -4520,7 +4520,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Caller is not a lead agent, operator, or user */
+                /** @description Caller lacks permission to reload config */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -21825,7 +21825,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Caller is not a lead agent, operator, or user */
+                /** @description Caller lacks permission to create schedules */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -21962,7 +21962,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Caller is not a lead agent, operator, or user */
+                /** @description Caller lacks permission to run the schedule */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -22231,7 +22231,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Caller may not change schedules, or the deferral or target is owned by another agent */
+                /** @description Caller lacks permission to change schedules, or the deferral or target is owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -22285,7 +22285,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Caller is not a lead agent, operator, or user */
+                /** @description Caller lacks permission to delete schedules */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -22446,7 +22446,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Caller may not change schedules, or the deferral or target is owned by another agent */
+                /** @description Caller lacks permission to change schedules, or the deferral or target is owned by another agent */
                 403: {
                     headers: {
                         [name: string]: unknown;

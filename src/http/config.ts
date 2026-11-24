@@ -355,7 +355,7 @@ const reloadConfigRoute = route({
       }),
     },
     500: { description: "Reload failed" },
-    403: { description: "Caller is not a lead agent, operator, or user" },
+    403: { description: "Caller lacks permission to reload config" },
   },
 });
 
