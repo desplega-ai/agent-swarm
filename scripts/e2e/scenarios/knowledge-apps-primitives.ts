@@ -257,12 +257,16 @@ export const knowledgeAppsPrimitives: Scenario = {
       created.push(String(asRecord(asRecord(borrowed.json).app).id));
       // biome-ignore lint/suspicious/noTemplateCurlyInString: $template interpolation syntax under test
       const appTemplate = "w=${/app/window}";
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: $template interpolation syntax under test
+      const bareAppTemplate = "w=${app/window}";
       for (const exported of [true, false]) {
         for (const [binding, read] of [
           ["deps", { $state: "/app/window" }],
           ["input", { $state: "/app/window" }],
           ["deps", { $template: appTemplate }],
           ["input", { $template: appTemplate }],
+          ["deps", { $template: bareAppTemplate }],
+          ["input", { $template: bareAppTemplate }],
         ] as const) {
           const definition = structuredClone(provider);
           const report = definition.elements.report;

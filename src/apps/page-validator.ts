@@ -40,15 +40,21 @@ interface StateRef {
   template?: boolean;
 }
 
-/** `${/path}` reads inside a `{ "$template": "..." }` object, as state refs. */
+/**
+ * `${path}` reads inside a `{ "$template": "..." }` object, as state refs. json-render resolves a
+ * bare `${app/x}` as `/app/x`, so a missing leading slash is added before the bans see it.
+ */
 function templateStateRefs(value: unknown, path: string): StateRef[] {
   if (!isPlainObject(value) || typeof value.$template !== "string") return [];
   const templatePath = appendPath(path, "$template");
-  return [...value.$template.matchAll(/\$\{(\/[^}]*)\}/g)].map((match) => ({
-    path: templatePath,
-    value: match[1]!,
-    template: true,
-  }));
+  return [...value.$template.matchAll(/\$\{([^}]+)\}/g)].map((match) => {
+    const read = match[1]!;
+    return {
+      path: templatePath,
+      value: read.startsWith("/") ? read : `/${read}`,
+      template: true,
+    };
+  });
 }
 
 export const ELEMENT_KEYS = new Set([
