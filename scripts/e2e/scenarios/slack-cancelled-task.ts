@@ -66,5 +66,16 @@ export const slackCancelledTask: Scenario = {
     await waitForTreeHeader(ctx, delegated.ts, "🧵 🔄 working");
     await cancel(ctx, childId);
     await waitForTreeHeader(ctx, delegated.ts, "🧵 🚫 stopped");
+
+    // The lead cancels leftover delegated work, then finishes its answer: still done.
+    const trimmed = await ask(ctx, "review the draft once");
+    ctx.markThread("cancelled-then-done", "C0GENERAL0", trimmed.ts);
+    await waitForEyes(ctx, trimmed.ts);
+    const trimmedAsk = String((await findSlackTask(ctx, trimmed.ts)).id);
+    await claim(ctx, leadId, trimmedAsk);
+    const leftover = await createChildTask(ctx, trimmedAsk, workerId, "second review round");
+    await cancel(ctx, leftover);
+    await finish(ctx, leadId, trimmedAsk, { status: "completed", output: "The draft is ready." });
+    await waitForTreeHeader(ctx, trimmed.ts, "🧵 ✅ done");
   },
 };
