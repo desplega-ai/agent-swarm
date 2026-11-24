@@ -4947,8 +4947,7 @@ export async function spawnProviderProcess(
     // runner-resolved value.
     reasoningEffort: reasoningEffortOverride,
   });
-  // Pi reports the model from its result. An unresolved configured model
-  // must not replace the last-used model before a session starts.
+  // Pi updates the last-used model when a result reports which model ran.
   if (initialModelReport && adapter.name !== "pi") {
     reportLatestModel(opts.apiUrl, opts.apiKey, opts.agentId, initialModelReport).catch((err) =>
       console.warn(`[runner] Failed to report latest model: ${err}`),
