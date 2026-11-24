@@ -463,6 +463,10 @@
       "description": "Model groups CRUD, the seeded tier groups, the shared name space with profiles and the delete guards; groups resolve at create, claim, pool and fallback hops",
       "scenarios": ["platformb-model-groups", "model-group-resolution"]
     },
+    "codex-structured-output": {
+      "description": "A real codex worker against the mock Responses API: the task outputSchema reaches the request in strict mode, a prose turn gets one reprompt that completes or fails the task, and a task without a schema sends none",
+      "scenarios": ["codex-structured-output"]
+    },
     "model-harness-guard": {
       "description": "Explicit model and harness pairs are validated on task create",
       "scenarios": ["model-harness-guard"]
