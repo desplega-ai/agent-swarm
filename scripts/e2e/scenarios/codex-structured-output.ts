@@ -23,6 +23,28 @@ const STRICT_SCHEMA = {
   additionalProperties: false,
 };
 
+/**
+ * The schema as JSON with object keys and `required` sorted. Postgres JSONB stores
+ * outputSchema keys shortest-first, and key order means nothing to a JSON schema.
+ */
+function canonical(value: unknown): string {
+  const sort = (node: unknown, key?: string): unknown => {
+    if (Array.isArray(node)) {
+      const items = node.map((item) => sort(item));
+      return key === "required" ? [...items].sort() : items;
+    }
+    if (node && typeof node === "object") {
+      return Object.fromEntries(
+        Object.keys(node)
+          .sort()
+          .map((k) => [k, sort((node as Record<string, unknown>)[k], k)]),
+      );
+    }
+    return node;
+  };
+  return JSON.stringify(sort(value));
+}
+
 function inputText(request: MockRequest): string {
   return JSON.stringify(asRecord(request.body).input ?? "");
 }
@@ -153,7 +175,7 @@ export const codexStructuredOutput: Scenario = {
           `codex request text.format is not strict json_schema: ${JSON.stringify(format)}`,
         );
         expect(
-          JSON.stringify(format.schema) === JSON.stringify(STRICT_SCHEMA),
+          canonical(format.schema) === canonical(STRICT_SCHEMA),
           `codex sent ${JSON.stringify(format.schema)}, expected the strict rewrite ${JSON.stringify(STRICT_SCHEMA)}`,
         );
       }
