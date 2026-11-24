@@ -6,4 +6,4 @@ coverageReporter = ["lcov"]
 coverageDir = "coverage"
 maxConcurrency = 1
 preload = ["./src/tests/preload.ts"]
-pathIgnorePatterns = ["apps/evals/**", "packages/ui-e2e/**", "packages/storage-postgres/**"]
+pathIgnorePatterns = ["apps/evals/**", "packages/ui-e2e/**"]
