@@ -73,27 +73,12 @@ export function minimalEnv(): Record<string, string> {
   return result;
 }
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("Failed to allocate a TCP port"));
-        return;
-      }
-      const port = address.port;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
-}
-
-// Ports a scenario binds minutes after boot (stand-ins the SUT's env names up front). A
-// kernel-picked port sits in the ephemeral range, where any later `listen(0)` in the runner
-// can take it first ("Failed to start server. Is port N in use?"). Below the range (Linux
-// starts at 32768, macOS at 49152) only an explicit bind can.
+// Ports bound some time after they are picked: the SUT's own API port (seconds of boot) and
+// stand-ins the SUT's env names up front (minutes). A kernel-picked port sits in the
+// ephemeral range, where any later `listen(0)` in the runner, or in a parallel test file,
+// can take it first. For the API port that is silent: /health then hits the other server,
+// and every request lands on it. Below the range (Linux starts at 32768, macOS at 49152)
+// only an explicit bind can.
 // shortcut: probes loopback only, so two runs sharing a host can still race; upgrade to a lock.
 const reserved = new Set<number>();
 async function reservedPort(): Promise<number> {
@@ -270,7 +255,7 @@ export async function startSut(
   prepare?: (sut: Sut) => Promise<void>,
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
-  const port = await freePort();
+  const port = await reservedPort();
   // The Codex device-login base is an env-only, loopback-only key, so the stand-in's port
   // is fixed at boot and the scenario binds its stub there (ctx.sutEnv).
   const codexDevicePort = await reservedPort();
