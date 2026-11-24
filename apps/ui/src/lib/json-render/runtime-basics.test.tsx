@@ -113,6 +113,14 @@ test("Form.initialValues: a refresh of another field keeps an unsaved edit", asy
     await render({ name: "original", threshold: 501, extra: 1 });
     expect(store.get("/forms/edit/threshold")).toBe(900);
     expect(store.get("/forms/edit/name")).toBe("my unsaved edit");
+    // A refresh through `app.action` clears the bound result while it runs:
+    // the empty pass neither blanks the fields nor turns the edit into a re-seed.
+    await render({ name: undefined, threshold: undefined });
+    expect(store.get("/forms/edit/name")).toBe("my unsaved edit");
+    expect(store.get("/forms/edit/threshold")).toBe(900);
+    await render({ name: "original", threshold: 501 });
+    expect(store.get("/forms/edit/name")).toBe("my unsaved edit");
+    expect(store.get("/forms/edit/threshold")).toBe(900);
     // Another row replaces both edits.
     await render({ name: "error rate", threshold: 5 });
     expect(store.get("/forms/edit/name")).toBe("error rate");

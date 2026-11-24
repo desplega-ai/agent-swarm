@@ -2877,6 +2877,10 @@ function FormComponent({ props }: { props: FormProps }) {
     for (const field of fields) {
       if (!Object.hasOwn(initialValues, field.name)) continue;
       const next = initialValues[field.name];
+      // A binding with no value yet (an `app.action` result clears while the
+      // action re-runs) is not a new prefill: skip it, or every refresh would
+      // blank the field and then re-seed it over the edit.
+      if (next === undefined) continue;
       const path = `${basePath}/${field.name}`;
       const wasSeeded = Object.hasOwn(seeded, field.name);
       // Re-seed an untouched field, or one whose own prefill changed (the form
