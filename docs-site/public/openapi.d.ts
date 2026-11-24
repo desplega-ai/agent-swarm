@@ -6130,6 +6130,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/codex-oauth/slots/{slot}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Persist refreshed Codex OAuth credentials for a pool slot
+         * @description Writes the global secret codex_oauth_<slot>. The caller must hold the slot's refresh lock (lockOwner). Open to registered agents so a worker can persist the tokens it just rotated; no other config key is writable here.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slot: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot> */
+                        lockOwner: string;
+                        credentials: {
+                            access: string;
+                            refresh: string;
+                            expires: number;
+                            accountId: string;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Credentials stored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            slot: number;
+                            key: string;
+                        };
+                    };
+                };
+                /** @description Caller is not the operator or a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller does not hold the slot's refresh lock */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Quarantine a Codex OAuth pool slot after a failed persist
+         * @description Deletes the global secret codex_oauth_<slot> so no caller replays a consumed refresh token. The caller must hold the slot's refresh lock (lockOwner).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slot: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot> */
+                        lockOwner: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Slot quarantined (deleted is false when no row existed) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            slot: number;
+                            key: string;
+                            deleted: boolean;
+                        };
+                    };
+                };
+                /** @description Caller is not the operator or a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller does not hold the slot's refresh lock */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/comb/review-batches": {
         parameters: {
             query?: never;

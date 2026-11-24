@@ -19992,6 +19992,218 @@
         }
       }
     },
+    "/api/codex-oauth/slots/{slot}/credentials": {
+      "put": {
+        "summary": "Persist refreshed Codex OAuth credentials for a pool slot",
+        "description": "Writes the global secret codex_oauth_<slot>. The caller must hold the slot's refresh lock (lockOwner). Open to registered agents so a worker can persist the tokens it just rotated; no other config key is writable here.",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "slot",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lockOwner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot>"
+                  },
+                  "credentials": {
+                    "type": "object",
+                    "properties": {
+                      "access": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "refresh": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "expires": {
+                        "type": "number"
+                      },
+                      "accountId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "access",
+                      "refresh",
+                      "expires",
+                      "accountId"
+                    ]
+                  }
+                },
+                "required": [
+                  "lockOwner",
+                  "credentials"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credentials stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "key"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not the operator or a registered agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Caller does not hold the slot's refresh lock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Quarantine a Codex OAuth pool slot after a failed persist",
+        "description": "Deletes the global secret codex_oauth_<slot> so no caller replays a consumed refresh token. The caller must hold the slot's refresh lock (lockOwner).",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "slot",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lockOwner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot>"
+                  }
+                },
+                "required": [
+                  "lockOwner"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slot quarantined (deleted is false when no row existed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "key",
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not the operator or a registered agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Caller does not hold the slot's refresh lock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/comb/review-batches": {
       "post": {
         "summary": "Send agent-fs comments to the swarm as one task",

@@ -302,6 +302,70 @@ export async function storeCodexOAuth(
   }
 }
 
+/**
+ * Persist credentials this caller just refreshed under the slot's refresh
+ * lock. Goes through `PUT /api/codex-oauth/slots/{slot}/credentials`, which
+ * accepts a registered agent's own key, unlike `PUT /api/config` (lead only
+ * for agents). The server refuses the write (409) unless `lockOwner` still
+ * holds the lock. Errors are redacted like {@link storeCodexOAuth}.
+ */
+export async function storeRefreshedCodexOAuth(
+  apiUrl: string,
+  apiKey: string,
+  creds: CodexOAuthCredentials,
+  slot: number,
+  lockOwner: string,
+): Promise<void> {
+  const key = codexOAuthKeyForSlot(slot);
+  const redact = (text: string) => redactTokens(text, [creds.access, creds.refresh]);
+  let res: Response;
+  try {
+    res = await fetch(`${apiUrl}/api/codex-oauth/slots/${slot}/credentials`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ lockOwner, credentials: creds }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to store ${key} config: ${redact(message)}`);
+  }
+
+  if (!res.ok) {
+    const text = redact(await res.text().catch(() => ""));
+    throw new Error(`Failed to store ${key} config: HTTP ${res.status} ${text}`);
+  }
+}
+
+/**
+ * Delete the slot's stored credentials while holding its refresh lock (see
+ * the quarantine note in {@link getValidCodexOAuth}). Uses the same
+ * agent-writable route as {@link storeRefreshedCodexOAuth}.
+ */
+export async function quarantineCodexOAuthSlot(
+  apiUrl: string,
+  apiKey: string,
+  slot: number,
+  lockOwner: string,
+): Promise<void> {
+  const res = await fetch(`${apiUrl}/api/codex-oauth/slots/${slot}/credentials`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ lockOwner }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Failed to quarantine ${codexOAuthKeyForSlot(slot)}: HTTP ${res.status} ${text}`,
+    );
+  }
+}
+
 export async function loadCodexOAuth(
   apiUrl: string,
   apiKey: string,
@@ -491,7 +555,7 @@ export async function getValidCodexOAuth(
       // replays it, triggering exactly the family revocation this lock
       // exists to prevent. Let the error propagate instead of swallowing it.
       try {
-        await storeCodexOAuth(apiUrl, apiKey, refreshed, slot);
+        await storeRefreshedCodexOAuth(apiUrl, apiKey, refreshed, slot, owner);
       } catch (persistErr) {
         // `lockedCreds.refresh` is already single-use/rotated with OpenAI —
         // it can never be exchanged again. If we can't durably store the new
@@ -501,7 +565,7 @@ export async function getValidCodexOAuth(
         // now-consumed old refresh token. Best-effort: a delete failure here
         // leaves the corrupted state, but we still surface the original
         // persist error so this call treats the slot as unusable.
-        await deleteCodexOAuth(apiUrl, apiKey, slot).catch((deleteErr) => {
+        await quarantineCodexOAuthSlot(apiUrl, apiKey, slot, owner).catch((deleteErr) => {
           console.error(
             `[codex-oauth] Failed to quarantine slot ${slot} after persist failure (non-fatal):`,
             deleteErr,

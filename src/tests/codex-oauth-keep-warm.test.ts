@@ -101,11 +101,13 @@ function installMockTransport(slots: Map<number, CodexOAuthCredentials>): void {
       }));
       return new Response(JSON.stringify({ configs }), { status: 200 });
     }
-    if (method === "PUT" && urlStr.includes("/api/config")) {
-      const body = JSON.parse((init?.body as string) ?? "{}") as { key: string; value: string };
-      const match = /^codex_oauth_(\d+)$/.exec(body.key);
-      if (match) slots.set(Number(match[1]), JSON.parse(body.value) as CodexOAuthCredentials);
-      return new Response(JSON.stringify({ id: body.key }), { status: 200 });
+    const slotWrite = /\/api\/codex-oauth\/slots\/(\d+)\/credentials$/.exec(urlStr);
+    if (method === "PUT" && slotWrite) {
+      const body = JSON.parse((init?.body as string) ?? "{}") as {
+        credentials: CodexOAuthCredentials;
+      };
+      slots.set(Number(slotWrite[1]), body.credentials);
+      return new Response(JSON.stringify({ slot: Number(slotWrite[1]) }), { status: 200 });
     }
     throw new Error(`Unexpected fetch in test: ${method} ${urlStr}`);
   };

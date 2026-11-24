@@ -96,6 +96,7 @@ import { handleChecklist } from "./checklist";
 import { handleCodexOAuthAccounts } from "./codex-oauth-accounts";
 import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
+import { handleCodexOAuthSlots } from "./codex-oauth-slots";
 import { handleComb } from "./comb";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
@@ -410,6 +411,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleOnboarding(req, res, pathSegments, queryParams),
         () => handleCodexOAuthDevice(req, res, pathSegments, queryParams),
         () => handleCodexOAuthAccounts(req, res, pathSegments, queryParams),
+        () => handleCodexOAuthSlots(req, res, pathSegments, queryParams),
         () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
         () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
         () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
