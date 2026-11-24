@@ -16,7 +16,7 @@ import {
   frameParams,
 } from "./app-context-bridge";
 import { useAppScopeId } from "./app-scope";
-import { OUTCOME_PARAM } from "./assemble";
+import { DEFINING_APP_PARAM, EXPOSE_READ_PARAM, OUTCOME_PARAM } from "./assemble";
 import { useJsonRenderTheme } from "./theme-scope";
 
 // Lazy: the page route imports the JSON page renderer, which imports this catalog.
@@ -43,6 +43,10 @@ export type PageFrameProps = {
   actions?: string[];
   /** App state paths the page may read (`appContext.state`). */
   expose?: string[];
+  /** Assembler-owned: the app a borrowed frame's actions run against. */
+  [DEFINING_APP_PARAM]?: string;
+  /** Assembler-owned: where each `expose` path is read, index-aligned. */
+  [EXPOSE_READ_PARAM]?: string[];
 };
 
 type Emit = (event: string) => void | Promise<void>;
@@ -94,11 +98,7 @@ function AppPageFrame({
     route: get("/route") ?? null,
     params: frameParams(props.params),
     theme: { mode: theme, preset: themePreset },
-    state: Object.fromEntries(
-      (Array.isArray(props.expose) ? props.expose : [])
-        .filter((path): path is string => typeof path === "string")
-        .map((path) => [path, get(path) ?? null]),
-    ),
+    state: exposedState(props, get),
   };
   const signature = JSON.stringify(snapshot);
   // Live reads for the long-lived listener below.
@@ -124,7 +124,17 @@ function AppPageFrame({
         calls += 1;
         const outcome = `/pageFrame/${callKey}/${calls}`;
         try {
-          await handler({ name, input, [OUTCOME_PARAM]: outcome });
+          // A borrowed frame runs its DEFINING app's action (the one its validator
+          // allowlisted), exactly like an `app.action` step the assembler tagged.
+          const definingApp = live.current.props[DEFINING_APP_PARAM];
+          await handler({
+            name,
+            input,
+            [OUTCOME_PARAM]: outcome,
+            ...(typeof definingApp === "string" && definingApp
+              ? { [DEFINING_APP_PARAM]: definingApp }
+              : {}),
+          });
         } catch {
           // A failed action halts its chain; the outcome slot still says why.
         }
@@ -191,6 +201,22 @@ function AppPageFrame({
       containerRef={containerRef}
     />
   );
+}
+
+/** The `expose`d state keyed by the authored path, read where the assembler pointed it. */
+function exposedState(
+  props: PageFrameProps,
+  get: (path: string) => unknown,
+): Record<string, unknown> {
+  const expose = Array.isArray(props.expose) ? props.expose : [];
+  const read = props[EXPOSE_READ_PARAM];
+  const state: Record<string, unknown> = {};
+  expose.forEach((path, index) => {
+    if (typeof path !== "string") return;
+    const at = Array.isArray(read) && typeof read[index] === "string" ? read[index] : path;
+    state[path] = get(at) ?? null;
+  });
+  return state;
 }
 
 /**

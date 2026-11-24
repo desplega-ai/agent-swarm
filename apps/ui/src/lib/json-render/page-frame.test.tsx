@@ -152,7 +152,11 @@ test("a first load that fails shows the error", async () => {
   expect(host.textContent).toContain("This page could not be loaded");
 });
 
-test("inside an app: params, app marker and app theme reach the frame, and the handshake bridges actions", async () => {
+// A borrowed frame (the assembler tagged `$app`) runs its defining app's actions.
+test.each([
+  ["own", undefined],
+  ["borrowed", "appA"],
+] as const)("inside an app (%s frame): params, app marker and app theme reach the frame, and the handshake bridges actions", async (_kind, definingApp) => {
   const actionCalls: Record<string, unknown>[] = [];
   const navigations: unknown[] = [];
   let store: ReturnType<typeof useStateStore> | null = null;
@@ -198,6 +202,7 @@ test("inside an app: params, app marker and app theme reach the frame, and the h
                         params: { traceId: "t1" },
                         actions: ["traceDetail"],
                         expose: ["/app/window"],
+                        ...(definingApp ? { $app: definingApp } : {}),
                       },
                       emit: (event) => {
                         emitted.push(event);
@@ -264,6 +269,8 @@ test("inside an app: params, app marker and app theme reach the frame, and the h
   expect((byId[2] as { status: string }).status).toBe("error");
   expect(actionCalls.length).toBe(1);
   expect(actionCalls[0]!.name).toBe("traceDetail");
+  expect(actionCalls[0]!.$app).toBe(definingApp);
+  expect("$app" in actionCalls[0]!).toBe(definingApp !== undefined);
   expect(navigations).toEqual([{ page: "span", params: { spanId: "s1" } }]);
   expect(emitted).toEqual(["message"]);
   expect(store!.get("/ui/waterfall/message")).toEqual({

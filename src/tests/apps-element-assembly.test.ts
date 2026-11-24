@@ -14,6 +14,7 @@ import {
   collectElementRefAppIds,
   DEFINING_APP_PARAM,
   ELEMENT_KEYS,
+  EXPOSE_READ_PARAM,
   MAX_ELEMENT_REF_DEPTH,
   REWRITE_COVERAGE,
   UI_STATE_COMPONENTS,
@@ -803,6 +804,60 @@ describe("assemblePageSpec — the `$app` routing marker is assembler-owned", ()
     };
     const { spec } = assembleElement(element, {}, true);
     expect(node(spec, "ref:r:btn")?.on.press[0].params[DEFINING_APP_PARAM]).toBe(NOTES_ID);
+  });
+});
+
+describe("assemblePageSpec — a PageFrame's appContext follows the element's app", () => {
+  const frame = {
+    mode: "bound",
+    root: "pf",
+    elements: {
+      pf: {
+        type: "PageFrame",
+        props: {
+          pageId: "8b8077e8b7a94dfc89c88636889a46ac",
+          id: "frame",
+          actions: ["shared"],
+          expose: ["/queries/q/data", "/app/window", "/ui/frame/message"],
+          $app: "99999999-9999-4999-8999-999999999999",
+          [EXPOSE_READ_PARAM]: ["/route"],
+        },
+      },
+    },
+  };
+
+  test("a borrowed frame runs the DEFINING app's actions and reads its query mirror", () => {
+    const { spec } = assembleElement(frame, {}, true);
+    const props = node(spec, "ref:r:pf")?.props;
+    // Without the marker, `appContext.action("shared")` would run the CONSUMER's
+    // same-named action, which the defining app's allowlist never checked.
+    expect(props[DEFINING_APP_PARAM]).toBe(NOTES_ID);
+    expect(props.expose).toEqual(["/queries/q/data", "/app/window", "/ui/frame/message"]);
+    expect(props[EXPOSE_READ_PARAM]).toEqual([
+      `/refs/${NOTES_ID}/queries/q/data`,
+      "/app/window",
+      "/ui/instances/r/frame/message",
+    ]);
+  });
+
+  test("a same-app frame or a page node carries no authored marker", () => {
+    const { spec } = assembleElement(frame);
+    const props = node(spec, "ref:r:pf")?.props;
+    expect(DEFINING_APP_PARAM in props).toBe(false);
+    // Only the instance-namespaced `/ui` id is rewritten here.
+    expect(props[EXPOSE_READ_PARAM]).toEqual([
+      "/queries/q/data",
+      "/app/window",
+      "/ui/instances/r/frame/message",
+    ]);
+
+    const consumer: AppRecordLike = {
+      id: CONSUMER_ID,
+      definition: { pages: { main: { root: "pf", elements: frame.elements as never } } },
+    };
+    const page = node(assemble(consumer, "main", []).spec, "pf")?.props;
+    expect(DEFINING_APP_PARAM in page).toBe(false);
+    expect(EXPOSE_READ_PARAM in page).toBe(false);
   });
 });
 

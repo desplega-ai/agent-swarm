@@ -595,6 +595,42 @@ function rewriteActionStep(step: Record<string, unknown>, scope: Scope): void {
   step.params = { ...current, formId: instanceId(scope.instanceKey, formId) };
 }
 
+/**
+ * Reserved PageFrame prop: the state path each `expose` entry is READ from,
+ * index-aligned with `expose` (which stays the authored key the page sees).
+ * Assembler-owned like `$app`; emitted only when a path was rewritten.
+ */
+export const EXPOSE_READ_PARAM = "$exposeRead";
+
+/**
+ * A PageFrame's `window.appContext` is the element's `app.action` /
+ * state reads by another route, so it takes the same rewrite:
+ * - `$app` names the app whose `actions` allowlist the validator checked (the
+ *   DEFINING app of a borrowed element), so `appContext.action` runs that
+ *   app's action, never a same-named one of the consuming app. Deleted
+ *   everywhere else, like an authored `$app` on an action step.
+ * - each `expose` path is read where the element's other bindings read it
+ *   (`/refs/<definingAppId>/queries/…`, instance-namespaced `/ui/…`); the page
+ *   still sees the authored path as the key.
+ */
+function rewritePageFrameBridge(
+  props: Record<string, unknown>,
+  rawProps: Record<string, unknown>,
+  scope: Scope,
+  state: AssemblyState,
+): void {
+  delete props[DEFINING_APP_PARAM];
+  delete props[EXPOSE_READ_PARAM];
+  if (scope.foreign) props[DEFINING_APP_PARAM] = scope.definingAppId;
+  if (!Array.isArray(rawProps.expose)) return;
+  const read = rawProps.expose.map((path) =>
+    typeof path === "string" ? rewriteStatePath(path, scope, state) : path,
+  );
+  if (read.some((path, index) => path !== (rawProps.expose as unknown[])[index])) {
+    props[EXPOSE_READ_PARAM] = read;
+  }
+}
+
 function rewriteStateNode(
   node: Record<string, unknown> & { $state: string },
   scope: Scope,
@@ -696,6 +732,7 @@ function emitNode(sourceId: string, ctx: EmitContext, state: AssemblyState): str
   ) {
     props.id = instanceId(ctx.scope.instanceKey, rawProps.id);
   }
+  if (raw.type === "PageFrame") rewritePageFrameBridge(props, rawProps, ctx.scope, state);
   node.props = props;
 
   if (Array.isArray(raw.children)) {
