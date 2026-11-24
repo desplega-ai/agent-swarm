@@ -1,7 +1,15 @@
-import { deleteKv, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import {
+  deleteKv,
+  getKv,
+  kvPrefixUpperBound,
+  listKv,
+  literalPrefixPattern,
+  upsertKv,
+} from "../be/db";
 import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
 import { getStorage } from "../be/storage";
+import { removeNamespaceFamilyRooms } from "../realtime/rooms";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -660,6 +668,26 @@ async function purgeNamespace(appId: string): Promise<void> {
   const namespace = appsNamespace(appId);
   while (true) {
     const changes = await getStorage().repos.kv.deleteNamespaceBatch(namespace, PURGE_BATCH_SIZE);
+    if (changes === 0) return;
+    await yieldToEventLoop();
+  }
+}
+
+/**
+ * Drops the app's page presence rooms (`presence:app:<appId>:<page>`): the
+ * live rooms first, so no pending flush writes a row back, then every
+ * persisted room row. Run it after the app row is gone, so no new join passes
+ * the app check.
+ */
+export async function purgeAppPresenceRooms(appId: string): Promise<void> {
+  const prefix = `presence:app:${appId}:`;
+  removeNamespaceFamilyRooms(prefix);
+  const pattern = literalPrefixPattern(prefix);
+  while (true) {
+    const changes = await getStorage().repos.kv.deleteNamespacesLikeBatch(
+      pattern,
+      PURGE_BATCH_SIZE,
+    );
     if (changes === 0) return;
     await yieldToEventLoop();
   }

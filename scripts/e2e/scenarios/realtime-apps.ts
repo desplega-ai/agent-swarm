@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -58,7 +59,8 @@ async function openDashboardSocket(baseUrl: string, ticket: string) {
  * App realtime over the existing socket: a dashboard ticket subscribes to
  * `app:<appId>` and gets a `rows` event after a row write; it joins the page's
  * presence room. Refused: a browser publish into the app channel, any op on an
- * app that does not exist, a non-default presence room.
+ * app that does not exist, a non-default presence room, a page the app does
+ * not declare. Deleting the app purges its stored presence rooms.
  */
 export const realtimeApps: Scenario = {
   name: "realtime-apps",
@@ -147,21 +149,54 @@ export const realtimeApps: Scenario = {
           schemaVersion: 1,
         });
         expect(other?.type === "error", `only the default presence room: ${JSON.stringify(other)}`);
+        // A well-formed document write, so the op allowlist is what refuses it.
         const write = await socket.request({
-          op: "update",
+          op: "change",
           namespace: `presence:app:${appId}:home`,
           name: "default",
-          update: "",
+          operations: [{ type: "set", path: ["title"], value: "x" }],
         });
         expect(
-          write?.type === "error",
+          write?.type === "error" && String(write.error).includes("only allow"),
           `presence rooms take no document writes: ${JSON.stringify(write)}`,
         );
+
+        // The page segment is client-chosen: a page the app does not declare gets no room.
+        for (let i = 0; i < 3; i++) {
+          const fake = await socket.request({
+            op: "join",
+            namespace: `presence:app:${appId}:nonexistent_page_${i}`,
+            name: "default",
+            schemaVersion: 1,
+          });
+          expect(
+            fake?.type === "error" && String(fake.error) === "app page not found",
+            `an undeclared page is refused: ${JSON.stringify(fake)}`,
+          );
+        }
       } finally {
         socket.ws.close();
       }
+      // The home room flushes its row (1 s delay); deleting the app removes it.
+      const roomRows = () =>
+        ctx.db.query<{ namespace: string }>(
+          sql`SELECT namespace FROM kv_entries WHERE namespace LIKE ${`presence:app:${appId}:%`}`,
+        );
+      const deadline = Date.now() + 5_000;
+      while (roomRows().length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      const stored = roomRows().map((row) => row.namespace);
+      expect(
+        JSON.stringify(stored) === JSON.stringify([`presence:app:${appId}:home`]),
+        `only the declared page's room is stored: ${JSON.stringify(stored)}`,
+      );
     } finally {
       await ctx.api("DELETE", `/api/apps/${appId}`);
     }
+    const left = ctx.db.query<{ namespace: string }>(
+      sql`SELECT namespace FROM kv_entries WHERE namespace LIKE ${`presence:app:${appId}:%`}`,
+    );
+    expect(left.length === 0, `deleting the app purges its presence rooms: ${JSON.stringify(left)}`);
   },
 };

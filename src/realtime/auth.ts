@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import { decodeAppDefinition } from "../apps/store";
 import { getAgentById, getTaskById } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
 import { getSessionRoot, sessionAccessForRoot } from "../be/session-shares";
@@ -46,7 +47,7 @@ const COMB_PRESENCE_OPERATIONS = new Set<RoomNamespaceOperation>(["join", "leave
 const SESSION_PRESENCE_NAMESPACE = /^presence:session:([A-Za-z0-9_-]{1,64})$/;
 const APP_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /** `presence:app:<appId>:<page>`: who has this app page open. */
-const APP_PRESENCE_NAMESPACE = new RegExp(`^presence:app:(${APP_ID}):[A-Za-z0-9_-]{1,64}$`);
+const APP_PRESENCE_NAMESPACE = new RegExp(`^presence:app:(${APP_ID}):([A-Za-z0-9_-]{1,64})$`);
 /** `app:<appId>`: server events for the app's open surfaces (`rows`). */
 const APP_CHANNEL_NAMESPACE = new RegExp(`^app:(${APP_ID})$`);
 const APP_CHANNEL_OPERATIONS = new Set<RoomNamespaceOperation>(["subscribe", "unsubscribe"]);
@@ -267,8 +268,25 @@ async function authorizeAppRealtime(
       return "App realtime requires the app.use permission";
     }
   }
-  if (!(await getStorage().repos.pages.appExists(appId))) return "app not found";
-  return null;
+  if (!presence) {
+    return (await getStorage().repos.pages.appExists(appId)) ? null : "app not found";
+  }
+  // The page is client-chosen: only a page the app declares gets a room, so a
+  // socket cannot mint persisted rooms under made-up page names.
+  const stored = await getStorage().repos.pages.getAppDefinition(appId);
+  if (stored === null) return "app not found";
+  return appDeclaresPage(stored, presence[2]!) ? null : "app page not found";
+}
+
+function appDeclaresPage(stored: string, page: string): boolean {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(stored);
+  } catch {
+    return false;
+  }
+  const pages = (decodeAppDefinition(raw).definition as { pages?: unknown }).pages;
+  return typeof pages === "object" && pages !== null && Object.hasOwn(pages, page);
 }
 
 /**
