@@ -1098,6 +1098,13 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   setRef.current = set;
   // Set while the slot holds the empty seed written before a bound `defaultValue` loaded.
   const awaitingDefaultRef = useRef(false);
+  // `/ui/<id>/search`: the typed text, debounced, so a `watch` can load options on type.
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(searchTimerRef.current), []);
+  const onSearchChange = (text: string) => {
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setRef.current(`/ui/${props.id}/search`, text), 250);
+  };
   useEffect(() => {
     const current = getRef.current(path);
     const seed = props.defaultValue;
@@ -1146,6 +1153,7 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
       searchPlaceholder: props.searchPlaceholder,
       searchable,
       contentAttrs: themeAttr,
+      onSearchChange,
       triggerClassName: cn(
         "w-full min-w-0",
         hasValue && clearable ? "[&>span:first-child]:mr-7" : undefined,
@@ -2852,6 +2860,18 @@ function FormComponent({ props }: { props: FormProps }) {
   // — `app.mutate` sets `/forms/<id>` to `{}` after a create — re-renders.
   const readField = (name: string): unknown => getByPath(state, `${basePath}/${name}`);
 
+  const initialValues = props.initialValues as Record<string, unknown> | undefined;
+  const initialSignature = initialValues ? JSON.stringify(initialValues) : "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed only when the prefill changes by value, not on every poll re-render
+  useEffect(() => {
+    if (!initialValues) return;
+    for (const field of fields) {
+      if (Object.hasOwn(initialValues, field.name)) {
+        set(`${basePath}/${field.name}`, initialValues[field.name]);
+      }
+    }
+  }, [initialSignature, basePath]);
+
   // Mutate failures scoped to THIS form: the `app.mutate` handler writes them
   // to `/forms/<id>/$error` (keyed by the injected `formId`) instead of the
   // page-level banner. `$` keeps the slot out of the field-value namespace.
@@ -4391,6 +4411,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
     </span>
   ),
   Skeleton: ({ props }) => <SkeletonComponent props={props} />,
+  OnEnter: ({ props, emit }) => <OnEnterRunner deps={props.deps} emit={emit} />,
   Spinner: ({ props }) => (
     // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a busy indicator
     <span role="status" className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -4429,3 +4450,19 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
   PageFrame: ({ props }) => <PageFrameComponent props={props} />,
 };
+
+/**
+ * `OnEnter`: emits `enter` on mount and whenever `deps` changes by value.
+ * `emit` runs the chain without the cancel flag `watch` has, so a state write
+ * by one step never stops the next.
+ */
+function OnEnterRunner({ deps, emit }: { deps: unknown; emit: (event: string) => void }) {
+  const signature = JSON.stringify(deps ?? null);
+  const emitRef = useRef(emit);
+  emitRef.current = emit;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger; emit is read live through the ref
+  useEffect(() => {
+    emitRef.current("enter");
+  }, [signature]);
+  return null;
+}

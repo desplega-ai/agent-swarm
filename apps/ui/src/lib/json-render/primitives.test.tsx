@@ -121,6 +121,15 @@ test("expressions: arithmetic, min/max, split/join/length", () => {
   expect(evaluateExpression("$join", [["a", null, "b"], "-"])).toBe("a--b");
   expect(evaluateExpression("$length", ["abc"])).toBe(3);
   expect(evaluateExpression("$length", [null])).toBe(0);
+  expect(evaluateExpression("$eq", ["running", "running"])).toBe(true);
+  expect(evaluateExpression("$eq", ["5", 5])).toBe(true);
+  expect(evaluateExpression("$eq", ["a", "b"])).toBe(false);
+  expect(evaluateExpression("$eq", [null, 0])).toBe(false);
+  expect(evaluateExpression("$neq", ["abc", "def"])).toBe(true);
+  expect(evaluateExpression("$not", [0])).toBe(true);
+  expect(evaluateExpression("$not", ["x"])).toBe(false);
+  expect(evaluateExpression("$if", [true, "yes", "no"])).toBe("yes");
+  expect(evaluateExpression("$if", [false, "yes"])).toBeUndefined();
 });
 
 test("an expression over a $chain operand waits for the chain runner", () => {

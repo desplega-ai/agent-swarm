@@ -313,6 +313,10 @@ const EXPRESSION_ARITY: Record<string, readonly [number, number]> = {
   $split: [1, 3],
   $join: [1, 2],
   $length: [1, 1],
+  $eq: [2, 2],
+  $neq: [2, 2],
+  $not: [1, 1],
+  $if: [2, 3],
 };
 
 /** The operator of a `{ "$op": [...] }` expression object, or null. */
@@ -801,7 +805,10 @@ function validateStateRef(
   if (ref.write) {
     return issue(ref.path, `only page-local /local/<name> state is writable (got "${ref.value}")`);
   }
-  if (ref.value === "/route/page") return null;
+  // The whole route (`{ page, params }`) or params object: `OnEnter.deps` re-runs on any change.
+  if (ref.value === "/route/page" || ref.value === "/route" || ref.value === "/route/params") {
+    return null;
+  }
   const routeParam = /^\/route\/params\/([^/]+)$/.exec(ref.value);
   if (routeParam) {
     const name = routeParam[1]!;

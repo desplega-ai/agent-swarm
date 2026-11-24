@@ -28,6 +28,7 @@
     "Kbd",
     "Skeleton",
     "Spinner",
+    "OnEnter",
     "AvatarStack",
     "Section",
     "Chips",
@@ -1675,6 +1676,17 @@
         "additionalProperties": false
       }
     },
+    "OnEnter": {
+      "description": "Renders nothing. Runs its `on.enter` chain once when mounted, and again each time the resolved `deps` value changes (`{ \"$state\": \"/route\" }` re-runs it on every page or route-param change). Unlike `watch`, a state write by a step does not cancel the remaining steps.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "deps": {}
+        },
+        "additionalProperties": false
+      }
+    },
     "AvatarStack": {
       "description": "Overlapping initials avatars for `users` (display names), up to `max` (default 4) then a `+N` count; hover lists every name.",
       "props": {
@@ -2595,6 +2607,13 @@
           },
           "submitLabel": {
             "type": "string"
+          },
+          "initialValues": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
           },
           "onSubmit": {
             "type": "array",
