@@ -136,8 +136,8 @@ One command makes a box (8 vCPU, 16 GB, Docker, firewall 22/80/443 only), two DN
    bash $S/stack.sh up $RUN onb-qa-$RUN                                  # credentials added later in /setup
    bash $S/stack.sh up $RUN demo-swarm --key CLAUDE_CODE_OAUTH_TOKEN --telemetry-env demo --keep
    # A commit of main on PostgreSQL, with local embeddings and no MinIO (a trial swarm that stays up):
-   bash $S/stack.sh up pg-swarm pg-swarm --ref 7dce4fa2c7 --overlay postgres --overlay tei --fs-storage local \
-     --agents "lead worker-1 worker-2" --telemetry-env pg-trial --keep
+   bash $S/stack.sh up $RUN trial-swarm --ref <commit> --overlay postgres --overlay tei --fs-storage local \
+     --agents "lead worker-1 worker-2" --telemetry-env trial --keep
    ```
    Options: `--fs-sub` (default `<sub>-fs`), `--version` (default latest release), `--agents "lead worker-1 worker-2"` (any agent service in `docker-compose.example.yml`; `worker-1` is `official/coder`), `--key KEY` (repeat; copies from the env file without printing). Re-running `up` on the same run is safe: it keeps the box, the DNS records, `API_KEY`, the generated passwords and pushed keys, and applies changed options. A second `up` with the same options recreates no container.
    Options for a build that is not a release:
