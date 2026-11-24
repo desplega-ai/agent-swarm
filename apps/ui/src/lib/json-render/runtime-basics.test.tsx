@@ -56,13 +56,13 @@ test("Form.initialValues prefills its fields and re-seeds when the bound row cha
     { name: "name", label: "Name" },
     { name: "threshold", label: "Threshold", kind: "number" },
   ];
-  const render = (initialValues: Record<string, unknown>) =>
+  const render = (initialValues: Record<string, unknown>, resetKey = "a") =>
     act(async () =>
       root.render(
         <QueryClientProvider client={new QueryClient()}>
           <StateProvider store={store}>
             <ActionProvider handlers={{}}>
-              <Form props={{ id: "edit", fields, initialValues, onSubmit: [] }} />
+              <Form props={{ id: "edit", fields, initialValues, resetKey, onSubmit: [] }} />
             </ActionProvider>
           </StateProvider>
         </QueryClientProvider>,
@@ -77,24 +77,24 @@ test("Form.initialValues prefills its fields and re-seeds when the bound row cha
   await render({ name: "p95 latency", threshold: 500, ignored: true });
   expect(store.get("/forms/edit/name")).toBe("typed");
   // Another row re-seeds.
-  await render({ name: "error rate", threshold: 5 });
+  await render({ name: "error rate", threshold: 5 }, "b");
   expect(store.get("/forms/edit/name")).toBe("error rate");
   await act(async () => root.unmount());
 });
 
-test("Form.initialValues: a refresh of another field keeps an unsaved edit", async () => {
+test("Form.initialValues: a same-row refresh keeps unsaved edits", async () => {
   const Form = swarmComponents.Form as Renderable;
   const store = createStateStore({});
   const root = mountRoot();
   const client = new QueryClient();
   const fields = [{ name: "name" }, { name: "threshold", kind: "number" }];
-  const render = (initialValues: Record<string, unknown>) =>
+  const render = (initialValues: Record<string, unknown>, resetKey = "a") =>
     act(async () =>
       root.render(
         <QueryClientProvider client={client}>
           <StateProvider store={store}>
             <ActionProvider handlers={{}}>
-              <Form props={{ id: "edit", fields, initialValues, onSubmit: [] }} />
+              <Form props={{ id: "edit", fields, initialValues, resetKey, onSubmit: [] }} />
             </ActionProvider>
           </StateProvider>
         </QueryClientProvider>,
@@ -121,9 +121,41 @@ test("Form.initialValues: a refresh of another field keeps an unsaved edit", asy
     await render({ name: "original", threshold: 501 });
     expect(store.get("/forms/edit/name")).toBe("my unsaved edit");
     expect(store.get("/forms/edit/threshold")).toBe(900);
+    // The server changes the edited field itself: the edit still wins.
+    await render({ name: "server changed name", threshold: 501 });
+    expect(store.get("/forms/edit/name")).toBe("my unsaved edit");
     // Another row replaces both edits.
-    await render({ name: "error rate", threshold: 5 });
+    await render({ name: "error rate", threshold: 5 }, "b");
     expect(store.get("/forms/edit/name")).toBe("error rate");
+    expect(store.get("/forms/edit/threshold")).toBe(5);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+test("Form.resetKey: a row switch drops the edit even when the new row shares the seeded value", async () => {
+  const Form = swarmComponents.Form as Renderable;
+  const store = createStateStore({});
+  const root = mountRoot();
+  const client = new QueryClient();
+  const fields = [{ name: "name" }, { name: "threshold", kind: "number" }];
+  const render = (initialValues: Record<string, unknown>, resetKey: string) =>
+    act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <StateProvider store={store}>
+            <ActionProvider handlers={{}}>
+              <Form props={{ id: "edit", fields, initialValues, resetKey, onSubmit: [] }} />
+            </ActionProvider>
+          </StateProvider>
+        </QueryClientProvider>,
+      ),
+    );
+  try {
+    await render({ name: "original", threshold: 500 }, "a");
+    await act(async () => store.set("/forms/edit/name", "my unsaved edit"));
+    await render({ name: "original", threshold: 5 }, "b");
+    expect(store.get("/forms/edit/name")).toBe("original");
     expect(store.get("/forms/edit/threshold")).toBe(5);
   } finally {
     await act(async () => root.unmount());

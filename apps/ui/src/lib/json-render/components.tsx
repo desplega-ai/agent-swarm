@@ -2862,16 +2862,20 @@ function FormComponent({ props }: { props: FormProps }) {
 
   const initialValues = props.initialValues as Record<string, unknown> | undefined;
   const initialSignature = initialValues ? JSON.stringify(initialValues) : "";
-  // The value each field was last seeded with, per form path. A field whose
-  // current value differs from it holds an unsaved edit.
-  const seededRef = useRef<{ path: string; values: Record<string, unknown> }>({
-    path: basePath,
+  const resetKey = props.resetKey as string | number | undefined;
+  // The value each field was last seeded with, for one form path and reset
+  // key. A field whose current value differs from it holds an unsaved edit.
+  const seededRef = useRef<{ scope: string; values: Record<string, unknown> }>({
+    scope: "",
     values: {},
   });
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed only when the prefill changes by value, not on every poll re-render
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed only when the prefill or its row changes by value, not on every poll re-render
   useEffect(() => {
     if (!initialValues) return;
-    if (seededRef.current.path !== basePath) seededRef.current = { path: basePath, values: {} };
+    // A new `resetKey` (the form now edits another row) forgets every seed, so
+    // each field re-seeds and drops the previous row's edits.
+    const scope = JSON.stringify([basePath, resetKey ?? null]);
+    if (seededRef.current.scope !== scope) seededRef.current = { scope, values: {} };
     const seeded = seededRef.current.values;
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     for (const field of fields) {
@@ -2882,17 +2886,15 @@ function FormComponent({ props }: { props: FormProps }) {
       // blank the field and then re-seed it over the edit.
       if (next === undefined) continue;
       const path = `${basePath}/${field.name}`;
-      const wasSeeded = Object.hasOwn(seeded, field.name);
-      // Re-seed an untouched field, or one whose own prefill changed (the form
-      // now shows another row). A refresh that changes only other fields keeps
-      // the edit.
-      const untouched = !wasSeeded || same(get(path), seeded[field.name]);
-      if (untouched || !same(next, seeded[field.name])) {
+      // Same row: a refresh re-seeds only untouched fields, so an edit survives
+      // even when the server value of that field changed.
+      const untouched = !Object.hasOwn(seeded, field.name) || same(get(path), seeded[field.name]);
+      if (untouched) {
         set(path, next);
         seeded[field.name] = next;
       }
     }
-  }, [initialSignature, basePath]);
+  }, [initialSignature, basePath, resetKey]);
 
   // Mutate failures scoped to THIS form: the `app.mutate` handler writes them
   // to `/forms/<id>/$error` (keyed by the injected `formId`) instead of the

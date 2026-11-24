@@ -2615,6 +2615,9 @@
             },
             "additionalProperties": {}
           },
+          "resetKey": {
+            "type": ["string", "number"]
+          },
           "onSubmit": {
             "type": "array",
             "items": {

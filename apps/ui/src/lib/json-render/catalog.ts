@@ -1120,10 +1120,15 @@ const formProps = z.object({
   submitLabel: z.string().optional(),
   /**
    * Prefill: `{ <field>: value }`, usually bound to a row (`{ "$state": "/queries/q/data/0" }`).
-   * Written into the fields on mount and again whenever the resolved value changes, so an
-   * edit dialog opened for another row shows that row.
+   * Written into the fields on mount; a later change re-seeds only fields the user has not
+   * edited. Set `resetKey` so an edit dialog opened for another row shows that row.
    */
   initialValues: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Row identity for `initialValues`, usually the row id. When it changes, every field
+   * re-seeds and unsaved edits from the previous row are dropped.
+   */
+  resetKey: z.union([z.string(), z.number()]).optional(),
   /** Action chain run on submit; params may reference `$form`. */
   onSubmit: actionChainSchema,
 });

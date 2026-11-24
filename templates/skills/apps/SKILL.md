@@ -577,7 +577,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `AvatarStack` | `users` | `users` are display names (initials avatars); `max` (default 4) before a `+N` count. Hover lists every name. |
 | `Section` | `title` | `description`, `collapsible`, `defaultOpen` (default true); has the `default` child slot. |
 | `Table` | `columns` | `data`, `loading`, `refreshing`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `id`, `selectable`, `bulkActions`, `filterable`, `clearState`, `onRetry`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
-| `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`, `initialValues` (`{ <field>: value }`, usually bound to a row; written into the fields on mount and whenever the bound value changes, so an edit dialog opened for another row shows that row; a refresh that changes only other fields keeps the user's unsaved edits); see below. |
+| `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`, `initialValues` (`{ <field>: value }`, usually bound to a row; written into the fields on mount, and a refresh re-seeds only fields the user has not edited), `resetKey` (the row id, e.g. `{ "$state": "/route/params/id" }`; when it changes every field re-seeds, so an edit dialog opened for another row shows that row and drops the previous row's edits); see below. |
 | `OnEnter` | none | `deps`. Renders nothing; runs `on.enter` on mount and when `deps` changes by value. See "`OnEnter`: load on open". |
 | `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below), `presentation: "sheet"` (default) or `"split"` (an inline right pane beside the page; see below); has the `default` child slot. |
 | `Dialog` | `param` | A centered modal with the Drawer route contract: open exactly while the page param named by `param` is set; Escape, the X or a click outside clears it. `title`, `description`, `size: "sm", "md" (default), or "lg"`, `actions` (footer buttons, Drawer rules). Use it for a short form opened from `headerActions`; after the write, an `app.navigate` without the param closes it. Has the `default` child slot. |
@@ -992,6 +992,7 @@ The page loads its data on open and when the `traceId` param changes, runs two a
             "id": "note",
             "fields": [{ "name": "traceId", "label": "Trace id" }],
             "initialValues": { "traceId": { "$state": "/route/params/traceId" } },
+            "resetKey": { "$state": "/route/params/traceId" },
             "onSubmit": []
           }
         }
