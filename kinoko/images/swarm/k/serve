@@ -1,0 +1,14 @@
+#!/bin/sh
+# The supervisor of the API process, as Compose `restart: unless-stopped` is in a
+# deployment. On Postgres the API exits by design when it loses the one-process lock
+# (runbooks/postgres.md); this loop starts it again. SIGTERM goes on to the API, so a
+# graceful stop still drains.
+pid=
+trap 'if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null; wait "$pid"; fi; exit 143' TERM INT
+while :; do
+  /api-entrypoint.sh &
+  pid=$!
+  wait "$pid"
+  echo "[kinoko] API process exited with status $?; starting it again in 1 s"
+  sleep 1
+done

@@ -1,0 +1,54 @@
+# Kinoko workload: the agent-swarm API alone, on its default SQLite file (WAL) in a
+# volume. Kinoko runs this file with podman in an x86_64 Linux guest without outside
+# network. Every image comes from images.tar (`kinoko push` packs it); build it first
+# with kinoko/build.sh. No value here is a real secret.
+services:
+  # What is under test: the API image of one commit (kinoko/images/swarm/Dockerfile).
+  app:
+    image: kinoko-swarm:sha-7dce4fa
+    pull_policy: never
+    container_name: app
+    # The same supervisor as the postgres workload, so both variants start alike.
+    entrypoint: ["/k/serve"]
+    environment:
+      DATABASE_PATH: /app/data/agent-swarm-db.sqlite
+      API_KEY: kinoko-workload-key
+      AGENT_SWARM_API_KEY: kinoko-workload-key
+      # No outside network and no worker: integrations and outbound calls are off.
+      SLACK_DISABLE: "true"
+      GITHUB_DISABLE: "true"
+      GITLAB_DISABLE: "true"
+      LINEAR_DISABLE: "true"
+      JIRA_DISABLE: "true"
+      AGENTMAIL_DISABLE: "true"
+      ANONYMIZED_TELEMETRY: "false"
+      DESPLEGA_TELEMETRY_ENV: test
+      OAUTH_KEEPALIVE_DISABLE: "true"
+      HEARTBEAT_CHECKLIST_DISABLE: "true"
+      # The simulated agents register without a runtime identity.
+      MULTI_RUNTIME_ENABLED: "false"
+      # Crash recovery in seconds, not minutes, so a run sees it: a sweep every 2 s,
+      # and a task with no session and no update for 6 s is taken from its agent.
+      HEARTBEAT_INTERVAL_MS: "2000"
+      HEARTBEAT_STALL_NO_SESSION_MIN: "0.1"
+    volumes:
+      # The SQLite file with its -wal and -shm files, and the encryption key file.
+      - swarm_api_data:/app/data
+
+  # Where the model's setup, actions and resources run. Same image, doing nothing of
+  # its own. No fault takes it down.
+  client:
+    image: kinoko-swarm:sha-7dce4fa
+    pull_policy: never
+    container_name: client
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      SWARM_API_URL: http://app:3013
+      SWARM_API_KEY: kinoko-workload-key
+    volumes:
+      - /hook:/hook:ro
+    depends_on:
+      - app
+
+volumes:
+  swarm_api_data:
