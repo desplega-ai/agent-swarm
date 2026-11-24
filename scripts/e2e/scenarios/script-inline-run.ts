@@ -118,6 +118,7 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
           "api",
           "boards",
           "caller",
+          "db",
           "fs",
           "logger",
           "mcp",

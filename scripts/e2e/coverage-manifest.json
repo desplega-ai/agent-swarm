@@ -568,6 +568,10 @@
       "description": "Inline (args, ctx) runs return their results, auto-save a scratch script only on success, record each run, and persist idempotent output to KV. Concurrent runs of the same new source share one scratch script and one initial version.",
       "scenarios": ["script-inline-run", "script-parallel-inline-runs"]
     },
+    "script-db-dialect": {
+      "description": "ctx.db.dialect equals the storage engine at run start (no probe query); ctx.db.query returns portable rows as objects, runs only the active dialect's text from a per-dialect object, and fails with the db_query error. Native and quickjs executors.",
+      "scenarios": ["script-db-dialect"]
+    },
     "script-tool-usage": {
       "description": "The seeded tool-usage script counts tool_use lines from session_logs, filters by the task owner's agent, and binds every argument as a SQL parameter.",
       "scenarios": ["script-tool-usage"]

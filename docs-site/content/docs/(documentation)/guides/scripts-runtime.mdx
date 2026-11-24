@@ -206,6 +206,9 @@ The `ScriptContext` passed to your `default` export carries:
 - `ctx.fs` and `ctx.sh` — the run's virtual filesystem (the agent's agent-fs
   drive at `/afs`, memory everywhere else) and a bash interpreter over it. See
   [Files and shell](#files-and-shell).
+- `ctx.db`: the SQL dialect of the swarm database (`ctx.db.dialect`) and a
+  query helper that returns rows as objects (`ctx.db.query`). See
+  [SQL](#sql).
 - `ctx.stdlib` — the runtime helpers (`fetch`, `fetchJson`, `grep`, `glob`,
   `table`, `retry`, `Redacted`). See [Retries](#retries).
 - `ctx.logger` — Console-compatible logger; same destination as the global
@@ -236,6 +239,35 @@ MCP boundary again: responses over 10,000 serialized UTF-8 bytes are replaced
 with a bounded preview or omission plus the per-agent KV spill pointer. Process
 large collections inside the script and return only the compact derived value
 the model needs.
+
+### SQL
+
+The swarm database runs on SQLite or on PostgreSQL. `ctx.db.dialect` is
+`"sqlite"` or `"postgres"`. The API sets it when the run starts, from its
+storage engine, so a script does not need a probe query to learn it.
+
+`ctx.db.query(sql, params?)` runs read-only SQL through `ctx.swarm.db_query`,
+with the same permissions, row cap, budget and errors. It returns the rows as
+objects keyed by column name. Unlike `db_query`, it throws when the query fails.
+`sql` is portable text, or an object with one text for each dialect. The helper
+runs the text of the active dialect:
+
+```ts
+export default async function (args: { scriptName: string }, ctx: ScriptContext) {
+  const runs = await ctx.db.query<{ status: string; n: number }>(
+    'SELECT status, count(*) AS n FROM script_runs WHERE "scriptName" = $1 GROUP BY status',
+    [args.scriptName],
+  );
+  const slow = await ctx.db.query({
+    sqlite: `SELECT id FROM script_runs WHERE (julianday("finishedAt") - julianday("startedAt")) * 86400 > 60 LIMIT 20`,
+    postgres: `SELECT id FROM script_runs WHERE extract(epoch FROM "finishedAt" - "startedAt") > 60 LIMIT 20`,
+  });
+  return { dialect: ctx.db.dialect, runs, slow };
+}
+```
+
+An object without both texts throws a `TypeError`. The `db_query` response
+still carries its `dialect` field. Durable workflow runs do not get `ctx.db`.
 
 ### Files and shell
 
@@ -454,7 +486,7 @@ Scripts launched through `launch-script-run` receive a different context:
   `ctx.step.swarmScript(label, config)` — replay-safe, journaled steps
 - `ctx.swarm`, `ctx.stdlib`, `ctx.logger`, `ctx.objects`, and `ctx.sheets`
 
-Durable runs do not receive `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`, or
+Durable runs do not receive `ctx.api`, `ctx.mcp`, `ctx.fs`, `ctx.sh`, `ctx.db`, or
 `ctx.swarm.config`. When a durable workflow needs a registered connection or
 the drive, call a named script through `ctx.step.swarmScript`.
 
