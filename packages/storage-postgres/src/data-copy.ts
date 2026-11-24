@@ -1287,6 +1287,9 @@ async function copyTable(
       continue;
     }
     const rows = params.length / perRow;
+    // A batch can hold no row to write: an empty batch from the source, or
+    // --repair dropped every row of it (a run of orphan rows).
+    if (rows === 0) continue;
     const tuples: string[] = [];
     for (let r = 0; r < rows; r++) {
       // Through text: Bun.SQL sends a string bound straight to jsonb as a JSON string.

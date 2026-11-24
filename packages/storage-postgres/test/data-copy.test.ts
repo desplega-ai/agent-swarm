@@ -513,6 +513,58 @@ CREATE TABLE kids (
       expect(lines).toContain("[db-copy] kids: 2 rows, 1 orphan row(s) dropped");
     });
 
+    test("copies when --repair drops every row of a batch", async () => {
+      // Orphans often sit in a run (the children of rows deleted on one day), so
+      // a whole batch can have no row left to write.
+      const kids: CopyRow[] = [];
+      const orphans: ReturnType<NonNullable<CopySource["foreignKeyViolations"]>> = [];
+      for (let i = 1; i <= 7; i++) {
+        const dropped = i >= 2 && i <= 5;
+        kids.push(item(i, [text(`k${i}`), text(dropped ? "gone" : "p1"), text("p1"), text("p1")]));
+        if (dropped)
+          orphans.push({
+            table: "kids",
+            row: `rowid ${i}`,
+            parent: "parents",
+            columns: ["owner"],
+            onDelete: "CASCADE",
+          });
+      }
+      writeFileSync(join(dir, "001_chain.sql"), FAMILY_CHAIN);
+      const report = await copyIntoPostgres(family(kids, orphans), {
+        url: db.url,
+        migrationsDir: dir,
+        embeddingDimensions: 4,
+        repair: true,
+        // Batches of 2 rows: rows 2+3 and 4+5 are batches with nothing to write.
+        batchSize: 2,
+        log: () => {},
+      });
+      expect(report.error).toBeUndefined();
+      expect(report.ok).toBe(true);
+      expect(report.repairCount).toBe(4);
+      expect(
+        (await sql.unsafe("SELECT id FROM kids ORDER BY id")).map((r: { id: string }) => r.id),
+      ).toEqual(["k1", "k6", "k7"]);
+      expect(report.tables.find((t) => t.table === "kids")).toMatchObject({
+        sourceRows: 3,
+        targetRows: 3,
+        equal: true,
+      });
+    });
+
+    test("an empty batch from the source writes nothing and does not fail", async () => {
+      const src = family([item(1, [text("k1"), text("p1"), text("p1"), text("p1")])], []);
+      const rows = src.rows.bind(src);
+      src.rows = function* (table, batchSize, batchBytes) {
+        yield [];
+        yield* rows(table, batchSize, batchBytes);
+      };
+      const report = await runFamily(src);
+      expect(report.error).toBeUndefined();
+      expect(report.ok).toBe(true);
+    });
+
     test("refuses an orphan in a table with no rowid: no row identity to repair by", async () => {
       // The source labels every such violation alike, so the copy must not match
       // it to a row. All three rows are valid here; only the report names an orphan.
