@@ -1,6 +1,6 @@
 // Serves the deck and persists review comments (comments.json) and rehearsal runs (timings.json).
 // Usage: bun talks/2026-11-24-helmcode-dreaming/serve.ts   then open /?debug=1
-import { join, normalize } from "node:path";
+import { join, normalize, sep } from "node:path";
 
 const root = import.meta.dir;
 
@@ -23,7 +23,8 @@ const server = Bun.serve({
     }
 
     const target = normalize(join(root, pathname === "/" ? "index.html" : decodeURIComponent(pathname)));
-    if (!target.startsWith(root)) return new Response("forbidden", { status: 403 });
+    // `root + sep`: a sibling folder whose name starts with this folder's name must not pass.
+    if (target !== root && !target.startsWith(root + sep)) return new Response("forbidden", { status: 403 });
     const file = Bun.file(target);
     if (!(await file.exists())) return new Response("not found", { status: 404 });
     return new Response(file, { headers: { "cache-control": "no-store" } });

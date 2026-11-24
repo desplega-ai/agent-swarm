@@ -4,7 +4,7 @@
 // localStorage and the "download" button.
 
 (() => {
-  const STORE = "deck-comments:2026-09-21-ai-builders-memory";
+  const STORE = "deck-comments:2026-11-24-helmcode-dreaming";
   let comments = [];
   let on = false;
   let served = false;
