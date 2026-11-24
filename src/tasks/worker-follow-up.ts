@@ -26,6 +26,8 @@ import {
   DEFERRED_WAIT_WOKE_EVENT,
   reconcileDeferredTaskWaits,
 } from "../scheduler/deferred-task-waits";
+import { slackAskOf } from "../slack/ask-chain";
+import { isSlackRenderV2Enabled } from "../slack/render-v2";
 import {
   type Agent,
   type AgentTask,
@@ -662,6 +664,18 @@ export async function createWorkerTaskFollowUp(args: {
       );
       followUpDescription += `\n\n⚠️ Cascade impact: ${cascadedDeps.length} dependent task(s) were also failed because they depend on this task:\n${depLines.join("\n")}`;
     }
+  }
+
+  // Render v2 settles this follow-up's card as no_slack_ask and posts nothing, so the Lead must know now.
+  if (
+    task.slackChannelId &&
+    task.slackThreadTs &&
+    isSlackRenderV2Enabled() &&
+    !(await slackAskOf(task))
+  ) {
+    followUpDescription += (
+      await resolveTemplate("task.worker.slack_card_blocked", { reason: "no_slack_ask" })
+    ).text;
   }
 
   const preFollowUp = await dispatchPre(
