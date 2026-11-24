@@ -82,7 +82,7 @@ function AppPageFrame({
   props: PageFrameProps;
   emit?: Emit;
 }) {
-  const { get, set, state } = useStateStore();
+  const { get, set } = useStateStore();
   const { handlers } = useActions();
   const themePreset = useJsonRenderTheme();
   const { theme } = useTheme();
@@ -181,7 +181,7 @@ function AppPageFrame({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the change trigger; the snapshot is read live
   useEffect(() => {
     portRef.current?.postMessage({ type: "swarm-app:update", snapshot: live.current.snapshot });
-  }, [signature, state]);
+  }, [signature]);
 
   return (
     <PageFrameView
