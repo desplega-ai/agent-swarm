@@ -48,6 +48,15 @@ that says so.
 | Write statement, bad SQL, multiple statements | 400 | (message describes the problem) |
 <!-- /dialect -->
 
+## From a script
+
+A swarm script reads the engine from `ctx.db.dialect` (`"sqlite"` or
+`"postgres"`). It is set when the run starts, so no `SELECT 1` probe is
+necessary. `ctx.db.query(sql, params?)` takes portable SQL text, or an object
+`{ sqlite, postgres }` with one text for each dialect, and runs the text of the
+active dialect through `db_query`. It returns the rows as objects and throws
+when the query fails. The limits and errors on this page also apply to it.
+
 ## Four tables are too large to read whole
 
 `session_logs`, `agent_log`, `events`, `task_context_snapshots`.

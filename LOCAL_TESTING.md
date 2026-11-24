@@ -66,6 +66,7 @@ It writes `./e2e-results.json` by default.
 `bun run e2e --engine postgres --only storage-recovery` also restores a live PostgreSQL backup into a fresh database.
 It checks decryption with the saved key and verifies that the API releases its original connections.
 Set `E2E_POSTGRES_URL` to a disposable PostgreSQL 16 server with pgvector. Put its matching `pg_dump` and `pg_restore` clients on `PATH`.
+With `--engine postgres`, the runner migrates one template database (`e2e_tpl_*`) per run and clones it for each API boot. Boots that run `db-copy` get an empty database. The runner drops the template at the end of the run.
 
 To verify a built API image, run `bash scripts/smoke-api-storage.sh <local-api-image>`.
 It writes a task on each engine, replaces both API containers, and reads the tasks from their original volumes.
