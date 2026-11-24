@@ -33,6 +33,13 @@ The watcher script and its verify brief live in the scripts catalog, not in this
 
 ## Checks
 
+Private gateway limits are **not** catalog rows. Embedded OpenCode can opt into
+credential-scoped LiteLLM discovery with `PROVIDER_MODEL_DISCOVERY`; see
+[gateway setup](../docs-site/content/docs/(documentation)/guides/provider-auth/model-gateways.mdx#model-limit-discovery).
+Workers retain only the selected alias's sanitized limits in a bounded in-process
+cache. They never write discovered inventories, pricing or overlays. Existing
+catalog authorization and model-profile allowlists are unchanged.
+
 - Catalog content: `GET /api/models-catalog`.
 - What each tier resolves to now, per provider: `GET /api/models-catalog/tiers`. The dashboard Configuration page reads it for the `MODEL_TIER_*` rows. Read-only, so previewing never records an alias resolution.
 - Why a task ran a model: `agent_tasks.resolvedModel`, `modelSource`, `modelAlias`. The task detail page and the tasks table show them.

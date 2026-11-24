@@ -25,6 +25,7 @@ import {
 import { kindForModelString } from "../utils/internal-ai/models";
 import { CREDENTIAL_SELECTION_STRATEGIES } from "../utils/key-usage";
 import { normalizeOrgWebsite } from "../utils/org-website";
+import { validateDiscoveryConfig } from "../utils/provider-model-discovery";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -529,6 +530,7 @@ function validateWorkflowInputEnvAllowlist(value: unknown): string | null {
 }
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  PROVIDER_MODEL_DISCOVERY: validateDiscoveryConfig,
   SLACK_DEFAULT_TIMEZONE: (value) =>
     isValidTimezone(value) ? null : "SLACK_DEFAULT_TIMEZONE must be a valid IANA timezone",
   WORKFLOW_INPUT_ENV_ALLOWLIST: validateWorkflowInputEnvAllowlist,

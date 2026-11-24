@@ -92,3 +92,8 @@ src/tests/operator-actor-keyless.test.ts  # getOperatorActor with no swarm key c
 src/tests/follow-up-gate-shadow.test.ts  # the gate verdict branches need an in-process verifier stub that throws, hangs past a shortened deadline or returns a fixed verdict, plus a drain of the after-commit hooks; the black-box API fixes the 60s deadline for a whole boot and gives a scenario no way to wait on those hooks
 src/tests/x402-client.test.ts  # src/x402 is a standalone payment library: no API route, MCP tool or CLI command loads it, so the black-box suite cannot reach its spending-limit hook; the cases sign real x402 v1 and v2 payloads locally with a throwaway viem key and no network
 src/tests/scm-sender-trust.test.ts  # one matrix of the mention sender rule across the GitLab, Bitbucket and Azure DevOps handlers with GitHub as the control, written to fail on the handlers before the rule existed; the GitLab rule is also checked over HTTP in platform-webhooks
+# Worker-only session preparation has no API endpoint: parsers and credential-scoped in-process transport require offline unit coverage.
+src/tests/provider-model-limits.test.ts  # Worker session precedence and token budgeting cannot be exercised by API-only scenarios.
+src/tests/litellm-model-info.test.ts  # Worker metadata parser; synthetic deployment coverage and secret retention checks.
+src/tests/provider-model-discovery.test.ts  # Worker credential isolation, injected clock, cache, transport bounds; no server-side API.
+src/tests/provider-model-discovery-integration.test.ts  # Real embedded SDK model activation before prompt; not reachable through the API-only SUT.

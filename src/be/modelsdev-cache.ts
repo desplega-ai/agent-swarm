@@ -18,7 +18,7 @@ export interface ModelsDevModel {
   id?: string;
   name?: string;
   cost?: ModelsDevCostBlock;
-  limit?: { context?: number };
+  limit?: { context?: number; input?: number; output?: number };
   release_date?: string;
   status?: string;
   reasoning?: boolean;

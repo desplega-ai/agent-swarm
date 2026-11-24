@@ -52,9 +52,10 @@ async function deliverContextBoundNote(
   contextTokens: number,
   model: string | undefined,
   inject: (note: string) => unknown,
+  reportedWindow?: number,
 ): Promise<void> {
   try {
-    const note = await renderContextBoundNote(contextTokens, model);
+    const note = await renderContextBoundNote(contextTokens, model, reportedWindow);
     if (note) await inject(note);
   } catch {
     // Fail open.
@@ -158,6 +159,7 @@ export function createContextBoundNote(options: {
   threshold: number;
   /** The session's model, read when the note renders, for the window share. */
   model?: () => string | undefined;
+  window?: () => number | undefined;
   inject: (note: string) => unknown;
   /** True while a note injected now reaches the model inside the current turn. */
   canDeliver: () => boolean;
@@ -183,7 +185,7 @@ export function createContextBoundNote(options: {
     state = "rendering";
     let note = "";
     try {
-      note = await renderContextBoundNote(contextTokens, options.model?.());
+      note = await renderContextBoundNote(contextTokens, options.model?.(), options.window?.());
     } catch {
       // Fail open.
     }

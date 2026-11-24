@@ -24,7 +24,7 @@ export interface RuntimeCatalogModel {
   id?: string;
   name?: string;
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
-  limit?: { context?: number };
+  limit?: { context?: number; input?: number; output?: number };
   release_date?: string;
   status?: string;
   reasoning?: boolean;

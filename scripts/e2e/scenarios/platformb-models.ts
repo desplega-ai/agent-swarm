@@ -569,6 +569,7 @@ export const platformbModels: Scenario = {
       expect(
         asRecord(merged).name === `E2E Overlay ${ctx.nonce}` &&
           asRecord(asRecord(merged).limit).context === 123_456 &&
+          asRecord(asRecord(merged).limit).output === 4096 &&
           asRecord(asRecord(merged).cost).output === 5,
         `Catalog entry for the overlay is ${JSON.stringify(merged)}`,
       );

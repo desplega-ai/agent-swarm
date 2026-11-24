@@ -248,6 +248,19 @@ Without a live window, the helper resolves the model catalog:
 
 Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wildly wrong for opus/sonnet 4.x.
 
+Embedded OpenCode can discover credential-scoped LiteLLM limits when
+`PROVIDER_MODEL_DISCOVERY` explicitly enables the selected inference route.
+The same effective session window is injected before the first prompt and used
+for usage percentages and context-bound notes. `max_input_tokens` and
+`max_output_tokens` remain separate; ambiguous `max_tokens` is never a context
+window. Without an authoritative combined bound, context conservatively equals
+input. An operator-confirmed `input-plus-output` interpretation is optional.
+OpenCode may compact earlier with conservative context, because it also needs
+output headroom. Swarm does not subtract output from the denominator or count
+it twice. Session initialization records the selected limits, source, context
+basis and observation staleness. History and deployment-wide catalog rows do
+not change. See [setup and caveats](./provider-auth/model-gateways#model-limit-discovery).
+
 ### peakContextTokens and contextWindowSize
 
 `agent_tasks.peakContextTokens` (renamed from `totalContextTokensUsed` in migration 063) is a monotonic max across all snapshots for the task — never regresses when a later snapshot reports a smaller value. This mirrors Claude Code's status-line "peak context" idea.

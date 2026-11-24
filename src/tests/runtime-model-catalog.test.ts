@@ -11,6 +11,7 @@ import {
 import {
   refreshRuntimeModelCatalog,
   resetRuntimeModelCatalogForTests,
+  runtimeCatalogModel,
   setRuntimeModelCatalog,
 } from "../utils/runtime-model-catalog";
 
@@ -24,7 +25,7 @@ const liveCatalog = {
       [NEW_CODEX]: {
         id: NEW_CODEX,
         cost: { input: 3, output: 12 },
-        limit: { context: 2_000_000 },
+        limit: { context: 2_000_000, output: 128000 },
         release_date: "2099-01-01",
         reasoning: true,
       },
@@ -81,6 +82,10 @@ describe("runtime model catalog", () => {
     }) as unknown as typeof fetch;
     expect(await refreshRuntimeModelCatalog({ apiUrl: "http://x", fetchImpl: ok })).toBe(true);
     expect(url).toBe("http://x/api/models-catalog");
+    expect(runtimeCatalogModel("openai", NEW_CODEX)?.limit).toEqual({
+      context: 2000000,
+      output: 128000,
+    });
     expect(getCodexModelPricing(NEW_CODEX)?.inputPerMillion).toBe(3);
   });
 });

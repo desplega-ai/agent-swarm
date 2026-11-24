@@ -916,6 +916,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/provider-auth/model-gateways`,
       },
       {
+        key: "PROVIDER_MODEL_DISCOVERY",
+        label: "Gateway model limit discovery",
+        description:
+          "Opt in to credential-scoped LiteLLM limits for new embedded OpenCode sessions. JSON maps provider IDs to mode, exact inference baseURL, optional ttlMs and semantics. Empty object disables discovery. No credentials or discovered inventories belong here.",
+        kind: "json",
+        defaultValue: "{}",
+        docsUrl: `${DOCS}guides/provider-auth/model-gateways#model-limit-discovery`,
+      },
+      {
         key: "OPENROUTER_APP_ATTRIBUTION",
         label: "OpenRouter app attribution",
         description:

@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("runner completion context", () => {
-  for (const harness of ["pi", "codex"] as const) {
+  for (const harness of ["pi", "codex", "opencode"] as const) {
     for (const withLiveWindow of [true, false]) {
       test(`${harness}: ${withLiveWindow ? "retains the latest throttled live window" : "falls back to the catalog without live usage"}`, async () => {
         const snapshots: Array<Record<string, unknown>> = [];
@@ -36,7 +36,13 @@ describe("runner completion context", () => {
           return Response.json({ configs: [], enabled: false });
         }) as typeof fetch;
 
-        const model = harness === "pi" ? "openai-codex/gpt-5.6-luna" : "gpt-5.6-luna";
+        const model =
+          harness === "opencode"
+            ? "openrouter/example-large-chat"
+            : harness === "pi"
+              ? "openai-codex/gpt-5.6-luna"
+              : "gpt-5.6-luna";
+        const sessionWindow = harness === "opencode" ? 922000 : 272000;
         const cost: CostData = {
           sessionId: "provider-session",
           agentId: crypto.randomUUID(),
@@ -62,7 +68,7 @@ describe("runner completion context", () => {
                 if (withLiveWindow) {
                   // Only the first progress event is posted. A later unknown window
                   // must not erase the second event's authoritative live limit.
-                  for (const contextTotalTokens of [258_400, 272_000, null, 0]) {
+                  for (const contextTotalTokens of [258_400, sessionWindow, null, 0]) {
                     listener({
                       type: "context_usage",
                       contextUsedTokens: 1000,
@@ -105,7 +111,7 @@ describe("runner completion context", () => {
         expect(configuredModel).toBe(model);
         const completion = snapshots.find((snapshot) => snapshot.eventType === "completion");
         expect(completion?.contextTotalTokens).toBe(
-          withLiveWindow ? 272_000 : getContextWindowSize(model),
+          withLiveWindow ? sessionWindow : getContextWindowSize(model),
         );
         expect(completion?.cumulativeInputTokens).toBe(100);
         expect(completion?.cumulativeOutputTokens).toBe(50);

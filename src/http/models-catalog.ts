@@ -41,7 +41,13 @@ const CatalogModelSchema = z.object({
       cache_write: z.number().optional(),
     })
     .optional(),
-  limit: z.object({ context: z.number().optional() }).optional(),
+  limit: z
+    .object({
+      context: z.number().optional(),
+      input: z.number().optional(),
+      output: z.number().optional(),
+    })
+    .optional(),
   release_date: z.string().optional(),
   status: z.string().optional(),
   reasoning: z.boolean().optional(),

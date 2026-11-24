@@ -33889,6 +33889,12 @@
                                   "properties": {
                                     "context": {
                                       "type": "number"
+                                    },
+                                    "input": {
+                                      "type": "number"
+                                    },
+                                    "output": {
+                                      "type": "number"
                                     }
                                   }
                                 },

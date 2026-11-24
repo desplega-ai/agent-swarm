@@ -19,6 +19,12 @@ rate by hand should also update this file.
 
 ## Live UI catalog: GET /api/models-catalog
 
+Credential-scoped LiteLLM discovery (`PROVIDER_MODEL_DISCOVERY`) supplies session
+limits only to embedded OpenCode. It does not discover prices or change this
+catalog, overlays, billing or historical context snapshots. The effective
+session window overrides the catalog for context telemetry; see the
+[gateway guide](../../docs-site/content/docs/(documentation)/guides/provider-auth/model-gateways.mdx#model-limit-discovery).
+
 - **Runtime module**: `src/be/models-catalog.ts`; route in
   `src/http/models-catalog.ts`.
 - Every successful models.dev fetch in the runtime refresh above also updates

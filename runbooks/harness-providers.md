@@ -104,6 +104,17 @@ On a codex, opencode or pi bump, run `bun scripts/probe-tool-schema-tokens.ts --
 
 ## NaN and Helmcode (pi, opencode)
 
+Embedded OpenCode supports opt-in, exact-route LiteLLM limit discovery through
+the resolved `PROVIDER_MODEL_DISCOVERY` JSON config. Discovery runs after the
+existing per-task key splice and before host creation. The pinned SDK 2.4.1's
+model registry activates asynchronously: startup waits up to five seconds for
+the selected model, verifies injected bounds and uses smaller runtime limits
+before prompting. Unknown or larger runtime bounds fail session preparation.
+The resulting immutable limits drive context usage and the context-bound note.
+ACP/subprocess OpenCode and other harnesses do not use this discovery path.
+Setup, semantics, failure behavior and rollback:
+[Model Gateways](../docs-site/content/docs/(documentation)/guides/provider-auth/model-gateways.mdx#model-limit-discovery).
+
 NaN and Helmcode are OpenAI-compatible, flat-rate providers. Their models run
 on `pi`, `opencode` and the ACP `opencode` target only; `claude` and `codex` reject `nan/*` and
 `helmcode/*` with the existing harness mismatch error.
