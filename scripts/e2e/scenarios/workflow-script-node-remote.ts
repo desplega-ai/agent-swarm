@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
@@ -143,7 +143,7 @@ export const workflowScriptNodeRemote: Scenario = {
     expectStatus(minted, [201], "mint shell runner credential");
     const credentialId = asString(asRecord(asRecord(minted.json).credential).id, "credential id");
     const runner = ctx.startScriptRunner(asString(asRecord(minted.json).token, "token"));
-    const cwd = await mkdtemp(join(tmpdir(), "phase10-cwd-"));
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), "phase10-cwd-")));
     const sessions = async () =>
       asRecords((await ctx.api("GET", "/api/script-runners")).json, "sessions");
     try {
@@ -182,6 +182,23 @@ export const workflowScriptNodeRemote: Scenario = {
         "cwd node consumes no remote slot",
       );
 
+      const remoteOrdinary = await runNode(
+        ctx,
+        {
+          runtime: "ts",
+          script: 'console.log(JSON.stringify({token:"ordinary",marker:"preserved"}))',
+          cwd: "",
+        },
+        false,
+        undefined,
+        "token",
+      );
+      expect(
+        remoteOrdinary.run.status === "completed" &&
+          asRecord(remoteOrdinary.followOutput).stdout === "ordinary",
+        "remote shell preserves ordinary field values for downstream nodes",
+      );
+
       const failed = await runNode(ctx, {
         runtime: "bash",
         script: "printf synthetic-failure >&2; exit 7",
@@ -189,6 +206,17 @@ export const workflowScriptNodeRemote: Scenario = {
       expect(
         failed.run.status === "failed" && failed.step.error === "synthetic-failure",
         "nonzero shell preserves exact failure error",
+      );
+      const timedOut = await runNode(ctx, {
+        runtime: "bash",
+        script: "sleep 30",
+        timeout: 1000,
+      });
+      expect(
+        timedOut.run.status === "failed" &&
+          timedOut.step.error === "Script execution error: Script timed out after 1000ms" &&
+          timedOut.output.stderr === "Script timed out after 1000ms",
+        "remote shell preserves exact timeout failure",
       );
       const secret = `ghp_${"a".repeat(36)}`;
       const scrubbed = await runNode(ctx, {
@@ -255,6 +283,7 @@ export const workflowScriptNodeRemote: Scenario = {
                 slots: 1,
                 executors: ["native"],
                 runtimes: [],
+                stepJobs: true,
                 held: [],
               }),
             ),
