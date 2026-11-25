@@ -13,7 +13,7 @@ const SCENARIOS_DIR = join(import.meta.dir);
 // here that exports zero Scenario objects is a mistake (typo'd export shape, forgotten export,
 // wrong `order`/`run` types) and loadScenarios() throws — this is the "did I actually get wired
 // in" check, and it runs on every invocation, not just in CI.
-const NON_SCENARIO_FILES = new Set([
+export const NON_SCENARIO_FILES = new Set([
   "core-helpers.ts",
   "registry.ts",
   "platform-helpers.ts",
