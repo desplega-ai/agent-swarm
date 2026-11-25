@@ -812,6 +812,11 @@ export async function handleScripts(
   }
 
   if (runRoute.match(req.method, pathSegments)) {
+    if (res.destroyed) return true;
+    const clientAbort = new AbortController();
+    res.once("close", () => {
+      if (!res.writableEnded) clientAbort.abort();
+    });
     const parsed = await runRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const agent = await requireAgent(res, agentId);
@@ -893,6 +898,7 @@ export async function handleScripts(
       return true;
     }
 
+    if (clientAbort.signal.aborted) return true;
     const startedAt = new Date().toISOString();
     // Touch before executing so an already-stale scratch script isn't reaped
     // by the retention sweep while this run is still in flight.
@@ -907,10 +913,6 @@ export async function handleScripts(
       sourceScriptRunId: runId,
     };
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
-    const clientAbort = new AbortController();
-    res.once("close", () => {
-      if (!res.writableEnded) clientAbort.abort();
-    });
     const runContext = {
       signal: clientAbort.signal,
       agentId: agent.id,
@@ -923,6 +925,7 @@ export async function handleScripts(
       apiConnections: await getScriptApiConnectionDescriptors({ agentId: agent.id }),
       mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     };
+    if (clientAbort.signal.aborted) return true;
     let output: RunScriptOutput;
     let object: { id: string; stateVersion: number; destroyed: boolean } | undefined;
     if (isDurable && namedScript && parsed.body.object) {
