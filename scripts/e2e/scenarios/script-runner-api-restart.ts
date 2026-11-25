@@ -88,7 +88,7 @@ export const scriptRunnerApiRestart: Scenario = {
         source: `export default async function(args: any, ctx: any) {
           const original = globalThis.fetch.bind(globalThis);
           await original(args.gate + "/step", { method: "POST", body: String((globalThis as any).process.pid) });
-          while (!(await (await original(args.gate + "/step-gate")).json()).released)
+          while (!(await (await original(args.gate + "/step-gate")).json() as any).released)
             await new Promise(resolve => setTimeout(resolve, 25));
           (globalThis as any).fetch = async (input: any, init: any) => {
             try { return await original(input, init); }
@@ -111,6 +111,7 @@ export const scriptRunnerApiRestart: Scenario = {
             config: {
               scriptName,
               scope: "global",
+              timeoutMs: 120000,
               args: { gate: gate.origin, key: configKey },
             },
           },
@@ -118,8 +119,8 @@ export const scriptRunnerApiRestart: Scenario = {
       });
       workflowRunId = (await triggerWorkflow(ctx, workflowId)).runId;
       expect(await pollUntil(() => stepStarts === 1, 20000, 50), "parked step starts once");
-      const parked = ctx.db.get<{ status: string; owner_id: string }>(
-        sql`SELECT status, owner_id FROM workflow_step_jobs WHERE run_id = ${workflowRunId}`,
+      const parked = ctx.db.get<{ status: string; owner_id: string; attempt: number }>(
+        sql`SELECT status, owner_id, attempt FROM workflow_step_jobs WHERE run_id = ${workflowRunId}`,
       );
       expect(
         parked?.status === "running" && parked.owner_id === instanceId,
@@ -271,7 +272,7 @@ export const scriptRunnerApiRestart: Scenario = {
         sql`SELECT status, attempt FROM workflow_step_jobs WHERE run_id = ${workflowRunId}`,
       );
       expect(
-        jobs.length === 1 && jobs[0]!.status === "completed" && jobs[0]!.attempt === 1,
+        jobs.length === 1 && jobs[0]!.status === "completed" && jobs[0]!.attempt === parked.attempt,
         "parked job completes without another attempt",
       );
       ctx.log(
