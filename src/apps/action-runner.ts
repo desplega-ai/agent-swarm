@@ -20,6 +20,9 @@ function syncPassError(sync: Awaited<ReturnType<typeof runAppSync>>): string | u
   return failed.map((pass) => `${pass.model}.${pass.source}: ${pass.error}`).join("; ");
 }
 
+/** The error a failed action's script_runs row stores; the detail goes only to the caller. */
+const ACTION_RUN_ROOT_ERROR = "the app action script failed; its error is in the action response";
+
 export async function runAppAction({
   app,
   name,
@@ -89,8 +92,9 @@ export async function runAppAction({
     // stamped on the run's token, so every run the script launches or calls
     // records an existing parent: the run tree `app-action-status` waits on.
     // `args.app.id` is what ties the run to this app. The row holds no caller
-    // input, caller identity or result: any authenticated principal can read
-    // script_runs, and the action's response already carries the result.
+    // input, caller identity, result or script error text (an error can echo
+    // the input): any authenticated principal can read script_runs, and the
+    // action's response already carries the result and the detailed error.
     const runId = crypto.randomUUID();
     const scriptInput = { ...action.args, ...input, app: { id: app.id }, caller };
     let recorded = false;
@@ -108,13 +112,13 @@ export async function runAppAction({
     } catch {
       // swallow: the row is observability and the wait handle; the action still runs, untracked.
     }
-    const finish = async (status: "completed" | "failed", error?: string) => {
+    const finish = async (status: "completed" | "failed") => {
       if (!recorded) return;
       try {
         // Running-guarded: a cancel that landed while the script ran keeps its status.
         await updateScriptRunIfRunning(runId, {
           status,
-          error: error ?? null,
+          error: status === "failed" ? ACTION_RUN_ROOT_ERROR : null,
           finishedAt: new Date().toISOString(),
         });
       } catch {
@@ -131,7 +135,7 @@ export async function runAppAction({
         ...(recorded ? { provenance: { sourceScriptRunId: runId } } : {}),
       });
     } catch (err) {
-      await finish("failed", err instanceof Error ? err.message : String(err));
+      await finish("failed");
       throw err;
     }
     const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
@@ -140,7 +144,7 @@ export async function runAppAction({
       : output.runtimeError
         ? `${output.runtimeError.name}: ${output.runtimeError.message}`
         : (output.error ?? `Script exited with code ${output.exitCode}`);
-    await finish(ok ? "completed" : "failed", error);
+    await finish(ok ? "completed" : "failed");
     return {
       status: 200 as const,
       body: scrubObject({

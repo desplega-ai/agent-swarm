@@ -24,7 +24,9 @@ const ORCHESTRATOR = `export default async function (args: { fail?: boolean }, c
 
 // The `refresh` action script: one inline nested run, then launch the orchestrator and return.
 // `holdMs` keeps the action itself running after its nested run, so a probe can read it mid-flight.
-const REFRESH = `export default async function (args: { fail?: boolean; holdMs?: number; note?: string }, ctx: any) {
+// `throwNote` fails the action itself with an error that echoes the caller's `note`.
+const REFRESH = `export default async function (args: { fail?: boolean; holdMs?: number; note?: string; throwNote?: boolean }, ctx: any) {
+  if (args.throwNote) throw new Error("bad input: " + args.note);
   await ctx.swarm.script_run({ source: "export default async function () { return 0; }" });
   if (args.holdMs) await new Promise((r) => setTimeout(r, args.holdMs));
   const launched = await ctx.swarm.script_launchRun({
@@ -240,6 +242,31 @@ export const knowledgeAppsActionRuns: Scenario = {
         expect(
           run.settled === true && run.state === "succeeded" && asRecord(run.runs).total === 3,
           `the held action's tree settles: ${JSON.stringify(run)}`,
+        );
+
+        // ── a failing action: the caller gets the error, the run row does not keep it ──
+        const failNote = `caller-error-${ctx.nonce}`;
+        response = await ctx.api("POST", `/api/apps/${appId}/actions/refresh`, {
+          body: { input: { throwNote: true, note: failNote } },
+        });
+        expectStatus(response, [200], "the failing action answers");
+        const failed = asRecord(response.json);
+        expect(
+          failed.ok === false && String(failed.error).includes(failNote),
+          `the caller gets the detailed error: ${JSON.stringify(failed)}`,
+        );
+        const failedRoot = asString(asRecord(failed.run).id, "failed run id");
+        response = await ctx.api("GET", `/api/script-runs/${failedRoot}`, { agentId: outsider });
+        expectStatus(response, [200], "another agent reads the failed action's script run");
+        const failedRow = asRecord(asRecord(response.json).run);
+        expect(
+          failedRow.status === "failed" && !JSON.stringify(failedRow).includes(failNote),
+          `the failed row holds no caller error text: ${JSON.stringify(failedRow)}`,
+        );
+        response = await ctx.api("GET", `/api/script-runs?agentId=${owner}`, { agentId: outsider });
+        expect(
+          !JSON.stringify(response.json).includes(failNote),
+          "the run list holds no caller error text",
         );
 
         // ── a failing launched run fails the tree and names the failure ──
