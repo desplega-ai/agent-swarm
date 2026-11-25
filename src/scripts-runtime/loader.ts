@@ -127,7 +127,9 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
 
 export async function prepareScriptJob(
   input: RunScriptInput,
-): Promise<ExecutorOutput | { job: InlineScriptJob; scrubber: ReturnType<typeof createValueScrubber> }> {
+): Promise<
+  ExecutorOutput | { job: InlineScriptJob; scrubber: ReturnType<typeof createValueScrubber> }
+> {
   if (input.fsMode === "workspace-rw") {
     return {
       result: undefined,
