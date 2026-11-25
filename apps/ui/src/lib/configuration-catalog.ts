@@ -1642,6 +1642,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack#stop-button`,
       },
       {
+        key: "SLACK_FEEDBACK_BUTTONS",
+        label: "Slack answer feedback",
+        description:
+          "Put Slack's native 👍/👎 buttons under each final outcome card. A click stores the vote, with the task's agent, profile and model, in the `slack-feedback` KV namespace. A person's later click on the same answer replaces their vote.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack#answer-feedback`,
+      },
+      {
         key: "SLACK_WORKFLOW_BOT_IDS",
         label: "Bots that start Slack workflows",
         description:

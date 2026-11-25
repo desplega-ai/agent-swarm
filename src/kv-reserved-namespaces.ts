@@ -23,6 +23,11 @@ const RESERVED_FAMILIES = new Map([
   ["slack-external-alert", "namespace is reserved for Slack external channel alerts"],
   // Threads the swarm left via slack-leave-thread (src/slack/left-threads.ts).
   ["slack-left-thread", "namespace is reserved for left Slack threads; use slack-leave-thread"],
+  // 👍/👎 votes on Slack outcome cards (src/slack/feedback.ts). Only a real click writes them.
+  [
+    "slack-feedback",
+    "namespace is reserved for Slack answer feedback; votes come from Slack clicks",
+  ],
   // Slack thread replies awaiting their buffer flush (src/slack/thread-buffer-store.ts). Private.
   ["slack-thread-buffer", "namespace is reserved for the Slack thread buffer"],
   // Source group labels (src/be/db/session-labels.ts). Private, see PRIVATE_FAMILIES.

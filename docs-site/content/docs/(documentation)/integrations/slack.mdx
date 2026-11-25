@@ -245,6 +245,12 @@ Set `SLACK_RENDER_V2_QUIET_LEAD_THREADS=true` to keep Lead threads to the Lead's
 
 Set `SLACK_REPLY_FOOTER_ENABLED=false` to hide the task details footer from outcome cards, agent replies, and replies mirrored from Sessions. The footer is enabled by default. Reply content, citations, and attachments still appear.
 
+### Answer feedback
+
+Set `SLACK_FEEDBACK_BUTTONS=true`, or turn on **Slack answer feedback** in **Settings → Configuration**, to put Slack's native 👍/👎 buttons under each final outcome card. It is off by default and applies without a restart. Deferral (⏳) cards and timed-out conclusions get no buttons. If Slack refuses the buttons, the card posts without them.
+
+A click from an allowed person in the task's channel stores one row in the reserved KV namespace `slack-feedback`, at key `<taskId>/<slackUserId>`, so a person's later click on the same answer replaces their vote. The row holds `vote` (`up` or `down`), `votedAt`, and the task's `agentId`, `profile`, `model` and `modelTier`. Read the votes with `GET /api/kv/_/slack-feedback` (add `?prefix=<taskId>/` for one task), or `kv_list` on that namespace from a script. Agents cannot write the namespace.
+
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
 Outcome cards answer live work; the renderer never backfills history. A task that finished more than `SLACK_CONCLUSION_TIMEOUT_MIN` minutes ago (at least one hour) gets no new outcome card, even when its thread renders again. A delegated ask's conclusion card stays eligible for that window after the closure's timeout. A Lead deferred wake also gets no card of its own when its answer already reached the thread: it called `slack-reply`, or the bot replied in the thread after the wake was created.

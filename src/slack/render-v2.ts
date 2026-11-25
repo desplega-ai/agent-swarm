@@ -78,6 +78,7 @@ import {
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
 import { isSlackReplyFooterEnabled } from "./config";
 import { getChannelBlockReason } from "./external-channel";
+import { slackFeedbackBlocks } from "./feedback";
 import {
   completedStatusIcon,
   iconPrefix,
@@ -1583,15 +1584,55 @@ async function withUiSpecBlockFallback<T>(
   taskId: string,
   send: (withCard: boolean) => Promise<T>,
 ): Promise<T> {
-  if (!uiSpec?.blocks.length) return await send(false);
+  return await withBlockRejectionFallback(
+    !!uiSpec?.blocks.length,
+    `the card of task ${taskId}; retrying with its fallback text`,
+    send,
+  );
+}
+
+/** Sends with the optional blocks, and once more without them when Slack refuses the blocks. */
+async function withBlockRejectionFallback<T>(
+  hasBlocks: boolean,
+  what: string,
+  send: (withBlocks: boolean) => Promise<T>,
+): Promise<T> {
+  if (!hasBlocks) return await send(false);
   try {
     return await send(true);
   } catch (error) {
     const code = slackErrorCode(error);
     if (!code || !UI_SPEC_BLOCK_REJECTION_CODES.has(code)) throw error;
-    console.warn(`[Slack] ${code} for the card of task ${taskId}; retrying with its fallback text`);
+    console.warn(`[Slack] ${code} for ${what}`);
     return await send(false);
   }
+}
+
+/**
+ * Slack's 👍/👎 under a final answer (`SLACK_FEEDBACK_BUTTONS`), never under a
+ * ⏳ deferral card or a timeout conclusion, whose answer is still to come.
+ */
+function outcomeFeedbackBlocks(task: AgentTask, conclusionKind?: SlackConclusionKind): unknown[] {
+  if (conclusionKind === "timeout" || isDeferredTask(task)) return [];
+  return slackFeedbackBlocks(task.id);
+}
+
+/**
+ * `send` with the feedback buttons and the task's card, dropping the buttons
+ * first, then the card, each time Slack refuses the blocks.
+ */
+async function withOutcomeBlockFallback<T>(
+  uiSpec: OutcomeUiSpec | null,
+  feedback: unknown[],
+  taskId: string,
+  send: (withCard: boolean, withFeedback: boolean) => Promise<T>,
+): Promise<T> {
+  return await withBlockRejectionFallback(
+    feedback.length > 0,
+    `the feedback buttons of task ${taskId}; retrying without them`,
+    (withFeedback) =>
+      withUiSpecBlockFallback(uiSpec, taskId, (withCard) => send(withCard, withFeedback)),
+  );
 }
 
 /** The answer, with the card's fallback text under it when the card blocks are not sent. */
@@ -1805,8 +1846,12 @@ export async function streamOutcomeCard(
   // The task's own card goes first in the blocks, under the answer. The
   // streamed text stays the answer alone.
   const uiSpec = await outcomeUiSpec(task);
-  const blocksFor = (withCard: boolean) =>
-    withCard && uiSpec ? [...uiSpec.blocks, ...captions] : captions;
+  const feedback = outcomeFeedbackBlocks(task, options?.conclusionKind);
+  const blocksFor = (withCard: boolean, withFeedback: boolean) => [
+    ...(withCard && uiSpec ? uiSpec.blocks : []),
+    ...captions,
+    ...(withFeedback ? feedback : []),
+  ];
 
   const startPayload: Record<string, unknown> = {
     channel: task.slackChannelId,
@@ -1878,16 +1923,21 @@ export async function streamOutcomeCard(
           `[Slack] chat.startStream failed for task ${task.id}; falling back to chat.postMessage:`,
           error,
         );
-        started = await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
-          const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
-          return callSlackWithRetry(app.client, "chat.postMessage", {
-            channel: task.slackChannelId,
-            thread_ts: task.slackThreadTs,
-            text,
-            blocks: [{ type: "markdown", text }, ...blocksFor(withCard)],
-            ...persona,
-          });
-        });
+        started = await withOutcomeBlockFallback(
+          uiSpec,
+          feedback,
+          task.id,
+          (withCard, withFeedback) => {
+            const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
+            return callSlackWithRetry(app.client, "chat.postMessage", {
+              channel: task.slackChannelId,
+              thread_ts: task.slackThreadTs,
+              text,
+              blocks: [{ type: "markdown", text }, ...blocksFor(withCard, withFeedback)],
+              ...persona,
+            });
+          },
+        );
         deliveredViaFallback = true;
       }
     }
@@ -1902,7 +1952,7 @@ export async function streamOutcomeCard(
   }
   if (!deliveredViaFallback) {
     try {
-      await withUiSpecBlockFallback(uiSpec, task.id, (withCard) =>
+      await withOutcomeBlockFallback(uiSpec, feedback, task.id, (withCard, withFeedback) =>
         callSlackWithRetry(app.client, "chat.stopStream", {
           channel: task.slackChannelId,
           ts: outcome.ts,
@@ -1910,7 +1960,7 @@ export async function streamOutcomeCard(
           ...(uiSpec?.fallbackText && !withCard
             ? { markdown_text: `\n\n${uiSpec.fallbackText}` }
             : {}),
-          blocks: blocksFor(withCard),
+          blocks: blocksFor(withCard, withFeedback),
         }),
       );
     } catch (error) {
@@ -1924,13 +1974,13 @@ export async function streamOutcomeCard(
       // slackReplySent snapshot may have since changed. The stream is closed
       // now, so chat.update is allowed: overwrite the text and the caption
       // blocks with the freshly computed presentation.
-      await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
+      await withOutcomeBlockFallback(uiSpec, feedback, task.id, (withCard, withFeedback) => {
         const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
         return callSlackWithRetry(app.client, "chat.update", {
           channel: task.slackChannelId,
           ts: outcome.ts,
           text,
-          blocks: [{ type: "markdown", text }, ...blocksFor(withCard)],
+          blocks: [{ type: "markdown", text }, ...blocksFor(withCard, withFeedback)],
         });
       });
     }
@@ -1996,14 +2046,20 @@ export async function refreshSlackOutcomeCard(taskId: string): Promise<boolean> 
     ...(await outcomeFooter([task], tasks, duration)),
   ];
   const uiSpec = await outcomeUiSpec(task);
-  await withUiSpecBlockFallback(uiSpec, task.id, (withCard) => {
+  const feedback = outcomeFeedbackBlocks(task, card.conclusionKind);
+  await withOutcomeBlockFallback(uiSpec, feedback, task.id, (withCard, withFeedback) => {
     const text = withUiSpecFallbackText(presentation, uiSpec, withCard);
     const cardBlocks = withCard && uiSpec ? uiSpec.blocks : [];
     return callSlackWithRetry(app.client, "chat.update", {
       channel: task.slackChannelId,
       ts: card.ts,
       text,
-      blocks: [{ type: "markdown", text }, ...cardBlocks, ...captions],
+      blocks: [
+        { type: "markdown", text },
+        ...cardBlocks,
+        ...captions,
+        ...(withFeedback ? feedback : []),
+      ],
     });
   });
   return true;
@@ -2061,7 +2117,7 @@ async function outcomeGroupMembers(
 async function renderOutcomeGroup(
   members: readonly AgentTask[],
   tasks: AgentTask[],
-): Promise<{ text: string; blocks: unknown[] } | null> {
+): Promise<{ text: string; blocks: unknown[]; feedback: unknown[] } | null> {
   // A reverse loop, not findLast: the extension-types bundle targets ES2022.
   let newestFollowUp: AgentTask | undefined;
   for (let i = members.length - 1; i >= 0 && !newestFollowUp; i--) {
@@ -2092,7 +2148,13 @@ async function renderOutcomeGroup(
     tasks,
     formatV2Duration(new Date(start), new Date(end)),
   );
-  return { text, blocks: [{ type: "markdown", text }, ...captions, ...footer] };
+  // The votes go to the newest answer shown: the one the card ends with.
+  const last = shown.at(-1);
+  return {
+    text,
+    blocks: [{ type: "markdown", text }, ...captions, ...footer],
+    feedback: last ? outcomeFeedbackBlocks(last) : [],
+  };
 }
 
 /** Edits the host card of `group` to show every task in `members`. Returns whether Slack was called. */
@@ -2105,12 +2167,17 @@ async function updateOutcomeGroupCard(
 ): Promise<boolean> {
   const rendered = await renderOutcomeGroup(members, tasks);
   if (!rendered) return false;
-  await callSlackWithRetry(client, "chat.update", {
-    channel: channelId,
-    ts: group.ts,
-    text: rendered.text,
-    blocks: rendered.blocks,
-  });
+  await withBlockRejectionFallback(
+    rendered.feedback.length > 0,
+    `the feedback buttons of merged card ${group.ts}; retrying without them`,
+    (withFeedback) =>
+      callSlackWithRetry(client, "chat.update", {
+        channel: channelId,
+        ts: group.ts,
+        text: rendered.text,
+        blocks: [...rendered.blocks, ...(withFeedback ? rendered.feedback : [])],
+      }),
+  );
   return true;
 }
 
@@ -2356,12 +2423,20 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
       if (!wake) continue;
       if (!(await removeDeferralCardAnsweredByReply(app.client, card, wake))) {
         const content = await resolvedDeferralContent(wake);
-        await withUiSpecBlockFallback(content.uiSpec, wake.id, (withCard) =>
-          callSlackWithRetry(app.client, "chat.update", {
-            channel: card.channelId,
-            ts: card.ts,
-            ...content.build(withCard),
-          }),
+        const feedback = outcomeFeedbackBlocks(wake);
+        await withOutcomeBlockFallback(
+          content.uiSpec,
+          feedback,
+          wake.id,
+          (withCard, withFeedback) => {
+            const built = content.build(withCard);
+            return callSlackWithRetry(app.client, "chat.update", {
+              channel: card.channelId,
+              ts: card.ts,
+              text: built.text,
+              blocks: [...built.blocks, ...(withFeedback ? feedback : [])],
+            });
+          },
         );
       }
       if (isDeferredTask(wake)) {
