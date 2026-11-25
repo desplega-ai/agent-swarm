@@ -15,7 +15,7 @@
  * still sees writes this process did not make.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { getDbClient } from "./db/runtime";
+import { getStorage } from "./storage";
 import { isWriteStatement } from "./write-stats";
 
 const MEMO_TTL_MS = 250;
@@ -44,7 +44,7 @@ export function requestMemoStats(): { hits: number; misses: number } | undefined
 /** Memoize `load()` for `id` in the current request scope. Each caller gets its own copy. */
 export async function memoizedRead<T>(kind: Kind, id: string, load: () => Promise<T>): Promise<T> {
   const scope = scopes.getStore();
-  if (!scope || getDbClient().inTransaction()) return load();
+  if (!scope || getStorage().inTransaction()) return load();
   const map = scope[kind];
   const now = performance.now();
   let entry = map.get(id);
