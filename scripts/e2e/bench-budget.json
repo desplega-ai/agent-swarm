@@ -4,5 +4,2238 @@
     "percent": 20,
     "minimum": 10
   },
-  "scenarios": {}
+  "scenarios": {
+    "audit-attribution-schedules": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "audit-attribution-scripts": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "audit-attribution-skills": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "audit-attribution-workflows": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "auth": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "authz-workflow-env": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "budget-pool-fallback": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "cli-api": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "cli-connect": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "cli-controller": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "cli-database-commands": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "cli-e2b": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "cli-help": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "cli-onboard": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "cli-provider-setup": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "cli-worker-token": {
+      "commits": 11,
+      "writeStatements": 71,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 59
+      }
+    },
+    "cli-x": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "codex-structured-output": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "config-roundtrip": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "connector-handoff": {
+      "commits": 12,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 3
+      }
+    },
+    "core-agent-access": {
+      "commits": 16,
+      "writeStatements": 71,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 59
+      }
+    },
+    "core-agent-lifecycle": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "core-agent-profile": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "core-agent-tools": {
+      "commits": 12,
+      "writeStatements": 149,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 124
+      }
+    },
+    "core-budgets": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "core-caller-scoped-writes": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "core-improvements": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "core-messaging": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "core-org": {
+      "commits": 13,
+      "writeStatements": 17,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 7
+      }
+    },
+    "core-preferences": {
+      "commits": 13,
+      "writeStatements": 14,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 4
+      }
+    },
+    "core-session-data": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "core-session-followup-turns": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "core-sessions": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "core-steering": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "core-task-controls": {
+      "commits": 20,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 10,
+        "writeStatements": 58
+      }
+    },
+    "core-task-status-kind": {
+      "commits": 20,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 10,
+        "writeStatements": 58
+      }
+    },
+    "core-task-tools": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "core-telemetry": {
+      "commits": 17,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 7,
+        "writeStatements": 58
+      }
+    },
+    "core-terminal-task-fence": {
+      "commits": 20,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 10,
+        "writeStatements": 58
+      }
+    },
+    "core-use-case-group": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "data-copy": {
+      "commits": 12,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 3
+      }
+    },
+    "data-copy-later-release": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "data-copy-refused-rows": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "defer-wake-pr-checks-done": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "defer-wake-pr-merged": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "design-system": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "divergence-concurrent-schedule-claim": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "divergence-db-query-denial": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "divergence-error-mapping": {
+      "commits": 12,
+      "writeStatements": 12,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 2
+      }
+    },
+    "divergence-fulltext-search": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "divergence-like-case": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "divergence-list-order": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "divergence-retention": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "divergence-seeded-schedule-sql": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "divergence-text-order": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "divergence-timestamps": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "divergence-tracker-dedup": {
+      "commits": 12,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 3
+      }
+    },
+    "divergence-values": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "divergence-vector-search": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "extensions": {
+      "commits": 18,
+      "writeStatements": 75,
+      "measured": {
+        "commits": 8,
+        "writeStatements": 62
+      }
+    },
+    "github-emulate-flows": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "github-installation-token-repos": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "health": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "http-malformed-json": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "invites": {
+      "commits": 11,
+      "writeStatements": 16,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 6
+      }
+    },
+    "key-window-usage": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-agentfs-edges": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "knowledge-apps": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-apps-app-context": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-apps-large-model": {
+      "commits": 24,
+      "writeStatements": 1200,
+      "measured": {
+        "commits": 14,
+        "writeStatements": 1000
+      }
+    },
+    "knowledge-apps-limits": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-apps-log-stream": {
+      "commits": 13,
+      "writeStatements": 14,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 4
+      }
+    },
+    "knowledge-apps-primitives": {
+      "commits": 13,
+      "writeStatements": 14,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 4
+      }
+    },
+    "knowledge-apps-session-thread-files": {
+      "commits": 13,
+      "writeStatements": 14,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 4
+      }
+    },
+    "knowledge-assets": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-assets-dashboard-user": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-boards": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-memory": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-objects": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-objects-reindex-scope": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-page-dashboard-user": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-pages": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-prompt-templates": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-rooms": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-sheets": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-sheets-edges": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-sheets-limits": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-sheets-scripts": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-sheets-values": {
+      "commits": 18,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 8,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-sheets-xlsx": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-sheets-xlsx-scripts": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "knowledge-skills": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "linear-emulate-flows": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "llm-emulate-ai": {
+      "commits": 14,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 3
+      }
+    },
+    "mcp-surface": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "mcp-user-code-mode": {
+      "commits": 13,
+      "writeStatements": 14,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 4
+      }
+    },
+    "mcp-user-events": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "memory-demotion-search": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "metrics-starter-dashboard": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "model-group-resolution": {
+      "commits": 21,
+      "writeStatements": 71,
+      "measured": {
+        "commits": 11,
+        "writeStatements": 59
+      }
+    },
+    "model-harness-guard": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "native-tool-hooks": {
+      "commits": 14,
+      "writeStatements": 75,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 62
+      }
+    },
+    "objects-http": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "platform-agent-token-permissions": {
+      "commits": 18,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 8,
+        "writeStatements": 58
+      }
+    },
+    "platform-chat-sdk": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "platform-chat-sdk-rocketchat": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "platform-checklist": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "platform-codex-accounts": {
+      "commits": 11,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 3
+      }
+    },
+    "platform-codex-device-login": {
+      "commits": 12,
+      "writeStatements": 18,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 8
+      }
+    },
+    "platform-codex-oauth-slot-store": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "platform-config": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "platform-config-key-guards": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "platform-edge": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "platform-external-tools": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "platform-file-import": {
+      "commits": 11,
+      "writeStatements": 77,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 64
+      }
+    },
+    "platform-integrations": {
+      "commits": 13,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 3
+      }
+    },
+    "platform-key-pace": {
+      "commits": 13,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 3
+      }
+    },
+    "platform-keys": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "platform-lead-tools": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "platform-mcp-server-tools": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "platform-mcp-servers": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "platform-oauth-apps": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "platform-oauth-locks": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "platform-onboarding": {
+      "commits": 12,
+      "writeStatements": 14,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 4
+      }
+    },
+    "platform-otel-db-statements": {
+      "commits": 12,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 3
+      }
+    },
+    "platform-otel-log-export": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "platform-outbound-url-guards": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "platform-pool-keys": {
+      "commits": 11,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 3
+      }
+    },
+    "platform-secret-egress": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "platform-telemetry": {
+      "commits": 12,
+      "writeStatements": 12,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 2
+      }
+    },
+    "platform-users-access": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "platform-users-lifecycle": {
+      "commits": 13,
+      "writeStatements": 25,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 15
+      }
+    },
+    "platform-webhooks": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "platformb-agentfs-proxy": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "platformb-extensions": {
+      "commits": 20,
+      "writeStatements": 93,
+      "measured": {
+        "commits": 10,
+        "writeStatements": 77
+      }
+    },
+    "platformb-fs": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "platformb-fs-continue": {
+      "commits": 11,
+      "writeStatements": 16,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 6
+      }
+    },
+    "platformb-fs-keys": {
+      "commits": 11,
+      "writeStatements": 16,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 6
+      }
+    },
+    "platformb-model-groups": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "platformb-models": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "platformb-repo-merge-policy": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "platformb-repos": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "platformb-runtime": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "platformb-slack-tools": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "platformb-trackers": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "poll-concurrent-claim": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "poll-rescan-locked": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "postgres-chain-layouts": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "postgres-dead-connections": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "postgres-password-env": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "realtime-apps": {
+      "commits": 15,
+      "writeStatements": 16,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 6
+      }
+    },
+    "realtime-apps-guards": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "realtime-rooms": {
+      "commits": 18,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 8,
+        "writeStatements": 58
+      }
+    },
+    "repo-exec-config-write": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "requester-hint": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "route-caller-identity": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "runtime-pools": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "schedule-target-owner": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "script-api-loopback": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-apis": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-connections": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-credential-binding-sources": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-credential-bindings": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-db-dialect": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "script-durable-objects": {
+      "commits": 18,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 8,
+        "writeStatements": 58
+      }
+    },
+    "script-inline-run": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "script-input-handling": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-kv": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-limits": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-memory-rate": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "script-parallel-inline-runs": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "script-retry-bridge": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-retry-fetch": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-retry-helper": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-run-storage": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "script-runs-durable": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "script-runs-executor-setting": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "script-sandbox-identity": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "script-saved-lifecycle": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "script-sdk-calls": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "script-tool-usage": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "secrets-backup-data-dir": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "slack-approval-buttons": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "slack-assistant-file-share": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-cancelled-task": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "slack-chat-sdk-command": {
+      "commits": 13,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 3
+      }
+    },
+    "slack-chat-sdk-interactivity": {
+      "commits": 13,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 3
+      }
+    },
+    "slack-chat-sdk-mention": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-chat-sdk-signature": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "slack-defer-eta-legacy": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-defer-eta-v2": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-defer-wake-reply-v2": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "slack-defer-wake-v2": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-delegation-band-entry": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "slack-delegation-band-entry-knowledge": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "slack-delegation-band-entry-storage": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "slack-delegation-child-result": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-delegation-failed-child": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-delegation-flag-off-repro": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-delegation-late-child": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-failed-task": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-file-download-bounds": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-follow-up": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-follow-up-card-merge": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-http-command": {
+      "commits": 13,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 3
+      }
+    },
+    "slack-http-cross-team-identity": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-http-interactivity": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "slack-http-mention": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-http-restart-redelivery": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-http-signature-retry": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-inbound-gates": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "slack-lead-follow-up-card": {
+      "commits": 20,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 10,
+        "writeStatements": 58
+      }
+    },
+    "slack-mention": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-pre-task-create-block": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "slack-quiet-lead-threads": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "slack-reaction-override": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-redefer": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "slack-relay-restart": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-reply-card": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "slack-reply-footer-toggle": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "slack-session-mirror": {
+      "commits": 15,
+      "writeStatements": 18,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 8
+      }
+    },
+    "slack-session-mirror-delegation": {
+      "commits": 12,
+      "writeStatements": 18,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 8
+      }
+    },
+    "slack-session-mirror-render-v2": {
+      "commits": 12,
+      "writeStatements": 18,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 8
+      }
+    },
+    "slack-skipped-task-legacy": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-skipped-task-v2": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-stop-button": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-task-output-citations": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-task-output-ui-spec": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-task-tree-toggle": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "slack-thread-one-card": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "slack-upload-path-bounds": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "slack-workflow-bot-ids": {
+      "commits": 13,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 58
+      }
+    },
+    "storage-recovery": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "stress-poll-claim": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "stress-task-create": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "stress-task-finish": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "stress-token-touch": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "task-create-idempotency": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "task-details-field-contract": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "task-details-fit": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "task-lifecycle": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "task-live-claim": {
+      "commits": 12,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 58
+      }
+    },
+    "task-started-after-commit": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "task-ui-actions": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "task-ui-script-actions": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "tasks-historical-values": {
+      "commits": 10,
+      "writeStatements": 10,
+      "measured": {
+        "commits": 0,
+        "writeStatements": 0
+      }
+    },
+    "trigger-asset-keys": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "trigger-cascades": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "trigger-chat-relay": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "trigger-fts-sync": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "trigger-immutability": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "trigger-model-profiles": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "trigger-rbac-default-role": {
+      "commits": 12,
+      "writeStatements": 16,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 6
+      }
+    },
+    "trigger-session-maintenance": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "upgrade-base-db": {
+      "commits": 12,
+      "writeStatements": 13,
+      "measured": {
+        "commits": 2,
+        "writeStatements": 3
+      }
+    },
+    "webhook-body-limit": {
+      "commits": 11,
+      "writeStatements": 11,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 1
+      }
+    },
+    "workflow-agent-task-crash-window": {
+      "commits": 11,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 58
+      }
+    },
+    "workflow-approvals": {
+      "commits": 21,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 11,
+        "writeStatements": 58
+      }
+    },
+    "workflow-definitions": {
+      "commits": 14,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 58
+      }
+    },
+    "workflow-edited-script-principal": {
+      "commits": 18,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 8,
+        "writeStatements": 58
+      }
+    },
+    "workflow-engine-async-nodes": {
+      "commits": 53,
+      "writeStatements": 89,
+      "measured": {
+        "commits": 43,
+        "writeStatements": 74
+      }
+    },
+    "workflow-engine-cancel": {
+      "commits": 24,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 14,
+        "writeStatements": 58
+      }
+    },
+    "workflow-engine-control": {
+      "commits": 23,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 13,
+        "writeStatements": 58
+      }
+    },
+    "workflow-engine-instant-nodes": {
+      "commits": 52,
+      "writeStatements": 78,
+      "measured": {
+        "commits": 42,
+        "writeStatements": 65
+      }
+    },
+    "workflow-engine-system-one": {
+      "commits": 16,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 58
+      }
+    },
+    "workflow-event-subscriber-isolation": {
+      "commits": 11,
+      "writeStatements": 17,
+      "measured": {
+        "commits": 1,
+        "writeStatements": 7
+      }
+    },
+    "workflow-executable-config-sources": {
+      "commits": 19,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 9,
+        "writeStatements": 58
+      }
+    },
+    "workflow-github-jira-event-triggers": {
+      "commits": 13,
+      "writeStatements": 17,
+      "measured": {
+        "commits": 3,
+        "writeStatements": 7
+      }
+    },
+    "workflow-input-refs": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "workflow-predicate-compat": {
+      "commits": 16,
+      "writeStatements": 18,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 8
+      }
+    },
+    "workflow-predicate-sandbox": {
+      "commits": 17,
+      "writeStatements": 20,
+      "measured": {
+        "commits": 7,
+        "writeStatements": 10
+      }
+    },
+    "workflow-retry-deadline": {
+      "commits": 14,
+      "writeStatements": 15,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 5
+      }
+    },
+    "workflow-savings": {
+      "commits": 14,
+      "writeStatements": 17,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 7
+      }
+    },
+    "workflow-schedules": {
+      "commits": 15,
+      "writeStatements": 70,
+      "measured": {
+        "commits": 5,
+        "writeStatements": 58
+      }
+    },
+    "workflow-script-node": {
+      "commits": 16,
+      "writeStatements": 20,
+      "measured": {
+        "commits": 6,
+        "writeStatements": 10
+      }
+    },
+    "workflow-script-node-executor-setting": {
+      "commits": 14,
+      "writeStatements": 17,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 7
+      }
+    },
+    "workflow-wait-event-loop": {
+      "commits": 17,
+      "writeStatements": 20,
+      "measured": {
+        "commits": 7,
+        "writeStatements": 10
+      }
+    },
+    "workflow-webhook-filter": {
+      "commits": 14,
+      "writeStatements": 17,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 7
+      }
+    },
+    "workflow-webhook-hmac-sha1": {
+      "commits": 14,
+      "writeStatements": 17,
+      "measured": {
+        "commits": 4,
+        "writeStatements": 7
+      }
+    }
+  }
 }
