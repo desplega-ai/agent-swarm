@@ -2593,6 +2593,9 @@
     }
   },
   "script_runs": {
+    "executionPrincipal": {
+      "exempt": "Server-recorded authority kind and identifiers"
+    },
     "sourceHash": {
       "exempt": "hash or digest"
     },
@@ -2958,6 +2961,9 @@
     }
   },
   "session_tokens": {
+    "brokerParentId": {
+      "exempt": "identifier"
+    },
     "runtimeId": {
       "exempt": "identifier"
     },
@@ -3765,6 +3771,9 @@
     }
   },
   "user_identity_events": {
+    "runProvenance": {
+      "exempt": "Server-recorded script run identifiers and nesting depth"
+    },
     "id": {
       "exempt": "identifier"
     },
@@ -3788,6 +3797,9 @@
     }
   },
   "user_tokens": {
+    "runProvenance": {
+      "exempt": "Server-recorded script run identifiers and nesting depth"
+    },
     "id": {
       "exempt": "identifier"
     },

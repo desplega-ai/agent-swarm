@@ -26,6 +26,7 @@ import {
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import { getStorage } from "../be/storage";
+import { isScriptRunToken } from "../be/users";
 import { can } from "../rbac";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
@@ -472,6 +473,12 @@ export async function handleScriptRuns(
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
+    const auth = getRequestAuth(req);
+    if (auth?.kind !== "operator" && auth?.kind !== "agent") {
+      jsonError(res, "Durable runs require an authenticated agent or operator", 403);
+      return true;
+    }
+
     if (!durableScriptRunsAllowed()) {
       jsonError(res, DURABLE_RUNS_NATIVE_REFUSED, 400);
       return true;
@@ -531,18 +538,19 @@ export async function handleScriptRuns(
         createdBy: requestedByUserId,
       });
       if (!creation.existing) {
-        const auth = getRequestAuth(req);
-        if (!auth || (auth.kind !== "operator" && auth.kind !== "agent" && auth.kind !== "user"))
-          throw new Error("Script run requires an authenticated principal");
         const principal =
           auth.kind === "operator"
             ? { kind: "operator" }
-            : auth.kind === "user"
-              ? { kind: "user", userId: auth.userId }
-              : { kind: "agent", agentId: auth.agentId };
+            : {
+                kind: "agent",
+                agentId: auth.agentId,
+                ...(auth.tokenKind === "agent" && (await isScriptRunToken(auth.tokenId))
+                  ? {}
+                  : { parentTokenId: auth.tokenId }),
+              };
         await getStorage().repos.scripts.setScriptRunPrincipal(
           creation.run.id,
-          JSON.stringify(principal),
+          JSON.stringify({ ...principal, depth: auth.depth, objectChain: auth.objectChain }),
         );
       }
       return creation;

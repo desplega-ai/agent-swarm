@@ -24,7 +24,11 @@ import type { IdentityEventRow, UserRow } from "@desplega/storage";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import { getApiKey } from "../utils/api-key";
-import type { HttpRequestAuth, ScriptRunProvenance } from "../utils/request-auth-context";
+import {
+  getCurrentRunProvenance,
+  type HttpRequestAuth,
+  type ScriptRunProvenance,
+} from "../utils/request-auth-context";
 import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { randomChars } from "../utils/short-id";
@@ -298,11 +302,13 @@ export async function recordIdentityEvent(
   before: unknown | null,
   after: unknown | null,
 ): Promise<void> {
+  const provenance = actor.kind === "system" ? null : getCurrentRunProvenance();
   await usersRepo().insertIdentityEvent({
     id: randomUUID().replace(/-/g, ""),
     userId,
     eventType,
     actor: actorString(actor),
+    runProvenance: provenance ? JSON.stringify(provenance) : null,
     beforeJson: before == null ? null : JSON.stringify(before),
     afterJson: after == null ? null : JSON.stringify(after),
     createdAt: new Date().toISOString(),
@@ -485,6 +491,7 @@ export async function mintToken(
 export async function mintUserScriptRunToken(
   userId: string,
   ttlMs: number,
+  provenance?: ScriptRunProvenance,
 ): Promise<{ tokenId: string; plaintext: string }> {
   const plaintext = `${TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -493,6 +500,7 @@ export async function mintUserScriptRunToken(
     id: tokenId,
     userId,
     label: "script-run",
+    runProvenance: provenance ? JSON.stringify(provenance) : undefined,
     tokenHash: sha256Hex(plaintext),
     tokenPreview: plaintext.slice(-4),
     createdAt: now.toISOString(),
@@ -565,7 +573,7 @@ export async function resolveUserByToken(plaintext: string): Promise<User | null
 /** Like `resolveUserByToken`, plus the id of the `user_tokens` row that matched. */
 export async function resolveUserToken(
   plaintext: string,
-): Promise<{ user: User | null; tokenId: string } | null> {
+): Promise<{ user: User | null; tokenId: string; provenance?: ScriptRunProvenance } | null> {
   const hash = sha256Hex(plaintext);
 
   const row = await usersRepo().findUserTokenByHash(hash);
@@ -584,7 +592,13 @@ export async function resolveUserToken(
     }
   }
 
-  return { user: await findUserById(row.userId), tokenId: row.id };
+  return {
+    user: await findUserById(row.userId),
+    tokenId: row.id,
+    ...(row.runProvenance
+      ? { provenance: JSON.parse(row.runProvenance) as ScriptRunProvenance }
+      : {}),
+  };
 }
 
 /**
@@ -600,6 +614,7 @@ export async function isLiveUserToken(tokenId: string, userId: string): Promise<
 // Session tokens (ephemeral, tasks and runtimes)
 // ---------------------------------------------------------------------------
 
+export const BROKER_TOKEN_PREFIX = "broker.aseph_";
 const SESSION_TOKEN_PREFIX = "aseph_"; // agent-swarm-ephemeral
 
 /**
@@ -712,6 +727,49 @@ export async function mintScriptRunToken(
   return token;
 }
 
+/** Broker credentials delegate to the exact live launch session, including its task or runtime limits. */
+export async function mintBrokerSessionToken(
+  agentId: string,
+  parentTokenId: string,
+  ttlMs: number,
+  provenance: ScriptRunProvenance,
+) {
+  return getStorage().transaction(async () => {
+    const parent = await sessionsRepo().findSessionTokenById(parentTokenId);
+    if (
+      !parent ||
+      parent.agentId !== agentId ||
+      parent.controllerId ||
+      parent.scriptRun ||
+      parent.operatorRun ||
+      parent.revokedAt ||
+      Date.parse(parent.expiresAt) <= Date.now()
+    ) {
+      throw new Error("Script run launch session is no longer active");
+    }
+    const token = await insertSessionToken(
+      agentId,
+      null,
+      null,
+      ttlMs,
+      null,
+      parent.expiresAt,
+      null,
+      null,
+      true,
+      false,
+      parentTokenId,
+    );
+    await sessionsRepo().setSessionTokenProvenance(token.tokenId, {
+      sourceStepId: provenance.sourceStepId ?? null,
+      sourceScriptRunId: provenance.sourceScriptRunId ?? null,
+      objectChain: provenance.objectChain ? JSON.stringify(provenance.objectChain) : null,
+      depth: provenance.depth ?? 0,
+    });
+    return token;
+  });
+}
+
 export async function mintOperatorScriptRunToken(
   label: string,
   ttlMs: number,
@@ -736,8 +794,10 @@ export async function insertSessionToken(
   parentTokenId: string | null = null,
   scriptRun = false,
   operatorRun = false,
+  brokerParentId: string | null = null,
 ): Promise<{ tokenId: string; plaintext: string }> {
-  const plaintext = `${SESSION_TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
+  const prefix = brokerParentId ? BROKER_TOKEN_PREFIX : SESSION_TOKEN_PREFIX;
+  const plaintext = `${prefix}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const hash = sha256Hex(plaintext);
   const preview = plaintext.slice(-4);
@@ -758,6 +818,7 @@ export async function insertSessionToken(
     createdAt: now.toISOString(),
     controllerId,
     parentTokenId,
+    brokerParentId,
     scriptRun,
     operatorRun,
   });
@@ -952,10 +1013,11 @@ export async function resolveSessionToken(
   plaintext: string,
   options: { touch?: boolean } = {},
 ): Promise<Extract<HttpRequestAuth, { kind: "agent" | "operator" | "controller" }> | null> {
-  if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
+  const broker = plaintext.startsWith(BROKER_TOKEN_PREFIX);
+  if (!broker && !plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const hash = sha256Hex(plaintext);
   const row = await sessionsRepo().findSessionTokenByHash(hash);
-  if (!row || row.revokedAt !== null) return null;
+  if (!row || row.revokedAt !== null || broker !== !!row.brokerParentId) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
 
   if (row.controllerId !== null) {
@@ -995,18 +1057,32 @@ export async function resolveSessionToken(
       ...provenance,
     };
   }
+  // A broker's credential can only act within its original session, even after an API restart.
+  const original =
+    row.scriptRun && row.brokerParentId
+      ? await sessionsRepo().findSessionTokenById(row.brokerParentId)
+      : row;
+  if (
+    !original ||
+    original.revokedAt ||
+    original.agentId !== row.agentId ||
+    Date.parse(original.expiresAt) <= nowMs ||
+    original.controllerId ||
+    (original.id !== row.id && original.scriptRun) ||
+    original.operatorRun
+  )
+    return null;
   return {
     kind: "agent",
-    tokenId: row.id,
-    tokenKind: row.taskId !== null ? "task" : row.runtimeId !== null ? "runtime" : "agent",
+    tokenId: original.id,
+    ...(original.id === row.id ? {} : { brokerTokenId: row.id }),
+    tokenKind:
+      original.taskId !== null ? "task" : original.runtimeId !== null ? "runtime" : "agent",
     agentId: row.agentId,
-    taskId: row.taskId,
-    runtimeId: row.runtimeId,
-    expiresAt: row.expiresAt,
-    ...(row.sourceStepId ? { sourceStepId: row.sourceStepId } : {}),
-    ...(row.sourceScriptRunId ? { sourceScriptRunId: row.sourceScriptRunId } : {}),
-    ...(row.objectChain !== null ? { objectChain: JSON.parse(row.objectChain) as string[] } : {}),
-    depth: row.depth,
+    taskId: original.taskId,
+    runtimeId: original.runtimeId,
+    expiresAt: row.expiresAt < original.expiresAt ? row.expiresAt : original.expiresAt,
+    ...provenance,
   };
 }
 

@@ -263,6 +263,7 @@ export function usersContract(engine: ContractEngine): void {
         tokenPreview: "t2",
       });
       expect(await repo.findUserTokenByHash("hash-t2")).toEqual({
+        runProvenance: null,
         id: "t2",
         userId: "u1",
         revokedAt: null,

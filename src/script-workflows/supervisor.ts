@@ -1,10 +1,12 @@
 import {
+  getAgentById,
   getRunningScriptRuns,
   getScriptRun,
   getScriptRunExecutionArgs,
   updateScriptRun,
   updateScriptRunIfRunning,
 } from "../be/db";
+import { acquireLegacyJournalCredential } from "../be/scripts/legacy-journal-credential";
 import {
   acquireScriptApiCredential,
   type ScriptExecutionPrincipal,
@@ -12,6 +14,7 @@ import {
 import { getStorage } from "../be/storage";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
 import type { ScriptRun } from "../types";
+import type { ScriptRunProvenance } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   localProcessScriptExecutor,
@@ -24,6 +27,7 @@ type ManagedRun = {
   execution: ScriptExecutionHandle;
 };
 
+const starting = new Map<string, Promise<void>>();
 const managed = new Map<string, ManagedRun>();
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
 let scriptExecutor: ScriptExecutor = localProcessScriptExecutor;
@@ -49,25 +53,42 @@ export function durableScriptRunsAllowed(): boolean {
 
 export async function startScriptRunProcess(run: ScriptRun, baseUrl: string): Promise<void> {
   if (supervisorDisabled()) return;
+  const pending = starting.get(run.id);
+  if (pending) return pending;
   if (managed.has(run.id)) return;
+  const launch = startOwnedScriptRun(run, baseUrl);
+  starting.set(run.id, launch);
+  try {
+    await launch;
+  } finally {
+    starting.delete(run.id);
+  }
+}
+
+async function startOwnedScriptRun(run: ScriptRun, baseUrl: string): Promise<void> {
   // Also covers reconcile respawns of runs created before the setting changed.
   if (!durableScriptRunsAllowed()) throw new Error(DURABLE_RUNS_NATIVE_REFUSED);
   const row = await getStorage().repos.scripts.getScriptRunPrincipal(run.id);
-  // Historical runs have no trusted principal. Refuse replay instead of elevating them.
-  if (!row?.executionPrincipal) throw new Error("Script run has no stored execution principal");
-  const principal = JSON.parse(row.executionPrincipal) as ScriptExecutionPrincipal;
-  if (!["operator", "agent", "user"].includes(principal.kind))
-    throw new Error("Invalid script execution principal");
-  if (principal.kind === "agent" && principal.agentId !== run.agentId)
-    throw new Error("Script run agent does not match principal");
-  const credential = await acquireScriptApiCredential(
-    run.agentId,
-    { sourceScriptRunId: run.id },
-    principal,
-    scriptRunMaxWallMs() + 60_000,
-  );
+  if (!row) throw new Error("Script run does not exist");
+  const ttl = scriptRunMaxWallMs() + 60_000;
+  const principal = row.executionPrincipal
+    ? (JSON.parse(row.executionPrincipal) as ScriptExecutionPrincipal & ScriptRunProvenance)
+    : null;
+  if (principal && principal.kind !== "agent" && principal.kind !== "operator") {
+    throw new Error("Invalid durable script execution principal");
+  }
+  if (!principal && !(await getAgentById(run.agentId))) {
+    throw new Error("Historical script run has no registered owner");
+  }
+  const credential = principal
+    ? await acquireScriptApiCredential(
+        run.agentId,
+        { sourceScriptRunId: run.id, depth: principal.depth, objectChain: principal.objectChain },
+        principal,
+        ttl,
+      )
+    : acquireLegacyJournalCredential(run.id, run.agentId, ttl);
   const apiKey = credential.apiKey;
-  if (!apiKey) throw new Error("Script run credential is required");
 
   // `run.args` is the redacted view; launch with the exact sealed value.
   let execution: ScriptExecutionHandle;
@@ -80,14 +101,25 @@ export async function startScriptRunProcess(run: ScriptRun, baseUrl: string): Pr
     throw error;
   }
   managed.set(run.id, { execution });
-  await updateScriptRun(run.id, {
+  let cleanup: Promise<void> | undefined;
+  const release = () => (cleanup ??= closeExecution());
+  async function closeExecution() {
+    if (managed.get(run.id)?.execution === execution) managed.delete(run.id);
+    try {
+      await execution.cleanup();
+    } finally {
+      await credential.release();
+    }
+  }
+  const persisted = updateScriptRun(run.id, {
     status: "running",
     pid: execution.pid,
     lastHeartbeatAt: new Date().toISOString(),
   });
-
-  execution.exited
+  // An early exit must wait for the initial status write before recording its final status.
+  const finished = execution.exited
     .then(async ({ exitCode, stderr, terminated }) => {
+      await persisted;
       if (terminated) return;
       const current = await getScriptRun(run.id);
       if (current && current.status === "running") {
@@ -113,17 +145,25 @@ export async function startScriptRunProcess(run: ScriptRun, baseUrl: string): Pr
         });
       }
     })
-    .finally(async () => {
-      managed.delete(run.id);
-      try {
-        await execution.cleanup();
-      } finally {
-        await credential.release();
-      }
-    });
+    .finally(release);
+  void finished.catch((error) => {
+    console.error(scrubSecrets(`[script-workflows] run ${run.id} cleanup: ${String(error)}`));
+  });
+  try {
+    await persisted;
+  } catch (error) {
+    // Stop any remaining work and revoke immediately if the executor cannot terminate.
+    try {
+      await execution.terminate("SIGTERM");
+    } finally {
+      await release();
+    }
+    throw error;
+  }
 }
 
 export async function terminateScriptRunProcess(runId: string): Promise<boolean> {
+  await starting.get(runId)?.catch(() => {});
   const managedRun = managed.get(runId);
   const run = await getScriptRun(runId);
   if (managedRun) {
@@ -190,5 +230,6 @@ export async function startScriptRunSupervisor(baseUrl: string): Promise<void> {
 export async function stopScriptRunSupervisor(): Promise<void> {
   if (reconcileTimer) clearInterval(reconcileTimer);
   reconcileTimer = null;
+  await Promise.allSettled(starting.values());
   for (const runId of [...managed.keys()]) await terminateScriptRunProcess(runId);
 }

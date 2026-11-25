@@ -15,6 +15,7 @@ import {
   computeContentHash,
   createAgent,
   createScheduledTask,
+  createUser,
   createWorkflow,
   createWorkflowRun,
   getDbClient,
@@ -38,15 +39,23 @@ import {
 } from "../be/seed/workflows-seeder";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
-import { dispatchScheduleTarget } from "../scheduler/scheduler";
+import { dispatchScheduleTarget, executeScheduleScript } from "../scheduler/scheduler";
 import { registerTriggerWorkflowTool } from "../tools/workflows/trigger-workflow";
 import type { Workflow } from "../types";
+import {
+  beginRequestAuthScope,
+  runWithoutRequestAuth,
+  setRequestAuth,
+} from "../utils/request-auth-context";
 import {
   getExecutorRegistry,
   initWorkflows,
   stopRetryPoller,
   workflowEventBus,
 } from "../workflows";
+import { startWorkflowExecution } from "../workflows/engine";
+import { resumeWaitState } from "../workflows/resume";
+import { resolveWorkflowRunPrincipal, workflowRequestPrincipal } from "../workflows/run-principal";
 import { handleEventTrigger } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { listenOnFreePort } from "./test-net";
@@ -145,13 +154,18 @@ beforeAll(async () => {
     string,
     { handler: (args: unknown, extra: unknown) => Promise<unknown> }
   >;
-  callTrigger = (args, agentId) =>
-    tools["trigger-workflow"]!.handler(args, {
+  callTrigger = (args, agentId) => {
+    beginRequestAuthScope();
+    setRequestAuth({} as IncomingMessage, { kind: "operator", fingerprint: "test" });
+    return tools["trigger-workflow"]!.handler(args, {
       sessionId: "session-test",
       requestInfo: { headers: { "x-agent-id": agentId } },
     });
+  };
 
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    beginRequestAuthScope();
+    setRequestAuth(req, { kind: "operator", fingerprint: "test" });
     res.setHeader("Content-Type", "application/json");
     const handled = await handleWorkflows(
       req,
@@ -242,14 +256,125 @@ describe("swarm-script principal for a creator-less workflow", () => {
     expect(gatherPrincipals()).toEqual([workerId]);
   });
 
-  test("an event payload naming the lead runs with no agent (the workflow sentinel)", async () => {
+  test("system events and legacy waits keep explicit authority during unrelated requests", async () => {
     await createWorkflow({
       name: `principal-event-${crypto.randomUUID()}`,
       definition: dreaming.definition,
       triggers: [{ type: "event", eventName: "principal.test" }],
     });
-    await handleEventTrigger("principal.test", { agentId: leadId }, getExecutorRegistry());
+    // An unrelated request must not change an event automation's authority.
+    beginRequestAuthScope();
+    const unrelatedUser = await createUser({ name: "Unrelated request user" });
+    setRequestAuth({} as IncomingMessage, {
+      kind: "user",
+      userId: unrelatedUser.id,
+      user: unrelatedUser,
+    });
+    await handleEventTrigger("principal.test", {}, getExecutorRegistry());
     expect(gatherPrincipals()).toEqual(["workflow"]);
+
+    // A trusted system parent must pass its authority to a creator-less child.
+    const child = await runWithoutRequestAuth(() =>
+      createWorkflow({
+        name: `system-child-${crypto.randomUUID()}`,
+        definition: dreaming.definition,
+      }),
+    );
+    const parent = await runWithoutRequestAuth(() =>
+      createWorkflow({
+        name: `system-parent-${crypto.randomUUID()}`,
+        definition: {
+          nodes: [{ id: "child", type: "sub-workflow", config: { workflowId: child.id } }],
+        },
+      }),
+    );
+    await startWorkflowExecution(parent, {}, getExecutorRegistry(), {
+      executionPrincipal: { ok: true, operator: true },
+    });
+    await waitUntil(
+      () => gatherPrincipals().length === 2,
+      () => "System child did not execute",
+    );
+    expect(gatherPrincipals()).toEqual(["workflow", "workflow"]);
+
+    const nested = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM workflow_runs WHERE workflowId = ?",
+      [child.id],
+    );
+    await getDbClient().run("UPDATE workflow_runs SET principal = ? WHERE id = ?", [
+      JSON.stringify({ ok: true }),
+      nested!.id,
+    ]);
+    expect(await resolveWorkflowRunPrincipal(child, nested!.id)).toEqual({
+      ok: true,
+      operator: true,
+    });
+
+    // Pre-upgrade parked executions recover from server-stamped trigger facts.
+    for (const principal of [undefined, JSON.stringify({ ok: true })]) {
+      const legacy = await createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: child.id,
+        triggerType: "event",
+        principal,
+      });
+      expect(await resolveWorkflowRunPrincipal(child, legacy.id)).toEqual({
+        ok: true,
+        operator: true,
+      });
+    }
+    const parked = await runWithoutRequestAuth(() =>
+      createWorkflow({
+        name: `legacy-wait-${crypto.randomUUID()}`,
+        definition: {
+          nodes: [
+            { id: "wait", type: "wait", config: { mode: "time", durationMs: 60000 }, next: "run" },
+            {
+              id: "run",
+              type: "swarm-script",
+              config: { scriptName: "dreaming-gather", args: { minTasks: 1 } },
+            },
+          ],
+        },
+      }),
+    );
+    for (const oldPrincipal of [null, JSON.stringify({ ok: true })]) {
+      const parkedId = await startWorkflowExecution(parked, {}, getExecutorRegistry(), {
+        triggerType: "event",
+        executionPrincipal: { ok: true, operator: true },
+      });
+      await getDbClient().run("UPDATE workflow_runs SET principal = ? WHERE id = ?", [
+        oldPrincipal,
+        parkedId,
+      ]);
+      const wait = await getDbClient().get<{ id: string }>(
+        "SELECT id FROM wait_states WHERE workflowRunId = ?",
+        [parkedId],
+      );
+      await resumeWaitState(wait!.id, "fired", {}, getExecutorRegistry());
+      expect((await getWorkflowRun(parkedId))?.status).toBe("completed");
+    }
+    expect(gatherPrincipals()).toEqual(["workflow", "workflow", "workflow", "workflow"]);
+    const ambiguous = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: child.id,
+      triggerType: "api",
+      principal: JSON.stringify({ ok: true }),
+    });
+    expect((await resolveWorkflowRunPrincipal(child, ambiguous.id)).ok).toBe(false);
+    expect(workflowRequestPrincipal({ kind: "guest" }).ok).toBe(false);
+    expect(
+      workflowRequestPrincipal({
+        kind: "agent",
+        agentId: workerId,
+        tokenKind: "agent",
+        taskId: null,
+        runtimeId: null,
+        tokenId: "expired-test",
+        expiresAt: "2000-01-01T00:00:00Z",
+      }).ok,
+    ).toBe(false);
+    setRequestAuth({} as IncomingMessage, { kind: "operator", fingerprint: "test" });
   });
 
   test("a sub-workflow child runs as the parent's principal, not an agentId in its inputs", async () => {
@@ -538,13 +663,93 @@ describe("swarm-script principal for a creator-less workflow", () => {
   });
 
   test("control: a workflow with a creator still runs as its creator", async () => {
+    const auditUser = await createUser({ name: "Automation audit user" });
     const owned = await createWorkflow({
+      createdBy: auditUser.id,
       name: `principal-owned-${crypto.randomUUID()}`,
       definition: dreaming.definition,
       createdByAgentId: leadId,
     });
     await callTrigger({ id: owned.id, triggerData: { agentId: workerId } }, workerId);
     expect(gatherPrincipals()).toEqual([leadId]);
+    const legacy = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: owned.id,
+      createdBy: auditUser.id,
+    });
+    expect(await resolveWorkflowRunPrincipal(owned, legacy.id)).toEqual({
+      ok: true,
+      agentId: leadId,
+    });
+    const oldForm = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: owned.id,
+      principal: JSON.stringify({ ok: true }),
+    });
+    expect(await resolveWorkflowRunPrincipal(owned, oldForm.id)).toEqual({
+      ok: true,
+      agentId: leadId,
+    });
+    expect(
+      (
+        await resolveWorkflowRunPrincipal(
+          { ...owned, lastUpdatedAt: "2999-01-01T00:00:00Z" },
+          oldForm.id,
+        )
+      ).ok,
+    ).toBe(false);
+    const agentSchedule = await createScheduledTask({
+      name: `agent-audit-${crypto.randomUUID()}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "script",
+      scriptName: "dreaming-gather",
+      createdByAgentId: leadId,
+      createdBy: auditUser.id,
+    });
+    await executeScheduleScript(agentSchedule);
+    expect(calls.at(-1)?.agentId).toBe(leadId);
+
+    const userWorkflow = await runWithoutRequestAuth(() =>
+      createWorkflow({
+        name: `user-owned-${crypto.randomUUID()}`,
+        createdBy: auditUser.id,
+        definition: {
+          nodes: [{ id: "run", type: "swarm-script", config: { scriptName: "dreaming-gather" } }],
+        },
+      }),
+    );
+    const userRun = await startWorkflowExecution(userWorkflow, {}, getExecutorRegistry(), {
+      executionPrincipal: { ok: true, userId: auditUser.id },
+    });
+    expect(await resolveWorkflowRunPrincipal(userWorkflow, userRun)).toEqual({
+      ok: true,
+      userId: auditUser.id,
+    });
+    const input = runnerSpy.mock.calls.at(-1)![0];
+    for (const key of ["agentFs", "egressSecrets", "apiConnections", "mcpConnections"] as const) {
+      expect(input[key]).toBeUndefined();
+    }
+    const oldUser = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: userWorkflow.id,
+      principal: JSON.stringify({ ok: true }),
+    });
+    expect(await resolveWorkflowRunPrincipal(userWorkflow, oldUser.id)).toEqual({
+      ok: true,
+      userId: auditUser.id,
+    });
+    const userSchedule = await createScheduledTask({
+      name: `user-schedule-${crypto.randomUUID()}`,
+      cronExpression: "0 0 1 1 *",
+      targetType: "script",
+      scriptName: "dreaming-gather",
+      createdBy: auditUser.id,
+    });
+    await executeScheduleScript(userSchedule);
+    const scheduledInput = runnerSpy.mock.calls.at(-1)![0];
+    for (const key of ["agentFs", "egressSecrets", "apiConnections", "mcpConnections"] as const) {
+      expect(scheduledInput[key]).toBeUndefined();
+    }
   });
 
   test("control: a worker's manual trigger with no data runs the *-lead nodes on the lead", async () => {

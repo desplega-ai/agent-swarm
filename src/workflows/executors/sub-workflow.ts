@@ -134,8 +134,7 @@ export class SubWorkflowExecutor extends BaseExecutor<
     try {
       childRunId = await startWorkflowExecution(workflow, config.inputs ?? {}, this.registry, {
         triggeredByAgentId,
-        executionPrincipal:
-          principal.userId || (!principal.agentId && !principal.operator) ? principal : undefined,
+        executionPrincipal: principal,
         requestedByUserId: meta.requestedByUserId,
         parentStepId: meta.stepId,
         parentStepAttempt: attempt,

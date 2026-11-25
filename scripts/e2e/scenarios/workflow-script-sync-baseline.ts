@@ -33,6 +33,19 @@ export const workflowScriptSyncBaseline: Scenario = {
       }`;
     const gate = startStub(() => Response.json({ released }));
     try {
+      const childName = `nested-sync-${ctx.nonce}`;
+      await upsertScript(ctx, fixtureOwner, {
+        name: childName,
+        scope: "global",
+        source: "export default async () => 42",
+      });
+      scripts.push(childName);
+      const childId = await createWorkflow(ctx, "nested-sync", {
+        nodes: [
+          { id: "child", type: "swarm-script", config: { scriptName: childName, scope: "global" } },
+        ],
+      });
+      workflows.push(childId);
       const name = `sync-baseline-${ctx.nonce}`;
       await upsertScript(ctx, fixtureOwner, {
         name,
@@ -42,7 +55,10 @@ export const workflowScriptSyncBaseline: Scenario = {
           if (agentId === "workflow") {
             const read = await ctx.swarm.config_get({ key: args.key, includeSecrets: true });
             const config = read.data.configs[0];
-            return { agentId, status: read.status, count: read.data.configs.length,
+            const child = await ctx.swarm.workflow_trigger({id:args.childId});
+            if (child.status !== 201) throw new Error("Cannot trigger child workflow");
+
+            return { agentId, childRunId: child.data.runId, status: read.status, count: read.data.configs.length,
               secretVisible: config?.isSecret === true && typeof config.value === "string" && config.value !== "********" };
           }
           const launched = await ctx.swarm.script_launchRun({ source: args.source, args: { gate: args.gate } });
@@ -61,6 +77,7 @@ export const workflowScriptSyncBaseline: Scenario = {
               scope: "global",
               args: {
                 key,
+                childId,
                 source: durableSource,
                 gate: gate.origin,
               },
@@ -79,6 +96,11 @@ export const workflowScriptSyncBaseline: Scenario = {
       expect(
         result.status === 200 && result.count === 1 && result.secretVisible === true,
         "creator-less script must retain operator access to the synthetic secret",
+      );
+      const nested = await getRunDetail(ctx, asString(result.childRunId, "nested workflow run"));
+      expect(
+        nested.run.status === "completed" && outputOf(nested, "child").result === 42,
+        "a creator-less script can trigger another creator-less script workflow",
       );
       // The public launch tool requires a registered agent. The trigger stamps that identity.
       const initiated = await triggerWorkflow(ctx, workflow, {}, { agentId });

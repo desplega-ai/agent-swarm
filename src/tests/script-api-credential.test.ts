@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
@@ -217,11 +217,24 @@ describe("operator run authority", () => {
     expect(principal.sourceStepId).toBe(provenance.sourceStepId);
     expect(principal.objectChain).toEqual(["fixture"]);
     expect(credential.apiKey === OPERATOR_KEY).toBe(false);
+    const { beginRequestAuthScope, setRequestAuth } = await import("../utils/request-auth-context");
+    const { handleUsers } = await import("../http/users");
     const server = createServer((req, res) => {
-      void resolveHttpRequestAuth(req, OPERATOR_KEY).then((auth) => {
-        res.writeHead(auth ? 200 : 401);
-        res.end();
-      });
+      beginRequestAuthScope();
+      void resolveHttpRequestAuth(req, OPERATOR_KEY)
+        .then(async (auth) => {
+          setRequestAuth(req, auth);
+          if (auth && req.method === "POST" && req.url === "/api/users") {
+            await handleUsers(req, res, ["api", "users"], new URLSearchParams());
+            return;
+          }
+          res.writeHead(auth ? 200 : 401);
+          res.end();
+        })
+        .catch(() => {
+          res.writeHead(500);
+          res.end();
+        });
     });
     const detach = attachRealtimeTransport(server);
     const port = await listenOnFreePort(server);
@@ -232,6 +245,29 @@ describe("operator run authority", () => {
           headers: { Authorization: `Bearer ${credential.apiKey}` },
         });
       expect((await request()).status).toBe(200);
+      const audit = [];
+      for (const key of [OPERATOR_KEY, credential.apiKey]) {
+        const response = await fetch(`http://127.0.0.1:${port}/api/users`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Audit fixture",
+            email: `audit-${crypto.randomUUID()}@example.invalid`,
+            dailyBudgetUsd: 10,
+          }),
+        });
+        expect(response.status).toBe(200);
+        const { user } = (await response.json()) as { user: { id: string } };
+        const row = await getDbClient().get<{ actor: string; runProvenance: string | null }>(
+          'SELECT actor, "runProvenance" FROM user_identity_events WHERE "userId" = ? AND "eventType" = ?',
+          [user.id, "budget_changed"],
+        );
+        audit.push(row);
+      }
+      expect(audit[0]?.actor).toBe(`operator:${fingerprintApiKey(OPERATOR_KEY)}`);
+      expect(audit[1]?.actor).toBe(audit[0]?.actor);
+      expect(audit[0]?.runProvenance).toBeNull();
+      expect(JSON.parse(audit[1]?.runProvenance ?? "null")).toEqual(provenance);
       ws = new WebSocket(`ws://127.0.0.1:${port}/api/realtime`, {
         headers: { Authorization: `Bearer ${credential.apiKey}` },
       });
@@ -276,9 +312,11 @@ test("durable broker retains agent authority after the inline credential is revo
   );
   const exit = Promise.withResolvers<{ exitCode: number; stderr: string; terminated: boolean }>();
   let brokerBearer: string | undefined;
+  let launches = 0;
   setScriptRunExecutor({
     start: async (input) => {
       brokerBearer = input.apiKey;
+      launches++;
       return {
         pid: 0,
         tmpdir: "",
@@ -292,7 +330,11 @@ test("durable broker retains agent authority after the inline credential is revo
     terminatePid: async () => {},
   });
   try {
-    await startScriptRunProcess(run, "http://127.0.0.1");
+    await Promise.all([
+      startScriptRunProcess(run, "http://127.0.0.1"),
+      startScriptRunProcess(run, "http://127.0.0.1"),
+    ]);
+    expect(launches).toBe(1);
     await parent.release();
     expect(await resolveSessionToken(parent.apiKey)).toBeNull();
     if (!brokerBearer) throw new Error("Expected broker credential");
@@ -313,23 +355,21 @@ test("durable broker retains agent authority after the inline credential is revo
 
 test("user authority stays a user and refuses deleted users", async () => {
   const { findOrCreateUserByEmail, resolveUserToken } = await import("../be/users");
-  const { decideWorkflowRunPrincipal } = await import("../workflows/run-principal");
-  const { beginRequestAuthScope, setRequestAuth, runWithoutRequestAuth } = await import(
-    "../utils/request-auth-context"
-  );
   const { user } = await findOrCreateUserByEmail(
     `phase2-${crypto.randomUUID()}@example.invalid`,
     {},
     { kind: "system", id: "phase2-fixture" },
   );
-  const credential = await acquireScriptApiCredential(
-    "workflow",
-    {},
-    { kind: "user", userId: user.id },
-  );
+  const provenance = { sourceStepId: crypto.randomUUID() };
+  const credential = await acquireScriptApiCredential("workflow", provenance, {
+    kind: "user",
+    userId: user.id,
+  });
   try {
     expect(await resolveSessionToken(credential.apiKey)).toBeNull();
-    expect((await resolveUserToken(credential.apiKey))?.user?.id).toBe(user.id);
+    const resolved = await resolveUserToken(credential.apiKey);
+    expect(resolved?.user?.id).toBe(user.id);
+    expect(resolved?.provenance).toEqual(provenance);
     const { can } = await import("../rbac");
     expect(
       can({
@@ -338,23 +378,133 @@ test("user authority stays a user and refuses deleted users", async () => {
         source: "http",
       }).allow,
     ).toBe(false);
-    beginRequestAuthScope();
-    const request = {} as import("node:http").IncomingMessage;
-    setRequestAuth(request, { kind: "user", userId: user.id, user });
-    const principal = await decideWorkflowRunPrincipal(null, undefined);
-    expect(principal).toEqual({ ok: true, userId: user.id });
-    const deferred = await runWithoutRequestAuth(() =>
-      decideWorkflowRunPrincipal({ createdBy: user.id } as never, undefined),
-    );
-    expect(deferred).toEqual({ ok: true, userId: user.id });
-    await runWithoutRequestAuth(() =>
-      expect(
-        acquireScriptApiCredential("workflow", {}, { kind: "user", userId: crypto.randomUUID() }),
-      ).rejects.toThrow("inactive"),
-    );
-    setRequestAuth(request, null);
+    await expect(
+      acquireScriptApiCredential("workflow", {}, { kind: "user", userId: crypto.randomUUID() }),
+    ).rejects.toThrow("inactive");
   } finally {
     await credential.release();
   }
   expect(await resolveUserToken(credential.apiKey)).toBeNull();
+});
+
+test("durable credentials preserve the launch session's task or runtime and expire with it", async () => {
+  const { mintSessionToken, mintRuntimeToken, revokeSessionToken } = await import("../be/users");
+  const taskId = crypto.randomUUID();
+  const runtimeId = crypto.randomUUID();
+  const task = await mintSessionToken(agentId, taskId, 60_000);
+  const runtime = await mintRuntimeToken(agentId, runtimeId, 60_000);
+  for (const parent of [task, runtime]) {
+    const authority = { kind: "agent", agentId, parentTokenId: parent.tokenId } as const;
+    const broker = await acquireScriptApiCredential(
+      agentId,
+      { sourceScriptRunId: "test-run" },
+      authority,
+    );
+    try {
+      const original = await resolveSessionToken(parent.plaintext);
+      const delegated = await resolveSessionToken(broker.apiKey);
+      if (original?.kind !== "agent" || delegated?.kind !== "agent")
+        throw new Error("Expected agent sessions");
+      expect(delegated.tokenKind).toBe(parent === task ? "task" : "runtime");
+      expect(delegated.taskId).toBe(original.taskId);
+      expect(delegated.runtimeId).toBe(original.runtimeId);
+      expect(delegated.expiresAt).toBe(original.expiresAt);
+      expect(delegated.sourceScriptRunId).toBe("test-run");
+      expect(delegated.brokerTokenId).toBeDefined();
+      await revokeSessionToken(parent.tokenId);
+      expect(await resolveSessionToken(broker.apiKey)).toBeNull();
+      await expect(acquireScriptApiCredential(agentId, {}, authority)).rejects.toThrow(
+        "no longer active",
+      );
+    } finally {
+      await broker.release();
+      await revokeSessionToken(parent.tokenId);
+    }
+  }
+});
+
+test("a failed launch write terminates the guest and releases its credential", async () => {
+  const { createScriptRun } = await import("../be/db");
+  const { getStorage } = await import("../be/storage");
+  const { setScriptRunExecutor, startScriptRunProcess } = await import(
+    "../script-workflows/supervisor"
+  );
+  const { localProcessScriptExecutor } = await import("../script-workflows/executor");
+  const { run } = await createScriptRun({
+    id: crypto.randomUUID(),
+    agentId,
+    source: "export default () => null",
+    args: null,
+  });
+  const scripts = getStorage().repos.scripts;
+  await scripts.setScriptRunPrincipal(run.id, JSON.stringify({ kind: "agent", agentId }));
+  const write = spyOn(scripts, "updateScriptRun").mockRejectedValueOnce(
+    new Error("Fixture storage unavailable"),
+  );
+  const exit = Promise.withResolvers<{ exitCode: number; stderr: string; terminated: boolean }>();
+  let terminated = false;
+  let cleaned = 0;
+  setScriptRunExecutor({
+    async start() {
+      return {
+        pid: null,
+        tmpdir: "",
+        startedAtMs: Date.now(),
+        exited: exit.promise,
+        async terminate() {
+          terminated = true;
+          exit.resolve({ exitCode: 0, stderr: "", terminated: true });
+        },
+        async cleanup() {
+          cleaned++;
+        },
+      };
+    },
+    isRunning: () => false,
+    terminatePid: async () => {},
+  });
+  try {
+    await expectOneRevokedToken(async () => {
+      await expect(startScriptRunProcess(run, "http://127.0.0.1")).rejects.toThrow(
+        "Fixture storage unavailable",
+      );
+    });
+    expect(terminated).toBe(true);
+    expect(cleaned).toBe(1);
+  } finally {
+    write.mockRestore();
+    setScriptRunExecutor(localProcessScriptExecutor);
+  }
+});
+
+test("historical replay authority belongs to one journal", async () => {
+  const { acquireLegacyJournalCredential, resolveLegacyJournalCredential } = await import(
+    "../be/scripts/legacy-journal-credential"
+  );
+  const runId = crypto.randomUUID();
+  const grant = acquireLegacyJournalCredential(runId, agentId, 60_000);
+  const journal = ["api", "internal", "script-runs", runId];
+  try {
+    expect(
+      resolveLegacyJournalCredential(grant.apiKey, "GET", [...journal, "steps", "read"])?.kind,
+    ).toBe("agent");
+    expect(resolveLegacyJournalCredential(grant.apiKey, "POST", [...journal, "status"])?.kind).toBe(
+      "agent",
+    );
+    expect(
+      resolveLegacyJournalCredential(grant.apiKey, "POST", [
+        "api",
+        "internal",
+        "script-runs",
+        crypto.randomUUID(),
+        "status",
+      ]),
+    ).toBeNull();
+    expect(
+      resolveLegacyJournalCredential(grant.apiKey, "POST", [...journal, "agent-task"]),
+    ).toBeNull();
+  } finally {
+    await grant.release();
+  }
+  expect(resolveLegacyJournalCredential(grant.apiKey, "POST", [...journal, "status"])).toBeNull();
 });

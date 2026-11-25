@@ -4,6 +4,7 @@ import { getAgentById } from "../db";
 import { getStorage } from "../storage";
 import {
   findUserById,
+  mintBrokerSessionToken,
   mintOperatorScriptRunToken,
   mintScriptRunToken,
   mintUserScriptRunToken,
@@ -31,7 +32,7 @@ function userScriptRunTokenTtlMs(): number {
 
 export type ScriptExecutionPrincipal =
   | { kind: "operator" }
-  | { kind: "agent"; agentId: string }
+  | { kind: "agent"; agentId: string; parentTokenId?: string }
   | { kind: "user"; userId: string };
 
 export type ScriptApiCredential = {
@@ -52,8 +53,11 @@ export async function acquireScriptApiCredential(
     const user = await findUserById(authority.userId);
     if (!user || user.status !== "active" || user.mergedIntoUserId)
       throw new Error("Script executing user is inactive");
-    const token = await mintUserScriptRunToken(authority.userId, ttlMs);
+    const token = await mintUserScriptRunToken(authority.userId, ttlMs, provenance);
     return { apiKey: token.plaintext, release: () => revokeUserScriptRunToken(token.tokenId) };
+  }
+  if (authority?.kind === "agent" && authority.agentId !== agentId) {
+    throw new Error("Script agent does not match its execution principal");
   }
   if (authority?.kind !== "operator" && !(await getAgentById(agentId))) {
     throw new Error("Script executing agent does not exist");
@@ -61,14 +65,16 @@ export async function acquireScriptApiCredential(
   const token =
     authority?.kind === "operator"
       ? await mintOperatorScriptRunToken(agentId, ttlMs, provenance)
-      : await mintScriptRunToken(agentId, ttlMs, provenance);
+      : authority?.kind === "agent" && authority.parentTokenId
+        ? await mintBrokerSessionToken(agentId, authority.parentTokenId, ttlMs, provenance)
+        : await mintScriptRunToken(agentId, ttlMs, provenance);
   let released = false;
   return {
     apiKey: token.plaintext,
     release: async () => {
       if (released) return;
-      released = true;
       await revokeSessionToken(token.tokenId);
+      released = true;
     },
   };
 }
@@ -91,7 +97,8 @@ export async function runScriptWithRunCredential(
   provenance: ScriptRunProvenance = {},
   authority?: ScriptExecutionPrincipal,
 ): Promise<RunScriptOutput> {
-  if (authority?.kind === "user") return runScriptAsUserWithRunCredential(input, authority.userId);
+  if (authority?.kind === "user")
+    return runScriptAsUserWithRunCredential(input, authority.userId, provenance);
   const credential = await acquireScriptApiCredential(input.agentId, provenance, authority);
   try {
     return await runScript({ ...input, apiKey: credential.apiKey, dbDialect: scriptDbDialect() });
@@ -120,12 +127,18 @@ export async function runScriptAsUserWithRunCredential(
     | "agentFs"
   >,
   userId: string,
+  provenance?: ScriptRunProvenance,
 ): Promise<RunScriptOutput> {
-  const token = await mintUserScriptRunToken(userId, userScriptRunTokenTtlMs());
+  const credential = await acquireScriptApiCredential(
+    "",
+    provenance,
+    { kind: "user", userId },
+    userScriptRunTokenTtlMs(),
+  );
   try {
     return await runScript({
       ...input,
-      apiKey: token.plaintext,
+      apiKey: credential.apiKey,
       dbDialect: scriptDbDialect(),
       // Empty: the SDK then sends no X-Agent-ID, which the api refuses on a user token.
       agentId: "",
@@ -135,8 +148,9 @@ export async function runScriptAsUserWithRunCredential(
       userConfig: {},
       apiConnections: [],
       mcpConnections: [],
+      agentFs: undefined,
     });
   } finally {
-    await revokeUserScriptRunToken(token.tokenId);
+    await credential.release();
   }
 }

@@ -22,7 +22,7 @@ export type HttpRequestAuth = (
    * for a page session. Credential and identity writes recheck it in their
    * write transaction (`assertMayActOnOperatorGrantedTarget`).
    */
-  | { kind: "user"; userId: string; user: User; tokenId?: string }
+  | ({ kind: "user"; userId: string; user: User; tokenId?: string } & ScriptRunProvenance)
   /** Password-page viewer with no user identity. Least privilege: every gate denies it. */
   | { kind: "guest" }
   | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
@@ -33,6 +33,8 @@ export type HttpRequestAuth = (
       agentId: string;
       taskId: string | null;
       runtimeId: string | null;
+      /** Revoking either session closes a socket opened by a durable broker. */
+      brokerTokenId?: string;
       tokenId: string;
       expiresAt: string;
     } & ScriptRunProvenance)
@@ -118,7 +120,7 @@ export function getCurrentRequestUserId(): string | undefined {
  */
 export function getCurrentRunProvenance(): ScriptRunProvenance | null {
   const auth = getCurrentRequestAuth();
-  if (auth?.kind !== "agent" && auth?.kind !== "operator") return null;
+  if (auth?.kind !== "agent" && auth?.kind !== "operator" && auth?.kind !== "user") return null;
   const { sourceStepId, sourceScriptRunId, objectChain, depth } = auth;
   return sourceStepId || sourceScriptRunId || objectChain !== undefined || depth
     ? { sourceStepId, sourceScriptRunId, objectChain, depth }

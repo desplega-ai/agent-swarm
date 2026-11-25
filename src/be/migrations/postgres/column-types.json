@@ -2784,6 +2784,10 @@
       }
     },
     "user_identity_events": {
+      "runProvenance": {
+        "class": "jsonb",
+        "evidence": "src/be/users.ts records server-assigned script provenance as JSON"
+      },
       "afterJson": {
         "class": "jsonb",
         "evidence": "src/be/users.ts:275 after == null ? null : JSON.stringify(after), inserted at packages/storage/src/repositories/users.ts:490"
@@ -2829,6 +2833,10 @@
       }
     },
     "user_tokens": {
+      "runProvenance": {
+        "class": "jsonb",
+        "evidence": "src/be/users.ts records server-assigned script provenance as JSON"
+      },
       "createdAt": {
         "class": "timestamptz",
         "format": "iso-ms-z",

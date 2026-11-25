@@ -124,9 +124,11 @@ export class SwarmScriptExecutor extends BaseExecutor<
       ? await touchScratchScriptLastUsed(resolved.script.id)
       : null;
 
-    const credentials = await buildScriptCredentialBindingsWithFailures({
-      agentId: agentId ?? undefined,
-    });
+    const credentials = principal.userId
+      ? undefined
+      : await buildScriptCredentialBindingsWithFailures({
+          agentId: agentId ?? undefined,
+        });
     const output = await runScriptWithRunCredential(
       {
         source: resolved.source,
@@ -134,12 +136,16 @@ export class SwarmScriptExecutor extends BaseExecutor<
         fsMode: "none",
         executor: resolved.script.executor,
         agentId: agentId ?? "workflow",
-        egressSecrets: credentials.egressSecrets,
-        failedBindings: credentials.failedBindings,
-        userConfig: credentials.userConfig,
-        agentFs: credentials.agentFs,
-        apiConnections: await getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
-        mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
+        egressSecrets: credentials?.egressSecrets,
+        failedBindings: credentials?.failedBindings,
+        userConfig: credentials?.userConfig,
+        agentFs: credentials?.agentFs,
+        apiConnections: principal.userId
+          ? undefined
+          : await getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
+        mcpConnections: principal.userId
+          ? undefined
+          : await getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
         timeoutMs: config.timeoutMs,
         // The step watchdog aborts this when the node budget runs out, which
         // kills the script process: a step reported as timed out must not go

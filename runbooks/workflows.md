@@ -502,19 +502,30 @@ Secret workflow inputs (`secret.NAME` references and sensitive `${ENV_VAR}` refe
 
 Catalog script source is never workflow-interpolated. If it contains a token rooted at a built-in workflow value or a declared input alias, the node fails with guidance to pass that value through `config.args`; unrelated mustache text remains literal script data.
 
-The node runs as the workflow's `createdByAgentId`. A workflow with no creator (seeded, or created without `X-Agent-ID`) runs as the agent the server stamped on the run (`workflow_runs.triggeredByAgentId`), never as `trigger.agentId`, which the caller controls:
+The engine receives explicit authority from each server entry point. Ambient request identity does not decide automation authority.
+A registered creator agent remains the principal when the workflow also records an audit user.
+A user execution retains user authority and receives no agent filesystem, egress secrets, or connection descriptors.
 
-| Run started by | Principal |
+| Run started by | Authority for a workflow without a creator agent |
 | --- | --- |
-| `trigger-workflow` MCP tool | the calling agent |
-| `POST /api/workflows/:id/trigger` | the request's `X-Agent-ID` |
-| A schedule with `targetType: workflow` | the schedule's `createdByAgentId` (not `targetAgentId`, which the creator picks) |
-| A `sub-workflow` node | the parent's principal (its creator, else its stamped agent); `agentId` in `inputs` is plain data |
-| Webhook or event trigger | none: the `workflow` sentinel with no agent token, global scripts only |
+| MCP or HTTP trigger | Verified request identity. Operator requests can select a registered calling agent. |
+| Schedule | Registered creator agent, otherwise its active creator user, otherwise explicit system authority. Seeded schedules retain their lead selection. |
+| Sub-workflow | Parent authority, subject to the child's creator and editor restrictions. |
+| Webhook or event | Explicit system authority, restricted to an active workflow owner user when present. |
 
-Any agent can edit a workflow, so the creator stays the principal only while the workflow's `updatedByAgentId` is the creator, a lead, or empty (a person's edit). After another agent's edit, `swarm-script` and `sub-workflow` nodes fail with an error that names the editor, until the creator or a lead saves the workflow again. The run decides this once, from the definition it pins at start, and stores it on the run row (`workflow_runs.principal`, migration 367): an edit or re-save while the run is in flight does not change it. Runs created before migration 367 decide from the live row.
+An agent creator can execute only definitions last saved by that creator, a lead, or a person.
+User authority never becomes agent or operator authority through a child workflow.
+The engine stores its decision in `workflow_runs.principal`. Retries and resumes reuse that decision.
 
-Retries and resumes reuse the run row, so they keep its principal. `trigger.agentId` remains ordinary trigger data for interpolation. Agent-scoped lookup uses the same principal; with none, only global scripts resolve. A seeded workflow should pin `scope: "global"` on every node so the starting agent cannot swap a script for its own copy.
+Historical runs without a principal, including the older `{ok:true}` form, require server-stamped evidence.
+A trusted parent link recovers nested authority under the child ownership restrictions.
+A registered creator or starting agent proves agent authority. An active owner or audit user restricts execution to that user.
+An event or schedule trigger proves system authority only when no user or agent attribution exists.
+Manual and API runs without identity evidence remain blocked. Creator-owned workflows changed since run creation also remain blocked.
+Unreadable principals, missing agents, and inactive users fail closed. Historical audit metadata never grants operator authority.
+
+`trigger.agentId` remains ordinary data. Agent-scoped lookup uses only the resolved principal.
+A seeded workflow should pin `scope: "global"` on every node to prevent script substitution by the starting agent.
 
 `timeoutMs` controls elapsed wall-clock time, not CPU time. The scripts runtime deliberately keeps a separate 60s CPU-time ulimit, so an I/O-bound or waiting script can use the full 5-minute wall-clock window while a hot loop is still terminated after roughly 60 CPU seconds. Workflow create, update, bulk-patch, and single-node patch operations validate executor config and reject values outside the allowed range before saving.
 

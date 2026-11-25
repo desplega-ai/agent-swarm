@@ -64,6 +64,7 @@ export type UserColumnUpdate = {
 };
 
 export type IdentityEventRow = {
+  runProvenance?: string | null;
   id: string;
   userId: string;
   eventType: string;
@@ -84,6 +85,7 @@ export type UserTokenSummaryRow = {
 };
 
 export type NewUserToken = {
+  runProvenance?: string;
   id: string;
   userId: string;
   label: string | null;
@@ -242,6 +244,7 @@ export interface UsersRepository {
   /** Revokes an unrevoked token that has an expiry (a script-run token). */
   revokeExpiringUserToken(tokenId: string, now: string): Promise<void>;
   findUserTokenByHash(tokenHash: string): Promise<{
+    runProvenance: string | null;
     id: string;
     userId: string;
     revokedAt: string | null;
@@ -543,8 +546,8 @@ export abstract class BaseUsersRepository implements UsersRepository {
 
   async insertIdentityEvent(e: IdentityEventRow): Promise<void> {
     await this.db.run(sql`
-      INSERT INTO user_identity_events (id, "userId", "eventType", actor, "beforeJson", "afterJson", "createdAt")
-      VALUES (${e.id}, ${e.userId}, ${e.eventType}, ${e.actor}, ${jsonText(e.beforeJson)}, ${jsonText(e.afterJson)}, ${e.createdAt})`);
+      INSERT INTO user_identity_events (id, "userId", "eventType", actor, "beforeJson", "afterJson", "createdAt", "runProvenance")
+      VALUES (${e.id}, ${e.userId}, ${e.eventType}, ${e.actor}, ${jsonText(e.beforeJson)}, ${jsonText(e.afterJson)}, ${e.createdAt}, ${jsonText(e.runProvenance ?? null)})`);
   }
 
   /** The newest-insert tiebreak differs per engine (SQLite `rowid`). */
@@ -557,8 +560,8 @@ export abstract class BaseUsersRepository implements UsersRepository {
 
   async insertUserToken(t: NewUserToken): Promise<void> {
     await this.db.run(sql`
-      INSERT INTO user_tokens (id, "userId", label, "tokenHash", "tokenPreview", "createdAt", "expiresAt")
-      VALUES (${t.id}, ${t.userId}, ${t.label}, ${t.tokenHash}, ${t.tokenPreview}, ${t.createdAt}, ${t.expiresAt})`);
+      INSERT INTO user_tokens (id, "userId", label, "tokenHash", "tokenPreview", "createdAt", "expiresAt", "runProvenance")
+      VALUES (${t.id}, ${t.userId}, ${t.label}, ${t.tokenHash}, ${t.tokenPreview}, ${t.createdAt}, ${t.expiresAt}, ${jsonText(t.runProvenance ?? null)})`);
   }
 
   /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
@@ -588,13 +591,14 @@ export abstract class BaseUsersRepository implements UsersRepository {
   }
 
   findUserTokenByHash(tokenHash: string): Promise<{
+    runProvenance: string | null;
     id: string;
     userId: string;
     revokedAt: string | null;
     expiresAt: string | null;
   } | null> {
     return this.db.get(sql`
-      SELECT id, "userId", "revokedAt", "expiresAt" FROM user_tokens WHERE "tokenHash" = ${tokenHash}`);
+      SELECT id, "userId", "revokedAt", "expiresAt", "runProvenance" FROM user_tokens WHERE "tokenHash" = ${tokenHash}`);
   }
 
   async touchUserToken(tokenId: string, now: string): Promise<void> {

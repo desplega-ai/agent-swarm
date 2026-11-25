@@ -177,6 +177,8 @@ Per-replica by design (keep one per replica, no change): 11 loops. `src/http/ind
 - `src/utils/page-session.ts:41`, `:113`: the page-session signing secret is generated into the data dir. A cookie signed on A fails on B (forced re-login, broken public pages). Same fix: a shared secret.
 - `src/fs/local-fs-provider.ts:17`, `:28`: without agent-fs, files go to `./data/fs` (or `AGENT_FS_LOCAL_DIR`) on the local volume. A file uploaded through A is missing on B. Replace with a required shared provider (agent-fs or object storage) for replicas.
 - `src/script-workflows/supervisor.ts:23`, `src/script-workflows/executor.ts:185-186`: a durable script run is a child process with a temp dir and a capability socket on one host, tracked in `managed`. Stop, pause and abort requests served by the other replica cannot reach it. Replace with an owner replica column and NOTIFY-forwarded commands.
+- `src/script-workflows/supervisor.ts` tracks launches in `starting`. This prevents duplicate local launches. Other API replicas need the durable ownership lease.
+- `src/be/scripts/legacy-journal-credential.ts` keeps historical replay grants in API memory. Route their journal requests to the issuing API for the lifetime of the replay.
 - `src/utils/process-group.ts:10-11`: `liveProcessGroups` and `terminations` track sandboxed child groups locally. Cleanup and kill run only on the owning replica. Fixed with the owner routing above.
 
 ## 7. Other

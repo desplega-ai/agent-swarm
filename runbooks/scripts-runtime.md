@@ -9,9 +9,11 @@ API server owns the `scripts` + `script_versions` tables. Workers + the runtime 
 
 ## Config injection
 
-Agent identity + bearer + mcpBaseUrl flow as a JSON `SwarmConfigPayload` over the subprocess **stdin**, NOT env vars. Bearer is wrapped in `Redacted<string>` inside the script; user code never unwraps. `process.env` carries only Node/Bun defaults. Api-side callers run scripts through `runScriptWithRunCredential` (`src/be/scripts/run-credential.ts`): it mints a per-run token bound to the executing agent, passes it to `runScript` as `apiKey`, and revokes it when the run ends. Trusted system runs receive an operator run token with a 15-minute expiry. Unknown agents fail closed. Schedule and workflow callers pass server-owned authority explicitly. Durable brokers persist the authenticated launch principal and mint independent credentials, revoked at process exit. Historical durable rows without an execution principal refuse replay. Historical workflow rows without an agent principal refuse execution. The loader fallback remains for direct test callers only.
+The API passes the agent identity, bearer and API address in JSON on subprocess stdin. Guest code uses the SDK. The runtime keeps credentials out of the environment. API callers use `runScriptWithRunCredential`. Each inline run gets a short-lived credential for its authorized agent, user or operator. The API revokes it when the run ends. An unknown agent cannot acquire a credential. User runs receive no agent connections, filesystem credentials or deployment egress secrets.
 
-Durable runs store the server-authorized principal in `script_runs.executionPrincipal`. The broker mints an independent credential for that principal. Its expiry covers the maximum durable wall time plus one minute. It revokes the credential after process cleanup. It never reuses an inline credential or substitutes the swarm key. Historical durable rows without this principal refuse replay. Historical workflow rows without a trusted agent or operator marker cannot execute scripts.
+Durable runs store the launch principal in `script_runs.executionPrincipal`. A broker receives its own credential. It can finish after the inline parent exits. A launch from a worker, runtime or task session keeps that session's authority and expiry. Revocation of the original session also ends broker access. The API revokes each broker credential during cleanup.
+
+Older durable rows recorded the owner and journal but omitted the launch session. The owner must still exist. The broker can replay recorded steps and update that run's journal and status. A new external step needs a fresh authorized launch. User and operator credentials carry run provenance into audit writes.
 
 ## FS modes
 

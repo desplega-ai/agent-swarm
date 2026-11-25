@@ -371,9 +371,11 @@ async function createRunWithInitialState(
     const definitionHash = await pinWorkflowDefinition(pinSource);
     // Decided from the same read as the pin, so a re-save while the run is in
     // flight cannot lend the creator's identity to a definition another agent wrote.
-    const principal =
-      options.executionPrincipal ??
-      (await decideWorkflowRunPrincipal(pinSource, options.triggeredByAgentId));
+    const principal = await decideWorkflowRunPrincipal(
+      pinSource,
+      options.triggeredByAgentId,
+      options.executionPrincipal,
+    );
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
