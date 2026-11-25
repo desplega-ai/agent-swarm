@@ -21,21 +21,18 @@ import {
   resolveSandboxIdentity,
   sandboxSpawnEnv,
 } from "../utils/sandboxed-process";
-import { handleCapabilityRequest, MAX_PENDING_CAPABILITY_CALLS } from "./capability-bridge";
-import { scriptRunMaxWallMs } from "./limits";
-import { isWorkflowSwarmCapabilityAllowed } from "./swarm-capabilities";
-import { type BuiltWorkflowCtx, buildWorkflowCtx } from "./workflow-ctx";
+import { createCapabilitySession } from "./capability-session";
+
+export { dispatchCapability, MAX_ACTIVE_CAPABILITY_DISPATCHES } from "./capability-session";
 
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
 const MAX_STDERR_BYTES = 1_048_576;
-const MAX_CAPABILITY_REQUESTS_PER_TURN = 4;
-// Keeps broker HTTP concurrency finite without throttling long-lived durable steps.
-export const MAX_ACTIVE_CAPABILITY_DISPATCHES = 8;
 
 export type ScriptExecutionResult = {
   exitCode: number | null;
   stderr: string;
   terminated?: boolean;
+  output?: unknown;
 };
 
 export type ScriptExecutionHandle = {
@@ -51,6 +48,7 @@ export type StartScriptExecutionInput = {
   run: ScriptRun;
   baseUrl: string;
   apiKey: string;
+  capabilityRelay?: (frame: string, send: (response: string) => Promise<void>) => Promise<void>;
 };
 
 export interface ScriptExecutor {
@@ -71,60 +69,6 @@ export function getScriptWorkflowHarnessPath(): string {
     );
   }
   return bundledHarness;
-}
-
-function stringifyResult(value: unknown): string {
-  return JSON.stringify(value ?? null);
-}
-
-export async function dispatchCapability(
-  built: BuiltWorkflowCtx,
-  path: string,
-  argsJson: string,
-): Promise<string> {
-  const args = JSON.parse(argsJson) as unknown;
-
-  if (path.startsWith("swarm.")) {
-    const method = path.slice("swarm.".length);
-    if (!method || method.includes(".")) throw new Error(`Invalid swarm capability path: ${path}`);
-    if (!isWorkflowSwarmCapabilityAllowed(method)) {
-      throw new Error(`Workflow swarm capability '${method}' is not allowlisted`);
-    }
-    const capability = built.ctx.swarm[method];
-    if (!capability) throw new Error(`Unknown workflow capability: ${path}`);
-    return stringifyResult(await capability(args));
-  }
-
-  if (path === "step.humanInTheLoop") {
-    return stringifyResult(await built.ctx.step.humanInTheLoop());
-  }
-
-  if (!Array.isArray(args) || args.length !== 2 || typeof args[0] !== "string") {
-    throw new Error(`Invalid arguments for capability ${path}`);
-  }
-  const [label, config] = args;
-  switch (path) {
-    case "step.rawLlm":
-      return stringifyResult(
-        await built.ctx.step.rawLlm(label, config as Parameters<typeof built.ctx.step.rawLlm>[1]),
-      );
-    case "step.agentTask":
-      return stringifyResult(
-        await built.ctx.step.agentTask(
-          label,
-          config as Parameters<typeof built.ctx.step.agentTask>[1],
-        ),
-      );
-    case "step.swarmScript":
-      return stringifyResult(
-        await built.ctx.step.swarmScript(
-          label,
-          config as Parameters<typeof built.ctx.step.swarmScript>[1],
-        ),
-      );
-    default:
-      throw new Error(`Unknown workflow capability: ${path}`);
-  }
 }
 
 async function postStatus(
@@ -185,169 +129,77 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     await Bun.write(sourceFile, run.source);
     await Bun.write(argsFile, JSON.stringify(run.args ?? null));
 
-    // The executor is the trusted broker. It alone holds the bearer and
-    // turns guest JSON capability calls into authenticated HTTP requests.
-    const built = buildWorkflowCtx({
-      runId: run.id,
-      agentId: run.agentId,
-      apiKey,
-      baseUrl,
-      args: run.args,
-      runStartedAt: run.startedAt,
-      runMaxWallMs: scriptRunMaxWallMs(),
-    });
+    const session = input.capabilityRelay
+      ? {
+          built: { abortInFlightSteps(_error?: Error) {}, async drainInFlightSteps() {} },
+          authenticate(frame: string) {
+            try {
+              const hello = JSON.parse(frame);
+              return hello.type === "hello" && hello.token === capabilityToken;
+            } catch {
+              return false;
+            }
+          },
+          receive: input.capabilityRelay,
+        }
+      : createCapabilitySession(input, capabilityToken);
+    const built = session.built;
     let proc: Bun.Subprocess<"ignore", "ignore", "pipe"> | undefined;
     let capabilitySocket: Socket | undefined;
     let protocolFailure: Error | undefined;
     let terminated = false;
     const sockets = new Set<Socket>();
     const server = createServer((socket) => {
+      if (capabilitySocket) return socket.destroy();
       sockets.add(socket);
-      socket.once("close", () => sockets.delete(socket));
-      const failProtocol = (error: unknown) => {
-        protocolFailure ??=
-          error instanceof Error ? error : new Error(`Capability protocol failed: ${error}`);
-        built.abortInFlightSteps(protocolFailure);
-        socket.destroy();
-        proc?.kill();
-      };
-      // Failed writes also emit an error event, even with a write callback.
-      // Unauthenticated connections must not terminate the active workflow.
-      socket.on("error", (error) => {
-        if (socket === capabilitySocket) failProtocol(error);
-        else socket.destroy();
-      });
-      // The harness authenticates before it imports user code. Reject later
-      // connections once that handshake has claimed the bridge.
-      if (capabilitySocket) {
-        socket.destroy();
-        return;
-      }
-      socket.setEncoding("utf8");
       let buffered = "";
       let authenticated = false;
-      let queuedResponseBytes = 0;
-      let processingScheduled = false;
-      let outstandingRequests = 0;
-      let activeDispatches = 0;
-      const dispatchWaiters: Array<() => void> = [];
-      const handshakeTimeout = setTimeout(() => {
-        if (!authenticated) socket.destroy();
-      }, 2_000);
-      handshakeTimeout.unref?.();
-      socket.once("close", () => clearTimeout(handshakeTimeout));
-
-      const writeResponse = (response: string): Promise<void> => {
-        const framed = `${response}\n`;
-        const bytes = Buffer.byteLength(framed);
-        if (queuedResponseBytes + bytes > SCRIPT_SDK_RESPONSE_LIMIT_BYTES) {
-          return Promise.reject(
-            new Error("Workflow capability response queue exceeded the 64 MiB limit"),
-          );
+      const timeout = setTimeout(() => socket.destroy(), 2000);
+      const fail = (error: unknown) => {
+        if (authenticated) {
+          protocolFailure = error instanceof Error ? error : new Error(String(error));
+          built.abortInFlightSteps(protocolFailure);
+          proc?.kill();
         }
-        queuedResponseBytes += bytes;
-        return new Promise((resolveWrite, reject) => {
-          socket.write(framed, (error) => {
-            queuedResponseBytes -= bytes;
-            if (error) reject(error);
-            else resolveWrite();
-          });
-        });
+        socket.destroy();
       };
-
-      const dispatchWithActiveLimit = async (path: string, argsJson: string): Promise<string> => {
-        if (!path.startsWith("swarm.")) return dispatchCapability(built, path, argsJson);
-
-        if (activeDispatches >= MAX_ACTIVE_CAPABILITY_DISPATCHES) {
-          await new Promise<void>((resolve) => dispatchWaiters.push(resolve));
-        } else {
-          activeDispatches += 1;
-        }
-        try {
-          return await dispatchCapability(built, path, argsJson);
-        } finally {
-          const next = dispatchWaiters.shift();
-          if (next) next();
-          else activeDispatches -= 1;
-        }
-      };
-
-      const respondToRequest = async (message: string): Promise<void> => {
-        if (outstandingRequests >= MAX_PENDING_CAPABILITY_CALLS) {
-          const response = await handleCapabilityRequest(message, async () => {
-            throw new Error(
-              `Capability pending call limit of ${MAX_PENDING_CAPABILITY_CALLS} exceeded`,
-            );
-          });
-          await writeResponse(response);
-          return;
-        }
-
-        outstandingRequests += 1;
-        try {
-          const response = await handleCapabilityRequest(message, dispatchWithActiveLimit);
-          await writeResponse(response);
-        } finally {
-          outstandingRequests -= 1;
-        }
-      };
-
-      const processBuffered = () => {
-        if (socket.destroyed) return;
-        let processed = 0;
-        while (processed < MAX_CAPABILITY_REQUESTS_PER_TURN) {
-          const newline = buffered.indexOf("\n");
-          if (newline < 0) break;
-          const message = buffered.slice(0, newline);
-          buffered = buffered.slice(newline + 1);
-          if (!message) continue;
-          if (!authenticated) {
-            let hello: unknown;
-            try {
-              hello = JSON.parse(message);
-            } catch {
-              socket.destroy();
-              return;
-            }
-            if (
-              !hello ||
-              typeof hello !== "object" ||
-              (hello as { type?: unknown }).type !== "hello" ||
-              (hello as { token?: unknown }).token !== capabilityToken
-            ) {
-              socket.destroy();
-              return;
-            }
-            if (capabilitySocket) {
-              socket.destroy();
-              return;
-            }
-            capabilitySocket = socket;
-            authenticated = true;
-            clearTimeout(handshakeTimeout);
-            continue;
-          }
-          processed += 1;
-          void respondToRequest(message).catch(failProtocol);
-        }
-        if (buffered.includes("\n") && !processingScheduled) {
-          processingScheduled = true;
-          queueMicrotask(() => {
-            processingScheduled = false;
-            processBuffered();
-          });
-        }
-      };
-
+      socket.once("close", () => {
+        clearTimeout(timeout);
+        sockets.delete(socket);
+      });
+      socket.on("error", fail);
+      socket.setEncoding("utf8");
       socket.on("data", (chunk) => {
         buffered += chunk;
         if (Buffer.byteLength(buffered) > SCRIPT_SDK_RESPONSE_LIMIT_BYTES) {
-          const error = new Error("Workflow capability request exceeded the 64 MiB limit");
-          if (authenticated) failProtocol(error);
-          else socket.destroy();
+          fail(new Error("Workflow capability request exceeded the 64 MiB limit"));
           return;
         }
-        processBuffered();
+        while (buffered.includes("\n")) {
+          const newline = buffered.indexOf("\n");
+          const frame = buffered.slice(0, newline);
+          buffered = buffered.slice(newline + 1);
+          if (!frame) continue;
+          if (!authenticated) {
+            if (capabilitySocket || !session.authenticate(frame)) {
+              socket.destroy();
+              return;
+            }
+            authenticated = true;
+            capabilitySocket = socket;
+            clearTimeout(timeout);
+          } else {
+            void session
+              .receive(
+                frame,
+                (response) =>
+                  new Promise<void>((resolve, reject) => {
+                    socket.write(`${response}\n`, (error) => (error ? reject(error) : resolve()));
+                  }),
+              )
+              .catch(fail);
+          }
+        }
       });
     });
 
@@ -420,10 +272,11 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     }
 
     const heartbeat = setInterval(() => {
-      fetch(`${baseUrl}/api/internal/script-runs/${run.id}/heartbeat`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "X-Agent-ID": run.agentId },
-      }).catch(() => {});
+      if (!input.capabilityRelay)
+        fetch(`${baseUrl}/api/internal/script-runs/${run.id}/heartbeat`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "X-Agent-ID": run.agentId },
+        }).catch(() => {});
     }, 10_000);
     heartbeat.unref?.();
 
@@ -460,17 +313,19 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
         const resultText = await readRunDirFile(resultFile, runDirCheck);
         if (resultText === undefined) throw new Error("guest wrote no readable result file");
         const output = JSON.parse(resultText);
-        await postStatus(run, baseUrl, apiKey, { status: "completed", output });
-        return { exitCode: 0, stderr };
+        if (!input.capabilityRelay)
+          await postStatus(run, baseUrl, apiKey, { status: "completed", output });
+        return { exitCode: 0, stderr, output };
       } catch (error) {
         await built.drainInFlightSteps().catch(() => {});
         built.abortInFlightSteps();
         stderr = appendError(stderr, error);
         try {
-          await postStatus(run, baseUrl, apiKey, {
-            status: "failed",
-            error: error instanceof Error ? error.message : String(error),
-          });
+          if (!input.capabilityRelay)
+            await postStatus(run, baseUrl, apiKey, {
+              status: "failed",
+              error: error instanceof Error ? error.message : String(error),
+            });
         } catch (statusError) {
           stderr = appendError(stderr, statusError);
         }

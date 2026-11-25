@@ -284,6 +284,8 @@ export type ScriptConnectionWrite = {
 
 /** One `script_runs` row; reads add the stored `script_run_sources` text as `storedSource`. */
 export type ScriptRunRow = {
+  ownerId: string | null;
+  leaseExpiresAt: string | null;
   objectScriptId: string | null;
   objectId: string | null;
   objectMethod: string | null;
@@ -565,6 +567,23 @@ export interface ScriptsRepository {
   deferForeignKeys(): Promise<void>;
   // ---- script_runs ----
   /** The run with its stored source. */
+  claimScriptRun(id: string, ownerId: string, leaseExpiresAt: string | null): Promise<boolean>;
+  renewScriptRunLease(
+    id: string,
+    ownerId: string,
+    now: string,
+    leaseExpiresAt: string,
+  ): Promise<boolean>;
+  releaseScriptRunOwner(id: string, ownerId: string): Promise<boolean>;
+  listExpiredScriptRunLeases(now: string): Promise<ScriptRunRow[]>;
+  settleOwnedScriptRun(
+    id: string,
+    ownerId: string,
+    now: string,
+    status: string,
+    output: string | null,
+    error: string | null,
+  ): Promise<boolean>;
   findScriptRun(id: string): Promise<ScriptRunRow | null>;
   findScriptRunByIdempotencyKey(idempotencyKey: string): Promise<ScriptRunRow | null>;
   insertScriptRun(row: NewScriptRunRow): Promise<ScriptRunRow | null>;
@@ -1184,6 +1203,57 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
       sql`UPDATE script_runs SET ${sqlJoin(sets, sql`, `)} WHERE id = ${id}${guardSql}`,
     );
     return result.changes;
+  }
+
+  async claimScriptRun(
+    id: string,
+    ownerId: string,
+    leaseExpiresAt: string | null,
+  ): Promise<boolean> {
+    const result =
+      await this.db.run(sql`UPDATE script_runs SET "ownerId" = ${ownerId}, "leaseExpiresAt" = ${leaseExpiresAt}, pid = NULL
+      WHERE id = ${id} AND status = 'running' AND "ownerId" IS NULL`);
+    return result.changes === 1;
+  }
+
+  async renewScriptRunLease(
+    id: string,
+    ownerId: string,
+    now: string,
+    leaseExpiresAt: string,
+  ): Promise<boolean> {
+    const result =
+      await this.db.run(sql`UPDATE script_runs SET "leaseExpiresAt" = ${leaseExpiresAt}, last_heartbeat_at = ${now}
+      WHERE id = ${id} AND status = 'running' AND "ownerId" = ${ownerId} AND "leaseExpiresAt" > ${now}`);
+    return result.changes === 1;
+  }
+
+  async releaseScriptRunOwner(id: string, ownerId: string): Promise<boolean> {
+    const result =
+      await this.db.run(sql`UPDATE script_runs SET "ownerId" = NULL, "leaseExpiresAt" = NULL, pid = NULL
+      WHERE id = ${id} AND "ownerId" = ${ownerId}`);
+    return result.changes === 1;
+  }
+
+  listExpiredScriptRunLeases(now: string): Promise<ScriptRunRow[]> {
+    return this.db.query<ScriptRunRow>(
+      sql`${this.scriptRunSelect} WHERE r.status = 'running' AND r."leaseExpiresAt" <= ${now} ORDER BY r.id`,
+    );
+  }
+
+  async settleOwnedScriptRun(
+    id: string,
+    ownerId: string,
+    now: string,
+    status: string,
+    output: string | null,
+    error: string | null,
+  ): Promise<boolean> {
+    const result =
+      await this.db.run(sql`UPDATE script_runs SET status = ${status}, output = ${output}, error = ${error}, "finishedAt" = ${now}, pid = NULL
+      WHERE id = ${id} AND status = 'running' AND "ownerId" = ${ownerId}
+      AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" > ${now})`);
+    return result.changes === 1;
   }
 
   abstract listActiveScriptRuns(): Promise<ScriptRunRow[]>;

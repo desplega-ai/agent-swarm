@@ -2045,6 +2045,11 @@
         "class": "text",
         "evidence": "src/be/db.ts:13458 binds new Date().toISOString() (comment: not the datetime('now') default); src/be/db.ts:13517 binds data.startedAt from new Date().toISOString() (http/scripts.ts:885, http/x.ts:244, user-code-mode.ts:111, scheduler.ts:105)",
         "reason": "current writers use toISOString, but older rows used datetime('now') (src/be/db-retention.ts:91); mixed formats in existing databases"
+      },
+      "leaseExpiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "durable dispatcher writes ISO timestamps"
       }
     },
     "script_versions": {

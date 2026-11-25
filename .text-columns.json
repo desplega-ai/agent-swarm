@@ -2593,6 +2593,8 @@
     }
   },
   "script_runs": {
+    "ownerId": { "exempt": "identifier" },
+    "leaseExpiresAt": { "exempt": "timestamp" },
     "executionPrincipal": {
       "exempt": "Server-recorded authority kind and identifiers"
     },

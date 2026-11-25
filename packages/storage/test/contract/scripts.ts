@@ -546,6 +546,26 @@ export function scriptsContract(engine: ContractEngine): void {
         ),
       ).toBe(1);
       expect((await repo.findScriptRun("r1"))?.pid).toBe(3);
+      // Only the current, unexpired owner can renew or settle a durable run.
+      await repo.updateScriptRun("r2", { status: "running" });
+      expect(await repo.claimScriptRun("r2", "runner-a", T1)).toBe(true);
+      expect(await repo.claimScriptRun("r2", "runner-b", T1)).toBe(false);
+      expect(await repo.renewScriptRunLease("r2", "runner-b", T0, T1)).toBe(false);
+      expect(await repo.settleOwnedScriptRun("r2", "runner-b", T0, "completed", "42", null)).toBe(
+        false,
+      );
+      expect(await repo.renewScriptRunLease("r2", "runner-a", T1, T1)).toBe(false);
+      expect((await repo.listExpiredScriptRunLeases(T1)).map((run) => run.id)).toEqual(["r2"]);
+      expect(await repo.releaseScriptRunOwner("r2", "runner-b")).toBe(false);
+      expect(await repo.releaseScriptRunOwner("r2", "runner-a")).toBe(true);
+      expect(await repo.claimScriptRun("r2", "embedded:boot", null)).toBe(true);
+      expect((await repo.listExpiredScriptRunLeases(T1)).length).toBe(0);
+      expect(
+        await repo.settleOwnedScriptRun("r2", "embedded:boot", T1, "completed", "42", null),
+      ).toBe(true);
+      expect(
+        await repo.settleOwnedScriptRun("r2", "embedded:boot", T1, "failed", null, "late"),
+      ).toBe(false);
     });
 
     test("script run journal: insert once per step, order, counts", async () => {
