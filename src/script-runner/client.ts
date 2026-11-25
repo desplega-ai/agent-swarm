@@ -119,6 +119,8 @@ export function startScriptRunner(options: {
   let heartbeatNonce = "";
   let heartbeatSentAt = 0;
   const sendHeartbeat = () => {
+    for (const [id, job] of steps)
+      if (job.result) sendCurrent({ type: "result", jobId: id, output: job.result });
     heartbeatNonce = crypto.randomUUID();
     heartbeatSentAt = performance.now();
     sendCurrent({

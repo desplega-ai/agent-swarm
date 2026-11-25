@@ -603,7 +603,7 @@ test("runner owner identity binds the credential across API restart", async () =
   );
 });
 
-test("step claims retain results across reconnect and ignore an early acknowledgement", async () => {
+test("step claims repeat unacknowledged results and retain them across reconnect", async () => {
   const { createServer } = await import("node:http");
   const { WebSocketServer } = await import("ws");
   const { listenOnFreePort } = await import("./test-net");
@@ -615,6 +615,7 @@ test("step claims retain results across reconnect and ignore an early acknowledg
   let connections = 0;
   let replayed = false;
   let held = false;
+  let firstConnectionResults = 0;
   wss.on("connection", (ws) => {
     const generation = ++connections;
     ws.on("message", (data) => {
@@ -637,7 +638,9 @@ test("step claims retain results across reconnect and ignore an early acknowledg
         );
       else if (message.type === "result") {
         expect(message.output.result).toBe(42);
-        if (generation === 1) ws.terminate();
+        if (generation === 1) {
+          if (++firstConnectionResults === 2) ws.terminate();
+        }
         else {
           replayed = true;
           ws.send(JSON.stringify({ type: "ack", jobId: id }));
@@ -654,17 +657,18 @@ test("step claims retain results across reconnect and ignore an early acknowledg
     onRefused() {},
   });
   try {
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + 20000;
     while (!replayed && Date.now() < deadline) await Bun.sleep(20);
     expect(replayed).toBe(true);
     expect(held).toBe(true);
+    expect(firstConnectionResults).toBe(2);
   } finally {
     await runner.stop();
     for (const ws of wss.clients) ws.terminate();
     wss.close();
     server.close();
   }
-}, 15000);
+}, 25000);
 
 test("step guests stop when confirmed lease time expires", async () => {
   const { createServer } = await import("node:http");
