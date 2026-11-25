@@ -537,7 +537,7 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, Dialog, and Svg). `watch` maps state paths to an action step or chain. A page may also declare `state`: page-local values read and written at `/local/<name>` (see Low-level primitives).
 
-## Component catalog (all 53)
+## Component catalog (all 54)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -591,6 +591,7 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `File` | `path` | `height`, `fill`; one agent-fs file (Markdown, image, PDF, text) read as the viewer; see below. |
 | `DateRange` | `id` | `presets` (any of `7d`, `30d`, `90d`, `mtd`, `custom`; default all five), `defaultPreset` (default the first), `label`; writes `/ui/<id>/from` and `/ui/<id>/to`; see below. |
 | `Timeline` | `timeField`, `titleField` | `data`, `loading`, `descriptionField`, `statusField`, `tones`, `icon`, `emptyMessage`, `onSelect`; vertical event list, newest first, grouped by day; see below. |
+| `LogStream` | `timeField`, `bodyField` | `data`, `loading`, `severityField`, `serviceField`, `attributesField`, `resourceField`, `traceField`, `keyField`, `follow`, `maxRows`, `height`, `fill`, `emptyMessage`, `onTrace`; a dense log tail, one line per entry; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 | `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 | `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`, `attachments`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
@@ -668,7 +669,26 @@ DateRange and Timeline details:
 - `DateRange` writes inclusive `YYYY-MM-DD` dates (the viewer's local calendar) to `/ui/<id>/from` and `/ui/<id>/to`, and the active preset to `/ui/<id>/preset`. On first load it writes `defaultPreset` unless the state already holds a range. Bind query params with `{ "$state": "/ui/<id>/from" }` so the query refetches when the range changes. `7d` is today and the six days before it; `mtd` starts on the 1st. `custom` opens two date inputs in a popover; Apply needs both dates, from not after to. `id` must match `[A-Za-z0-9_-]+`, and `defaultPreset` must be one of `presets`.
 - `Timeline` reads `timeField` as an ISO date or epoch ms (rows that do not parse are left out), sorts newest first and groups under day headings: Today, Yesterday, then the date. Each event shows `titleField`, the time, `descriptionField` (two lines at most) and a `statusField` pill (`tones` maps value to tone; lifecycle values get the status chip). `icon` replaces the marker dot. `onSelect` runs with `$row` (the row) and `$rowIndex` (its index in `data`); without it events are not clickable.
 
-SchemaForm details:
+LogStream details — logs as a tail, not a table:
+
+- One monospace line per entry, newest first: `HH:mm:ss.SSS`, a 3 px severity bar (text like `WARN` or an OTel number), the service, the body on one line. Click a line to expand the full body, `attributesField` and `resourceField` (objects or JSON strings) and a trace link that runs `onTrace` with `$row`.
+- Virtualized and memoized: 50k entries scroll smoothly, and a refresh re-renders only the lines it adds. Set `keyField` to a unique id so expanded lines stay open across refreshes and a refetched entry is reused, not redrawn.
+- `maxRows` (default 10,000, at most 100,000) keeps the newest entries; the oldest past it drop with a notice at the bottom. Keep the source query bounded too (a `limit` or a `since` window).
+- Live tail: refresh the source with `OnEnter.everyMs` (and a `since` cursor in the action) and set `follow: true`. The newest entry stays in view; once the viewer scrolls down, new entries show an "N new" pill instead of moving the view.
+- Pair it with a severity histogram (`Chart` kind `bar`, stacked per severity) on top and facets (`Chips` or `Select` over service and severity) beside it.
+
+```json
+{ "type": "LogStream", "props": {
+  "data": { "$state": "/actions/tail/result/logs" },
+  "loading": { "$state": "/actions/tail/running" },
+  "timeField": "timestamp", "bodyField": "body", "severityField": "severity_text",
+  "serviceField": "service.name", "attributesField": "attributes", "traceField": "traceId", "keyField": "cursor",
+  "follow": true, "fill": true,
+  "onTrace": [{ "action": "app.navigate", "params": { "page": "trace", "params": { "traceId": { "$row": "traceId" } } } }]
+} }
+```
+
+Form details:
 
 - `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
 - Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
@@ -990,6 +1010,8 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 **`watch` rules.** A `watch` skips the value it sees on first render: it only fires on a later change, so it never loads data on page open. Any state write while a `watch` chain runs cancels the steps after it, and `app.action` always writes (`/actions/<name>`), so a `watch` chain runs at most one `app.action` or `ui.set`, and it must be the last step. Put multi-step loads in `OnEnter` instead.
 
 **Live data.** `OnEnter.everyMs` (1000 or more) re-runs the chain on an interval while the tab is visible; a tick is skipped while any earlier run (a tick or a `deps` change) is still going. Bind it to a toggle (`{ "$if": [{ "$state": "/local/live" }, 2000, null] }`) for a pausable live tail.
+
+**Realtime.** An open app page holds one realtime socket (the same one pages use). A row write (UI, `app-row-*` tools, a sync pass) refreshes every query over that model on every open page within about 250 ms, with no polling needed; polling stays as the fallback. `/presence/peers` lists the other people on the same app page (`[{ id, name, avatar? }]`), `/presence/names` their names and `/presence/count` how many: `{ "type": "AvatarStack", "props": { "users": { "$state": "/presence/names" } } }`. Viewers need `app.use`. Script query results and action results are not pushed: refresh those with `OnEnter.everyMs`.
 
 **`OnEnter`: load on open.** An `OnEnter` element renders nothing. It runs its `on.enter` chain on mount, then again each time its resolved `deps` value changes. Its steps always run to the end (no `watch` cancel). Use `deps: { "$state": "/route" }` to re-run it when the page or a route param changes; omit `deps` to run it once per mount. Put it anywhere in the page tree.
 

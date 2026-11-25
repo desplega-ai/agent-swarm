@@ -342,6 +342,9 @@ function connect(
       if (namespace.startsWith("presence:session:") && msg.name !== "default") {
         throw new Error("Session presence uses the default room");
       }
+      if (namespace.startsWith("presence:app:") && msg.name !== "default") {
+        throw new Error("App presence uses the default room");
+      }
       const denied = await authorizeRoomNamespace(namespace, auth.identity, msg.op, msg.name);
       if (denied) throw new Error(typeof denied === "string" ? denied : "Forbidden");
       if (closed) return;
@@ -386,7 +389,9 @@ function connect(
             const creationDenied = await authorizeRoomNamespace(
               namespace,
               auth.identity,
-              namespace.startsWith("presence:comb:") || namespace.startsWith("presence:session:")
+              namespace.startsWith("presence:comb:") ||
+                namespace.startsWith("presence:session:") ||
+                namespace.startsWith("presence:app:")
                 ? "join"
                 : true,
             );

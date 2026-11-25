@@ -309,6 +309,12 @@ const listTasks = route({
     createdBefore: z.string().datetime().optional(),
     /** Comma-separated source filter (e.g. `ui,slack`). Omit to include all. */
     source: z.string().optional(),
+    tags: z
+      .string()
+      .optional()
+      .describe(
+        "Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all.",
+      ),
     /**
      * When present, restrict results to tasks where `agent_tasks.requestedByUserId`
      * equals this value. The sentinel `none` matches rows where it IS NULL
@@ -1130,6 +1136,11 @@ export async function handleTasks(
       if (validated.length > 0) source = validated;
     }
 
+    const tags = parsed.query.tags
+      ?.split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
     // Every shape carries task text, so a user sees only sessions they can
     // read, and `total` counts the same rows.
     const actor = await resolveSessionActor(req, myAgentId, {
@@ -1148,6 +1159,7 @@ export async function handleTasks(
       createdAfter: parsed.query.createdAfter || undefined,
       createdBefore: parsed.query.createdBefore || undefined,
       source,
+      tags: tags && tags.length > 0 ? tags : undefined,
       requestedByUserId:
         parsed.query.requestedByUserId && parsed.query.requestedByUserId !== "none"
           ? parsed.query.requestedByUserId

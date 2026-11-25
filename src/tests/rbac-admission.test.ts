@@ -862,11 +862,12 @@ describe("realtime ticket admission", () => {
     );
   }
 
-  test("a role with either presence verb gets a ticket; a role with neither does not", async () => {
+  test("a role with a presence verb or app.use gets a ticket; a role with none does not", async () => {
     process.env.RBAC_ENABLED = "true";
     const cases: [PermissionVerb[], number][] = [
       [["comb.presence"], 200],
       [["session.presence"], 200],
+      [["app.use"], 200],
       [["task.read.own"], 403],
     ];
     for (const [verbs, expected] of cases) {
