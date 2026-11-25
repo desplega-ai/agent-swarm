@@ -287,7 +287,10 @@ export const registerDataQueryTool = (server: McpServer) => {
             tabs: [
               {
                 name: input.sheet.tab ?? "Sheet1",
-                rows: [headers, ...result.rows.map((row) => headers.map((h) => sheetCell(row[h])))],
+                rows: [
+                  headers.map(sheetCell),
+                  ...result.rows.map((row) => headers.map((h) => sheetCell(row[h]))),
+                ],
               },
             ],
           });

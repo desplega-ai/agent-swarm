@@ -17,11 +17,11 @@ const CSV = "e2e/data/sales.csv";
 const RESULT = {
   columns: [
     { name: "region", type: "VARCHAR" },
-    { name: "n", type: "BIGINT" },
+    { name: "=n", type: "BIGINT" },
   ],
   rows: [
-    { region: "eu", n: 2 },
-    { region: "=us", n: 1 },
+    { region: "eu", "=n": 2 },
+    { region: "=us", "=n": 1 },
   ],
   rowCount: 2,
   truncated: false,
@@ -84,7 +84,7 @@ export const dataQuery: Scenario = {
         const table = asRecord(asRecord(asRecord(card.card).elements).table);
         expect(
           table.type === "Table" &&
-            JSON.stringify(asRecord(table.props).headers) === `["region","n"]` &&
+            JSON.stringify(asRecord(table.props).headers) === `["region","=n"]` &&
             JSON.stringify(asRecord(table.props).rows) === `[["eu","2"],["=us","1"]]`,
           `card: ${JSON.stringify(card.card)}`,
         );
@@ -101,11 +101,13 @@ export const dataQuery: Scenario = {
         expect(
           stored.format === "swarm-sheet/1" &&
             asRecord(cells.A1).v === "region" &&
+            asRecord(cells.B1).v === "=n" &&
+            asRecord(cells.B1).f === undefined &&
             asRecord(cells.B2).v === 2 &&
             asRecord(cells.A3).v === "=us" &&
             asRecord(cells.A3).f === undefined &&
             typeof asRecord(asRecord(sheet.sheet).object).id === "string",
-          `sheet: a header row, then the rows, '=' text kept literal: ${JSON.stringify(cells)}`,
+          `sheet: a header row, then the rows, '=' text kept literal in both: ${JSON.stringify(cells)}`,
         );
 
         const before = sqlCalls.length;
