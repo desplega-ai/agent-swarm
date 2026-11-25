@@ -123,6 +123,7 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
         timeoutMs: 60_000,
       },
       { sourceScriptRunId: record.id },
+      "schedule",
     );
   } catch (err) {
     await recordScheduleScriptRun({

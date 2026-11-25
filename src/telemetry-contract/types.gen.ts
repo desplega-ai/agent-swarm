@@ -4,6 +4,97 @@
  */
 
 export interface paths {
+    "/api/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check the dashboard session */
+        get: operations["checkLiveSession"];
+        put?: never;
+        /**
+         * Exchange the access token for a persistent session
+         * @description Requires a same-origin request. The server limits failed login attempts. Sessions have no server-side expiration.
+         */
+        post: operations["createLiveSession"];
+        /**
+         * Clear the dashboard session cookie
+         * @description Requires a same-origin request. The browser closes its stream on logout.
+         */
+        delete: operations["deleteLiveSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the latest shared dashboard snapshot
+         * @description Shares the stream cache. Returns 503 if a required refresh fails. Clients retain their last successful snapshot.
+         */
+        get: operations["getLiveSnapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receive live dashboard snapshots through SSE
+         * @description Each snapshot event contains a complete LiveSnapshot JSON object.
+         *     One shared query refreshes snapshots every five seconds while subscribers remain connected.
+         *     Reconnection receives the latest snapshot. No replay cursor is required.
+         *     Heartbeat comments arrive every fifteen seconds and do not change the source timestamp.
+         *     An unavailable event contains a message when the database cannot be read.
+         *     An expired event precedes closure when the session is logged out.
+         *     Slow clients can be disconnected. Clients retain their last successful snapshot on errors.
+         */
+        get: operations["streamLiveSnapshots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check the dashboard process
+         * @description This endpoint does not query ClickHouse or expose telemetry.
+         */
+        get: operations["checkLiveHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;
@@ -67,6 +158,32 @@ export interface paths {
          *     JSON body must not exceed 4 KB.
          */
         post: operations["submitUsedByConsent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/improvements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a product-improvement suggestion
+         * @description Stores one product-improvement suggestion, then posts it to the feedback
+         *     Slack channel. Called server-to-server by the agent-swarm API, only after a
+         *     person approved the text; there is no read endpoint and no CORS. The JSON
+         *     body must not exceed 26,944 bytes: a 4,000-character text plus a
+         *     320-character email at 6 bytes per character (worst-case UTF-8 and JSON
+         *     escaping), plus 1 KB for keys and the install id. Limited to 5 requests per
+         *     minute per source IP.
+         */
+        post: operations["submitImprovement"];
         delete?: never;
         options?: never;
         head?: never;
@@ -151,8 +268,11 @@ export interface paths {
          *     proxy's denylist is never listed. When several installs list one domain,
          *     the one whose listing was ingested first holds it (ties go to the lower
          *     install ID) while it qualifies; the next in that order takes over when it
-         *     stops. Recomputed hourly. Called server to server by the landing, so the response sends no
-         *     CORS headers. Rate limited per IP: a burst of 10, then 10 per minute.
+         *     stops. Recomputed every minute (the exclusion check is reused for an
+         *     hour per install); every view is cut from the same in-memory snapshot,
+         *     named by `generatedAt`. Called server to server by the landing, so the
+         *     response sends no CORS headers. Rate limited per IP: a burst of 60, then
+         *     60 per minute.
          */
         get: operations["getRanking"];
         put?: never;
@@ -194,6 +314,59 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description Reported version 2 agent-swarm production events with deployment self-host, including Desplega installations.
+         *     Windows use ingested_at. Reports with occurred_at more than two hours before asOf are excluded.
+         *     Tokens sum session.cost input, output, cache read, and cache write. Ranking usage is excluded.
+         *     Tasks count task.created. Workflows count workflow.started. Counts do not deduplicate event reports.
+         */
+        LiveSnapshot: {
+            /**
+             * Format: date-time
+             * @description Source timestamp of the successful query, shared by all windows and buckets.
+             */
+            asOf: string;
+            /** @constant */
+            scope: "self-hosted-production";
+            /** @constant */
+            windowSeconds: 300;
+            counters: {
+                tokens: number;
+                tasks: number;
+                workflows: number;
+                /** @description Distinct nonempty installation IDs with work events in the previous five minutes. Reconnects and periodic snapshots do not count. */
+                activeSwarms: number;
+            };
+            /** @description Token breakdown for the previous five minutes. Sessions report these values when they finish. */
+            tokens: {
+                input: number;
+                output: number;
+                cacheRead: number;
+                cacheWrite: number;
+            };
+            /** @description Ascending one-minute buckets, including the current partial minute. Empty buckets contain zeros. */
+            buckets: {
+                /** Format: date-time */
+                start: string;
+                tokens: number;
+                tasks: number;
+                workflows: number;
+            }[];
+            /**
+             * @description Ten-second sums for the candle chart, stored by column. Index i starts at start plus i times stepSeconds.
+             *     The series begins 34 minutes before the current minute and ends with the tick that contains asOf.
+             *     The three arrays have the same length. Empty ticks contain zeros.
+             */
+            ticks: {
+                /** Format: date-time */
+                start: string;
+                /** @constant */
+                stepSeconds: 10;
+                tokens: number[];
+                tasks: number[];
+                workflows: number[];
+            };
+        };
         /**
          * @description Single telemetry event envelope.
          *
@@ -413,6 +586,26 @@ export interface components {
             /** @constant */
             status: "accepted";
         };
+        ImprovementSubmission: {
+            /** @description Agent-swarm installation identifier. Omit it when the install has none. */
+            install_id?: string;
+            /** @description The approved suggestion. Must hold 1 to 4000 characters after trimming whitespace. */
+            text: string;
+            /**
+             * Format: email
+             * @description Optional contact address. Null or an empty string means none.
+             */
+            email?: string | null;
+        };
+        ImprovementAcceptedResponse: {
+            /** @constant */
+            status: "accepted";
+            /**
+             * Format: uuid
+             * @description Server-generated identifier of the stored submission.
+             */
+            id: string;
+        };
         FeedbackAcceptedResponse: {
             /** @constant */
             status: "accepted";
@@ -469,6 +662,11 @@ export interface components {
         RankingResponse: {
             data: {
                 apps: components["schemas"]["RankingRow"][];
+                /**
+                 * Format: date-time
+                 * @description Not an OpenRouter key. When the snapshot this response is cut from was computed (UTC, milliseconds). Responses with the same value come from the same snapshot, so their periods and filters agree.
+                 */
+                generatedAt: string;
                 /** @description The `group` query value, or `agent-swarm` for every category. */
                 group: string;
                 /** @description The `subcategory` query value, or null. */
@@ -546,11 +744,25 @@ export interface components {
             /** @description The listing subcategory, or empty. */
             categories: string[];
             related_apps: number[];
+            /**
+             * @description Not an OpenRouter key. True when the entry is held by one of the
+             *     installs in `RANKING_CREATOR_INSTALL_IDS` (agent-swarm's makers). Set
+             *     by install ID only, never by domain or org name. A creator install
+             *     skips the fleet exclusions; opt-out, 7-day telemetry and website
+             *     rules still apply.
+             */
+            is_creator: boolean;
+            /**
+             * @description Not an OpenRouter key. True when the entry was first served
+             *     (`created_at`) less than 7 days before `generatedAt`, in every view.
+             */
+            is_new: boolean;
         };
-        /** @description OpenRouter's `{x, ys}` chart, oldest point first. `daily` is today and the 30 days before, with `x` as `YYYY-MM-DD 00:00:00`. `weekly` is Monday-based with `x` as `YYYY-MM-DD`: 52 weeks without `domain`, and from the entry's first week (first served or first counted day) with `domain`, at most 52. With `domain`, `ys` keys are models (the top 10 of the point); without it, `app_id`s as strings (the top 9). The rest sum into `Others`. A series with no tokens is left out, so `ys` can be empty. An unknown or hidden `domain` gets empty `daily` and `weekly`. */
+        /** @description OpenRouter's `{x, ys}` chart, oldest point first. `daily` is today and the 30 days before, with `x` as `YYYY-MM-DD 00:00:00`. `weekly` is Monday-based with `x` as `YYYY-MM-DD`: 52 weeks without `domain`, and from the entry's first week (first served or first counted day) with `domain`, at most 52. `monthly` (not an OpenRouter key) is UTC calendar months with `x` as the month's first day `YYYY-MM-01`, this month included: 12 months without `domain`, and from the entry's first month with `domain`, at most 12. With `domain`, `ys` keys are models (the top 10 of the point); without it, `app_id`s as strings (the top 9). The rest sum into `Others`. A series with no tokens is left out, so `ys` can be empty. An unknown or hidden `domain` gets empty `daily`, `weekly` and `monthly`. */
         RankingChart: {
             daily: components["schemas"]["RankingChartPoint"][];
             weekly: components["schemas"]["RankingChartPoint"][];
+            monthly: components["schemas"]["RankingChartPoint"][];
         };
         RankingChartPoint: {
             x: string;
@@ -1293,6 +1505,91 @@ export interface components {
             /** @constant */
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmOnboardingStepViewedProperties"];
+        };
+        AgentSwarmOrgActivityProperties: {
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Requests resolved as approved. */
+            hitl_requests_approved: number;
+            /** @description Requests cancelled before a human answered. */
+            hitl_requests_cancelled: number;
+            /** @description Human-in-the-loop requests (approvals and agent human-input requests) created. */
+            hitl_requests_created: number;
+            /** @description Created requests an agent raised from a task, outside a workflow. */
+            hitl_requests_from_task: number;
+            /** @description Created requests that belong to a workflow run. */
+            hitl_requests_from_workflow: number;
+            /** @description Requests resolved as rejected. */
+            hitl_requests_rejected: number;
+            /** @description Requests that timed out. */
+            hitl_requests_timeout: number;
+            /** @description Longest wait of a request settled in the window. */
+            hitl_wait_ms_max: number;
+            /** @description Summed wait, created to resolved, of the requests settled in the window. */
+            hitl_wait_ms_total: number;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description Script executions that finished in the window. */
+            script_runs: number;
+            /** @description Script executions that exited cleanly. */
+            script_runs_completed: number;
+            /** @description Longest script execution in the window. */
+            script_runs_duration_ms_max: number;
+            /** @description Summed wall-clock duration of the window's script executions. */
+            script_runs_duration_ms_total: number;
+            /** @description Script executions that failed for a reason other than a timeout. */
+            script_runs_failed: number;
+            /** @description Script executions started outside a task, workflow or schedule (API, MCP, dashboard). */
+            script_runs_inline: number;
+            /** @description Script executions on the native executor. */
+            script_runs_native: number;
+            /** @description Script executions started by an app action, an API endpoint, a durable object or a task gate. */
+            script_runs_other: number;
+            /** @description Script executions on the quickjs executor. */
+            script_runs_quickjs: number;
+            /** @description Script executions a schedule started. */
+            script_runs_schedule: number;
+            /** @description Script executions an agent started from a task. */
+            script_runs_task: number;
+            /** @description Script executions that hit their wall-clock limit. */
+            script_runs_timeout: number;
+            /** @description Script executions a workflow swarm-script node started. */
+            script_runs_workflow_node: number;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+            /** @description Minutes this rollup covers, ending at occurred_at. About 60; shorter for the window that ends at shutdown. */
+            window_minutes: number;
+            /** @description Workflow node runs (steps) started. */
+            workflow_steps: number;
+            /** @description Steps of agent-task nodes. */
+            workflow_steps_agent_task: number;
+            /** @description Steps of human-in-the-loop nodes. */
+            workflow_steps_hitl: number;
+            /** @description Steps of every other node type (LLM, routing, notify, wait, VCS, sub-workflow, foreach). */
+            workflow_steps_other: number;
+            /** @description Steps of swarm-script and script nodes. */
+            workflow_steps_script: number;
+        };
+        /** @description Hourly per-install counts of script runs, human-in-the-loop requests and workflow steps, by kind and status. Counts and durations only: no names, sources, arguments, content or IDs. (emitter: api-server, since 2026-11-25) */
+        AgentSwarmOrgActivityEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "org.activity";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmOrgActivityProperties"];
         };
         AgentSwarmOrgProfileUpdatedProperties: {
             /** @description Changed profile field names, never their values. */
@@ -2620,11 +2917,22 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmWorkflowStartedProperties"];
         };
-        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkUnlockedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkViewedEvent"] | components["schemas"]["AgentSwarmIdentityLookupEvent"] | components["schemas"]["AgentSwarmIdentityUserCreatedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgProfileUpdatedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmPopupDismissedEvent"] | components["schemas"]["AgentSwarmPopupShownEvent"] | components["schemas"]["AgentSwarmPopupSubmittedEvent"] | components["schemas"]["AgentSwarmRankingOptedInEvent"] | components["schemas"]["AgentSwarmRankingOptedOutEvent"] | components["schemas"]["AgentSwarmRankingUsageEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSetupWorkerCommandCopiedEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmTelemetryEnabledEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmUsedByConsentChangedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
+        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkUnlockedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkViewedEvent"] | components["schemas"]["AgentSwarmIdentityLookupEvent"] | components["schemas"]["AgentSwarmIdentityUserCreatedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgActivityEvent"] | components["schemas"]["AgentSwarmOrgProfileUpdatedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmPopupDismissedEvent"] | components["schemas"]["AgentSwarmPopupShownEvent"] | components["schemas"]["AgentSwarmPopupSubmittedEvent"] | components["schemas"]["AgentSwarmRankingOptedInEvent"] | components["schemas"]["AgentSwarmRankingOptedOutEvent"] | components["schemas"]["AgentSwarmRankingUsageEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSetupWorkerCommandCopiedEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmTelemetryEnabledEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmUsedByConsentChangedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
         /** @description Every catalogued (product, event) pair with its property schema. Generated from contracts/telemetry/catalog/events.json. */
         CatalogEvent: components["schemas"]["AgentFsCatalogEvent"] | components["schemas"]["AgentSwarmCatalogEvent"];
     };
     responses: {
+        /** @description The request failed. The message contains no credentials or database details. */
+        LiveErrorResponse: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    message: string;
+                };
+            };
+        };
         /** @description Browser preflight response. CORS allow headers are present only for an allowed origin. */
         CORSPreflightResponse: {
             headers: {
@@ -2646,6 +2954,139 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    checkLiveSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session is valid and the browser cookie is renewed. */
+            204: {
+                headers: {
+                    /** @description Renewed signed live_session cookie. Browser cookie lifetime limits still apply. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["LiveErrorResponse"];
+        };
+    };
+    createLiveSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Session created. */
+            204: {
+                headers: {
+                    /** @description Signed live_session cookie. HttpOnly, SameSite=Strict, Path=/, and Secure in production. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["LiveErrorResponse"];
+            401: components["responses"]["LiveErrorResponse"];
+            403: components["responses"]["LiveErrorResponse"];
+            413: components["responses"]["LiveErrorResponse"];
+            429: components["responses"]["LiveErrorResponse"];
+        };
+    };
+    deleteLiveSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session cookie cleared. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["LiveErrorResponse"];
+            403: components["responses"]["LiveErrorResponse"];
+        };
+    };
+    getLiveSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dashboard snapshot. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveSnapshot"];
+                };
+            };
+            401: components["responses"]["LiveErrorResponse"];
+            503: components["responses"]["LiveErrorResponse"];
+        };
+    };
+    streamLiveSnapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Persistent stream. Disable proxy buffering and allow idle connections for heartbeat delivery. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["LiveErrorResponse"];
+        };
+    };
+    checkLiveHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The process is running. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     ingestEvent: {
         parameters: {
             query?: never;
@@ -2694,6 +3135,18 @@ export interface operations {
              *     recorded in the `rejected_events` table.
              */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /**
+             * @description The service is shutting down (code `shutting_down`). The event was
+             *     not stored; retry it.
+             */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2869,6 +3322,80 @@ export interface operations {
             };
         };
     };
+    submitImprovement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImprovementSubmission"];
+            };
+        };
+        responses: {
+            /** @description Submission persisted; the Slack post is best-effort. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImprovementAcceptedResponse"];
+                };
+            };
+            /**
+             * @description Request body is invalid JSON or failed field validation. `code` is one of
+             *     `invalid_json`, `unknown_field`, `invalid_text` or `invalid_email`.
+             */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Request body exceeds 26,944 bytes. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The source IP exceeded 5 requests per minute. */
+            429: {
+                headers: {
+                    /** @description Seconds to wait before retrying. */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description The submission could not be persisted. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Improvement storage is not configured. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
     getOrgLogo: {
         parameters: {
             query: {
@@ -3020,7 +3547,7 @@ export interface operations {
             /** @description The ranking for the period and filters. */
             200: {
                 headers: {
-                    /** @description `public, max-age=3600`. */
+                    /** @description `public, max-age=60`. */
                     "Cache-Control"?: string;
                     [name: string]: unknown;
                 };

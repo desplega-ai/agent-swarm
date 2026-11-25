@@ -66,6 +66,7 @@ import { realtimeBus } from "../realtime/bus";
 import { TaskRoutingAuthorizationError } from "../tasks/errors";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
+import { recordHitlCreated, recordHitlSettled, recordWorkflowStep } from "../telemetry-activity";
 import { invalidateTelemetryUserRole, scheduleOrgDomainRecompute } from "../telemetry-identity";
 import {
   emitTaskTelemetry,
@@ -6358,6 +6359,7 @@ export async function createWorkflowRunStep(data: {
     idempotencyKey: data.idempotencyKey ?? null,
   });
   if (!row) throw new Error("Failed to create workflow run step");
+  getStorage().afterCommit(() => recordWorkflowStep(data.nodeType));
   return rowToWorkflowRunStep(row);
 }
 
@@ -7503,7 +7505,9 @@ export async function createApprovalRequest(data: {
     });
   });
 
-  return rowToApprovalRequest(row!);
+  const created = rowToApprovalRequest(row!);
+  getStorage().afterCommit(() => recordHitlCreated(created));
+  return created;
 }
 
 export async function getApprovalRequestById(id: string): Promise<ApprovalRequest | null> {
@@ -7540,6 +7544,7 @@ export async function resolveApprovalRequest(
   if (!row) return null;
   const resolved = rowToApprovalRequest(row);
   scheduleApprovalCardUpdates([resolved]);
+  getStorage().afterCommit(() => recordHitlSettled([resolved]));
   return resolved;
 }
 
@@ -7559,6 +7564,7 @@ export async function cancelApprovalRequestById(
   if (!row) return null;
   const cancelled = rowToApprovalRequest(row);
   scheduleApprovalCardUpdates([cancelled]);
+  getStorage().afterCommit(() => recordHitlSettled([cancelled]));
   return cancelled;
 }
 
@@ -7574,6 +7580,7 @@ export async function cancelPendingApprovalRequestsForRun(
   );
   const cancelled = rows.map(rowToApprovalRequest);
   scheduleApprovalCardUpdates(cancelled);
+  getStorage().afterCommit(() => recordHitlSettled(cancelled));
   return cancelled;
 }
 

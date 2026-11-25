@@ -972,6 +972,7 @@ export async function handleScripts(
           executor,
         },
         { ...provenance, depth: depth + 1 },
+        sourceTaskId ? "task" : "inline",
       );
     }
     const ok = output.exitCode === 0 && !output.error && !output.runtimeError;

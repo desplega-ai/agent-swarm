@@ -71,6 +71,7 @@ import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-wor
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { telemetry } from "../telemetry";
+import { flushOrgActivity } from "../telemetry-activity";
 import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
@@ -543,6 +544,7 @@ globalState.__stopExtensions = stopExtensionRuntime;
 async function shutdown() {
   globalState.__closeRealtime?.();
   console.log("Shutting down HTTP server...");
+  flushOrgActivity();
   telemetry.server("shutdown", {
     signal: shutdownSignal,
     uptimeMs: Date.now() - serverStartedAt,

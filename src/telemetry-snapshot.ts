@@ -15,6 +15,7 @@ import {
   setTelemetryRoleResolver,
   telemetry,
 } from "./telemetry";
+import { flushOrgActivity } from "./telemetry-activity";
 import type { PropsFor } from "./telemetry-contract";
 import {
   cachedUserFunction,
@@ -134,7 +135,8 @@ let firstTimer: ReturnType<typeof setTimeout> | null = null;
  * Start the API server's telemetry upkeep: the role resolver for
  * `context.user_role`, the org-domain recompute (at boot, on user changes, then
  * hourly) and the daily `org.snapshot` (60 s after boot, then whenever the
- * hourly tick finds 24 h have passed). One timer, no new cadence per feature.
+ * hourly tick finds 24 h have passed) and the hourly `org.activity` rollup.
+ * One timer, no new cadence per feature.
  * A no-op when telemetry is off.
  */
 export function startTelemetryTicker(deps: SnapshotDeps): void {
@@ -153,6 +155,7 @@ export function startTelemetryTicker(deps: SnapshotDeps): void {
       );
     }
     await emitOrgSnapshotIfDue(deps);
+    flushOrgActivity();
   };
 
   Promise.resolve(deps.getConfig(ORG_DOMAIN_KEY))
