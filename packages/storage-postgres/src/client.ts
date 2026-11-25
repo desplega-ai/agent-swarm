@@ -23,9 +23,10 @@ import { checkOwnerFence, mayWrite, type OwnerFence } from "./owner-fence";
  *   fails with SQLSTATE 40001 or 40P01 runs again, whole, with a bounded
  *   jittered backoff. The hooks of a failed attempt are discarded:
  *   `onAttemptRollback` hooks run at once, `afterRollback` hooks run only when
- *   the last attempt fails, `afterCommit` hooks run only after COMMIT. A
- *   statement outside a transaction that fails with 40001 or 40P01 changed
- *   nothing and runs again, with the same backoff.
+ *   the last attempt fails, `onCommit` and `afterCommit` hooks run only after
+ *   COMMIT (`onCommit` before `transaction()` resolves, `afterCommit` on a
+ *   later turn). A statement outside a transaction that fails with 40001 or
+ *   40P01 changed nothing and runs again, with the same backoff.
  * - `txReplay` (the `--tx-replay` e2e mode) rolls back the first attempt of
  *   every outermost transaction and runs the callback again.
  */
@@ -119,6 +120,8 @@ type TxContext = {
    */
   failure: { retryable: string | null };
   afterCommit: (() => void | Promise<void>)[];
+  /** Run synchronously after COMMIT, before `transaction()` resolves. */
+  onCommit: (() => void)[];
   afterRollback: (() => void)[];
   attemptRollback: (() => void)[];
 };
@@ -296,6 +299,7 @@ export class PostgresClient implements DbClient {
               handle,
               failure: { retryable: null },
               afterCommit: [],
+              onCommit: [],
               afterRollback: [],
               attemptRollback: [],
             };
@@ -322,6 +326,7 @@ export class PostgresClient implements DbClient {
         const committed = ctx as TxContext | undefined;
         if (committed) {
           committed.closed = true;
+          runHooks(committed.onCommit, "onCommit");
           for (const hook of committed.afterCommit) this.scheduleHook(hook);
         }
         end(attempt, "commit");
@@ -366,6 +371,7 @@ export class PostgresClient implements DbClient {
     // released: a savepoint that rolls back drops its writes, so it drops
     // their hooks too. The other hook lists are the outermost transaction's.
     const savepointHooks: (() => void | Promise<void>)[] = [];
+    const savepointCommitHooks: (() => void)[] = [];
     let result: T;
     try {
       result = await outer.handle.savepoint(async (sp) => {
@@ -374,6 +380,7 @@ export class PostgresClient implements DbClient {
           handle: sp,
           failure: outer.failure,
           afterCommit: savepointHooks,
+          onCommit: savepointCommitHooks,
           afterRollback: outer.afterRollback,
           attemptRollback: outer.attemptRollback,
         };
@@ -388,6 +395,7 @@ export class PostgresClient implements DbClient {
       throw mapPostgresError(err, this.options.checkMessages);
     }
     outer.afterCommit.push(...savepointHooks);
+    outer.onCommit.push(...savepointCommitHooks);
     return result;
   }
 
@@ -420,6 +428,12 @@ export class PostgresClient implements DbClient {
       return;
     }
     this.scheduleHook(fn);
+  }
+
+  onCommit(fn: () => void): void {
+    const ctx = txContext.getStore();
+    if (ctx && !ctx.closed) ctx.onCommit.push(fn);
+    else runHooks([fn], "onCommit");
   }
 
   afterRollback(fn: () => void): void {

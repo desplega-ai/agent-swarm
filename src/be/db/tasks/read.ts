@@ -42,6 +42,7 @@ import {
 import { normalizeOutputSchema } from "../../../utils/output-schema";
 import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
+import { memoizedRead } from "../../request-memo";
 import { getStorage } from "../../storage";
 import { getAgentById } from "../agents";
 
@@ -422,8 +423,10 @@ function rowToAgentTaskTimelineItem(row: AgentTaskTimelineRow): AgentTaskTimelin
 }
 
 export async function getTaskById(id: string): Promise<AgentTask | null> {
-  const row = await tasksRepo().findTaskById(id);
-  return row ? toTask(row) : null;
+  return memoizedRead("task", id, async () => {
+    const row = await tasksRepo().findTaskById(id);
+    return row ? toTask(row) : null;
+  });
 }
 
 export async function getChildTasks(parentTaskId: string): Promise<AgentTask[]> {

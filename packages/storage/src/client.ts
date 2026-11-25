@@ -74,6 +74,14 @@ export interface DbClient extends DbExecutor {
    */
   afterCommit(fn: () => void | Promise<void>): void;
   /**
+   * Run `fn` synchronously right after the open outermost transaction COMMITs,
+   * before `transaction()` resolves. Savepoints and failed attempts drop it as
+   * they drop `afterCommit`. Only for in-process state that must not lag the
+   * commit (a cache epoch), never for I/O: put side effects in `afterCommit`.
+   * With no transaction open it runs now.
+   */
+  onCommit(fn: () => void): void;
+  /**
    * Run `fn` synchronously when the open outermost transaction rolls back for
    * good (the last attempt). Dropped on commit. With no transaction open it
    * does nothing.
