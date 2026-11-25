@@ -76,7 +76,7 @@ async function vote(
   choice: "up" | "down",
   user: string,
 ) {
-  // The mock clicks plain buttons; the handler reads only the value, as with Slack's feedback element.
+  // The mock sends a feedback_buttons action carrying the clicked side's value, as Slack does.
   const ack = await ctx.slack.clickButton({
     channel: "general",
     ts: card.cardTs,
