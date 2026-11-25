@@ -2,7 +2,7 @@ import { getNodeEnv } from "../../utils/node-env";
 import { runWithCapacityRetry } from "./capacity-retry";
 import type { ScriptJob, ScriptRunnerHandle } from "./types";
 
-function assertSerializableJob(job: ScriptJob): void {
+export function assertSerializableJob(job: ScriptJob): void {
   const seen = new WeakSet<object>();
   function check(value: unknown): void {
     if (typeof value === "function" || typeof value === "symbol") {

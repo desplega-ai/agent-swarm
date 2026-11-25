@@ -907,7 +907,12 @@ export async function handleScripts(
       sourceScriptRunId: runId,
     };
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
+    const clientAbort = new AbortController();
+    res.once("close", () => {
+      if (!res.writableEnded) clientAbort.abort();
+    });
     const runContext = {
+      signal: clientAbort.signal,
       agentId: agent.id,
       runtimeInstanceId,
       sourceTaskId,

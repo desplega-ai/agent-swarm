@@ -52,6 +52,7 @@ import {
 } from "./report";
 import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
+import { startScriptRunner } from "./script-runner";
 import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import {
@@ -81,6 +82,7 @@ export type ScenarioContext = {
    * every agent a scenario started when the scenario ends, so a lingering poller cannot
    * steal the next scenario's pool tasks. Stop earlier yourself when the scenario needs it.
    */
+  startScriptRunner: (token: string) => ReturnType<typeof startScriptRunner>;
   startAgent: (options?: SimulatedAgentOptions) => Promise<SimulatedAgent>;
   /** Count a request made outside `ctx.api` (raw fetch, WebSocket, SSE) toward coverage. */
   recordHttpCall: typeof recordHttpCall;
@@ -263,7 +265,10 @@ const stacks = new Set<Stack>();
 const activeAgents = new Set<SimulatedAgent>();
 let cleaning = false;
 
+const activeScriptRunners = new Set<ReturnType<typeof startScriptRunner>>();
 async function stopActiveAgents(): Promise<void> {
+  await Promise.all([...activeScriptRunners].map((runner) => runner.stop()));
+  activeScriptRunners.clear();
   const agents = [...activeAgents];
   activeAgents.clear();
   await Promise.all(agents.map((agent) => agent.stop().catch(() => {})));
@@ -363,6 +368,11 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
       db,
       slack: slack.mock,
       llm,
+      startScriptRunner(token) {
+        const runner = startScriptRunner(sut.baseUrl, token);
+        activeScriptRunners.add(runner);
+        return runner;
+      },
       async startAgent(agentOptions) {
         const agent = await startSimulatedAgent({ api, nonce }, agentOptions);
         activeAgents.add(agent);

@@ -94,3 +94,5 @@ src/tests/x402-client.test.ts  # src/x402 is a standalone payment library: no AP
 src/tests/scm-sender-trust.test.ts  # one matrix of the mention sender rule across the GitLab, Bitbucket and Azure DevOps handlers with GitHub as the control, written to fail on the handlers before the rule existed; the GitLab rule is also checked over HTTP in platform-webhooks
 src/tests/seed-script-time-windows.test.ts  # cutoff regressions need backdated rows and a fixed script clock to check millisecond boundaries; public write APIs assign timestamps server-side
 src/tests/script-api-credential.test.ts  # Server-only issuer and broker credentials have no mint endpoint. Verify lifetime and revocation without exposing bearers to guest code.
+
+src/script-runner/  # Worker protocol and process lifecycle have no database access.

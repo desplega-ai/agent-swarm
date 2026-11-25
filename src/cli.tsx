@@ -162,6 +162,12 @@ const COMMAND_HELP: Record<
   string,
   { usage: string; description: string; options: string; examples: string }
 > = {
+  "script-runner": {
+    usage: `${binName} script-runner --api-url <url> [--allow-shared-uid]`,
+    description: "Run scripts through an authenticated connection to the API.",
+    options: "  --allow-shared-uid  Permit native execution with the runner UID for development",
+    examples: `${binName} script-runner --api-url https://api.example.test`,
+  },
   controller: {
     usage: `${binName} controller --api-url <url> --kind docker [options]`,
     description: "Run a remote controller next to the worker infrastructure.",
@@ -456,6 +462,7 @@ function printHelp(command?: string) {
     ["lead", "Run Claude as lead agent in headless loop"],
     ["api", "Start the API + MCP HTTP server"],
     ["controller", "Run a remote runtime controller"],
+    ["script-runner", "Run a remote script runner"],
     ["claude", "Run Claude CLI"],
     ["hook", "Handle Claude Code hook events (stdin)"],
     ["codex-hook", "Handle Codex CLI hook events (stdin, steering delivery)"],
@@ -745,7 +752,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
 } else if (
-  (args.command === "onboard" || args.command === "controller" || args.command === "db-copy") &&
+  (args.command === "onboard" ||
+    args.command === "controller" ||
+    args.command === "script-runner" ||
+    args.command === "db-copy") &&
   !process.versions.bun
 ) {
   // The published bin uses Node, but these commands require Bun APIs.
@@ -753,7 +763,7 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : "db-copy"} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
+      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : args.command === "script-runner" ? "Script runner" : "db-copy"} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
     );
   }
   process.exit(result.status ?? 1);
@@ -829,6 +839,9 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runE2BCommand } = await import("./commands/e2b");
   const e2bArgs = process.argv.slice(process.argv.indexOf("e2b") + 1);
   await runE2BCommand(e2bArgs);
+} else if (args.command === "script-runner") {
+  const { runScriptRunner } = await import("./script-runner/main");
+  await runScriptRunner(process.argv.slice(process.argv.indexOf("script-runner") + 1));
 } else if (args.command === "controller") {
   const { runController } = await import("./commands/controller");
   await runController(process.argv.slice(process.argv.indexOf("controller") + 1));

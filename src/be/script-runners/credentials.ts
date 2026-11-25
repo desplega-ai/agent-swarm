@@ -4,6 +4,7 @@ import {
   scrubSecrets,
   unregisterVolatileSecret,
 } from "../../utils/secret-scrubber";
+import { closeSessionTokenConnections } from "../../utils/session-token-connections";
 import { userHoldsExplicitVerb } from "../rbac-roles";
 import { getStorage } from "../storage";
 import { findUserById } from "../users";
@@ -56,11 +57,11 @@ export async function mintScriptRunnerCredential(
   });
 }
 
-/** Only the future runner link may use this credential lookup. */
-export async function authenticateScriptRunnerCredential(token: string) {
-  const storage = getStorage();
-  if (!storage.capabilities.scriptRunners || !/^assr_[a-f0-9]{64}$/.test(token)) return null;
-  return activeScriptRunnerCredential(createHash("sha256").update(token).digest("hex"));
+/** Only the runner link may use this credential lookup. */
+export function scriptRunnerCredentialHash(token: string) {
+  return /^assr_[a-f0-9]{64}$/.test(token)
+    ? createHash("sha256").update(token).digest("hex")
+    : null;
 }
 
 /** Recheck the issuing user's grant when the API validates a connected runner. */
@@ -77,7 +78,11 @@ export async function revokeScriptRunnerCredential(id: string, actor: string | n
   const storage = getStorage();
   return storage.transaction(async () => {
     const found = await storage.repos.scriptRunners.revoke(id, new Date().toISOString(), actor);
-    if (found) storage.afterCommit(() => unregisterVolatileSecret(`script-runner:${id}`));
+    if (found)
+      storage.afterCommit(() => {
+        unregisterVolatileSecret(`script-runner:${id}`);
+        closeSessionTokenConnections([`script-runner:${id}`]);
+      });
     return found;
   });
 }

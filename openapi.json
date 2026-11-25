@@ -66493,6 +66493,72 @@
         }
       }
     },
+    "/api/script-runners": {
+      "get": {
+        "summary": "List live script-runner sessions",
+        "tags": [
+          "Script runners"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "instanceId": {
+                            "type": "string"
+                          },
+                          "slots": {
+                            "type": "number"
+                          },
+                          "jobsInFlight": {
+                            "type": "number"
+                          },
+                          "jobsCompleted": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "instanceId",
+                          "slots",
+                          "jobsInFlight",
+                          "jobsCompleted"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "sessions"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/script-runners/credentials": {
       "get": {
         "summary": "List script-runner credentials without token material",
@@ -80054,6 +80120,44 @@
           },
           "404": {
             "description": "Runtime pools disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/script-runners/connect": {
+      "get": {
+        "summary": "Connect a script runner with its dedicated bearer credential",
+        "tags": [
+          "Script runners"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket upgrade"
+          },
+          "401": {
+            "description": "Invalid runner credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "script_runners_need_postgres",
             "content": {
               "application/json": {
                 "schema": {

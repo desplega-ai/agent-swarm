@@ -7,6 +7,9 @@ The root `CLAUDE.md` keeps only the rules that cause damage when missed. This fi
 
 API server owns the `scripts` + `script_versions` tables. Workers + the runtime invoke via HTTP. The runtime evaluates user-supplied TS in a `Bun.spawn` subprocess wrapped in `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`, launched as `bun --no-orphans` (the harness dies with the API and SIGKILLs its whole descendant tree on exit; added by `buildSandboxedCommand` in `src/utils/sandboxed-process.ts`), a wall-clock AbortController (30s default; up to 5m where exposed), and a 1 MB stdout cap.
 
+Synchronous runs use the dispatcher. With PostgreSQL, a connected script runner with capacity can execute the job.
+Otherwise the embedded runner executes it. See [script-runners.md](./script-runners.md) for credentials, UID isolation and lifecycle.
+
 ## Config injection
 
 The API passes the agent identity, bearer and API address in JSON on subprocess stdin. Guest code uses the SDK. The runtime keeps credentials out of the environment. API callers use `runScriptWithRunCredential`. Each inline run gets a short-lived credential for its authorized agent, user or operator. The API revokes it when the run ends. An unknown agent cannot acquire a credential. User runs receive no agent connections, filesystem credentials or deployment egress secrets.

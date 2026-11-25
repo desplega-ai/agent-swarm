@@ -194,3 +194,10 @@ Per-replica by design (keep one per replica, no change): 11 loops. `src/http/ind
 2. Realtime rooms (in-memory Yjs documents with delayed flush). They need one owner per room or a real CRDT relay.
 3. The heartbeat reboot sweep and the other boot-time "everything running is orphaned" resets (script-run supervisor PID check, user-merge reset, Slack receipt reset). They need a replica registry and leases before any replica can safely boot next to another.
 4. Config reload into `process.env`. Many integrations read env at call time or capture it at init, so a config write must re-run the full reload on every replica.
+
+## Script-runner link
+
+- `src/be/script-runners/sessions.ts`: `scriptRunnerSessions` and each runner's pending map belong to one API process. Jobs and their waiters cannot move between replicas.
+- `src/http/script-runners-connect.ts`: handshake and ping timers, sockets and credential callbacks belong to the API process that accepted the connection.
+- `src/script-runner/client.ts`: active jobs and reconnect timers belong to one runner process. A disconnect aborts inline jobs before reconnect.
+- `src/scripts-runtime/dispatch/dispatcher.ts`: the remote picker resolves sessions from this API process only. This registry does not enable multiple API replicas.

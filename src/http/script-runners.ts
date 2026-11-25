@@ -7,11 +7,37 @@ import {
   mintScriptRunnerCredential,
   revokeScriptRunnerCredential,
 } from "../be/script-runners/credentials";
+import { listScriptRunnerSessions } from "../be/script-runners/sessions";
 import { getStorage } from "../be/storage";
 import { can } from "../rbac";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
+
+const sessions = route({
+  method: "get",
+  path: "/api/script-runners",
+  pattern: ["api", "script-runners"],
+  tags: ["Script runners"],
+  summary: "List live script-runner sessions",
+  rbac: { permission: "script_runner.write" },
+  responses: {
+    200: {
+      description: "Live sessions",
+      schema: z.object({
+        sessions: z.array(
+          z.object({
+            instanceId: z.string(),
+            slots: z.number(),
+            jobsInFlight: z.number(),
+            jobsCompleted: z.number(),
+          }),
+        ),
+      }),
+    },
+    403: { description: "Forbidden" },
+  },
+});
 
 const credentialSchema = z.object({
   id: z.string(),
@@ -90,7 +116,7 @@ export async function handleScriptRunners(
   query: URLSearchParams,
   agentId: string | undefined,
 ): Promise<boolean> {
-  if (![list, mint, revoke].some((def) => def.match(req.method, segments))) return false;
+  if (![sessions, list, mint, revoke].some((def) => def.match(req.method, segments))) return false;
   const principal = await agentFirstPrincipal(req, agentId);
   if (!principal || (principal.kind !== "operator" && principal.kind !== "user")) {
     jsonError(res, "Script-runner credentials require an operator or user", 403);
@@ -108,7 +134,10 @@ export async function handleScriptRunners(
     jsonError(res, decision.reason, 403);
     return true;
   }
-  if (list.match(req.method, segments)) {
+  if (sessions.match(req.method, segments)) {
+    if (!(await sessions.parse(req, res, segments, query))) return true;
+    sessions.respond(res, 200, { sessions: listScriptRunnerSessions() });
+  } else if (list.match(req.method, segments)) {
     if (!(await list.parse(req, res, segments, query))) return true;
     list.respond(res, 200, { credentials: await getStorage().repos.scriptRunners.list() });
   } else if (mint.match(req.method, segments)) {

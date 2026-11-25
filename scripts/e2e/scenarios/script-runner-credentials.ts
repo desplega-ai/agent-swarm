@@ -145,8 +145,8 @@ export const scriptRunnerCredentials: Scenario = {
       );
       expect(
         logs.length === 1 &&
-          !logs[0].content.includes(token) &&
-          logs[0].content.includes("[REDACTED:"),
+          !logs[0]?.content.includes(token) &&
+          logs[0]?.content.includes("[REDACTED:"),
         "stored log scrubs revoked token",
       );
       expect(!(await ctx.sutLog()).includes(token), "SUT never logs raw token");

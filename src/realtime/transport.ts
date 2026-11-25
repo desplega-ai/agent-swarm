@@ -202,7 +202,7 @@ export function attachRealtimeTransport(server: Server): () => void {
   // Authentication precedes upgrade on both direct and proxied paths.
   const onUpgrade = (req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => {
     const path = req.url?.split("?")[0];
-    if (path === "/api/controllers/connect") return;
+    if (path === "/api/controllers/connect" || path === "/api/script-runners/connect") return;
     if (
       closing ||
       (path !== "/@swarm/realtime" && path !== "/api/realtime") ||

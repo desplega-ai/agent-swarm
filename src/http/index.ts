@@ -519,6 +519,8 @@ const httpServer = createHttpServer(async (req, res) => {
 const detachRealtime = attachRealtimeTransport(httpServer);
 const { attachControllerTransport } = await import("./controllers-connect");
 const detachControllers = attachControllerTransport(httpServer);
+const { attachScriptRunnerTransport } = await import("./script-runners-connect");
+const detachScriptRunners = attachScriptRunnerTransport(httpServer);
 const stopWorkerNudges = startWorkerNudgeListener();
 const taskAutoTitles = startTaskAutoTitleListener();
 const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
@@ -529,6 +531,7 @@ const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namesp
 globalState.__closeRealtime = () => {
   detachRealtime();
   detachControllers();
+  detachScriptRunners();
   stopWorkerNudges();
   taskAutoTitles.stop();
   stopRoomDeletion();
