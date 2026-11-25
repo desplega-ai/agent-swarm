@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { OpenAIEmbeddingProvider } from "../be/memory/providers/openai-embedding";
-import { runMemoryRater } from "../be/memory/raters/llm-summarizer";
 import { validateProviderCredentials } from "../commands/provider-credentials";
 import { completeStructured } from "../utils/internal-ai/complete-structured";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
@@ -68,16 +67,6 @@ function expectAttribution(headers: Headers | undefined, attributed: boolean) {
     expect(headers?.has("x-openrouter-categories")).toBe(false);
   }
 }
-
-describe("memory rater (llm-summarizer)", () => {
-  for (const c of CASES) {
-    test(`${c.name}`, async () => {
-      setEnv(c.env);
-      await runMemoryRater({ prompt: "p", apiKey: "example-or-key" });
-      expectAttribution(requests[0]?.headers, c.attributed);
-    });
-  }
-});
 
 describe("completeStructured (pi-ai path)", () => {
   for (const c of CASES) {

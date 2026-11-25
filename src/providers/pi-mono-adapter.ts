@@ -2184,6 +2184,7 @@ export class PiMonoAdapter implements ProviderAdapter {
           if (runtimeInstanceId) {
             mcpClient.customHeaders["X-Runtime-Instance-ID"] = runtimeInstanceId;
           }
+          Object.assign(mcpClient.customHeaders, config.traceHeaders);
           await mcpClient.initialize();
           const tools = await mcpClient.listTools();
           customTools = mcpToolsToDefinitions(mcpClient, tools, {

@@ -23,6 +23,11 @@ const RESERVED_FAMILIES = new Map([
   ["slack-external-alert", "namespace is reserved for Slack external channel alerts"],
   // Threads the swarm left via slack-leave-thread (src/slack/left-threads.ts).
   ["slack-left-thread", "namespace is reserved for left Slack threads; use slack-leave-thread"],
+  // 👍/👎 votes on Slack outcome cards (src/slack/feedback.ts). Only a real click writes them.
+  [
+    "slack-feedback",
+    "namespace is reserved for Slack answer feedback; votes come from Slack clicks",
+  ],
   // Slack thread replies awaiting their buffer flush (src/slack/thread-buffer-store.ts). Private.
   ["slack-thread-buffer", "namespace is reserved for the Slack thread buffer"],
   // Source group labels (src/be/db/session-labels.ts). Private, see PRIVATE_FAMILIES.
@@ -49,7 +54,16 @@ const RESERVED_FAMILIES = new Map([
  * source label names a private channel or a DM partner; a buffered Slack
  * reply holds a message from one).
  */
-const PRIVATE_FAMILIES = new Set(["session-labels", "slack-thread-buffer"]);
+const PRIVATE_FAMILIES = new Set(["session-labels", "slack-thread-buffer", "slack-feedback"]);
+
+/**
+ * Private families a Lead agent may still read through generic KV, with the
+ * error everyone else gets. A Slack vote names its voter and the task's
+ * channel and thread, so only the operator's Lead reads them.
+ */
+const LEAD_READABLE_FAMILIES = new Map([
+  ["slack-feedback", "Slack feedback votes are readable only by a Lead agent"],
+]);
 
 /**
  * Families only the Lead may write. `usecase:<key>` holds the Slack or chat
@@ -75,10 +89,15 @@ export function reservedNamespaceError(namespace: string): string | null {
 }
 
 /** The error a generic KV read of a private family gets, or null. */
-export function privateNamespaceError(namespace: string): string | null {
-  return PRIVATE_FAMILIES.has(namespace.split(":", 1)[0] ?? "")
-    ? reservedNamespaceError(namespace)
-    : null;
+export function privateNamespaceError(
+  namespace: string,
+  caller: { isLead?: boolean } = {},
+): string | null {
+  const family = namespace.split(":", 1)[0] ?? "";
+  if (!PRIVATE_FAMILIES.has(family)) return null;
+  const leadError = LEAD_READABLE_FAMILIES.get(family);
+  if (leadError) return caller.isLead ? null : leadError;
+  return reservedNamespaceError(namespace);
 }
 
 export function reservedRoomKeyError(key: string): string | null {

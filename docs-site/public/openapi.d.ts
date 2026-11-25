@@ -614,6 +614,7 @@ export interface paths {
                         args?: {
                             [key: string]: unknown;
                         };
+                        parentScriptRunId?: string;
                     };
                 };
             };
@@ -1088,6 +1089,70 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apps/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the app component catalog
+         * @description No query: every component (one line, child slots) and action type. `component` returns its props schema (`prop` drills into one prop), `action` an action step's params, `topic=expressions` the binding reference.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    component?: string;
+                    prop?: string;
+                    action?: string;
+                    topic?: "expressions";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Catalog entry */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+                /** @description More than one of component, action and topic, or prop without component */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unknown component, prop or action; names the closest */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -15007,7 +15072,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; internal_ai reports the provider policy for task titles, session summaries and llm memory ratings (INTERNAL_LLM_PROVIDER, the credential kinds tried in order, and the TASK_AUTO_TITLE_MODEL and MEMORY_RATER_MODEL pins); github reports the GitHub web base (GITHUB_URL) for PR and repo links.
          */
         get: {
             parameters: {
@@ -15120,6 +15185,12 @@ export interface paths {
                             github?: {
                                 web_url: string;
                                 enterprise: boolean;
+                            };
+                            internal_ai?: {
+                                provider: string;
+                                order: string[];
+                                task_title_model: string | null;
+                                memory_rater_model: string | null;
                             };
                         };
                     };
@@ -38245,6 +38316,7 @@ export interface operations {
                     /** @enum {string|null} */
                     executor?: "native" | "quickjs" | null;
                     idempotencyKey?: string;
+                    parentScriptRunId?: string;
                 };
             };
         };
@@ -38305,7 +38377,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Script not found */
+            /** @description Script not found, or parentScriptRunId names no running run of the calling agent */
             404: {
                 headers: {
                     [name: string]: unknown;

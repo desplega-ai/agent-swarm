@@ -1,0 +1,39 @@
+name: Scenario Order Notification
+
+on:
+  # Sweep open PRs whenever main gains or moves a scenario, so a PR whose e2e
+  # scenario order main just took learns about it before it enters the queue.
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/e2e/scenarios/**"
+
+jobs:
+  notify-stale-prs:
+    name: Notify open PRs of scenario orders main now owns
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Keep the pull-requests: write token out of git config; only gh gets it.
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Comment on open PRs whose scenario orders collide with main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: bun scripts/check-scenario-orders.ts --sweep

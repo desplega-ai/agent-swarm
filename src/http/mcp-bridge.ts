@@ -15,6 +15,7 @@ import {
   markScriptSdkRequestOrigin,
   type RequestInfo,
 } from "../tools/utils";
+import { runForBridgedScriptRun } from "../utils/request-auth-context";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -130,6 +131,8 @@ const mcpBridgeRoute = route({
   body: z.object({
     tool: z.string().min(1).max(200),
     args: z.record(z.string(), z.unknown()).default({}),
+    /** The background script run making the call, so the runs it starts join its tree. */
+    parentScriptRunId: z.string().min(1).optional(),
   }),
   responses: {
     200: {
@@ -161,7 +164,7 @@ export async function handleMcpBridge(
   const parsed = await mcpBridgeRoute.parse(req, res, pathSegments, new URLSearchParams());
   if (!parsed) return true;
 
-  const { tool: toolName, args } = parsed.body;
+  const { tool: toolName, args, parentScriptRunId } = parsed.body;
 
   const sourceTaskId = headerValue(req, "x-source-task-id");
   // Runtime identity rides the bridge like the agent identity so the
@@ -169,17 +172,19 @@ export async function handleMcpBridge(
   const runtimeInstanceId = headerValue(req, "x-runtime-instance-id");
 
   try {
-    const result = await invokeToolInProcess({
-      toolName,
-      args,
-      agentId: myAgentId,
-      sourceTaskId,
-      auditSourceTaskId: headerValue(req, "x-audit-source-task-id"),
-      runtimeInstanceId,
-      // The agent header is caller-controlled; the extension origin also needs the
-      // per-process token that only the in-process extension SDK holds.
-      callOrigin: resolveBridgeCallOrigin(myAgentId, headerValue(req, "x-extension-token")),
-    });
+    const result = await runForBridgedScriptRun(parentScriptRunId, () =>
+      invokeToolInProcess({
+        toolName,
+        args,
+        agentId: myAgentId,
+        sourceTaskId,
+        auditSourceTaskId: headerValue(req, "x-audit-source-task-id"),
+        runtimeInstanceId,
+        // The agent header is caller-controlled; the extension origin also needs the
+        // per-process token that only the in-process extension SDK holds.
+        callOrigin: resolveBridgeCallOrigin(myAgentId, headerValue(req, "x-extension-token")),
+      }),
+    );
 
     if (result && typeof result === "object" && "structuredContent" in result) {
       json(res, result.structuredContent);

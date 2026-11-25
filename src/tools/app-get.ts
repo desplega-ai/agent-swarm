@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { type AppRow, listAppRows } from "@/apps/row-store";
+import { appSourcesPath, listAppSources } from "@/apps/sources";
 import { getApp } from "@/apps/store";
 import { collectAppSyncStatus } from "@/apps/sync";
 import { getAgentById } from "@/be/db";
@@ -33,7 +34,7 @@ export const registerAppGetTool = (server: McpServer) => {
     {
       title: "Get an app",
       description:
-        "Get an app by ID, including its models, named queries, actions, and json-render pages definition.",
+        "Get an app by ID, including its models, named queries, actions, and json-render pages definition. sourcesPath is the app's agent-fs folder for generators, backing-script drafts and NOTES.md (sourceFiles lists it when agent-fs is set up); read NOTES.md there first on a follow-up edit. For valid components, props and bindings, call app-catalog.",
       annotations: { readOnlyHint: true },
       rbac: { permission: "app.use" },
       inputSchema: z.object({
@@ -41,6 +42,9 @@ export const registerAppGetTool = (server: McpServer) => {
       }),
       outputSchema: swarmToolOutputSchema({
         app: z.unknown().optional(),
+        sourcesPath: z.string().optional(),
+        sourceFiles: z.array(z.string()).optional(),
+        warnings: z.array(z.string()).optional(),
       }),
     },
     async ({ appId }, requestInfo) => {
@@ -58,14 +62,22 @@ export const registerAppGetTool = (server: McpServer) => {
 
       const syncStatus = await collectAppSyncStatus(app.id);
       const hasSyncStatus = Object.keys(syncStatus).length > 0;
+      const sourcesPath = await appSourcesPath(app.id);
+      const sources = await listAppSources(sourcesPath, requestInfo.agentId);
+      const sourcesData = {
+        sourcesPath,
+        ...(sources.files ? { sourceFiles: sources.files } : {}),
+        ...(sources.warning ? { warnings: [sources.warning] } : {}),
+      };
+      const sourcesLine = `Sources: ${sourcesPath}${sources.files ? ` (${sources.files.length > 0 ? sources.files.join(", ") : "empty"})` : ""}`;
       // Supplying `details` suppresses the registrar's JSON-data fallback, so
       // text-only harnesses must get the sync freshness surface here too.
       const details = hasSyncStatus
-        ? `${JSON.stringify(app, null, 2)}\n\nSync status (model:source):\n${JSON.stringify(syncStatus, null, 2)}`
-        : JSON.stringify(app, null, 2);
+        ? `${JSON.stringify(app, null, 2)}\n\nSync status (model:source):\n${JSON.stringify(syncStatus, null, 2)}\n\n${sourcesLine}`
+        : `${JSON.stringify(app, null, 2)}\n\n${sourcesLine}`;
       return toolOk(`App "${app.name}" (${app.id}).`, {
         details,
-        data: { app, ...(hasSyncStatus ? { syncStatus } : {}) },
+        data: { app, ...(hasSyncStatus ? { syncStatus } : {}), ...sourcesData },
       });
     },
   );

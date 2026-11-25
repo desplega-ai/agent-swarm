@@ -461,7 +461,7 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
   // The dsh regular-tier default (DEFAULT_MODEL_TIER_MAP.dsh in src/types.ts).
-  dsh: "openrouter/deepseek/deepseek-v4.1-flash",
+  dsh: "openrouter/deepseek/deepseek-v4.1-flash-1017",
   // The cursor regular-tier default (DEFAULT_MODEL_TIER_MAP.cursor in src/types.ts).
   cursor: "claude-sonnet-5-5",
   // `low` is Amp's cheapest mode; the regular tier (`medium`) runs an Opus-class model.
@@ -469,7 +469,7 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   // The grok regular-tier default (DEFAULT_MODEL_TIER_MAP.grok in src/types.ts).
   grok: "grok-4.3",
   // The fx regular-tier default (DEFAULT_MODEL_TIER_MAP.fx in src/types.ts).
-  fx: "openrouter/deepseek/deepseek-v4.1-flash",
+  fx: "openrouter/deepseek/deepseek-v4.1-flash-1017",
   acp: "",
 };
 

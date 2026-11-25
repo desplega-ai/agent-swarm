@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createToolRegistrar } from "@/tools/utils";
 import { ScriptRunStatusSchema } from "@/types";
-import { getCurrentRunProvenance } from "@/utils/request-auth-context";
+import { getBridgedScriptRunId, getCurrentRunProvenance } from "@/utils/request-auth-context";
 import { proxyScriptsApi, scriptNameSchema, scriptToolOutputSchema } from "./script-common";
 
 export const LAUNCH_SCRIPT_RUN_DESCRIPTION =
@@ -110,7 +110,8 @@ export const registerScriptRunsTools = (server: McpServer) => {
     async (args, requestInfo) => {
       // The proxy below calls with the swarm key, which drops the calling
       // run's token: carry its run id so the launched run joins its tree.
-      const parentScriptRunId = getCurrentRunProvenance()?.sourceScriptRunId;
+      const parentScriptRunId =
+        getCurrentRunProvenance()?.sourceScriptRunId ?? getBridgedScriptRunId();
       return proxyScriptsApi({
         method: "POST",
         path: "/api/script-runs",

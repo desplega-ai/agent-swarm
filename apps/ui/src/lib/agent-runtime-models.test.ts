@@ -680,7 +680,7 @@ describe("fx harness models", () => {
   test("the default is the regular-tier model when OpenRouter is enabled", () => {
     const groups = modelGroupsForHarness("fx", [], { OPENROUTER_API_KEY: true });
     expect(pickDefaultModelForHarness("fx", groups)).toBe(
-      "openrouter/deepseek/deepseek-v4.1-flash",
+      "openrouter/deepseek/deepseek-v4.1-flash-1017",
     );
   });
 });

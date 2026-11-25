@@ -205,8 +205,11 @@ Common attributes:
 | `mcp.tool.result_content_count` | Number of returned content items |
 | `mcp.tool.is_error` | Whether the MCP result is an error |
 | `agentswarm.task.id` | Source task ID when available |
+| `agentswarm.tool.call_id` | Harness tool-call id, when the client sends one (Claude Code's `_meta["claudecode/toolUseId"]`). Equals `agentswarm.tool.call_id` on the worker's `worker.mcp.tool` span for the same call |
 | `agentswarm.tool.args_preview` | Scrubbed, truncated argument preview |
 | `agentswarm.tool.result_preview` | Scrubbed, truncated result preview |
+
+Every harness adapter adds a W3C `traceparent` naming the worker's `worker.session` span to the swarm MCP server's headers, so the `POST /mcp` span of a tool call is a child of `worker.session` in the task's trace. That header is fixed when the session starts: the harness sends the request itself, so it cannot name the per-call `worker.mcp.tool` span. Join the two through `agentswarm.tool.call_id` instead. The static header also wins over a `traceparent` a harness with its own tracing would inject, whose span may never reach your backend.
 
 Useful for:
 

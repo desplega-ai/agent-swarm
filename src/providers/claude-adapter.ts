@@ -576,6 +576,7 @@ export function mergeMcpConfig(
   taskId: string,
   contextKey?: string,
   runtimeInstanceId?: string,
+  traceHeaders?: Record<string, string>,
 ): { mcpServers: Record<string, unknown> } {
   const config: { mcpServers: Record<string, unknown> } = {
     mcpServers: { ...(baseConfig?.mcpServers ?? {}) },
@@ -607,6 +608,7 @@ export function mergeMcpConfig(
     if (runtimeInstanceId) {
       (server.headers as Record<string, string>)["X-Runtime-Instance-ID"] = runtimeInstanceId;
     }
+    Object.assign(server.headers as Record<string, string>, traceHeaders);
   }
 
   return config;
@@ -626,6 +628,7 @@ export async function createSessionMcpConfig(
   taskId: string,
   installedServers?: Record<string, Record<string, unknown>> | null,
   contextKey?: string,
+  traceHeaders?: Record<string, string>,
 ): Promise<string | null> {
   // Collect every .mcp.json from cwd up to filesystem root. Stopping at the first
   // match silently drops the swarm-managed /workspace/.mcp.json when the cloned
@@ -665,6 +668,7 @@ export async function createSessionMcpConfig(
       taskId,
       contextKey,
       swarmRuntimeInstanceId(),
+      traceHeaders,
     );
     const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
     await writeFile(sessionConfigPath, JSON.stringify(config, null, 2));
@@ -1500,6 +1504,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       config.taskId,
       installedServers,
       config.contextKey,
+      config.traceHeaders,
     );
 
     // Stage the system prompt on disk so it can be passed as a file path
