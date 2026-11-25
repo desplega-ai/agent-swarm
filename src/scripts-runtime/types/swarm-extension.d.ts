@@ -21,6 +21,7 @@ declare module "swarm-extension" {
       | "linear"
       | "jira"
       | "comb"
+      | "alert"
       | undefined;
     routingReason?:
       | "skill"
@@ -172,7 +173,8 @@ declare module "swarm-extension" {
       | "workflow"
       | "linear"
       | "jira"
-      | "comb";
+      | "comb"
+      | "alert";
     tags: string[];
     priority: number;
     dependsOn: string[];

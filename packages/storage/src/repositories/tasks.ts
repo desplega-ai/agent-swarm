@@ -64,6 +64,7 @@ export const TASK_SOURCES = [
   "jira",
   "comb",
   "chat",
+  "alert",
 ] as const;
 export type TaskSource = (typeof TASK_SOURCES)[number];
 

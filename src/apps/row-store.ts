@@ -1,7 +1,15 @@
-import { deleteKv, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import {
+  deleteKv,
+  getKv,
+  kvPrefixUpperBound,
+  listKv,
+  literalPrefixPattern,
+  upsertKv,
+} from "../be/db";
 import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
 import { getStorage } from "../be/storage";
+import { removeNamespaceFamilyRooms } from "../realtime/rooms";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -12,6 +20,7 @@ import {
   type ModelDef,
 } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
+import { publishAppRowsChanged } from "./realtime-events";
 
 export type AppRow = {
   id: string;
@@ -209,6 +218,18 @@ function prepareValues(
 }
 
 /**
+ * One DbClient transaction for the KV writes of one request: a row key plus its
+ * index keys, or every row of a bulk request. Each autocommit write is its own
+ * commit, and a commit on Postgres waits for a WAL flush. Call it only while the
+ * mutation lock is held (see the lock ordering below). A Postgres serialization
+ * failure runs the callback again, whole, so the callback must have no side
+ * effect outside the database.
+ */
+function inRowTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  return getStorage().transaction(operation);
+}
+
+/**
  * Lock ordering: this per-app/model lock is always acquired BEFORE the DbClient
  * transaction lock, never the other way round. Awaiting `withMutationLock` (or
  * anything that calls it, such as `purgeAppRows`) from inside an open client
@@ -221,7 +242,14 @@ export function withMutationLock<T>(
 ): Promise<T> {
   const lockKey = `${appId}:${model}`;
   const previous = mutationChains.get(lockKey) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
+  // Every row write runs under this lock: tell open app surfaces once it lands.
+  const current = previous
+    .catch(() => undefined)
+    .then(operation)
+    .then((result) => {
+      if (model !== "*") publishAppRowsChanged(appId, model);
+      return result;
+    });
   mutationChains.set(lockKey, current);
   return current.finally(() => {
     if (mutationChains.get(lockKey) === current) mutationChains.delete(lockKey);
@@ -307,10 +335,16 @@ export function createAppRow(
     const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
     const prepared = prepareValues(currentDefinition, values, "create", options);
-    return createRowUnlocked(appId, model, currentDefinition, prepared, options);
+    return inRowTransaction(() =>
+      createRowUnlocked(appId, model, currentDefinition, prepared, options),
+    );
   });
 }
 
+/**
+ * All or nothing: the rows are validated before the first write, and the writes
+ * share one transaction, so a database error leaves no row of the request.
+ */
 export function createAppRows(
   appId: string,
   model: string,
@@ -324,11 +358,14 @@ export function createAppRows(
     const prepared = rows.map((values) =>
       prepareValues(currentDefinition, values, "create", options),
     );
-    const created: AppRow[] = [];
-    for (const values of prepared) {
-      created.push(await createRowUnlocked(appId, model, currentDefinition, values, options));
-    }
-    return created;
+    return inRowTransaction(async () => {
+      // A retried attempt starts again with new row ids and timestamps.
+      const created: AppRow[] = [];
+      for (const values of prepared) {
+        created.push(await createRowUnlocked(appId, model, currentDefinition, values, options));
+      }
+      return created;
+    });
   });
 }
 
@@ -517,7 +554,9 @@ export function patchAppRow(
     const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
     const prepared = prepareValues(currentDefinition, values, "patch", options);
-    return patchPreparedRowUnlocked(appId, model, currentDefinition, rowId, prepared, options);
+    return inRowTransaction(() =>
+      patchPreparedRowUnlocked(appId, model, currentDefinition, rowId, prepared, options),
+    );
   });
 }
 
@@ -620,6 +659,21 @@ export async function rebuildAppColumnIndexUnlocked(
   }
 }
 
+async function deleteRowUnlocked(
+  appId: string,
+  model: string,
+  definition: ModelDef,
+  rowId: string,
+  matches?: (row: AppRow) => boolean,
+): Promise<boolean> {
+  const namespace = appsNamespace(appId);
+  const row = await getAppRow(appId, model, rowId);
+  if (!row || (matches && !matches(row))) return false;
+  for (const key of indexKeys(model, definition, row)) await deleteKv(namespace, key);
+  await deleteKv(namespace, rowKey(model, rowId));
+  return true;
+}
+
 /** `matches` re-checks the row under the lock; a row that no longer matches is kept. */
 export function deleteAppRow(
   appId: string,
@@ -628,15 +682,30 @@ export function deleteAppRow(
   rowId: string,
   matches?: (row: AppRow) => boolean,
 ): Promise<boolean> {
+  return deleteAppRows(appId, model, _definition, [rowId], matches).then((count) => count > 0);
+}
+
+/**
+ * Delete rows under one lock and in one transaction; returns how many went.
+ * `matches` re-checks each row under the lock; a row that no longer matches is kept.
+ */
+export function deleteAppRows(
+  appId: string,
+  model: string,
+  _definition: ModelDef,
+  rowIds: readonly string[],
+  matches?: (row: AppRow) => boolean,
+): Promise<number> {
   return withMutationLock(appId, model, async () => {
     const currentDefinition = await currentModelDefinition(appId, model);
-    if (!currentDefinition) return false;
-    const namespace = appsNamespace(appId);
-    const row = await getAppRow(appId, model, rowId);
-    if (!row || (matches && !matches(row))) return false;
-    for (const key of indexKeys(model, currentDefinition, row)) await deleteKv(namespace, key);
-    await deleteKv(namespace, rowKey(model, rowId));
-    return true;
+    if (!currentDefinition) return 0;
+    return inRowTransaction(async () => {
+      let deleted = 0;
+      for (const rowId of rowIds) {
+        if (await deleteRowUnlocked(appId, model, currentDefinition, rowId, matches)) deleted++;
+      }
+      return deleted;
+    });
   });
 }
 
@@ -652,6 +721,26 @@ async function purgeNamespace(appId: string): Promise<void> {
   const namespace = appsNamespace(appId);
   while (true) {
     const changes = await getStorage().repos.kv.deleteNamespaceBatch(namespace, PURGE_BATCH_SIZE);
+    if (changes === 0) return;
+    await yieldToEventLoop();
+  }
+}
+
+/**
+ * Drops the app's page presence rooms (`presence:app:<appId>:<page>`): the
+ * live rooms first, so no pending flush writes a row back, then every
+ * persisted room row. Run it after the app row is gone, so no new join passes
+ * the app check.
+ */
+export async function purgeAppPresenceRooms(appId: string): Promise<void> {
+  const prefix = `presence:app:${appId}:`;
+  removeNamespaceFamilyRooms(prefix);
+  const pattern = literalPrefixPattern(prefix);
+  while (true) {
+    const changes = await getStorage().repos.kv.deleteNamespacesLikeBatch(
+      pattern,
+      PURGE_BATCH_SIZE,
+    );
     if (changes === 0) return;
     await yieldToEventLoop();
   }

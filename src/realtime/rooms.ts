@@ -554,3 +554,12 @@ export function removeNamespaceRooms(namespace: string): void {
     destroyRoom(room);
   }
 }
+
+/** `removeNamespaceRooms` for every live room whose namespace starts with `prefix`. */
+export function removeNamespaceFamilyRooms(prefix: string): void {
+  const namespaces = new Set<string>();
+  for (const room of state.rooms.values()) {
+    if (room.namespace.startsWith(prefix)) namespaces.add(room.namespace);
+  }
+  for (const namespace of namespaces) removeNamespaceRooms(namespace);
+}
