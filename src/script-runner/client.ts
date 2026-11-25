@@ -274,9 +274,10 @@ export function startScriptRunner(options: {
           }
           const controller = new AbortController();
           const held = message.kind !== "inline";
+          const completed = Promise.resolve();
           const record = {
             controller,
-            done: Promise.resolve(),
+            done: completed,
             result: undefined as ExecutorOutput | undefined,
           };
           if (held) steps.set(message.jobId, record);

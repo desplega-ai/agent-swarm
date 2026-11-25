@@ -1,6 +1,9 @@
 import type { WorkflowStepJob } from "@desplega/storage";
 import { encodeRunnerFrame } from "../../script-runner/protocol";
-import { reserveHeldScriptRunner } from "../../scripts-runtime/dispatch/held-reservations";
+import {
+  adoptHeldScriptSlot,
+  reserveHeldScriptRunner,
+} from "../../scripts-runtime/dispatch/held-reservations";
 import type { ExecutorOutput } from "../../scripts-runtime/executors/types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { checkpointStepFailure } from "../../workflows/checkpoint";
@@ -16,6 +19,7 @@ import { rebuildNodeExecutionInput } from "../../workflows/step-input";
 import { getStepJobKind, type PreparedStepJob } from "../../workflows/step-job-kinds";
 import { settleStepResult } from "../../workflows/step-settle";
 import {
+  getLatestStepForNode,
   getRunWorkflow,
   getWorkflowRun,
   getWorkflowRunStep,
@@ -27,7 +31,11 @@ import { getStorage } from "../storage";
 import { type RemoteScriptRunner, registerHeldStepHooks, scriptRunnerSessions } from "./sessions";
 
 const LEASE_MS = 60000;
-const active = new Map<string, { prepared: PreparedStepJob; releaseSlot: () => void }>();
+const active = new Map<
+  string,
+  { prepared: PreparedStepJob; releaseSlot: () => void; controller: AbortController; owner: string }
+>();
+const adoptedSlots = new Map<string, () => void>();
 let draining = false;
 let registry: ExecutorRegistry;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -87,10 +95,13 @@ async function load(job: WorkflowStepJob) {
 }
 
 async function release(id: string) {
+  adoptedSlots.get(id)?.();
+  adoptedSlots.delete(id);
   const held = active.get(id);
   active.delete(id);
   if (held) {
     try {
+      held.controller.abort();
       await held.prepared.release();
     } finally {
       held.releaseSlot();
@@ -102,6 +113,7 @@ export async function settleWorkflowStepJob(
   id: string,
   owner: string,
   raw: ExecutorOutput,
+  acknowledge?: () => void,
 ): Promise<void> {
   const storage = getStorage();
   const job = await storage.repos.workflowStepJobs.get(id);
@@ -182,9 +194,42 @@ export async function settleWorkflowStepJob(
       });
     });
   } finally {
+    acknowledge?.();
     if (prepared && prepared !== active.get(id)?.prepared) await prepared.release();
     await release(id);
   }
+}
+
+async function rejectCandidate(job: WorkflowStepJob, error: unknown): Promise<void> {
+  const storage = getStorage();
+  const message = scrubSecrets(error instanceof Error ? error.message : String(error)).slice(
+    0,
+    4096,
+  );
+  await storage.transaction(async () => {
+    const step = await getWorkflowRunStep(job.stepId);
+    if (
+      step?.status !== "waiting" ||
+      step.retryCount !== job.attempt ||
+      (await getRunLineageBlock(job.runId))
+    )
+      return;
+    if (!(await storage.repos.workflowStepJobs.reject(job.id, new Date().toISOString(), message)))
+      return;
+    await storage.repos.workflowStepJobs.revokeStepCredentials(
+      job.stepId,
+      new Date().toISOString(),
+    );
+    await updateWorkflowRunStep(job.stepId, { status: "running" });
+    await checkpointStepFailure(job.runId, job.stepId, message, job.attempt, undefined, {
+      fence: { retryCount: job.attempt },
+    });
+    await storage.executionBus!.publish("workflow.step_job.finished", {
+      jobId: job.id,
+      runId: job.runId,
+    });
+  });
+  await release(job.id);
 }
 
 export async function drainWorkflowStepJobs(): Promise<void> {
@@ -192,15 +237,47 @@ export async function drainWorkflowStepJobs(): Promise<void> {
   draining = true;
   try {
     const storage = getStorage();
+    for (const [id, job] of active)
+      if (job.owner === "embedded")
+        await storage.repos.workflowStepJobs.renew(
+          id,
+          "embedded",
+          new Date().toISOString(),
+          new Date(Date.now() + LEASE_MS).toISOString(),
+        );
     for (const candidate of await storage.repos.workflowStepJobs.listClaimable(
       new Date().toISOString(),
     )) {
-      const data = await load(candidate);
-      const handler = getStepJobKind(candidate.kind);
-      const slot = reserveHeldScriptRunner({
-        lane: "sync",
-        eligible: (runner) => handler.eligible?.(runner, data.build) ?? true,
-      });
+      let data: Awaited<ReturnType<typeof load>>;
+      let handler: ReturnType<typeof getStepJobKind>;
+      try {
+        data = await load(candidate);
+        handler = getStepJobKind(candidate.kind);
+        const live = [...scriptRunnerSessions.values()].filter(
+          (runner) => runner.socket.readyState === 1,
+        );
+        if (
+          process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS !== undefined &&
+          Number(process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS) === 0 &&
+          live.length > 0 &&
+          !live.some((runner) => handler.eligible?.(runner, data.build) ?? true)
+        )
+          throw new Error("No connected runner supports this workflow job");
+      } catch (error) {
+        await rejectCandidate(candidate, error);
+        continue;
+      }
+
+      let slot: ReturnType<typeof reserveHeldScriptRunner>;
+      try {
+        slot = reserveHeldScriptRunner({
+          lane: "sync",
+          eligible: (runner) => handler.eligible?.(runner, data.build) ?? true,
+        });
+      } catch (error) {
+        await rejectCandidate(candidate, error);
+        continue;
+      }
       if (!slot) continue;
       const job = await storage.repos.workflowStepJobs.claim(
         slot.runner.id,
@@ -219,14 +296,20 @@ export async function drainWorkflowStepJobs(): Promise<void> {
           new Date().toISOString(),
         );
         const prepared = await handler.build({ ...data.build, job });
-        active.set(job.id, { prepared, releaseSlot: slot.release });
+        const controller = new AbortController();
+        active.set(job.id, {
+          prepared,
+          releaseSlot: slot.release,
+          controller,
+          owner: slot.runner.id,
+        });
         if (slot.runner.kind === "remote") {
           const runner = scriptRunnerSessions.get(slot.runner.id);
           if (!runner) throw new Error("Workflow job runner disconnected before dispatch");
           send(runner, { type: "job", jobId: job.id, ...prepared.job });
         } else {
           void slot.runner
-            .run(prepared.job)
+            .run(prepared.job, controller.signal)
             .then((output) => settleWorkflowStepJob(job.id, slot.runner.id, output))
             .catch((error) => console.error(scrubSecrets(String(error))))
             .finally(() => void drainWorkflowStepJobs());
@@ -285,7 +368,17 @@ async function resume(runId: string, jobId: string) {
   const step = job ? await getWorkflowRunStep(job.stepId) : null;
   let nodeId = step?.nodeId;
   const parent = nodeId ? resolveForeachParent(workflow.definition, nodeId) : null;
-  if (parent) nodeId = parent.id;
+  if (parent) {
+    const parentStep = await getLatestStepForNode(runId, parent.id);
+    if (parentStep?.status !== "completed") {
+      await finalizeOrWait(runId);
+      return;
+    }
+    nodeId = parent.id;
+  } else if (step?.status !== "completed") {
+    await finalizeOrWait(runId);
+    return;
+  }
   const nodes = nodeId
     ? getSuccessors(workflow.definition, nodeId, step?.nextPort ?? undefined)
     : [];
@@ -342,9 +435,10 @@ export function startWorkflowStepJobs(executors: ExecutorRegistry): void {
     },
     async result(runner, id, output) {
       if (!(await getStorage().repos.workflowStepJobs.get(id))) return false;
-      await settleWorkflowStepJob(id, runner.id, output);
+      await settleWorkflowStepJob(id, runner.id, output, () =>
+        send(runner, { type: "ack", jobId: id }),
+      );
       runner.jobsCompleted++;
-      send(runner, { type: "ack", jobId: id });
       void drainWorkflowStepJobs();
       return true;
     },
@@ -358,6 +452,15 @@ export function startWorkflowStepJobs(executors: ExecutorRegistry): void {
         job.leaseExpiresAt <= new Date().toISOString()
       )
         send(runner, { type: "cancel", jobId: id });
+      if (
+        job.status === "running" &&
+        job.ownerId === runner.id &&
+        job.leaseExpiresAt &&
+        job.leaseExpiresAt > new Date().toISOString() &&
+        !active.has(id) &&
+        !adoptedSlots.has(id)
+      )
+        adoptedSlots.set(id, adoptHeldScriptSlot(runner.id));
       return true;
     },
   });

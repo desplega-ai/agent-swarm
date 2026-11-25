@@ -8,12 +8,14 @@ import type { AsyncExecutorResult } from "./executors/base";
 export function shouldParkScriptNode(): boolean {
   return (
     getStorage().capabilities.scriptRunners &&
-    (scriptRunnerSessions.size > 0 || process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS === "0")
+    (scriptRunnerSessions.size > 0 ||
+      (process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS !== undefined &&
+        Number(process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS) === 0))
   );
 }
 
 /** Commit the waiting step, reference-only job and wake-up together. */
-export async function parkStepJob<T=never>(
+export async function parkStepJob<T = never>(
   kind: string,
   meta: ExecutorMeta,
   _context: Readonly<Record<string, unknown>>,

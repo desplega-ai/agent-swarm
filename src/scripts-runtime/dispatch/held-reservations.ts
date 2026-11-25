@@ -49,3 +49,17 @@ export function reserveHeldScriptRunner(options: HeldReservationOptions = { lane
     },
   };
 }
+
+/** Restore a retained remote job before admitting new jobs after reconnect. */
+export function adoptHeldScriptSlot(id: string): () => void {
+  held.set(id, heldScriptSlots(id) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const count = heldScriptSlots(id) - 1;
+    if (count) held.set(id, count);
+    else held.delete(id);
+    wake();
+  };
+}

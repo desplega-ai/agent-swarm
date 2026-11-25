@@ -19,6 +19,7 @@ export type WorkflowStepJob = {
 
 export interface WorkflowStepJobsRepository {
   insert(row: WorkflowStepJob): Promise<void>;
+  reject(id: string, now: string, error: string): Promise<boolean>;
   get(id: string): Promise<WorkflowStepJob | null>;
   claim(
     ownerId: string,
@@ -53,6 +54,14 @@ export class BaseWorkflowStepJobsRepository implements WorkflowStepJobsRepositor
        created_at, updated_at, created_by, updated_by)
       VALUES (${row.id}, ${row.runId}, ${row.stepId}, ${row.attempt}, ${row.kind}, 'queued',
         NULL, NULL, NULL, ${row.createdAt}, ${row.updatedAt}, ${row.createdBy}, ${row.updatedBy})`);
+  }
+
+  async reject(id: string, now: string, error: string): Promise<boolean> {
+    const result =
+      await this.db.run(sql`UPDATE workflow_step_jobs SET status='failed',error=${error},
+      lease_expires_at=NULL,updated_at=${now} WHERE id=${id}
+      AND (status='queued' OR (status='running' AND lease_expires_at<=${now}))`);
+    return result.changes > 0;
   }
 
   get(id: string): Promise<WorkflowStepJob | null> {

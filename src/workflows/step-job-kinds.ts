@@ -26,7 +26,6 @@ export interface StepJobKindHandler {
 
 const handlers = new Map<string, StepJobKindHandler>();
 export function registerStepJobKind(kind: string, handler: StepJobKindHandler): void {
-  if (handlers.has(kind)) throw new Error(`Step job kind already registered: ${kind}`);
   handlers.set(kind, handler);
 }
 export function getStepJobKind(kind: string): StepJobKindHandler {
