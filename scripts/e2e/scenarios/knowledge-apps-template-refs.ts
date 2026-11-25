@@ -53,7 +53,7 @@ const t = (template: string) => ({ $template: template });
 
 export const knowledgeAppsTemplateRefs: Scenario = {
   name: "knowledge-apps-template-refs",
-  order: 556,
+  order: 556.5,
   async run(ctx) {
     const created: string[] = [];
     try {
