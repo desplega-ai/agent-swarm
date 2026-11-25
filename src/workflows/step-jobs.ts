@@ -13,11 +13,11 @@ export function shouldParkScriptNode(): boolean {
 }
 
 /** Commit the waiting step, reference-only job and wake-up together. */
-export async function parkStepJob(
+export async function parkStepJob<T=never>(
   kind: string,
   meta: ExecutorMeta,
   _context: Readonly<Record<string, unknown>>,
-): Promise<AsyncExecutorResult> {
+): Promise<AsyncExecutorResult<T>> {
   const id = crypto.randomUUID();
   const storage = getStorage();
   await storage.transaction(async () => {
