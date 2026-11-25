@@ -12,6 +12,17 @@ export async function getScriptRunExecutionArgs(id: string): Promise<unknown> {
   return row ? openSealedJson(row.args) : undefined;
 }
 
+/**
+ * A run and its descendants over `parentScriptRunId`, root first (no rows when
+ * it does not exist). `truncated` is true when the tree goes past either bound.
+ */
+export async function listScriptRunTree(
+  rootId: string,
+  bounds: { maxRows: number; maxDepth: number },
+) {
+  return await getStorage().repos.scripts.listScriptRunTree(rootId, bounds);
+}
+
 /** A durable run's follow-up re-delegation guard decision (see migration 266). */
 export type ScriptRunFollowUpGuard = "passed" | "same-work" | "loop-cap";
 

@@ -225,7 +225,7 @@
   ],
   "flows": {
     "storage-engine-parity": {
-      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
+      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention, db-query denial and db-query JSON params.",
       "scenarios": [
         "upgrade-base-db",
         "tasks-historical-values",
@@ -237,15 +237,18 @@
         "divergence-vector-search",
         "divergence-like-case",
         "divergence-seeded-schedule-sql",
+        "upgrade-seeded-schedule-operator-fields",
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
         "stress-task-finish",
         "stress-task-create",
         "stress-token-touch",
+        "ping-serialization-retry",
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
+        "divergence-db-query-json-params",
         "divergence-list-order",
         "divergence-timestamps",
         "divergence-values",
@@ -311,12 +314,15 @@
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
       "scenarios": [
         "knowledge-apps",
+        "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
+        "knowledge-apps-catalog",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
         "knowledge-apps-log-stream",
         "knowledge-apps-primitives",
-        "knowledge-apps-session-thread-files"
+        "knowledge-apps-session-thread-files",
+        "knowledge-apps-template-refs"
       ]
     },
     "asset-namespaces": {
@@ -600,8 +606,17 @@
       ]
     },
     "script-runs-durable": {
-      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
-      "scenarios": ["script-runs-durable", "script-run-storage", "script-runs-executor-setting"]
+      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, the refusal under SCRIPT_EXECUTOR=quickjs, and the parent link on every run a background run starts.",
+      "scenarios": [
+        "script-runs-durable",
+        "script-run-storage",
+        "script-runs-executor-setting",
+        "script-background-run-tree"
+      ]
+    },
+    "rbac-integration-role": {
+      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events and durable script runs, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
+      "scenarios": ["rbac-integration-role"]
     },
     "script-sandbox-identity": {
       "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
@@ -661,7 +676,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button, 👍/👎 answer feedback",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -675,6 +690,7 @@
         "slack-task-output-citations",
         "slack-task-tree-toggle",
         "slack-stop-button",
+        "slack-feedback-buttons",
         "slack-task-output-ui-spec",
         "slack-pre-task-create-block",
         "slack-cancelled-task"
@@ -866,7 +882,7 @@
       "scenarios": ["route-caller-identity"]
     },
     "llm-emulator-backend": {
-      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429, and task auto-titling lands a title from a streamed set_title tool call",
+      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429; task auto-titling uses the claude CLI when a Claude token and an OpenRouter key are both set, and lands a title from a streamed set_title tool call only after INTERNAL_LLM_PROVIDER=openrouter",
       "scenarios": ["llm-emulate-ai"]
     },
     "post-onboarding-checklist": {

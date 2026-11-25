@@ -524,6 +524,7 @@ export async function buildCodexConfig(
       "X-Agent-ID": config.agentId,
       "X-Source-Task-Id": config.taskId ?? "",
       ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
+      ...config.traceHeaders,
     },
     enabled: true,
     startup_timeout_sec: 30,

@@ -614,6 +614,7 @@ export interface paths {
                         args?: {
                             [key: string]: unknown;
                         };
+                        parentScriptRunId?: string;
                     };
                 };
             };
@@ -704,6 +705,17 @@ export interface paths {
                 /** @description Agent not found */
                 404: {
                     headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Liveness update conflicted after retries. Retry after the delay in `Retry-After`. */
+                503: {
+                    headers: {
+                        /** @description Seconds to wait before retrying the ping. */
+                        "Retry-After": number;
                         [name: string]: unknown;
                     };
                     content: {
@@ -1077,6 +1089,70 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apps/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the app component catalog
+         * @description No query: every component (one line, child slots) and action type. `component` returns its props schema (`prop` drills into one prop), `action` an action step's params, `topic=expressions` the binding reference.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    component?: string;
+                    prop?: string;
+                    action?: string;
+                    topic?: "expressions";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Catalog entry */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+                /** @description More than one of component, action and topic, or prop without component */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unknown component, prop or action; names the closest */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2237,12 +2313,18 @@ export interface paths {
                             stdout: string;
                             error?: string;
                             durationMs: number;
+                            run?: {
+                                id: string;
+                            };
                         } | {
                             /** @enum {boolean} */
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
                             status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                            run: {
+                                id: string;
+                            };
                         } | {
                             ok: boolean;
                             result: {
@@ -2311,6 +2393,89 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apps/{id}/action-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read or wait on an app action run
+         * @description `runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    waitSeconds?: number | null;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                    runId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Action run state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            taskId?: string;
+                            /** @enum {string} */
+                            state: "running" | "succeeded" | "failed";
+                            settled: boolean;
+                            runs?: {
+                                total: number;
+                                running: number;
+                                completed: number;
+                                failed: number;
+                                truncated: boolean;
+                            };
+                            failures?: {
+                                id: string;
+                                scriptName: string | null;
+                                error: string | null;
+                            }[];
+                            status?: string;
+                            elapsedMs: number;
+                            next?: string;
+                        };
+                    };
+                };
+                /** @description Permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description App or action run not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -14907,7 +15072,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; internal_ai reports the provider policy for task titles, session summaries and llm memory ratings (INTERNAL_LLM_PROVIDER, the credential kinds tried in order, and the TASK_AUTO_TITLE_MODEL and MEMORY_RATER_MODEL pins); github reports the GitHub web base (GITHUB_URL) for PR and repo links.
          */
         get: {
             parameters: {
@@ -15020,6 +15185,12 @@ export interface paths {
                             github?: {
                                 web_url: string;
                                 enterprise: boolean;
+                            };
+                            internal_ai?: {
+                                provider: string;
+                                order: string[];
+                                task_title_model: string | null;
+                                memory_rater_model: string | null;
                             };
                         };
                     };
@@ -37260,13 +37431,17 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    source: string;
+                    /** @description Inline TypeScript source. Pass this or `name`. */
+                    source?: string;
+                    /** @description A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent. */
+                    name?: string;
                     args?: unknown;
                     /** @default true */
                     background?: boolean;
                     idempotencyKey?: string;
                     scriptName?: string;
                     requestedByUserId?: string;
+                    parentScriptRunId?: string;
                 };
             };
         };
@@ -37295,7 +37470,25 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Existing idempotent run returned */
+            /** @description A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Global script not found, or parentScriptRunId names no running run of the calling agent */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Existing idempotent run returned. A key another caller used answers 409 with an error and no run. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -37372,6 +37565,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description A scoped user may cancel only the runs it launched */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Script run not found */
             404: {
@@ -37947,6 +38149,7 @@ export interface operations {
                     /** @enum {string|null} */
                     executor?: "native" | "quickjs" | null;
                     idempotencyKey?: string;
+                    parentScriptRunId?: string;
                 };
             };
         };
@@ -38007,7 +38210,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Script not found */
+            /** @description Script not found, or parentScriptRunId names no running run of the calling agent */
             404: {
                 headers: {
                     [name: string]: unknown;

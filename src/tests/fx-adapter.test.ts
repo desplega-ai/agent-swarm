@@ -236,7 +236,7 @@ describe("fx model routes", () => {
     });
     // No model means the regular tier default.
     expect(resolveFxRoute("")).toMatchObject({
-      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      model: "openrouter/deepseek/deepseek-v4.1-flash-1017",
       fxProvider: "openrouter",
     });
   });

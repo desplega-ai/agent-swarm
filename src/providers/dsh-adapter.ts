@@ -448,6 +448,7 @@ export class DshAdapter implements ProviderAdapter {
                     "X-Source-Task-Id": config.taskId,
                     ...(config.contextKey ? { "X-Context-Key": config.contextKey } : {}),
                     ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
+                    ...config.traceHeaders,
                   },
                   failOnStartupError: true,
                 },

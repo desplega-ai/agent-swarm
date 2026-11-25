@@ -187,6 +187,12 @@ export interface ProviderSessionConfig {
   /** Resolved environment variables to pass to the spawned process. */
   env?: Record<string, string>;
   /**
+   * W3C trace headers (`traceparent`, `tracestate`) naming the `worker.session`
+   * span. Adapters add them to the swarm MCP server's headers so the API's
+   * `POST /mcp` spans nest under the session. Empty or unset when OTel is off.
+   */
+  traceHeaders?: Record<string, string>;
+  /**
    * Codex OAuth pool slot selected for this task. When set, the Codex adapter
    * uses this slot for token refresh write-back instead of defaulting to slot 0.
    */

@@ -36,8 +36,10 @@ interface StateRef {
   value: string;
   /** A write target (`$bindState`, `ui.set`): only page-local `/local/<name>` state. */
   write?: boolean;
-  /** A `${/path}` read inside a `$template` string: checked only by the element-mode bans. */
+  /** A `${path}` read inside a `$template` string. */
   template?: boolean;
+  /** A template read written without a leading slash (`${name}`): a repeat item field first. */
+  bare?: boolean;
 }
 
 /**
@@ -53,6 +55,7 @@ function templateStateRefs(value: unknown, path: string): StateRef[] {
       path: templatePath,
       value: read.startsWith("/") ? read : `/${read}`,
       template: true,
+      bare: !read.startsWith("/"),
     };
   });
 }
@@ -2605,14 +2608,37 @@ export function validatePage(
     }
   }
 
+  // Elements that render inside a repeat (the repeated element or a descendant of one).
+  const repeatScoped = new Set<string>();
+  for (const [elementId] of elementEntries) {
+    let current: string | undefined = elementId;
+    const seen = new Set<string>();
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      const element = elements[current];
+      if (isPlainObject(element) && Object.hasOwn(element, "repeat")) {
+        repeatScoped.add(elementId);
+        break;
+      }
+      current = parentByChild.get(current);
+    }
+  }
+  const inRepeatScope = (refPath: string): boolean =>
+    [...repeatScoped].some((elementId) => refPath.startsWith(`${elementsPath}.${elementId}.`));
+
   for (const ref of stateRefs) {
     const propMatch = /^\/props\/([^/]+)(?:\/.*)?$/.exec(ref.value);
     const userConfigRef = ref.value === "/user" || ref.value.startsWith("/user/");
     const appRef = ref.value === "/app" || ref.value.startsWith("/app/");
     let stateIssue: AppValidationIssue | null;
-    if (ref.template && !(options?.elementMode && (userConfigRef || appRef))) {
-      // shortcut: template reads skip full path validation (pages never checked them); only the
-      // element-mode /user and /app bans apply. Widen if templates need path checks too.
+    if (ref.template && options?.elementMode && !userConfigRef && !appRef) {
+      // shortcut: element-mode template reads get only the /user and /app bans, not the
+      // /props/<declared> check. Widen if a typo'd element template prop shows up.
+      stateIssue = null;
+    } else if (ref.bare && !options?.elementMode && inRepeatScope(ref.path)) {
+      // json-render reads a bare `${name}` from the repeat item first, and the item's fields are
+      // not known statically, so it falls back to `/<name>` only at runtime. Element mode keeps
+      // its /user and /app bans: an item without the field falls back to the consumer's state.
       stateIssue = null;
     } else if (options?.elementMode && ref.write) {
       stateIssue = issue(
@@ -2640,6 +2666,12 @@ export function validatePage(
       );
     } else {
       stateIssue = validateStateRef(ref, definition, formIds, uiIds, pageParams, pageState);
+      if (stateIssue && ref.bare) {
+        stateIssue = issue(
+          ref.path,
+          `${stateIssue.message} (a bare \${...} outside a repeat reads "${ref.value}")`,
+        );
+      }
     }
     if (stateIssue) issues.push(stateIssue);
   }

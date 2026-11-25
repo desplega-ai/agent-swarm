@@ -120,6 +120,14 @@
       "has_notification_channel": {
         "type": "boolean",
         "description": "A notification channel is configured."
+      },
+      "db_engine": {
+        "type": "string",
+        "description": "Storage engine of the API server. API-server events only.",
+        "enum": [
+          "sqlite",
+          "postgres"
+        ]
       }
     }
   },

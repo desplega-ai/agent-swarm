@@ -64,6 +64,11 @@ import {
   resolveSqliteVecExtensionPath,
 } from "./db/runtime";
 import { currentLoopPath, recordStatement } from "./event-loop-lag";
+import {
+  recordStatementForWriteStats,
+  recordTransactionForWriteStats,
+  writeStatsEnabled,
+} from "./write-stats";
 
 export type { BusyRetryOptions };
 
@@ -165,7 +170,10 @@ const serverObserver: StatementObserver = {
  * skip the event-loop accounting and the slow sync statement log.
  */
 const postgresObserver: StatementObserver = {
-  onStatement: (sql, durationMs) => recordDbStatement("postgresql", sql, durationMs),
+  onStatement: (sql, durationMs) => {
+    recordDbStatement("postgresql", sql, durationMs);
+    recordStatementForWriteStats(sql);
+  },
   onTransaction: (info) => recordDbTransaction({ system: "postgresql", ...info }),
 };
 
@@ -388,12 +396,21 @@ export async function openPostgresEngine(
     const checkMessages = JSON.parse(
       readFileSync(join(migrationsDir, "check-messages.json"), "utf8"),
     ) as CheckMessages;
+    const txStats = transactionStatsSink();
+    // `STORAGE_WRITE_STATS_DIR`: the commit budget of the e2e bench (src/be/write-stats.ts).
+    const bench = writeStatsEnabled();
     const client = createPostgresClient(url, {
       max: POSTGRES_POOL_MAX,
       timestampFormats,
       txReplay,
       checkMessages,
-      onTransactionEnd: transactionStatsSink(),
+      onTransactionEnd:
+        txStats || bench
+          ? (info) => {
+              txStats?.(info);
+              if (bench) recordTransactionForWriteStats(info);
+            }
+          : undefined,
       observer: postgresObserver,
       // Writes check that this process still owns the database (D16 write fence).
       fence: { ownerPid: lock.pid, ownerBackendStart: lock.backendStart },

@@ -40,9 +40,11 @@ import { startSavingsRollup, stopSavingsRollup } from "../be/savings/rollup";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { getStorage } from "../be/storage";
 import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
+import { withRequestWriteScope } from "../be/write-stats";
 import { initBitbucket } from "../bitbucket";
 import {
   loadEnabledExtensions,
@@ -70,7 +72,7 @@ import { attachRealtimeTransport } from "../realtime/transport";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
-import { telemetry } from "../telemetry";
+import { setTelemetryDbEngine, telemetry } from "../telemetry";
 import { flushOrgActivity } from "../telemetry-activity";
 import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
@@ -507,9 +509,12 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     };
 
-    // Name the entry point for the event-loop stall line.
-    await withLoopPath(loopPathForRequest(req.method, pathSegments), () =>
-      span ? withSpanContext(span, handleRequest) : handleRequest(),
+    // Name the entry point for the event-loop stall line (and the e2e commit budget).
+    const loopPath = loopPathForRequest(req.method, pathSegments);
+    await withLoopPath(loopPath, () =>
+      withRequestWriteScope(loopPath, () =>
+        span ? withSpanContext(span, handleRequest) : handleRequest(),
+      ),
     );
   });
 });
@@ -888,6 +893,8 @@ httpServer
     const telemetrySetConfig = async (key: string, value: string) => {
       await upsertSwarmConfig({ scope: "global", key, value });
     };
+    // Every event of this process carries the storage engine (`db_engine`).
+    setTelemetryDbEngine(getStorage().capabilities.dbQueryDialect);
     // Also keeps the accessors so turning telemetry on at runtime re-inits it.
     await initApiTelemetry(telemetryGetConfig, telemetrySetConfig);
     telemetry.server("started", { port });

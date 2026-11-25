@@ -369,8 +369,8 @@ estimate.
 
 Set `HARNESS_PROVIDER=dsh` and `OPENROUTER_API_KEY` in the worker environment or
 agent-scoped config. This runs DeepSeek's own harness with the same defaults as
-pi: smol/regular `openrouter/deepseek/deepseek-v4.1-flash`, smart
-`openrouter/deepseek/deepseek-v4-pro-0813`, ultra `openrouter/anthropic/claude-opus-5.5`.
+pi: smol/regular `openrouter/deepseek/deepseek-v4.1-flash-1017`, smart
+`openrouter/moonshotai/kimi-k3.1-pro`, ultra `openrouter/anthropic/claude-opus-5.5`.
 
 Routing follows the model prefix, even when both keys are available:
 `MODEL_OVERRIDE=openrouter/<model-id>` uses the bundled `llm-pi-ai` adapter with
@@ -447,14 +447,14 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.4.2`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.5.0`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
 
 - **Models.** `model` is a bare Cursor model id from `Cursor.models.list()`
   (account-specific, so the swarm does not validate it against the catalog).
-  Tiers: smol `gpt-5.4-mini`, regular `claude-sonnet-5-5`, smart
+  Tiers: smol `gpt-5.6-luna`, regular `claude-sonnet-5-5`, smart
   `claude-opus-5-5`, ultra `claude-fable-5-1`. Aliases (`sonnet-4.6`) resolve
   through the live model list.
 - **Reasoning effort.** Each Cursor model names its own effort parameter

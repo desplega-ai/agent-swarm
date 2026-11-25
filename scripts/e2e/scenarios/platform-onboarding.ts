@@ -423,6 +423,10 @@ export const platformTelemetry: Scenario = {
       expect(first.source === "api-server", `the event comes from the api-server: ${first.source}`);
       expect(asRecord(first.properties).via === "settings", "the event names the `via` we sent");
       expect(
+        asRecord(first.properties).db_engine === ctx.db.engine,
+        `an api-server event names the storage engine: got ${asRecord(first.properties).db_engine}, want ${ctx.db.engine}`,
+      );
+      expect(
         typeof first.actor_anonymous_id === "string" &&
           first.actor_anonymous_id.startsWith("install_"),
         "the event is pseudonymous: an install id, no user",

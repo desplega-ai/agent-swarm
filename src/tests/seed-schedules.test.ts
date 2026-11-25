@@ -277,29 +277,34 @@ describe("schedules seeder", () => {
     expect(second).toMatchObject({ skippedUnchanged: 1, updated: 0, failed: [] });
   });
 
-  test("preserves a schedule enabled by the operator", async () => {
+  test("updates a schedule the operator switched on and keeps its on/off and cron", async () => {
     await runSeeder(createSchedulesSeeder([scheduleSource()]), { quiet: true });
     const seeded = await getScheduledTaskByName("test-seeded-schedule");
-    await updateScheduledTask(seeded!.id, { enabled: true });
+    await updateScheduledTask(seeded!.id, { enabled: true, cronExpression: "45 6 * * *" });
 
-    const result = await runSeeder(createSchedulesSeeder([scheduleSource("30 9 * * *")]), {
-      quiet: true,
-    });
-    expect(result.skippedUserModified).toBe(1);
-    expect(await getScheduledTaskByName("test-seeded-schedule")).toMatchObject({
+    const result = await runSeeder(
+      createSchedulesSeeder([scheduleSource("30 9 * * *", "Fixed description.")]),
+      { quiet: true },
+    );
+    expect(result).toMatchObject({ updated: 1, skippedUserModified: 0, failed: [] });
+    const row = await getScheduledTaskByName("test-seeded-schedule");
+    expect(row).toMatchObject({
+      description: "Fixed description.",
       enabled: true,
-      cronExpression: "0 9 * * *",
+      cronExpression: "45 6 * * *",
     });
+    expect(row?.nextRunAt).toBeDefined();
   });
 
   test("updates a pristine schedule when its template changes", async () => {
     await runSeeder(createSchedulesSeeder([scheduleSource()]), { quiet: true });
-    const result = await runSeeder(createSchedulesSeeder([scheduleSource("30 9 * * *")]), {
-      quiet: true,
-    });
+    const result = await runSeeder(
+      createSchedulesSeeder([scheduleSource("0 9 * * *", "Fixed description.")]),
+      { quiet: true },
+    );
     expect(result).toMatchObject({ updated: 1, failed: [] });
-    expect((await getScheduledTaskByName("test-seeded-schedule"))?.cronExpression).toBe(
-      "30 9 * * *",
+    expect((await getScheduledTaskByName("test-seeded-schedule"))?.description).toBe(
+      "Fixed description.",
     );
   });
 

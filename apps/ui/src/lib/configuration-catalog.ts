@@ -184,7 +184,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "TASK_AUTO_TITLE_ENABLED",
         label: "Automatic task titles",
         description:
-          "Give every new task a short display title from the cheapest configured model (OpenRouter DeepSeek v4.1 Flash, Claude Haiku, GPT Luna, or the claude CLI). A title a person set is never replaced. Off keeps the prompt as the title.",
+          "Give every new task a short display title from a small model on the internal LLM provider (Claude Haiku through the claude CLI first). A title a person set is never replaced. Off keeps the prompt as the title.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}ui/configuration#task-titles`,
@@ -193,9 +193,28 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "TASK_AUTO_TITLE_MODEL",
         label: "Task title model",
         description:
-          "Pin one model for task titles: provider/model-id (openrouter/deepseek/deepseek-v4.1-flash, anthropic/claude-haiku-5-5, openai/gpt-6-luna, openai-codex/gpt-6-luna) or a claude -p alias such as haiku. Unset picks the first provider with a credential, cheapest model first, and falls back down the list on errors.",
+          "Pin one model for task titles: provider/model-id (anthropic/claude-haiku-5-5, openai/gpt-6-luna, openai-codex/gpt-6-luna, openrouter/deepseek/deepseek-v4.1-flash) or a claude -p alias such as haiku. The pin selects its provider, so an openrouter/ model opts in to OpenRouter. Unset follows the internal LLM provider order.",
         kind: "string",
-        placeholder: "openrouter/deepseek/deepseek-v4.1-flash",
+        placeholder: "haiku",
+        docsUrl: `${DOCS}ui/configuration#task-titles`,
+      },
+      {
+        key: "INTERNAL_LLM_PROVIDER",
+        label: "Internal LLM provider",
+        description:
+          "Credential used for task titles, session summaries and LLM memory ratings. auto tries the claude CLI (CLAUDE_CODE_OAUTH_TOKEN), then Anthropic, OpenAI, Codex OAuth, Fireworks and Bedrock, with the harness's own provider first (OpenRouter for pi and opencode). OpenRouter is used only when chosen here, by a pinned openrouter/ model, or by a pi or opencode harness. A named provider is the only one tried. GET /status shows the effective order under internal_ai.",
+        kind: "enum",
+        options: [
+          "auto",
+          "claude-cli",
+          "anthropic",
+          "openai",
+          "openai-codex",
+          "openrouter",
+          "fireworks",
+          "amazon-bedrock",
+        ],
+        defaultValue: "auto",
         docsUrl: `${DOCS}ui/configuration#task-titles`,
       },
     ],
@@ -1642,6 +1661,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack#stop-button`,
       },
       {
+        key: "SLACK_FEEDBACK_BUTTONS",
+        label: "Slack answer feedback",
+        description:
+          "Put Slack's native 👍/👎 buttons under each final outcome card. A click stores the vote, with the task's agent, profile and model, in the `slack-feedback` KV namespace. A person's later click on the same answer replaces their vote.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack#answer-feedback`,
+      },
+      {
         key: "SLACK_WORKFLOW_BOT_IDS",
         label: "Bots that start Slack workflows",
         description:
@@ -1995,6 +2023,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "number",
         defaultValue: "10",
         placeholder: "10",
+      },
+      {
+        key: "SCRIPT_RUN_USER_ALLOWLIST",
+        label: "User durable script allowlist",
+        description:
+          "Comma-separated global script names a user token may launch as durable runs. Each run executes as the script's owning agent. Empty means a user token launches none; agents are unaffected.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "obs-lite-alert-intake",
+        docsUrl: `${DOCS}ui/configuration#user-durable-script-allowlist`,
       },
       {
         key: "SEED_AUTOMATIONS_ENABLED",

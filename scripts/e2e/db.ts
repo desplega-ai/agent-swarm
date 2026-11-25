@@ -277,7 +277,10 @@ function readerRoleName(databaseUrl: string): string {
  * LOGIN role with SELECT on every table except the denied ones. Returns the
  * `DATABASE_QUERY_URL`. The SUT then finds the chain applied and probes the role.
  */
-export async function preparePostgresQueryReader(databaseUrl: string): Promise<string> {
+export async function preparePostgresQueryReader(
+  databaseUrl: string,
+  seedFile = process.env.E2E_POSTGRES_SEED_SQL,
+): Promise<string> {
   const { DB_QUERY_DENIED_TABLES } = await import("../../packages/storage/src/index");
   // A clone of the migrated template carries the `_migrations` ledger, so this finds
   // every migration applied. Roles are cluster-wide, so the role is made per database.
@@ -286,9 +289,7 @@ export async function preparePostgresQueryReader(databaseUrl: string): Promise<s
   const database = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
   const sql = new Bun.SQL({ url: databaseUrl, max: 1 });
   try {
-    // Bench only: `E2E_POSTGRES_SEED_SQL` names a SQL file that seeds the database
-    // before the API boots (for example scripts/e2e/fixtures/postgres-bench-seed.sql).
-    const seedFile = process.env.E2E_POSTGRES_SEED_SQL;
+    // A fixture or benchmark may seed this isolated database before the API boots.
     if (seedFile) await sql.unsafe(await Bun.file(seedFile).text());
     await sql.unsafe(`CREATE ROLE "${role}" LOGIN PASSWORD '${role}'`);
     await sql.unsafe(`GRANT CONNECT ON DATABASE "${database}" TO "${role}"`);
@@ -383,6 +384,34 @@ export async function dropPostgresRole(role: string): Promise<void> {
     await client.unsafe(`DROP ROLE IF EXISTS "${role.replaceAll('"', '""')}"`);
   } finally {
     await client.close();
+  }
+}
+
+/** Raw SQL on a private fixture copy before boot (SQLite text, `?` placeholders). */
+export type FixtureEditor = {
+  get: <T>(text: string, params?: SQLQueryBindings[]) => T | null;
+  run: (text: string, params?: SQLQueryBindings[]) => number;
+};
+
+/**
+ * Edit a private copy of a fixture before the SUT boots on it. `edit` gets a
+ * read-write handle; the result is the edited fixture under `name` plus what `edit` returned.
+ */
+export function editDbFixture<T>(
+  fixture: DbFixture,
+  name: string,
+  edit: (db: FixtureEditor) => T,
+): { fixture: DbFixture; result: T } {
+  const db = Database.deserialize(fixture.file);
+  try {
+    const result = edit({
+      get: <R>(text: string, params: SQLQueryBindings[] = []) =>
+        db.query(text).get(...params) as R | null,
+      run: (text, params = []) => db.run(text, params).changes,
+    });
+    return { fixture: { ...fixture, name, file: db.serialize() }, result };
+  } finally {
+    db.close();
   }
 }
 

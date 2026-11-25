@@ -35,7 +35,7 @@ import type {
 } from "./types";
 
 /** Pinned in package.json and Dockerfile.worker; bump all three together. */
-export const CURSOR_SDK_VERSION = "1.4.2";
+export const CURSOR_SDK_VERSION = "1.5.0";
 
 /** MCP server name; Cursor reports its tools as `mcp` calls with this `providerIdentifier`. */
 const CURSOR_MCP_SERVER_NAME = "agent-swarm";
@@ -590,6 +590,7 @@ export class CursorAdapter implements ProviderAdapter {
         "X-Source-Task-Id": config.taskId,
         ...(config.contextKey ? { "X-Context-Key": config.contextKey } : {}),
         ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
+        ...config.traceHeaders,
       },
     };
     // Per-session JSONL store: no conversation state outlives the task.

@@ -119,3 +119,21 @@ export function getCurrentRunProvenance(): ScriptRunProvenance | null {
     ? { sourceStepId, sourceScriptRunId, objectChain, depth }
     : null;
 }
+
+const bridgedScriptRun = new AsyncLocalStorage<string>();
+
+/**
+ * Run a `/api/mcp-bridge` tool call on behalf of the background script run that
+ * named itself in the bridge body. A background run calls with its launcher's
+ * key, which carries no run provenance, so this is how the run tools
+ * (`script-run`, `launch-script-run`) learn which run they work for. Unverified
+ * here: the script-run endpoints check it names a running run of the agent.
+ */
+export function runForBridgedScriptRun<T>(runId: string | undefined, fn: () => T): T {
+  return runId ? bridgedScriptRun.run(runId, fn) : fn();
+}
+
+/** The background script run of the current bridge call; see `runForBridgedScriptRun`. */
+export function getBridgedScriptRunId(): string | undefined {
+  return bridgedScriptRun.getStore();
+}

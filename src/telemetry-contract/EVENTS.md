@@ -60,6 +60,7 @@ Common properties, allowed on every event of this product:
 
 | Property | Type | Description |
 |---|---|---|
+| `db_engine` | (sqlite \| postgres) | Storage engine of the API server. API-server events only. |
 | `has_email_channel` | (boolean) | An email channel is configured. |
 | `has_embedding_key` | (boolean) | An embedding API key is configured. |
 | `has_notification_channel` | (boolean) | A notification channel is configured. |

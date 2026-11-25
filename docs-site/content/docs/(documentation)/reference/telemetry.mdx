@@ -31,6 +31,7 @@ Common properties, allowed on every event of this product:
 
 | Property | Type | Description |
 |---|---|---|
+| `db_engine` | (sqlite \| postgres) | Storage engine of the API server. API-server events only. |
 | `has_email_channel` | (boolean) | An email channel is configured. |
 | `has_embedding_key` | (boolean) | An embedding API key is configured. |
 | `has_notification_channel` | (boolean) | A notification channel is configured. |
@@ -124,6 +125,8 @@ Every event also adds these to `properties`. They are the same facts `context` c
 - `has_embedding_key` — boolean, whether an embedding-capable key (`EMBEDDING_API_KEY` or `OPENAI_API_KEY`) is configured, i.e. whether semantic memory search is likely enabled
 - `has_slack_channel` / `has_email_channel` / `has_notification_channel` — booleans indicating whether an outbound notification channel (Slack, AgentMail email, or either) is configured. Presence only — never a token, channel ID, or address.
 - `install_method` — enum: `onboard_interactive`, `onboard_noninteractive`, `e2b`, or `manual`. Which entry point produced this install.
+
+Events from the API server also add `db_engine` to `properties`: `sqlite` or `postgres`, the storage engine of that server. Worker events do not know the engine and omit it.
 
 And these to `metadata`:
 

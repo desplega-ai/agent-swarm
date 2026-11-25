@@ -410,7 +410,11 @@ export function buildWorkflowCtx(input: {
       return (args?: unknown) =>
         fetchJson("/api/mcp-bridge", {
           method: "POST",
-          body: JSON.stringify({ tool: mcpToolNameForSdkMethod(prop), args: args ?? {} }),
+          body: JSON.stringify({
+            tool: mcpToolNameForSdkMethod(prop),
+            args: args ?? {},
+            parentScriptRunId: input.runId,
+          }),
         });
     },
   });
@@ -439,6 +443,8 @@ export function buildWorkflowCtx(input: {
               fsMode: config.fsMode ?? "none",
               intent: config.intent ?? `script-run:${input.runId}:${label}`,
               idempotencyKey: config.idempotencyKey,
+              // This run's key carries no run provenance: name the run so the child joins its tree.
+              parentScriptRunId: input.runId,
             }),
           }),
         ),

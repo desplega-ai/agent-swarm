@@ -1,7 +1,20 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as z from "zod";
 import type { AppActionCaller } from "../apps/action-caller";
+import {
+  ActionRunStateSchema,
+  MAX_ACTION_RUN_WAIT_SECONDS,
+  resolveActionRunState,
+} from "../apps/action-run-status";
 import { runAppAction } from "../apps/action-runner";
+import {
+  CATALOG_TOPICS,
+  catalogAction,
+  catalogComponent,
+  catalogIndex,
+  catalogTopic,
+} from "../apps/catalog-reference";
+import { CLOSEST_NAME_MAX_LENGTH } from "../apps/closest-names";
 import {
   type AppDefinition,
   AppNameSchema,
@@ -320,6 +333,29 @@ const listAppsRoute = route({
   rbac: { ungated: "app summaries are list-level; per-app filtering is future work" },
 });
 
+// Before getAppRoute: `/api/apps/catalog` must not read as an app id.
+const appCatalogRoute = route({
+  method: "get",
+  path: "/api/apps/catalog",
+  pattern: ["api", "apps", "catalog"],
+  summary: "Read the app component catalog",
+  description:
+    "No query: every component (one line, child slots) and action type. `component` returns its props schema (`prop` drills into one prop), `action` an action step's params, `topic=expressions` the binding reference.",
+  tags: ["Apps"],
+  query: z.object({
+    component: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    prop: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    action: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    topic: z.enum(CATALOG_TOPICS).optional(),
+  }),
+  responses: {
+    200: { description: "Catalog entry", schema: z.record(z.string(), z.unknown()) },
+    400: { description: "More than one of component, action and topic, or prop without component" },
+    404: { description: "Unknown component, prop or action; names the closest" },
+  },
+  rbac: { ungated: "static catalog of the app vocabulary; holds no app data" },
+});
+
 const createAppRoute = route({
   method: "post",
   path: "/api/apps",
@@ -614,11 +650,15 @@ const runActionScriptResultSchema = z.object({
   stdout: z.string(),
   error: z.string().optional(),
   durationMs: z.number(),
+  /** The action's script run: read or wait on it with GET /api/apps/{id}/action-runs/{runId}. */
+  run: z.object({ id: z.string() }).optional(),
 });
 const runActionTaskResultSchema = z.object({
   ok: z.literal(true),
   taskId: z.string(),
   status: AgentTaskStatusSchema,
+  /** `run.id` is the task id, for GET /api/apps/{id}/action-runs/{runId}. */
+  run: z.object({ id: z.string() }),
 });
 /**
  * Sync actions deliberately reuse the SCRIPT-action shape minus `stdout`/
@@ -692,6 +732,26 @@ const runActionRoute = route({
     403: { description: "Permission denied" },
     409: { description: "App definition needs repair" },
     404: { description: "App, action, or parent task not found" },
+  },
+  rbac: { permission: "app.use" },
+});
+
+const getActionRunRoute = route({
+  method: "get",
+  path: "/api/apps/{id}/action-runs/{runId}",
+  pattern: ["api", "apps", null, "action-runs", null],
+  summary: "Read or wait on an app action run",
+  description:
+    "`runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.",
+  tags: ["Apps"],
+  params: z.object({ id: z.string().min(1), runId: z.string().min(1) }),
+  query: z.object({
+    waitSeconds: z.coerce.number().min(0).max(MAX_ACTION_RUN_WAIT_SECONDS).optional(),
+  }),
+  responses: {
+    200: { description: "Action run state", schema: ActionRunStateSchema },
+    403: { description: "Permission denied" },
+    404: { description: "App or action run not found" },
   },
   rbac: { permission: "app.use" },
 });
@@ -1192,6 +1252,36 @@ export async function handleApps(
     return true;
   }
 
+  if (appCatalogRoute.match(req.method, pathSegments)) {
+    const parsed = await appCatalogRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { component, prop, action, topic } = parsed.query;
+    if ([component, action, topic].filter((value) => value !== undefined).length > 1) {
+      jsonError(res, "give at most one of component, action or topic", 400);
+      return true;
+    }
+    if (prop !== undefined && component === undefined) {
+      jsonError(res, "prop needs component", 400);
+      return true;
+    }
+    if (topic !== undefined) {
+      appCatalogRoute.respond(res, 200, { topic, content: catalogTopic(topic) });
+      return true;
+    }
+    const lookup =
+      component !== undefined
+        ? catalogComponent(component, prop)
+        : action !== undefined
+          ? catalogAction(action)
+          : { ok: true as const, value: catalogIndex() };
+    if (!lookup.ok) {
+      json(res, { error: lookup.message, closest: lookup.closest }, 404);
+      return true;
+    }
+    appCatalogRoute.respond(res, 200, lookup.value);
+    return true;
+  }
+
   if (listAppsRoute.match(req.method, pathSegments)) {
     const parsed = await listAppsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -1533,6 +1623,23 @@ export async function handleApps(
     });
     if (output.status === 200) runActionRoute.respond(res, 200, output.body);
     else json(res, output.body, output.status);
+    return true;
+  }
+
+  if (getActionRunRoute.match(req.method, pathSegments)) {
+    const parsed = await getActionRunRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const state = await resolveActionRunState(
+      parsed.params.id,
+      parsed.params.runId,
+      parsed.query.waitSeconds,
+    );
+    if (!state) {
+      jsonError(res, "app action run not found", 404);
+      return true;
+    }
+    getActionRunRoute.respond(res, 200, state);
     return true;
   }
 

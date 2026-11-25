@@ -857,6 +857,11 @@ export interface components {
         AgentFsCatalogEvent: components["schemas"]["AgentFsLiveSessionStartedEvent"] | components["schemas"]["AgentFsServerHeartbeatEvent"] | components["schemas"]["AgentFsServerStartedEvent"];
         AgentSwarmAgentRegisteredProperties: {
             capabilities: unknown[];
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -890,6 +895,11 @@ export interface components {
         AgentSwarmCompactionTriggeredProperties: {
             compactTrigger: string;
             contextTotalTokens: number;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -920,6 +930,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmCompactionTriggeredProperties"];
         };
         AgentSwarmFeatureUsedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description Feature identifier, including health_popover and kickoff_call_opened. Existing identifiers remain accepted. */
             feature: string;
             /** @description An email channel is configured. */
@@ -951,6 +966,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmFeatureUsedProperties"];
         };
         AgentSwarmFleetBenchmarkUnlockedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description Profile fields supplied, never their values. */
             fields: ("website" | "team_size" | "use_case")[];
             /** @description An email channel is configured. */
@@ -982,6 +1002,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmFleetBenchmarkUnlockedProperties"];
         };
         AgentSwarmFleetBenchmarkViewedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1014,6 +1039,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmFleetBenchmarkViewedProperties"];
         };
         AgentSwarmIdentityLookupProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1044,6 +1074,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmIdentityLookupProperties"];
         };
         AgentSwarmIdentityUserCreatedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @enum {string} */
             email_kind: "work" | "personal";
             has_company: boolean;
@@ -1079,6 +1114,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmIdentityUserCreatedProperties"];
         };
         AgentSwarmIntegrationConnectedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             first_of_type: boolean;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -1114,6 +1154,11 @@ export interface components {
             /** @description Lead channel, including setup_help and fleet_report. Existing channels remain accepted. */
             channel: string;
             consent: boolean;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1149,6 +1194,11 @@ export interface components {
          */
         "schemas-NotificationMoment": "task_failed" | "first_workflow" | "default";
         AgentSwarmNotificationDismissedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1185,6 +1235,11 @@ export interface components {
          */
         "schemas-UserFunction": "engineer" | "eng_lead" | "founder" | "product" | "ops" | "other";
         AgentSwarmNotificationSubmittedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description Domain of the email typed into the item, never the address. */
             email_domain?: string;
             /** @description An email channel is configured. */
@@ -1219,6 +1274,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmNotificationSubmittedProperties"];
         };
         AgentSwarmNotificationViewedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1250,6 +1310,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmNotificationViewedProperties"];
         };
         AgentSwarmOnboardingCompletedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1281,6 +1346,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingCompletedProperties"];
         };
         AgentSwarmOnboardingDismissedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1312,6 +1382,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingDismissedProperties"];
         };
         AgentSwarmOnboardingFirstTaskCompletedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1344,6 +1419,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedProperties"];
         };
         AgentSwarmOnboardingStartedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             existing_install: boolean;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -1376,6 +1456,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingStartedProperties"];
         };
         AgentSwarmOnboardingStepCompletedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             derived: boolean;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -1410,6 +1495,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingStepCompletedProperties"];
         };
         AgentSwarmOnboardingStepFailedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             error_class: string;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -1443,6 +1533,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingStepFailedProperties"];
         };
         AgentSwarmOnboardingStepSkippedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1475,6 +1570,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingStepSkippedProperties"];
         };
         AgentSwarmOnboardingStepViewedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1507,6 +1607,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOnboardingStepViewedProperties"];
         };
         AgentSwarmOrgActivityProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1592,6 +1697,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOrgActivityProperties"];
         };
         AgentSwarmOrgProfileUpdatedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description Changed profile field names, never their values. */
             fields: ("name" | "website" | "team_size" | "use_case" | "acquisition_source")[];
             /** @description An email channel is configured. */
@@ -1630,6 +1740,11 @@ export interface components {
         AgentSwarmOrgSnapshotProperties: {
             /** @description Registered agents. */
             agents_total: number;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1681,6 +1796,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmOrgSnapshotProperties"];
         };
         AgentSwarmPageViewedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1717,6 +1837,11 @@ export interface components {
          */
         Popup: "feedback" | "org_name" | "used_by";
         AgentSwarmPopupDismissedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1749,6 +1874,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmPopupDismissedProperties"];
         };
         AgentSwarmPopupShownProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1786,6 +1916,11 @@ export interface components {
         AgentSwarmPopupSubmittedProperties: {
             /** @description Number of profile follow-up questions answered, never their values. */
             answered?: number;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description A name or email was left. The values go to /v1/feedback, never here. */
             has_contact: boolean;
             /** @description An email channel is configured. */
@@ -1823,6 +1958,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmPopupSubmittedProperties"];
         };
         AgentSwarmRankingOptedInProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1854,6 +1994,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmRankingOptedInProperties"];
         };
         AgentSwarmRankingOptedOutProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description The listing domain that leaves the ranking: a lowercase hostname. */
             domain: string;
             /** @description An email channel is configured. */
@@ -1887,6 +2032,11 @@ export interface components {
         AgentSwarmRankingUsageProperties: {
             cacheReadTokens?: number;
             cacheWriteTokens?: number;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1925,6 +2075,11 @@ export interface components {
         };
         AgentSwarmScheduleErrorProperties: {
             consecutiveErrors: number;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1957,6 +2112,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmScheduleErrorProperties"];
         };
         AgentSwarmScheduleExecutedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -1989,6 +2149,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmScheduleExecutedProperties"];
         };
         AgentSwarmServerShutdownProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2021,6 +2186,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmServerShutdownProperties"];
         };
         AgentSwarmServerStartedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2057,6 +2227,11 @@ export interface components {
         TriggerSurface: "slack" | "ui" | "api" | "mcp" | "github" | "gitlab" | "linear" | "jira" | "agentmail" | "schedule" | "workflow" | "system" | "other";
         AgentSwarmSessionCancelledProperties: {
             agentId: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs: number;
             errorCategory: string;
             /** @description An email channel is configured. */
@@ -2098,6 +2273,11 @@ export interface components {
             agentId: string;
             cacheReadTokens?: number;
             cacheWriteTokens?: number;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs: number;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2142,6 +2322,11 @@ export interface components {
         };
         AgentSwarmSessionEndedProperties: {
             agentId: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs?: number;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2178,6 +2363,11 @@ export interface components {
         };
         AgentSwarmSessionFailureProperties: {
             agentId: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs: number;
             errorCategory: string;
             /** @description An email channel is configured. */
@@ -2217,6 +2407,11 @@ export interface components {
         };
         AgentSwarmSessionStartedProperties: {
             agentId: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             harnessProvider: string;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2254,6 +2449,11 @@ export interface components {
         };
         AgentSwarmSessionSteeredProperties: {
             by_kind: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2285,6 +2485,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmSessionSteeredProperties"];
         };
         AgentSwarmSetupWorkerCommandCopiedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @enum {string} */
             harness: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
             /** @description An email channel is configured. */
@@ -2318,6 +2523,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmSetupWorkerCommandCopiedProperties"];
         };
         AgentSwarmSkillInvokedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2352,6 +2562,11 @@ export interface components {
         };
         AgentSwarmTaskCancelledProperties: {
             agentId?: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs?: number;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2389,6 +2604,11 @@ export interface components {
         };
         AgentSwarmTaskClaimedProperties: {
             agentId: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2424,6 +2644,11 @@ export interface components {
         };
         AgentSwarmTaskCompletedProperties: {
             agentId?: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs?: number;
             harnessVariant?: string;
             harnessVersion?: string;
@@ -2462,6 +2687,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmTaskCompletedProperties"];
         };
         AgentSwarmTaskCreatedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             harnessVariant?: string;
             harnessVersion?: string;
             hasParent: boolean;
@@ -2503,6 +2733,11 @@ export interface components {
         };
         AgentSwarmTaskFailedProperties: {
             agentId?: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs?: number;
             harnessVariant?: string;
             harnessVersion?: string;
@@ -2542,6 +2777,11 @@ export interface components {
         };
         AgentSwarmTaskSessionCompletedProperties: {
             agentId: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs: number;
             exitCode: number;
             harnessVariant?: string;
@@ -2583,6 +2823,11 @@ export interface components {
         };
         AgentSwarmTaskStartedProperties: {
             agentId: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2618,6 +2863,11 @@ export interface components {
         };
         AgentSwarmTaskSupersededProperties: {
             agentId?: string;
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs?: number;
             harnessVariant?: string;
             harnessVersion?: string;
@@ -2657,6 +2907,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmTaskSupersededProperties"];
         };
         AgentSwarmTelemetryEnabledProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2688,6 +2943,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmTelemetryEnabledProperties"];
         };
         AgentSwarmUiSessionStartedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2717,6 +2977,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmUiSessionStartedProperties"];
         };
         AgentSwarmUsedByConsentChangedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             granted: boolean;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2749,6 +3014,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmUsedByConsentChangedProperties"];
         };
         AgentSwarmWorkflowCompletedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs?: number;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2782,6 +3052,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmWorkflowCompletedProperties"];
         };
         AgentSwarmWorkflowCreatedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2818,6 +3093,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmWorkflowCreatedProperties"];
         };
         AgentSwarmWorkflowDeletedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -2853,6 +3133,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmWorkflowDeletedProperties"];
         };
         AgentSwarmWorkflowFailedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             durationMs?: number;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -2886,6 +3171,11 @@ export interface components {
             properties: components["schemas"]["AgentSwarmWorkflowFailedProperties"];
         };
         AgentSwarmWorkflowStartedProperties: {
+            /**
+             * @description Storage engine of the API server. API-server events only.
+             * @enum {string}
+             */
+            db_engine?: "sqlite" | "postgres";
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
