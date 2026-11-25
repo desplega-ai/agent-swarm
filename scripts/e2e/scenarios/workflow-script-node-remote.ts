@@ -50,7 +50,7 @@ async function runNode(
     }, 60_000),
     "shell workflow became terminal",
   );
-  const step = asRecords(detail.steps, "steps").find((step) => step.nodeId === "shell");
+  const step = asRecords(detail, "steps").find((step) => step.nodeId === "shell");
   expect(step, "shell step exists");
   return {
     run: asRecord(detail.run),
