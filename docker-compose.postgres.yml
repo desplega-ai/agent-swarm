@@ -43,7 +43,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/script-runner.ready"]
+      test: ["CMD-SHELL", "test -f /run/agent-swarm-script-runner/ready"]
       interval: 5s
       timeout: 3s
       retries: 3

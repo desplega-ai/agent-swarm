@@ -146,12 +146,14 @@ The CLI also exposes `agent-swarm script-runner --api-url <url>`.
 | `SCRIPT_RUNNER_SLOTS` | Concurrent job slots, chart default 4 |
 
 The image runs as root. Native children run as uid 65534 and gid 65534 (`nobody:nogroup`).
+Native execution requires root to start a child as uid 65534. Kubernetes namespaces that require restricted Pod Security reject this pod.
+
 The image build checks `bash`, `python3`, `bun`, and `setpriv`.
 It checks Bun execution and harness readability under the sandbox identity.
 The runner shares the API image's bundled harnesses, libraries, and QuickJS worker entry.
 Do not use `--allow-shared-uid` in a deployment.
 
-The client creates `/tmp/script-runner.ready` while connected and removes it after disconnection.
+The client creates `/run/agent-swarm-script-runner/ready` while connected and removes it after disconnection.
 The chart and Compose use a file probe. They do not require `pgrep`.
 SIGTERM starts drain. The chart and Compose allow 60 seconds before forced termination.
 Durable runs replay their journal after ownership moves to another runner.
@@ -172,7 +174,8 @@ helm upgrade --install swarm charts/agent-swarm \
 ```
 
 `scriptRunner.apiUrl` overrides the internal API URL, including for KEDA.
-Use it for an HTTPS endpoint outside a trusted network.
+Use an HTTP or HTTPS origin. Use HTTPS outside a trusted network.
+The default URL includes the release namespace so the KEDA operator can resolve the API Service.
 Enabling runners sets API `SCRIPT_EMBEDDED_RUNNER_SLOTS=0` unless `config.extraEnv` supplies a value.
 A `swarm_config` row wins over this environment value. Check Settings, Configuration before rollout.
 With embedded slots at zero and no connected runner, scripts wait and then fail.

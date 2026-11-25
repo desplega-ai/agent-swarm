@@ -45,6 +45,8 @@ spec:
       securityContext:
         runAsUser: 0
         runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: script-runner
           image: {{ include "agent-swarm.image" . | quote }}
@@ -59,7 +61,7 @@ spec:
               value: {{ .Values.scriptRunner.slots | quote }}
           readinessProbe:
             exec:
-              command: ["sh", "-c", "test -f /tmp/script-runner.ready"]
+              command: ["sh", "-c", "test -f /run/agent-swarm-script-runner/ready"]
             periodSeconds: 5
           resources:
             {{- toYaml .Values.scriptRunner.resources | nindent 12 }}

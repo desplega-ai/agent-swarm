@@ -192,7 +192,7 @@ RUN command -v bash python3 bun setpriv agent-swarm-script-runner \
     && test "$(id -u nobody)" = 65534 && test "$(id -g nobody)" = 65534 \
     && setpriv --reuid=65534 --regid=65534 --clear-groups bun --version \
     && setpriv --reuid=65534 --regid=65534 --clear-groups sh -c \
-      'test -r /app/scripts-runtime/eval-harness.bundle.js && test -r /app/script-workflows-runtime/harness.bundle.js'
+      'test -r /app/scripts-runtime/eval-harness.bundle.js && test -r /app/script-workflows-runtime/harness.bundle.js && test -z "$(find /app/scripts-runtime /app/script-workflows-runtime ! -readable -print -quit)"'
 
 ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite

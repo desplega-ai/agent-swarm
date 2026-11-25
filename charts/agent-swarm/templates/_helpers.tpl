@@ -257,5 +257,9 @@ Pass dict {ingress, secretName}.
 {{- end -}}
 
 {{- define "agent-swarm.scriptRunnerApiUrl" -}}
-{{- default (printf "http://%s-api:%v" (include "agent-swarm.fullname" .) .Values.api.port) .Values.scriptRunner.apiUrl | trimSuffix "/" -}}
+{{- $url := default (printf "http://%s-api.%s.svc:%v" (include "agent-swarm.fullname" .) .Release.Namespace .Values.api.port) .Values.scriptRunner.apiUrl | trimSuffix "/" -}}
+{{- if not (regexMatch "^https?://(\\[[0-9A-Fa-f:]+\\]|[A-Za-z0-9.-]+)(:[0-9]+)?$" $url) -}}
+{{- fail "scriptRunner.apiUrl must be an HTTP or HTTPS origin" -}}
+{{- end -}}
+{{- $url -}}
 {{- end -}}

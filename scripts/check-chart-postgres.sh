@@ -58,7 +58,7 @@ DB=(--set database.url=postgres://swarm:pw@db:5432/swarm)
 runner=$(render "${DB[@]}" "${RUNNER[@]}" --show-only templates/script-runner-deployment.yaml)
 grep -q -e '-auth' -e 'API_KEY' -e 'DATABASE_URL' -e 'envFrom:' <<<"$runner" && fail "runner receives API credentials"
 grep -q 'runAsUser: 0' <<<"$runner" || fail "runner cannot drop native child uid"
-grep -q '/tmp/script-runner.ready' <<<"$runner" || fail "runner lacks file readiness probe"
+grep -q '/run/agent-swarm-script-runner/ready' <<<"$runner" || fail "runner lacks file readiness probe"
 grep -q 'SCRIPT_RUNNER_TOKEN_FILE' <<<"$runner" || fail "runner lacks token file"
 grep -q 'defaultMode: 256' <<<"$runner" || grep -q 'defaultMode: 0400' <<<"$runner" || fail "runner token is not root-only"
 config=$(render "${DB[@]}" "${RUNNER[@]}" --show-only templates/configmap.yaml)
@@ -84,9 +84,12 @@ if render "${DB[@]}" "${RUNNER[@]}" --set scriptRunner.existingSecret=release-ag
 fi
 https=$(render "${DB[@]}" "${RUNNER[@]}" --set scriptRunner.apiUrl=https://api.example.test/ --show-only templates/script-runner-deployment.yaml)
 grep -q 'value: "https://api.example.test"' <<<"$https" || fail "HTTPS override ignored"
+if render "${DB[@]}" "${RUNNER[@]}" --set scriptRunner.apiUrl=https://api.example.test/path >/dev/null 2>&1; then
+  fail "runner accepts an API URL with a path"
+fi
 KEDA=(--set scriptRunner.keda.enabled=true --set scriptRunner.keda.existingSecret=metrics-user)
 keda=$(render "${DB[@]}" "${RUNNER[@]}" "${KEDA[@]}" --show-only templates/script-runner-scaledobject.yaml)
-for expected in 'kind: ScaledObject' 'kind: TriggerAuthentication' 'minReplicaCount: 1' 'maxReplicaCount: 10' 'valueLocation: lanes.sync.queued' 'authMode: bearer' 'name: metrics-user'; do
+for expected in 'kind: ScaledObject' 'kind: TriggerAuthentication' 'minReplicaCount: 1' 'maxReplicaCount: 10' 'valueLocation: lanes.sync.queued' 'authMode: bearer' 'name: metrics-user' 'http://release-agent-swarm-api.default.svc:3013/api/script-runners'; do
   grep -q "$expected" <<<"$keda" || fail "KEDA missing $expected"
 done
 for field in minReplicaCount maxReplicaCount targetValue pollingInterval cooldownPeriod; do
