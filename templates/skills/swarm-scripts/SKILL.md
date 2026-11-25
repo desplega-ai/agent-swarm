@@ -251,6 +251,7 @@ function rowsToObjects(res: any): any[] {
 
 - Every `ctx.swarm.*` response passes the secret scrubber. Text shaped like a secret-looking `key=value` assignment comes back as `[REDACTED:<key>]`, so code, HTML or profile text read through `kv_get`, `db_query` or a page read can differ from the stored bytes. Never write such a read back verbatim. Read stored text as `hex(...)` through `db_query`, decode it in the script, and refuse to publish or write when the result contains `[REDACTED:`.
 - `db_query` rejects any SQL containing `;`, even inside a string literal. Pass such literals through `params`.
+- Pass a JSON list as a string param. SQLite reads it with `json_each(?)`. On PostgreSQL, cast it with `$1::text::jsonb`, or pass a real array with `$1::jsonb`. A string param in a `json` or `jsonb` position must be JSON text: `'abc'` fails.
 - `db_query` caps rows without an error (1000 in scripts). Aggregate in SQL and confirm totals with `COUNT(*)`.
 - `kv_get` returns the entry at `data`: read `res.data.value`. The MCP tool shape `entry.value` reads `undefined` in a script.
 - `script_run` returns an envelope (`result`, `truncated`, `durationMs`, `stdout`, `stderr`, `exitCode`). The callee payload is at `.result`. Take key names from a real response: a guessed key that is absent reads as a false zero.
