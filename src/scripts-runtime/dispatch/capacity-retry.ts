@@ -1,6 +1,6 @@
-import { executeShellJobOutput } from "../shell-job-output";
 import { getScriptExecutor } from "../executors/registry";
 import type { ExecutorOutput } from "../executors/types";
+import { executeShellJobOutput } from "../shell-job-output";
 import type { ScriptJob } from "./types";
 
 // The native executor checks the harness's startedFile before classifying an abort.

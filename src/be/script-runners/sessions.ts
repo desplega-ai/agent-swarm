@@ -1,4 +1,3 @@
-import type { ShellRuntime } from "../../scripts-runtime/shell-job";
 import { WebSocket } from "ws";
 import {
   apiMessage,
@@ -10,6 +9,7 @@ import type { StartScriptExecutionInput } from "../../script-workflows/executor"
 import { heldScriptSlots } from "../../scripts-runtime/dispatch/held-reservations";
 import type { ScriptJob, ScriptRunnerHandle } from "../../scripts-runtime/dispatch/types";
 import type { ExecutorOutput, ScriptExecutorName } from "../../scripts-runtime/executors/types";
+import type { ShellRuntime } from "../../scripts-runtime/shell-job";
 
 export class RemoteScriptRunner implements ScriptRunnerHandle {
   readonly kind = "remote";
@@ -43,7 +43,9 @@ export class RemoteScriptRunner implements ScriptRunnerHandle {
       };
       const deadline = setTimeout(
         () => this.close(),
-        (job.kind === "step-shell" ? job.input.timeout ?? 30_000 : job.input.resources.wallClockMs) + RPC_CLEANUP_GRACE_MS,
+        (job.kind === "step-shell"
+          ? (job.input.timeout ?? 30_000)
+          : job.input.resources.wallClockMs) + RPC_CLEANUP_GRACE_MS,
       );
       this.pending.set(job.id, {
         finish: (output) => {

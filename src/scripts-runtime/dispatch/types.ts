@@ -1,9 +1,9 @@
-import type { ShellJobConfig, ShellRuntime } from "../shell-job";
 import type {
   ScriptExecutionHandle,
   StartScriptExecutionInput,
 } from "../../script-workflows/executor";
 import type { ExecutorInput, ExecutorOutput, ScriptExecutorName } from "../executors/types";
+import type { ShellJobConfig, ShellRuntime } from "../shell-job";
 
 export type InlineScriptJob = {
   id: string;
@@ -12,7 +12,12 @@ export type InlineScriptJob = {
   input: Omit<ExecutorInput, "signal">;
 };
 
-export type ShellScriptJob = { id:string; kind:"step-shell"; executor:"native"; input:ShellJobConfig };
+export type ShellScriptJob = {
+  id: string;
+  kind: "step-shell";
+  executor: "native";
+  input: ShellJobConfig;
+};
 export type ScriptJob = InlineScriptJob | ShellScriptJob;
 
 export type ScriptRunnerHandle = {
