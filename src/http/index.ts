@@ -33,6 +33,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { withRequestMemo } from "../be/request-memo";
 import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
@@ -511,7 +512,7 @@ const httpServer = createHttpServer(async (req, res) => {
     const loopPath = loopPathForRequest(req.method, pathSegments);
     await withLoopPath(loopPath, () =>
       withRequestWriteScope(loopPath, () =>
-        span ? withSpanContext(span, handleRequest) : handleRequest(),
+        withRequestMemo(() => (span ? withSpanContext(span, handleRequest) : handleRequest())),
       ),
     );
   });
