@@ -14,6 +14,7 @@ import {
   catalogIndex,
   catalogTopic,
 } from "../apps/catalog-reference";
+import { CLOSEST_NAME_MAX_LENGTH } from "../apps/closest-names";
 import {
   type AppDefinition,
   AppNameSchema,
@@ -342,9 +343,9 @@ const appCatalogRoute = route({
     "No query: every component (one line, child slots) and action type. `component` returns its props schema (`prop` drills into one prop), `action` an action step's params, `topic=expressions` the binding reference.",
   tags: ["Apps"],
   query: z.object({
-    component: z.string().min(1).optional(),
-    prop: z.string().min(1).optional(),
-    action: z.string().min(1).optional(),
+    component: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    prop: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    action: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
     topic: z.enum(CATALOG_TOPICS).optional(),
   }),
   responses: {

@@ -78,6 +78,12 @@ export const knowledgeAppsCatalog: Scenario = {
         `an unknown component names the closest 3: ${JSON.stringify(closest)}`,
       );
       await callToolErr(mcp, "app-catalog", { component: "Nope" });
+      // An oversized name is rejected by the input schema before any edit-distance scoring.
+      result = await callToolErr(mcp, "app-catalog", { component: "x".repeat(129) });
+      expect(
+        /128/.test(toolText(result)) && !toolText(result).includes("unknown component"),
+        `an oversized component name fails validation before closest scoring: ${toolText(result).slice(0, 200)}`,
+      );
 
       // ── one call answers the binding questions ($param, everyMs/watch, page params, date) ──
       result = await callToolOk(mcp, "app-catalog", { topic: "expressions" });
@@ -132,5 +138,9 @@ export const knowledgeAppsCatalog: Scenario = {
       agentId: owner,
     });
     expectStatus(response, [400], "GET with two selectors");
+    response = await ctx.api("GET", `/api/apps/catalog?component=${"x".repeat(129)}`, {
+      agentId: owner,
+    });
+    expectStatus(response, [400], "GET an oversized component name");
   },
 };

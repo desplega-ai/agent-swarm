@@ -7,6 +7,7 @@ import {
   catalogIndex,
   catalogTopic,
 } from "@/apps/catalog-reference";
+import { CLOSEST_NAME_MAX_LENGTH } from "@/apps/closest-names";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerAppCatalogTool = (server: McpServer) => {
@@ -19,9 +20,24 @@ export const registerAppCatalogTool = (server: McpServer) => {
       annotations: { readOnlyHint: true },
       rbac: { ungated: "static catalog of the app vocabulary; holds no app data" },
       inputSchema: z.object({
-        component: z.string().min(1).optional().describe("Component type, e.g. Chart."),
-        prop: z.string().min(1).optional().describe("With component: return one prop's schema."),
-        action: z.string().min(1).optional().describe("Action step type, e.g. app.mutate."),
+        component: z
+          .string()
+          .min(1)
+          .max(CLOSEST_NAME_MAX_LENGTH)
+          .optional()
+          .describe("Component type, e.g. Chart."),
+        prop: z
+          .string()
+          .min(1)
+          .max(CLOSEST_NAME_MAX_LENGTH)
+          .optional()
+          .describe("With component: return one prop's schema."),
+        action: z
+          .string()
+          .min(1)
+          .max(CLOSEST_NAME_MAX_LENGTH)
+          .optional()
+          .describe("Action step type, e.g. app.mutate."),
         topic: z.enum(CATALOG_TOPICS).optional().describe("Reference topic."),
       }),
       outputSchema: swarmToolOutputSchema({

@@ -1,3 +1,6 @@
+/** Longest name worth scoring: edit distance is O(name × candidate) per candidate, so a longer name gets no suggestions. */
+export const CLOSEST_NAME_MAX_LENGTH = 128;
+
 function editDistance(a: string, b: string): number {
   const row = Array.from({ length: b.length + 1 }, (_, index) => index);
   for (let i = 1; i <= a.length; i++) {
@@ -14,6 +17,7 @@ function editDistance(a: string, b: string): number {
 
 /** The `limit` names nearest to `name`, nearest first (substring matches rank first). */
 export function closestNames(name: string, names: Iterable<string>, limit = 5): string[] {
+  if (name.length > CLOSEST_NAME_MAX_LENGTH) return [];
   const needle = name.toLowerCase();
   return [...names]
     .map((candidate) => {

@@ -9495,7 +9495,8 @@
           {
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 128
             },
             "required": false,
             "name": "component",
@@ -9504,7 +9505,8 @@
           {
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 128
             },
             "required": false,
             "name": "prop",
@@ -9513,7 +9515,8 @@
           {
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 128
             },
             "required": false,
             "name": "action",
