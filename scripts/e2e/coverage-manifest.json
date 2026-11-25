@@ -442,7 +442,7 @@
     },
     "kv": {
       "description": "KV store over HTTP and MCP: namespaces, types, TTL, views, authorization, and the 24 hour MCP overflow spill.",
-      "scenarios": ["script-kv"]
+      "scenarios": ["script-kv", "kv-app-namespace-read"]
     },
     "linear-provider-emulated": {
       "description": "Against @emulators/linear: OAuth consent, actor=app install, code exchange, refresh and revoke; delegating a Todo issue creates a task and acknowledges the AgentSession, a Backlog issue is gated, completion ends the session with the output, and Canceled cancels the task; LINEAR_URL and LINEAR_API_URL cannot be stored in swarm_config",
