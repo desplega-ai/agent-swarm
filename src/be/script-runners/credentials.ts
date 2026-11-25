@@ -33,7 +33,7 @@ export async function mintScriptRunnerCredential(
   const deadline =
     expiresAt === undefined ? issuedAt + MAX_RUNNER_CREDENTIAL_TTL_MS : Date.parse(expiresAt);
   if (!(deadline > issuedAt && deadline <= issuedAt + MAX_RUNNER_CREDENTIAL_TTL_MS))
-    throw new Error("Invalid runner credential expiry");
+    return { error: "expiry" } as const;
   const now = new Date(issuedAt).toISOString();
   const credential = {
     id: randomUUID(),
@@ -46,8 +46,7 @@ export async function mintScriptRunnerCredential(
     updatedBy: actor,
   };
   return storage.transaction(async () => {
-    if (actor && !(await issuerIsActive(actor)))
-      throw new Error("Runner credential issuer is inactive");
+    if (actor && !(await issuerIsActive(actor))) return { error: "issuer" } as const;
     await storage.repos.scriptRunners.insert(
       credential,
       createHash("sha256").update(token).digest("hex"),

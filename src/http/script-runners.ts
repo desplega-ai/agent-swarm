@@ -148,15 +148,14 @@ export async function handleScriptRunners(
       return true;
     }
     res.setHeader("Cache-Control", "no-store");
-    mint.respond(
-      res,
-      201,
-      await mintScriptRunnerCredential(
-        parsed.body.name,
-        parsed.body.expiresAt,
-        principal.kind === "user" ? principal.userId : null,
-      ),
+    const result = await mintScriptRunnerCredential(
+      parsed.body.name,
+      parsed.body.expiresAt,
+      principal.kind === "user" ? principal.userId : null,
     );
+    if (result.error === "issuer") jsonError(res, "Runner credential issuer is inactive", 403);
+    else if (result.error === "expiry") jsonError(res, "Invalid runner credential expiry", 400);
+    else mint.respond(res, 201, result);
   } else {
     const parsed = await revoke.parse(req, res, segments, query);
     if (!parsed) return true;
