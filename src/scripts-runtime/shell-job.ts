@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -12,15 +13,83 @@ import {
   sandboxSpawnEnv,
   snapshotCapped,
 } from "../utils/sandboxed-process";
+import { MAX_SCRIPT_WALL_CLOCK_MS } from "./executors/types";
 
-export type ShellJobConfig = {
-  runtime: "bash" | "ts" | "python";
-  script: string;
-  args?: string[];
-  env?: Record<string, string>;
-  timeout?: number;
-  cwd?: string;
-};
+const RESERVED_ENV_KEYS = new Set([
+  "PATH",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "TMPDIR",
+  "PWD",
+  "SHLVL",
+  "OLDPWD",
+  // These affect native loading or libc initialization before the wrapper's ulimit.
+  "GCONV_PATH",
+  "GLIBC_TUNABLES",
+  "LOCPATH",
+  "NLSPATH",
+  "GETCONF_DIR",
+  // Shell startup controls and variables Bash rewrites or owns.
+  "BASH",
+  "BASHOPTS",
+  "BASHPID",
+  "ENV",
+  "SHELLOPTS",
+  "IFS",
+  "OPTIND",
+  "OPTERR",
+  "PS0",
+  "PS1",
+  "PS2",
+  "PS3",
+  "PS4",
+  "PPID",
+  "UID",
+  "EUID",
+  "LINENO",
+  "RANDOM",
+  "SRANDOM",
+  "SECONDS",
+  "EPOCHSECONDS",
+  "EPOCHREALTIME",
+  "HISTCMD",
+  "COMP_WORDBREAKS",
+  "_",
+]);
+const RESERVED_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_"];
+
+export const ShellJobConfigSchema = z.object({
+  runtime: z.enum(["bash", "ts", "python"]),
+  script: z.string(),
+  args: z.array(z.string()).optional(),
+  env: z
+    .record(
+      z
+        .string()
+        .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid environment variable name")
+        .refine(
+          (key) => {
+            const name = key.toUpperCase();
+            return (
+              !RESERVED_ENV_KEYS.has(name) &&
+              !RESERVED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
+            );
+          },
+          {
+            message: "Cannot override a reserved script environment variable",
+          },
+        ),
+      z.string().refine((value) => !value.includes("\0"), {
+        message: "Environment variable values cannot contain NUL bytes",
+      }),
+    )
+    .optional(),
+  timeout: z.number().int().min(1000).max(MAX_SCRIPT_WALL_CLOCK_MS).default(30_000),
+  cwd: z.string().optional(),
+});
+
+export type ShellJobConfig = z.input<typeof ShellJobConfigSchema>;
 
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
 const MAX_OUTPUT_BYTES = 1_048_576;
@@ -58,11 +127,13 @@ function withDeadline<T>(promise: Promise<T>, ms: number, onDeadline: () => T): 
 export async function runShellJob(
   config: ShellJobConfig,
   timeoutMs = config.timeout ?? 30_000,
+  signal?: AbortSignal,
 ): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
 }> {
+  signal?.throwIfAborted();
   const { runtime, script, args = [], cwd } = config;
   let cmd: string[];
 
@@ -128,6 +199,12 @@ export async function runShellJob(
       }),
     );
 
+    const abort = () => {
+      void terminateProcessGroup(proc.pid);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+
     // Drain both pipes concurrently with the wait. a script producing more
     // than a pipe buffer of output would otherwise block forever on write.
     // Each gets its own progress state so the STREAM_DRAIN_GRACE_MS
@@ -156,6 +233,7 @@ export async function runShellJob(
       await terminateProcessGroup(proc.pid);
     } finally {
       globalThis.clearTimeout(killTimer);
+      signal?.removeEventListener("abort", abort);
     }
 
     if (timedOut) {
@@ -201,7 +279,10 @@ export type ShellJobResult = {
   nextPort?: string;
 };
 
-export async function executeShellJob(config: ShellJobConfig): Promise<ShellJobResult> {
+export async function executeShellJob(
+  config: ShellJobConfig,
+  signal?: AbortSignal,
+): Promise<ShellJobResult> {
   const timeoutMs = config.timeout ?? 30_000;
   try {
     // The timeout lives INSIDE runScript so it can actually SIGKILL the child.
@@ -209,7 +290,7 @@ export async function executeShellJob(config: ShellJobConfig): Promise<ShellJobR
     // shape) only abandoned the promise: a sleeping script kept running past
     // the deadline. the CPU ulimit does not bound sleep. and its scoped
     // tmpdir was deleted out from under a live process.
-    const result = await runShellJob(config, timeoutMs);
+    const result = await runShellJob(config, timeoutMs, signal);
 
     // Non-zero exit code is a hard failure. mark the step failed so the
     // workflow engine stops the branch and operators can see what went wrong.
@@ -258,4 +339,13 @@ export async function executeShellJob(config: ShellJobConfig): Promise<ShellJobR
       },
     };
   }
+}
+
+export const SHELL_RUNTIME_BINARIES = { bash: "bash", ts: "bun", python: "python3" } as const;
+export type ShellRuntime = keyof typeof SHELL_RUNTIME_BINARIES;
+
+export function availableShellRuntimes(): ShellRuntime[] {
+  return (Object.keys(SHELL_RUNTIME_BINARIES) as ShellRuntime[]).filter(
+    (runtime) => Bun.which(SHELL_RUNTIME_BINARIES[runtime]) !== null,
+  );
 }

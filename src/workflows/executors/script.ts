@@ -1,84 +1,14 @@
 import { z } from "zod";
 import { isExecutorAllowedByDeployment } from "../../scripts-runtime/executors/registry";
-import { MAX_SCRIPT_WALL_CLOCK_MS } from "../../scripts-runtime/executors/types";
-import { executeShellJob } from "../../scripts-runtime/shell-job";
+import {
+  executeShellJob,
+  ShellJobConfigSchema as ScriptConfigSchema,
+} from "../../scripts-runtime/shell-job";
 import type { ExecutorMeta } from "../../types";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 // ─── Schemas ────────────────────────────────────────────────
-const RESERVED_ENV_KEYS = new Set([
-  "PATH",
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "TMPDIR",
-  "PWD",
-  "SHLVL",
-  "OLDPWD",
-  // These affect native loading or libc initialization before the wrapper's ulimit.
-  "GCONV_PATH",
-  "GLIBC_TUNABLES",
-  "LOCPATH",
-  "NLSPATH",
-  "GETCONF_DIR",
-  // Shell startup controls and variables Bash rewrites or owns.
-  "BASH",
-  "BASHOPTS",
-  "BASHPID",
-  "ENV",
-  "SHELLOPTS",
-  "IFS",
-  "OPTIND",
-  "OPTERR",
-  "PS0",
-  "PS1",
-  "PS2",
-  "PS3",
-  "PS4",
-  "PPID",
-  "UID",
-  "EUID",
-  "LINENO",
-  "RANDOM",
-  "SRANDOM",
-  "SECONDS",
-  "EPOCHSECONDS",
-  "EPOCHREALTIME",
-  "HISTCMD",
-  "COMP_WORDBREAKS",
-  "_",
-]);
-const RESERVED_ENV_PREFIXES = ["LD_", "DYLD_", "BASH_"];
-
-export const ScriptConfigSchema = z.object({
-  runtime: z.enum(["bash", "ts", "python"]),
-  script: z.string(),
-  args: z.array(z.string()).optional(),
-  env: z
-    .record(
-      z
-        .string()
-        .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid environment variable name")
-        .refine(
-          (key) => {
-            const name = key.toUpperCase();
-            return (
-              !RESERVED_ENV_KEYS.has(name) &&
-              !RESERVED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
-            );
-          },
-          {
-            message: "Cannot override a reserved script environment variable",
-          },
-        ),
-      z.string().refine((value) => !value.includes("\0"), {
-        message: "Environment variable values cannot contain NUL bytes",
-      }),
-    )
-    .optional(),
-  timeout: z.number().int().min(1000).max(MAX_SCRIPT_WALL_CLOCK_MS).default(30_000),
-  cwd: z.string().optional(),
-});
+export { ShellJobConfigSchema as ScriptConfigSchema } from "../../scripts-runtime/shell-job";
 
 export const ScriptOutputSchema = z.object({
   exitCode: z.number(),
