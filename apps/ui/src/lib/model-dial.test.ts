@@ -219,7 +219,7 @@ describe("dsh", () => {
     const ctx = context({ openrouter: true, tiers });
     expect(DIAL_LEVELS.map((l) => dialSetting("dsh", l, ctx)?.model)).toEqual([
       "openrouter/acme/cheap-one",
-      "openrouter/deepseek/deepseek-v4-pro-0813",
+      "openrouter/moonshotai/kimi-k3.1-pro",
       "openrouter/anthropic/claude-opus-5.5",
     ]);
   });
@@ -235,7 +235,9 @@ describe("dsh", () => {
         "deepseek-v9-pro": { release_date: "2035-01-01", status: "deprecated" },
       },
     });
-    const ctx = context({ catalog });
+    // The shipped smart tier is not a DeepSeek model; retune it to keep the pro family covered.
+    const tiers = tierRows({ "dsh:smart": "openrouter/deepseek/deepseek-v4-pro-0813" });
+    const ctx = context({ catalog, tiers });
     // flash: the newest id ending in -flash (not the -exp variant).
     expect(dialSetting("dsh", "cheap", ctx)?.model).toBe("deepseek-v5-flash");
     // pro: `deepseek-v4-pro-0813` names the pro family; a deprecated model is skipped.

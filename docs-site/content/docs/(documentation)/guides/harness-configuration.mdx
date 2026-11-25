@@ -678,7 +678,7 @@ behavior, and cost tracking.
 ## Cursor
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY`. The defaults are
-`gpt-5.4-mini`, `claude-sonnet-5-5`, `claude-opus-5-5`, and
+`gpt-5.6-luna`, `claude-sonnet-5-5`, `claude-opus-5-5`, and
 `claude-fable-5-1` for `smol` through `ultra`; the SDK resolves them against
 the account's model list. Cursor passes supported reasoning effort through the
 model's own parameter, wires swarm MCP, and supports steer and queue. Sessions
@@ -700,8 +700,8 @@ details.
 Set `HARNESS_PROVIDER=fx` and one of `OPENROUTER_API_KEY` (for
 `openrouter/<vendor>/<id>`), `OPENAI_API_KEY` (for a bare id) or
 `AI_GATEWAY_API_KEY` (for `vercel/<vendor>/<id>`). Tier defaults are
-`openrouter/deepseek/deepseek-v4.1-flash` for `smol` and `regular`,
-`openrouter/deepseek/deepseek-v4-pro-0813` for `smart` and
+`openrouter/deepseek/deepseek-v4.1-flash-1017` for `smol` and `regular`,
+`openrouter/moonshotai/kimi-k3.1-pro` for `smart` and
 `openrouter/anthropic/claude-opus-5.5` for `ultra`. fx includes swarm MCP,
 steers natively and resumes sessions. Cost is a pricing-table estimate. fx
 ships only in `worker-full`. See [Provider Auth: fx](/docs/guides/provider-auth/fx)

@@ -505,7 +505,7 @@ describe("Model Control - Priority Resolution Logic", () => {
     expect(resolveModelTier({ tier: "smart", harnessProvider: "codex" })).toBe("gpt-6.1-sol");
     expect(resolveModelTier({ tier: "ultra", harnessProvider: "codex" })).toBe("gpt-6-astra");
     expect(resolveModelTier({ tier: "smart", harnessProvider: "opencode" })).toBe(
-      "openrouter/deepseek/deepseek-v4-pro-0813",
+      "openrouter/moonshotai/kimi-k3.1-pro",
     );
     expect(resolveModelTier({ tier: "ultra", harnessProvider: "pi" })).toBe(
       "openrouter/anthropic/claude-opus-5.5",
