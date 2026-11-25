@@ -278,22 +278,31 @@ export const scriptRunnerApiRestart: Scenario = {
       ctx.log(
         `Combined restart: hello within ${Math.round(reconnectMs)}ms of health, ${refusedCalls} refused SDK requests, one workflow execution, two durable executions, one journaled effect`,
       );
+    } catch (error) {
+      ctx.log(
+        `Restart markers: stepStarts=${stepStarts} durableStarts=${durableStarts} effectCalls=${effectCalls} refusedCalls=${refusedCalls}`,
+      );
+      if (runner) ctx.log(runner.logs());
+      throw error;
     } finally {
       releaseStep = true;
       releaseDurable = true;
-      await runner?.stop("SIGKILL");
-      // Restore the API even when the downtime assertion failed before the next boot.
-      await ctx.restartSut();
-      await sync;
-      if (durableId) await ctx.api("DELETE", `/api/script-runs/${durableId}`);
-      if (workflowRunId)
-        await ctx.api("POST", `/api/workflow-runs/${workflowRunId}/cancel`, { body: {} });
-      if (workflowId) await ctx.api("DELETE", `/api/workflows/${workflowId}`);
-      if (scriptSaved)
-        await ctx.api("DELETE", `/api/scripts/${scriptName}?scope=global`, { agentId: lead });
-      await dropConfig?.();
-      await ctx.api("DELETE", `/api/script-runners/credentials/${credential}`);
-      gate.stop();
+      try {
+        await runner?.stop("SIGKILL");
+        // Restore the API even when the downtime assertion failed before the next boot.
+        await ctx.restartSut();
+        await sync;
+        if (durableId) await ctx.api("DELETE", `/api/script-runs/${durableId}`);
+        if (workflowRunId)
+          await ctx.api("POST", `/api/workflow-runs/${workflowRunId}/cancel`, { body: {} });
+        if (workflowId) await ctx.api("DELETE", `/api/workflows/${workflowId}`);
+        if (scriptSaved)
+          await ctx.api("DELETE", `/api/scripts/${scriptName}?scope=global`, { agentId: lead });
+        await dropConfig?.();
+        await ctx.api("DELETE", `/api/script-runners/credentials/${credential}`);
+      } finally {
+        gate.stop();
+      }
     }
   },
 };
