@@ -1141,7 +1141,9 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
   ): Promise<{ rows: ScriptRunTreeRow[]; truncated: boolean }> {
     // One LIMITed query per level instead of a recursive CTE: Postgres rejects
     // LIMIT in a recursive term, and an outer LIMIT after ORDER BY still walks
-    // the whole tree. Here each read stops at the rows still allowed.
+    // the whole tree. Here each read stops at the rows still allowed: the
+    // ORDER BY matches idx_script_runs_parent_started, so neither engine sorts
+    // a wide level before the LIMIT (test: script-run-tree-plan on both engines).
     const cols = sql`id, "scriptName", status, error, "startedAt", "finishedAt"`;
     const root = await this.db.get<ScriptRunTreeRow>(
       sql`SELECT ${cols} FROM script_runs WHERE id = ${rootId}`,
@@ -1157,7 +1159,7 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
       const level = await this.db.query<ScriptRunTreeRow>(sql`
         SELECT ${cols} FROM script_runs
         WHERE "parentScriptRunId" IN (${sqlList(frontier)})
-        ORDER BY "startedAt", id
+        ORDER BY "parentScriptRunId", "startedAt", id
         LIMIT ${atBound ? 1 : room + 1}`);
       // A revisited id is a parent cycle: drop it so the walk still ends.
       const fresh = level.filter((r) => !seen.has(r.id));
