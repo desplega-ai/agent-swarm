@@ -2,7 +2,11 @@ import { embeddedScriptRunner } from "./embedded-runner";
 import type { ScriptRunnerHandle } from "./types";
 
 const held = new Map<string, number>();
-let picker: (() => ScriptRunnerHandle | undefined) | undefined;
+export type HeldReservationOptions = {
+  lane?: "sync" | "long";
+  eligible?: (runner: ScriptRunnerHandle) => boolean;
+};
+let picker: ((options: HeldReservationOptions) => ScriptRunnerHandle | undefined) | undefined;
 let embeddedBusy: () => number = () => 0;
 let wake: () => void = () => {};
 export function setHeldScriptRunnerPicker(next: typeof picker) {
@@ -17,8 +21,8 @@ export function heldScriptSlots(id: string): number {
 }
 
 /** Reserve before any asynchronous claim or credential mint. */
-export function reserveHeldScriptRunner() {
-  let runner = picker?.();
+export function reserveHeldScriptRunner(options: HeldReservationOptions = { lane: "long" }) {
+  let runner = picker?.(options);
   if (!runner) {
     const configured = process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS;
     if (
@@ -26,6 +30,7 @@ export function reserveHeldScriptRunner() {
       embeddedBusy() + heldScriptSlots("embedded") >= Number(configured)
     )
       return;
+    if (options.eligible && !options.eligible(embeddedScriptRunner)) return;
     runner = embeddedScriptRunner;
   }
   const selected = runner;

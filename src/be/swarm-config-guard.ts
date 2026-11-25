@@ -659,6 +659,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
   ...enumValidator("BOOT_SCRUB_MODE", ["backfill", "forward-only"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
+  SCRIPT_RUNNER_LONG_LANE_SHARE: (value) =>
+    validateScriptCapacity("SCRIPT_RUNNER_LONG_LANE_SHARE", value),
   SCRIPT_EMBEDDED_RUNNER_SLOTS: (value) =>
     validateScriptCapacity("SCRIPT_EMBEDDED_RUNNER_SLOTS", value),
   SCRIPT_QUEUE_WAIT_SYNC_MS: (value) => validateScriptCapacity("SCRIPT_QUEUE_WAIT_SYNC_MS", value),

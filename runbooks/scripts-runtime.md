@@ -45,3 +45,11 @@ Derived from MCP tool registry at build time via `scripts/bundle-script-types.ts
 ## New MCP tools
 
 When adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scripts-runtime/sdk-allowlist.ts`) to expose it to scripts, or add it to `EXCLUDED_TOOLS` in `scripts/check-sdk-tool-registration.ts` with a reason. Enforced by CI.
+
+## Durable placement
+
+On PostgreSQL, durable runs reserve shared capacity before acquiring a broker credential.
+They can wait as unowned rows when embedded slots are disabled or capacity is full.
+The API retains the broker and capability session. Only the guest runs remotely.
+SQLite retains local execution and leaves ownership columns NULL.
+See [script-runners.md](./script-runners.md#durable-runs) for lease, replay and drain behavior.

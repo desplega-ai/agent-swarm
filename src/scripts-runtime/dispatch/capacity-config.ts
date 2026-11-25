@@ -1,6 +1,14 @@
-export const SCRIPT_CAPACITY_KEYS = ["SCRIPT_EMBEDDED_RUNNER_SLOTS", "SCRIPT_QUEUE_WAIT_SYNC_MS"];
+export const SCRIPT_CAPACITY_KEYS = [
+  "SCRIPT_EMBEDDED_RUNNER_SLOTS",
+  "SCRIPT_QUEUE_WAIT_SYNC_MS",
+  "SCRIPT_RUNNER_LONG_LANE_SHARE",
+];
 
 export function validateScriptCapacity(key: string, value: unknown): string | null {
+  if (key === "SCRIPT_RUNNER_LONG_LANE_SHARE")
+    return Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) <= 1
+      ? null
+      : "SCRIPT_RUNNER_LONG_LANE_SHARE must be greater than 0 and at most 1";
   const max = key === "SCRIPT_QUEUE_WAIT_SYNC_MS" ? 540_000 : 1024;
   return /^\d+$/.test(String(value)) && Number(value) <= max
     ? null

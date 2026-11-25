@@ -2,6 +2,7 @@ import { getApiKey } from "../../utils/api-key";
 import type { ExecutorOutput } from "../executors/types";
 import { syncQueueWaitMs } from "./capacity-config";
 import { assertSerializableJob, embeddedScriptRunner } from "./embedded-runner";
+import { configureHeldReservations, heldScriptSlots } from "./held-reservations";
 import type { ScriptJob, ScriptRunnerHandle } from "./types";
 
 let pickRemote: ((job: ScriptJob) => ScriptRunnerHandle | undefined) | undefined;
@@ -15,6 +16,7 @@ type Waiter = {
   start(runner: ScriptRunnerHandle): void;
 };
 const queue: Waiter[] = [];
+configureHeldReservations(() => embeddedInFlight, drainScriptQueue);
 
 export function setRemoteScriptRunnerPicker(picker: typeof pickRemote, slots = () => 0) {
   pickRemote = picker;
@@ -58,7 +60,9 @@ function available(job: ScriptJob) {
   const remote = pickRemote?.(job);
   if (remote) return remote;
   const slots = process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS;
-  return slots === undefined || embeddedInFlight < Number(slots) ? embeddedScriptRunner : undefined;
+  return slots === undefined || embeddedInFlight + heldScriptSlots("embedded") < Number(slots)
+    ? embeddedScriptRunner
+    : undefined;
 }
 
 export function drainScriptQueue() {

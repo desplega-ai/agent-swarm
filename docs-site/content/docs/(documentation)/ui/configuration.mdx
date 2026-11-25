@@ -842,3 +842,7 @@ Execution wall time begins on the runner. The maximum queue wait plus execution 
 `SCRIPT_QUICKJS_POOL_SIZE` still controls the executor's QuickJS pool.
 `GET /api/script-runners` exposes queue depth, oldest wait, active runs and slots in `lanes.sync`.
 Unlimited embedded capacity appears as `slots: null`.
+
+Durable runs use `SCRIPT_RUNNER_LONG_LANE_SHARE` (default `0.5`, greater than 0 and at most 1).
+The share limits durable jobs on each remote runner, with at least one eligible slot.
+This setting requires PostgreSQL and an API restart.

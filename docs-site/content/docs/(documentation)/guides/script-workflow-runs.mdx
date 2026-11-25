@@ -501,3 +501,15 @@ Use the list view to scan recent runs by status, script name, agent, start time,
 - [Receipts](/docs/receipts)
 - [Script Runs API reference](/docs/api-reference/script-runs)
 - [MCP tools reference](/docs/reference/mcp-tools)
+
+## Remote execution
+
+With PostgreSQL, a connected script runner can execute a durable run.
+The API keeps the journal, broker credential and capability authorization.
+A lost lease returns the run to the queue for journal replay.
+A runner shutdown releases ownership immediately after its guests stop.
+
+After an API restart, the API cancels remote guests and replays the journal.
+Guest code and `ctx.swarm` calls outside a journal step can execute again.
+Use `ctx.step` for work that needs replay protection.
+SQLite continues to execute durable runs locally.

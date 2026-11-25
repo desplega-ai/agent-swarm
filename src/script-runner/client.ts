@@ -94,7 +94,12 @@ export function startScriptRunner(options: {
   let socket: WebSocket;
   const durable = new Map<
     string,
-    { guest?: DurableGuest; done: Promise<void>; result?: ScriptExecutionResult }
+    {
+      cancelled?: boolean;
+      guest?: DurableGuest;
+      done: Promise<void>;
+      result?: ScriptExecutionResult;
+    }
   >();
   let sendCurrent: (message: unknown) => void = () => {};
   const heartbeat = setInterval(
@@ -172,14 +177,19 @@ export function startScriptRunner(options: {
             !options.executors.includes("native")
           )
             throw new Error("Invalid durable job");
-          const job: { guest?: DurableGuest; done: Promise<void>; result?: ScriptExecutionResult } =
-            { done: Promise.resolve() };
+          const job: {
+            cancelled?: boolean;
+            guest?: DurableGuest;
+            done: Promise<void>;
+            result?: ScriptExecutionResult;
+          } = { done: Promise.resolve() };
           durable.set(message.jobId, job);
           job.done = (async () => {
             try {
               job.guest = await startDurableGuest(message.run, (frame) =>
                 sendCurrent({ type: "cap", jobId: message.jobId, frame }),
               );
+              if (job.cancelled) await job.guest.stop();
               job.result = await job.guest.execution.exited;
               await job.guest.execution.cleanup();
             } catch {
@@ -194,6 +204,7 @@ export function startScriptRunner(options: {
         } else if (message.type === "job") {
           if (
             !welcomed ||
+            stopped ||
             jobs.has(message.jobId) ||
             jobs.size + durable.size >= options.slots ||
             !options.executors.includes(message.executor)
@@ -236,13 +247,15 @@ export function startScriptRunner(options: {
         } else if (message.type === "cancel") {
           jobs.get(message.jobId)?.controller.abort();
           const job = durable.get(message.jobId);
-          if (job)
+          if (job) {
+            job.cancelled = true;
             void (async () => {
               if (!job.guest) await job.done;
               await job.guest?.stop();
               await job.done;
               durable.delete(message.jobId);
             })();
+          }
         }
       } catch {
         current.close(1008, "Invalid API message");
@@ -286,9 +299,18 @@ export function startScriptRunner(options: {
       clearInterval(heartbeat);
       clearReady();
       clearTimeout(reconnect);
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.all([...jobs.values()].map((job) => job.done)),
+        new Promise<void>((resolve) => {
+          grace = setTimeout(resolve, 5000);
+        }),
+      ]);
+      clearTimeout(grace);
       await killJobs();
       await Promise.all(
         [...durable.values()].map(async (job) => {
+          job.cancelled = true;
           await job.guest?.stop();
           await job.done;
         }),

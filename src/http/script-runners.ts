@@ -7,6 +7,7 @@ import {
   mintScriptRunnerCredential,
   revokeScriptRunnerCredential,
 } from "../be/script-runners/credentials";
+import { longLaneMetrics } from "../be/script-runners/durable-dispatch";
 import { listScriptRunnerSessions } from "../be/script-runners/sessions";
 import { getStorage } from "../be/storage";
 import { can } from "../rbac";
@@ -27,6 +28,7 @@ const sessions = route({
       description: "Live sessions",
       schema: z.object({
         lanes: z.object({
+          long: z.object({ queued: z.number(), oldestWaitMs: z.number(), inFlight: z.number() }),
           sync: z.object({
             queued: z.number(),
             oldestWaitMs: z.number(),
@@ -145,7 +147,7 @@ export async function handleScriptRunners(
     if (!(await sessions.parse(req, res, segments, query))) return true;
     sessions.respond(res, 200, {
       sessions: listScriptRunnerSessions(),
-      lanes: { sync: syncLaneMetrics() },
+      lanes: { sync: syncLaneMetrics(), long: await longLaneMetrics() },
     });
   } else if (list.match(req.method, segments)) {
     if (!(await list.parse(req, res, segments, query))) return true;

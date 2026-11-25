@@ -4,7 +4,7 @@ import { startScriptRunner } from "../script-runner";
 
 export const scriptRunnerDurable: Scenario = {
   name: "script-runner-durable",
-  order: 498,
+  order: 501,
   async run(ctx) {
     const minted = await ctx.api("POST", "/api/script-runners/credentials", {
       body: {

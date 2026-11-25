@@ -6,6 +6,7 @@ import {
   RPC_CLEANUP_GRACE_MS,
 } from "../../script-runner/protocol";
 import type { StartScriptExecutionInput } from "../../script-workflows/executor";
+import { heldScriptSlots } from "../../scripts-runtime/dispatch/held-reservations";
 import type { ScriptJob, ScriptRunnerHandle } from "../../scripts-runtime/dispatch/types";
 import type { ExecutorOutput, ScriptExecutorName } from "../../scripts-runtime/executors/types";
 
@@ -83,7 +84,20 @@ export function listScriptRunnerSessions() {
   return [...scriptRunnerSessions.values()].map((runner) => ({
     instanceId: runner.id,
     slots: runner.slots,
-    jobsInFlight: runner.pending.size,
+    jobsInFlight: runner.pending.size + heldScriptSlots(runner.id),
     jobsCompleted: runner.jobsCompleted,
   }));
+}
+
+export type HeldStepHooks = {
+  heartbeat(runner: RemoteScriptRunner, id: string): Promise<boolean>;
+  result(runner: RemoteScriptRunner, id: string, output: ExecutorOutput): Promise<boolean>;
+  reconnect(runner: RemoteScriptRunner, id: string): Promise<boolean>;
+};
+let stepHooks: HeldStepHooks | undefined;
+export function registerHeldStepHooks(hooks: HeldStepHooks) {
+  stepHooks = hooks;
+}
+export function heldStepHooks() {
+  return stepHooks;
 }

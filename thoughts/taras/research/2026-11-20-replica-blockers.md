@@ -206,3 +206,11 @@ Per-replica by design (keep one per replica, no change): 11 loops. `src/http/ind
 
 The FIFO sync queue, slot counters and waiters live in API process memory.
 An API restart loses queued callers. Multiple API replicas do not share placement or queue metrics.
+
+### Durable execution tier state
+
+`src/be/script-runners/durable-dispatch.ts` retains capability sessions and held jobs in this API process.
+`src/script-workflows/capability-session.ts` retains broker calls and responses for reconnect.
+`src/script-workflows/supervisor.ts` owns the lease sweep timer and the `embedded:<bootId>` identity.
+`src/scripts-runtime/dispatch/held-reservations.ts` retains shared slot reservations.
+These files still require one API process per database.

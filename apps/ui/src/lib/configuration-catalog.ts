@@ -1977,6 +1977,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/scripts-runtime#egress-policy`,
       },
       {
+        key: "SCRIPT_RUNNER_LONG_LANE_SHARE",
+        label: "Long lane share",
+        description:
+          "Maximum share of each remote runner for durable jobs. At least one slot remains eligible. PostgreSQL only.",
+        kind: "number",
+        defaultValue: "0.5",
+        restartRequired: true,
+        docsUrl: "/docs/ui/configuration#script-runner-capacity",
+      },
+      {
         key: "SCRIPT_EMBEDDED_RUNNER_SLOTS",
         label: "Embedded script runner slots",
         description:

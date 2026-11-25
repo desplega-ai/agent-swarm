@@ -32,14 +32,17 @@ const send = (runner: RemoteScriptRunner, message: unknown) =>
 export function durableJobsForOwner(ownerId: string): number {
   return [...held.values()].filter((job) => job.ownerId === ownerId).length;
 }
-export function pickDurableRunner(): RemoteScriptRunner | undefined {
+export function pickDurableRunner(
+  options: { lane?: "sync" | "long"; eligible?: (runner: RemoteScriptRunner) => boolean } = {},
+): RemoteScriptRunner | undefined {
   const share = Number(process.env.SCRIPT_RUNNER_LONG_LANE_SHARE ?? 0.5);
   return [...scriptRunnerSessions.values()].find(
     (runner) =>
       runner.socket.readyState === 1 &&
-      runner.executors.includes("native") &&
+      (options.eligible ? options.eligible(runner) : runner.executors.includes("native")) &&
       runner.pending.size + heldScriptSlots(runner.id) < runner.slots &&
-      heldScriptSlots(runner.id) < Math.max(1, Math.floor(runner.slots * share)),
+      (options.lane === "sync" ||
+        heldScriptSlots(runner.id) < Math.max(1, Math.floor(runner.slots * share))),
   );
 }
 
@@ -117,6 +120,12 @@ export async function durableResult(
   result: ScriptExecutionResult,
 ) {
   const job = held.get(id);
+  if (result.terminated && job?.ownerId === runner.id) {
+    await getStorage().repos.scripts.releaseScriptRunOwner(id, runner.id);
+    job.finish(result);
+    await send(runner, { type: "ack", jobId: id });
+    return;
+  }
   if (job?.ownerId === runner.id && (await owns(id, runner.id))) {
     const now = new Date().toISOString();
     const changed = await getStorage().transaction(() =>
@@ -156,4 +165,18 @@ export async function releaseDurableOwner(ownerId: string, runId?: string) {
       job.finish({ exitCode: null, stderr: "", terminated: true });
     }
   }
+}
+
+export async function longLaneMetrics() {
+  const rows = (await getStorage().repos.scripts.listActiveScriptRuns()).filter(
+    (run) => run.status === "running",
+  );
+  const queued = rows.filter((run) => !run.ownerId);
+  return {
+    queued: queued.length,
+    oldestWaitMs: queued.length
+      ? Math.max(...queued.map((run) => Date.now() - Date.parse(run.startedAt)))
+      : 0,
+    inFlight: rows.length - queued.length,
+  };
 }

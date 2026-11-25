@@ -13,7 +13,11 @@ import {
   reconnectDurable,
   releaseDurableOwner,
 } from "../be/script-runners/durable-dispatch";
-import { RemoteScriptRunner, scriptRunnerSessions } from "../be/script-runners/sessions";
+import {
+  heldStepHooks,
+  RemoteScriptRunner,
+  scriptRunnerSessions,
+} from "../be/script-runners/sessions";
 import { getStorage } from "../be/storage";
 import {
   API_PING_INTERVAL_MS,
@@ -21,7 +25,10 @@ import {
   runnerMessage,
   SCRIPT_RUNNER_PATH,
 } from "../script-runner/protocol";
-import { drainScriptQueue, setRemoteScriptRunnerPicker } from "../scripts-runtime/dispatch/dispatcher";
+import {
+  drainScriptQueue,
+  setRemoteScriptRunnerPicker,
+} from "../scripts-runtime/dispatch/dispatcher";
 import {
   heldScriptSlots,
   setHeldScriptRunnerPicker,
@@ -47,13 +54,15 @@ export function attachScriptRunnerTransport(server: Server): () => void {
   setHeldScriptRunnerPicker(pickDurableRunner);
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   let closing = false;
-  setRemoteScriptRunnerPicker((job) =>
-    [...scriptRunnerSessions.values()].find(
-      (runner) =>
-        runner.socket.readyState === WebSocket.OPEN &&
-        runner.pending.size + heldScriptSlots(runner.id) < runner.slots &&
-        runner.executors.includes(job.executor),
-    ),
+  const instanceCredentials = new Map<string, string>();
+  setRemoteScriptRunnerPicker(
+    (job) =>
+      [...scriptRunnerSessions.values()].find(
+        (runner) =>
+          runner.socket.readyState === WebSocket.OPEN &&
+          runner.pending.size + heldScriptSlots(runner.id) < runner.slots &&
+          runner.executors.includes(job.executor),
+      ),
     () => [...scriptRunnerSessions.values()].reduce((sum, runner) => sum + runner.slots, 0),
   );
   const upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -128,6 +137,10 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                 const message = runnerMessage.parse(JSON.parse(data.toString()));
                 if (message.type === "hello") {
                   if (runner) throw new Error("hello");
+                  const priorCredential = instanceCredentials.get(message.instanceId);
+                  if (priorCredential && priorCredential !== credential.id)
+                    throw new Error("Runner instance credential changed");
+                  instanceCredentials.set(message.instanceId, credential.id);
                   if (scriptRunnerSessions.has(message.instanceId)) {
                     ws.close(1011, "Runner instance is still connected");
                     return;
@@ -146,16 +159,24 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                       if (error) ws.terminate();
                     },
                   );
-                  await reconnectDurable(runner, message.held);
+                  const unhandled = [];
+                  for (const id of message.held)
+                    if (!(await heldStepHooks()?.reconnect(runner, id))) unhandled.push(id);
+                  await reconnectDurable(runner, unhandled);
                   drainScriptQueue();
                 } else {
                   if (!runner) throw new Error("hello required");
-                  if (message.type === "heartbeat") await durableHeartbeat(runner, message.jobs);
-                  else if (message.type === "cap")
+                  if (message.type === "heartbeat") {
+                    const unhandled = [];
+                    for (const id of message.jobs)
+                      if (!(await heldStepHooks()?.heartbeat(runner, id))) unhandled.push(id);
+                    await durableHeartbeat(runner, unhandled);
+                  } else if (message.type === "cap")
                     await durableCapability(runner, message.jobId, message.frame);
                   else if (message.type === "durable-result")
                     await durableResult(runner, message.jobId, message);
-                  else runner.result(message.jobId, message.output);
+                  else if (!(await heldStepHooks()?.result(runner, message.jobId, message.output)))
+                    runner.result(message.jobId, message.output);
                 }
               } catch {
                 ws.close(1008, "Invalid runner message");

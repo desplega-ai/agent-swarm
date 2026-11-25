@@ -96,3 +96,38 @@ Durable-object leases include queue wait, execution time and a 10-second commit 
 `GET /api/script-runners` requires `script_runner.read` for users or the operator key.
 Its `lanes.sync` reports `queued`, `oldestWaitMs`, `inFlight` and `slots`.
 `slots: null` means unlimited embedded capacity. Counters and waiters belong to this API process.
+
+## Durable runs
+
+PostgreSQL places durable script runs through shared slot reservations.
+Each reservation consumes the same total capacity as an inline run.
+`SCRIPT_RUNNER_LONG_LANE_SHARE` defaults to `0.5` and limits durable jobs on each remote runner.
+The long lane always permits at least one slot. Unowned `running` rows form its queue without a timeout.
+`lanes.long` reports queued rows, oldest wait and active owners.
+
+The API claims the row before it mints the broker credential.
+The broker retains the verified launch authority and its original expiry restrictions.
+Historical runs retain journal-only credentials. The runner receives no broker bearer for a durable job.
+The guest receives source, arguments, its run identity and a local capability socket.
+The API applies the capability allowlist, dispatch limits and response limits.
+
+Remote owners use the runner instance ID. Remote PIDs stay NULL.
+A heartbeat renews each live lease every 10 seconds for 60 seconds.
+Expired leases cannot renew. The supervisor clears expired owners and replays their journals.
+Embedded owners use `embedded:<bootId>` without a lease expiry.
+The supervisor never takes a live embedded run because of heartbeat age.
+
+The API fences capabilities, heartbeats and settlement by owner and lease.
+It scrubs output and error text before settlement. Settlement keeps the running guard.
+The runner retains finished results until acknowledgement and resends them after reconnect.
+Within one API process, capability request IDs reuse their original responses after reconnect.
+The response cache has a 64 MiB limit per durable session.
+
+A short disconnect retains durable guests and broker sessions.
+After an API restart, the API cancels held guests and releases their rows for journal replay.
+Guest code and swarm calls outside a journal step can execute again after a restart.
+Use journal steps for work that needs replay protection.
+
+SIGTERM stops admission, allows inline work five seconds, and stops durable guests.
+The runner then closes with code 1000. The API releases its held rows immediately.
+Pause, cancel and limits stop the remote guest through its owner session.
