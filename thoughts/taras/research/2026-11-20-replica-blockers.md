@@ -214,3 +214,10 @@ An API restart loses queued callers. Multiple API replicas do not share placemen
 `src/script-workflows/supervisor.ts` owns the lease sweep timer and the `embedded:<bootId>` identity.
 `src/scripts-runtime/dispatch/held-reservations.ts` retains shared slot reservations.
 These files still require one API process per database.
+
+## Execution bus additions
+
+- `packages/storage-postgres/src/bus/table-backend.ts`: subscriptions and the delivery timer belong to one process. Wake-up subscriptions only reach that process.
+- Delivery claims use SERIALIZABLE transactions and `FOR UPDATE SKIP LOCKED`. A unique token fences each acknowledgement across processes.
+- `src/be/script-runners/durable-dispatch.ts`: the API subscribes to `script.job.requested`. The supervisor recovery scan remains necessary after lost wakes.
+- Existing realtime and workflow bus subscribers retain their current behavior.

@@ -24,6 +24,7 @@ import {
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { publishDurableRunRequested } from "../be/script-runners/durable-launch-bus";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import { getStorage } from "../be/storage";
 import { isScriptRunToken } from "../be/users";
@@ -553,6 +554,8 @@ export async function handleScriptRuns(
           JSON.stringify({ ...principal, depth: auth.depth, objectChain: auth.objectChain }),
         );
       }
+      if (!creation.existing)
+        await publishDurableRunRequested(creation.run.id, !parsed.body.background);
       return creation;
     });
     if (!creation) {

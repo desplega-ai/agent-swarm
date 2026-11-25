@@ -6,6 +6,7 @@ import {
   type Storage,
   type TransactionOptions,
 } from "@desplega/storage";
+import { PostgresTableBus } from "./bus/table-backend";
 import { postgresDialect } from "./dialect";
 import { PostgresMemoryIndexes } from "./memory-indexes";
 import { PostgresAgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
@@ -59,6 +60,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
   };
   const memory = new PostgresMemoryRepository(executor);
   return {
+    executionBus: new PostgresTableBus(client),
     dialect: postgresDialect,
     capabilities,
     executor,

@@ -7,6 +7,8 @@ import {
   updateScriptRunIfRunning,
 } from "../be/db";
 import { DURABLE_LEASE_MS, releaseDurableOwner } from "../be/script-runners/durable-dispatch";
+
+import { startDurableBus, stopDurableBus } from "../be/script-runners/durable-launch-bus";
 import { acquireLegacyJournalCredential } from "../be/scripts/legacy-journal-credential";
 import {
   acquireScriptApiCredential,
@@ -277,6 +279,8 @@ export async function reconcileScriptRuns(baseUrl: string): Promise<void> {
 
 export async function startScriptRunSupervisor(baseUrl: string): Promise<void> {
   if (supervisorDisabled() || reconcileTimer) return;
+  startDurableBus((run) => startScriptRunProcess(run, baseUrl));
+  if (process.env.NODE_ENV === "test" && process.env.E2E_BUS_RECOVERY_ONLY === "true") return;
   await reconcileScriptRuns(baseUrl);
   reconcileTimer = setInterval(() => {
     void reconcileScriptRuns(baseUrl);
@@ -285,6 +289,7 @@ export async function startScriptRunSupervisor(baseUrl: string): Promise<void> {
 }
 
 export async function stopScriptRunSupervisor(): Promise<void> {
+  await stopDurableBus();
   if (reconcileTimer) clearInterval(reconcileTimer);
   reconcileTimer = null;
   await Promise.allSettled(starting.values());

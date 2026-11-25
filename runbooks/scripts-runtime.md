@@ -53,3 +53,24 @@ They can wait as unowned rows when embedded slots are disabled or capacity is fu
 The API retains the broker and capability session. Only the guest runs remotely.
 SQLite retains local execution and leaves ownership columns NULL.
 See [script-runners.md](./script-runners.md#durable-runs) for lease, replay and drain behavior.
+
+## Durable launch bus on PostgreSQL
+
+The API writes `script.job.requested` with the durable run in one transaction.
+The `script-dispatcher` consumer group exists in the topic catalog, even before a consumer starts.
+The launch still starts a background run directly. A repeated delivery uses the supervisor guard.
+A deferred launch records its originating API boot in the event.
+That boot acknowledges the event without starting a guest.
+A new boot can start the guest from a delivery left pending by a crash.
+The ordinary supervisor scan still recovers deferred runs.
+
+The table backend claims deliveries with SERIALIZABLE transactions and `FOR UPDATE SKIP LOCKED`.
+It executes handlers outside those transactions and fences acknowledgements with a unique claim token.
+A failed handler waits for the next sweep. A claim expires after 60 seconds.
+After-commit wakes and a 15-second sweep trigger delivery. A boot starts delivery before reconciliation.
+The supervisor still reads active run rows for recovery.
+
+The API owns the bus and its database connection. A script runner never accesses bus tables.
+SQLite uses the existing supervisor path and has no execution bus tables.
+Existing realtime and workflow event subscribers retain their current delivery behavior.
+See `runbooks/db-retention.md` for the internal queue retention policy.

@@ -33,6 +33,8 @@ const SIDE_EFFECTS: [RegExp, string][] = [
  * through afterCommit themselves. Reason on each line (brief section 10).
  */
 const DEFERS_INTERNALLY: Record<string, string> = {
+  publishDurableRunRequested:
+    "src/be/script-runners/durable-dispatch.ts writes queue rows in the transaction and schedules wakes through afterCommit",
   emitRunFinished:
     "src/be/db/workflow-runs.ts schedules the bus emit with getDbClient().afterCommit",
 };

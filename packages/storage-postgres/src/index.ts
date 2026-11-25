@@ -9,6 +9,7 @@ export {
   ProcessLockHeldError,
   type ProcessLockOptions,
 } from "./boot";
+export { PostgresTableBus } from "./bus/table-backend";
 export {
   createPostgresClient,
   DEFAULT_POSTGRES_RETRY,

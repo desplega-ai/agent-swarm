@@ -1,3 +1,5 @@
+export { BUS_DURABLE_GROUPS, BUS_TOPICS, type BusTopics } from "./bus/topics";
+export type { Bus, BusDelivery, ManagedBus } from "./bus/types";
 export type { Capabilities, CapabilityName } from "./capabilities";
 export {
   type DbClient,

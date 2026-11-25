@@ -76,6 +76,7 @@ export type Repositories = {
  * transaction entry point. The API server holds exactly one.
  */
 export interface Storage {
+  readonly executionBus?: import("./bus/types").ManagedBus;
   readonly dialect: Dialect;
   readonly capabilities: Capabilities;
   readonly repos: Repositories;

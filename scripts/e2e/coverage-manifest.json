@@ -224,6 +224,10 @@
     }
   ],
   "flows": {
+    "execution-bus": {
+      "description": "Public durable launches persist execution events on PostgreSQL and retain the SQLite path",
+      "scenarios": ["stress-bus-claim", "bus-launch-recovery"]
+    },
     "script-runner-credentials": {
       "description": "Human credential management and HTTP isolation",
       "scenarios": [
