@@ -128,7 +128,9 @@ export interface ResolveCredentialOptions {
 
 /**
  * Credential kinds in precedence order. `resolveCredentials` walks this list;
- * `resolveCredential` returns the first hit.
+ * `resolveCredential` returns the first hit. Only callers that pass no
+ * `kinds` use it (workflow LLM nodes): platform-internal calls (titles,
+ * session summaries, the `llm` rater) pass `internalProviderOrder(...)`.
  *
  * `fireworks` and `amazon-bedrock` sit AFTER every kind that shipped before
  * them. Both can be present in an environment that already works today (a
@@ -154,10 +156,11 @@ export const CREDENTIAL_KIND_PRECEDENCE: readonly CredentialKind[] = [
 
 export interface ResolveCredentialsOptions extends ResolveCredentialOptions {
   /**
-   * Only resolve these kinds (in precedence order). Lets a caller probe one
+   * Only resolve these kinds, in the order given. Platform-internal callers
+   * pass `internalProviderOrder(...)` here; it also lets a caller probe one
    * provider at a time, so the codex OAuth lookup (an HTTP call that can
    * rotate a refresh token) runs only when that kind is actually needed.
-   * Default: every kind.
+   * Default: every kind, in {@link CREDENTIAL_KIND_PRECEDENCE}.
    */
   kinds?: readonly CredentialKind[];
   /** Stop after this many credentials. Default: no limit. */
@@ -181,7 +184,7 @@ export interface ResolveCredentialsOptions extends ResolveCredentialOptions {
  *   8. null
  */
 export async function resolveCredential(
-  opts: ResolveCredentialOptions = {},
+  opts: Omit<ResolveCredentialsOptions, "limit"> = {},
 ): Promise<ResolvedCredential | null> {
   const [first] = await resolveCredentials({ ...opts, limit: 1 });
   return first ?? null;
@@ -199,13 +202,11 @@ export async function resolveCredentials(
 ): Promise<ResolvedCredential[]> {
   const env = opts.env ?? process.env;
   const getEnvKey = opts._getEnvApiKey ?? getEnvApiKey;
-  const wanted = opts.kinds ?? CREDENTIAL_KIND_PRECEDENCE;
   const limit = opts.limit ?? Number.POSITIVE_INFINITY;
   const found: ResolvedCredential[] = [];
 
-  for (const kind of CREDENTIAL_KIND_PRECEDENCE) {
+  for (const kind of opts.kinds ?? CREDENTIAL_KIND_PRECEDENCE) {
     if (found.length >= limit) break;
-    if (!wanted.includes(kind)) continue;
     const cred = await resolveKind(kind, opts, env, getEnvKey);
     if (cred) found.push(cred);
   }
@@ -225,7 +226,7 @@ async function resolveKind(
       return {
         kind,
         apiKey: selectCredential(key, undefined, "OPENROUTER_API_KEY").selected,
-        modelDefault: resolveRaterModelString(kind),
+        modelDefault: resolveRaterModelString(kind, env),
       };
     }
     case "anthropic": {
@@ -239,7 +240,7 @@ async function resolveKind(
       return {
         kind,
         apiKey: selectCredential(key, undefined, "ANTHROPIC_API_KEY").selected,
-        modelDefault: resolveRaterModelString(kind),
+        modelDefault: resolveRaterModelString(kind, env),
       };
     }
     case "openai": {
@@ -248,26 +249,26 @@ async function resolveKind(
       return {
         kind,
         apiKey: selectCredential(key, undefined, "OPENAI_API_KEY").selected,
-        modelDefault: resolveRaterModelString(kind),
+        modelDefault: resolveRaterModelString(kind, env),
       };
     }
     case "openai-codex":
       // Only if we have apiUrl + apiKey to probe the config store.
       if (!opts.apiUrl || !opts.apiKey) return null;
-      return resolveCodexOAuthCredential(opts, opts.apiUrl, opts.apiKey);
+      return resolveCodexOAuthCredential(opts, opts.apiUrl, opts.apiKey, env);
     case "claude-cli":
       // `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` is the mirror set by claude-adapter.ts
       // before spawning `claude` — the CLI strips `CLAUDE_CODE_OAUTH_TOKEN` from
       // hook subprocesses (security), so the hook reads the mirror instead.
       if (!env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN && !env.CLAUDE_CODE_OAUTH_TOKEN) return null;
-      return { kind, modelDefault: resolveRaterModelString(kind) };
+      return { kind, modelDefault: resolveRaterModelString(kind, env) };
     case "fireworks": {
       const key = env.FIREWORKS_API_KEY ?? getEnvKey("fireworks");
       if (!key) return null;
       return {
         kind,
         apiKey: selectCredential(key, undefined, "FIREWORKS_API_KEY").selected,
-        modelDefault: resolveRaterModelString(kind),
+        modelDefault: resolveRaterModelString(kind, env),
       };
     }
     case "amazon-bedrock":
@@ -301,7 +302,7 @@ function resolveBedrockCredential(
   // endpoint and the region are all the call site needs to add.
   return {
     kind: "amazon-bedrock",
-    modelDefault: resolveRaterModelString("amazon-bedrock"),
+    modelDefault: resolveRaterModelString("amazon-bedrock", env),
     region,
   };
 }
@@ -310,6 +311,7 @@ async function resolveCodexOAuthCredential(
   opts: ResolveCredentialOptions,
   apiUrl: string,
   apiKey: string,
+  env: NodeJS.ProcessEnv,
 ): Promise<ResolvedCredential | null> {
   const getCodex = opts._getValidCodexOAuth ?? getValidCodexOAuth;
   const getOAuth = opts._getOAuthApiKey ?? resolveOAuthApiKey;
@@ -350,7 +352,7 @@ async function resolveCodexOAuthCredential(
     return {
       kind: "openai-codex",
       apiKey: oauthResult.apiKey,
-      modelDefault: resolveRaterModelString("openai-codex"),
+      modelDefault: resolveRaterModelString("openai-codex", env),
     };
   } catch (err) {
     console.error(

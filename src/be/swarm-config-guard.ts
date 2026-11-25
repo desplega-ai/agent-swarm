@@ -22,7 +22,7 @@ import {
   isFollowUpGateScheduleId,
   parseFollowUpGateScheduleIds,
 } from "../utils/follow-up-gate-schedule-ids";
-import { kindForModelString } from "../utils/internal-ai/models";
+import { INTERNAL_LLM_PROVIDER_OPTIONS, kindForModelString } from "../utils/internal-ai/models";
 import { CREDENTIAL_SELECTION_STRATEGIES } from "../utils/key-usage";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
@@ -780,6 +780,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "TASK_AUTO_TITLE_ENABLED",
   ]),
   TASK_AUTO_TITLE_MODEL: validateTaskAutoTitleModel,
+  ...enumValidator("INTERNAL_LLM_PROVIDER", ["", ...INTERNAL_LLM_PROVIDER_OPTIONS]),
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),

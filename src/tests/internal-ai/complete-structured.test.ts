@@ -7,7 +7,7 @@ import {
   completeStructuredWithModel,
   defaultSpawnClaudeCli,
 } from "../../utils/internal-ai/complete-structured.js";
-import type { ResolvedCredential } from "../../utils/internal-ai/credentials.js";
+import { type ResolvedCredential, resolveCredential } from "../../utils/internal-ai/credentials.js";
 import { summaryToolSchema } from "../../utils/internal-ai/summarize-session.js";
 
 const ResultZodSchema = z.object({
@@ -726,5 +726,84 @@ describe("credential kinds added for fireworks and amazon-bedrock", () => {
       _complete: async () => toolCallMsg(),
     });
     expect(result).toBeNull();
+  });
+});
+
+describe("session summary / llm rater provider resolution (#3667)", () => {
+  const baseOpts = {
+    zodSchema: ResultZodSchema,
+    toolSchema: ResultToolSchema,
+    toolName: "record_result",
+    toolDescription: "Record the result.",
+    systemPrompt: "sys",
+    userPrompt: "user",
+    retries: 1,
+  };
+  const BOTH_KEYS = { OPENROUTER_API_KEY: "example-or", CLAUDE_CODE_OAUTH_TOKEN: "oat" };
+  // The real resolver, without pi-ai's process.env key lookup.
+  const resolveFromEnvOnly: typeof resolveCredential = (opts) =>
+    resolveCredential({ ...opts, _getEnvApiKey: () => undefined });
+
+  /** Runs one call and reports which path served it. */
+  async function served(env: Record<string, string>) {
+    const seen: string[] = [];
+    const result = await completeStructuredWithModel({
+      ...baseOpts,
+      env,
+      _resolveCredential: resolveFromEnvOnly,
+      _spawnClaudeCli: async (_prompt, model) => {
+        seen.push(`claude-cli:${model}`);
+        return JSON.stringify({ summary: "cli", count: 1 });
+      },
+      _complete: async (model) => {
+        seen.push(`${model.provider}:${model.id}`);
+        return makeMsg([
+          {
+            type: "toolCall",
+            id: "call_1",
+            name: "record_result",
+            arguments: { summary: "api", count: 2 },
+          },
+        ]);
+      },
+    });
+    return { seen, model: result?.model };
+  }
+
+  test("OPENROUTER_API_KEY + CLAUDE_CODE_OAUTH_TOKEN goes to the claude CLI", async () => {
+    expect(await served(BOTH_KEYS)).toEqual({ seen: ["claude-cli:haiku"], model: "haiku" });
+  });
+
+  test("MEMORY_RATER_MODEL=haiku uses the claude CLI, even over an explicit setting", async () => {
+    expect(
+      await served({
+        ...BOTH_KEYS,
+        INTERNAL_LLM_PROVIDER: "openrouter",
+        MEMORY_RATER_MODEL: "haiku",
+      }),
+    ).toEqual({ seen: ["claude-cli:haiku"], model: "haiku" });
+  });
+
+  test("INTERNAL_LLM_PROVIDER=openrouter opts in to OpenRouter", async () => {
+    expect(await served({ ...BOTH_KEYS, INTERNAL_LLM_PROVIDER: "openrouter" })).toEqual({
+      seen: ["openrouter:deepseek/deepseek-v4.1-flash"],
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+    });
+  });
+
+  test("a pinned openrouter/ rater model opts in to OpenRouter", async () => {
+    expect(
+      await served({ ...BOTH_KEYS, MEMORY_RATER_MODEL: "openrouter/deepseek/deepseek-v4.1-flash" }),
+    ).toEqual({
+      seen: ["openrouter:deepseek/deepseek-v4.1-flash"],
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+    });
+  });
+
+  test("an OpenRouter-only environment skips the call without opt-in", async () => {
+    expect(await served({ OPENROUTER_API_KEY: "example-or" })).toEqual({
+      seen: [],
+      model: undefined,
+    });
   });
 });

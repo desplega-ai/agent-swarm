@@ -101,22 +101,58 @@ describe("prepareTaskTextForTitle", () => {
   });
 });
 
+/** `INTERNAL_AUTO_PROVIDER_ORDER`: OpenRouter is not in it. */
+const AUTO_KINDS = [
+  "claude-cli",
+  "anthropic",
+  "openai",
+  "openai-codex",
+  "fireworks",
+  "amazon-bedrock",
+];
+
 describe("buildTaskTitlePlan", () => {
-  test("default plan is the candidate table", () => {
-    expect(buildTaskTitlePlan({})).toBe(TASK_TITLE_MODEL_CANDIDATES);
+  test("default plan follows the shared internal order and leaves OpenRouter out", () => {
+    const plan = buildTaskTitlePlan({});
+    expect(plan.map((group) => group.kind)).toEqual(AUTO_KINDS);
+    for (const group of plan) {
+      expect(group.models).toEqual(
+        TASK_TITLE_MODEL_CANDIDATES.find((candidate) => candidate.kind === group.kind)?.models,
+      );
+    }
+  });
+
+  test("INTERNAL_LLM_PROVIDER=openrouter is the opt-in, and allows only that kind", () => {
+    const plan = buildTaskTitlePlan({ INTERNAL_LLM_PROVIDER: "openrouter" });
+    expect(plan).toEqual([TASK_TITLE_MODEL_CANDIDATES[0]]);
+    expect(plan[0]?.kind).toBe("openrouter");
+  });
+
+  test("the codex harness moves its own kinds first", () => {
+    expect(buildTaskTitlePlan({ HARNESS_PROVIDER: "codex" }).map((group) => group.kind)).toEqual([
+      "openai-codex",
+      "openai",
+      "claude-cli",
+      "anthropic",
+      "fireworks",
+      "amazon-bedrock",
+    ]);
   });
 
   test("a pinned model moves its provider first and the model to the front", () => {
     const plan = buildTaskTitlePlan({ [TASK_TITLE_MODEL_ENV]: "openai/gpt-5-nano" });
     expect(plan[0]).toEqual({ kind: "openai", models: ["openai/gpt-5-nano", "openai/gpt-6-luna"] });
-    expect(plan.slice(1).map((group) => group.kind)).toEqual([
-      "openrouter",
-      "anthropic",
-      "openai-codex",
-      "claude-cli",
-      "fireworks",
-      "amazon-bedrock",
-    ]);
+    expect(plan.slice(1).map((group) => group.kind)).toEqual(
+      AUTO_KINDS.filter((kind) => kind !== "openai"),
+    );
+  });
+
+  test("a pinned openrouter model opts in to OpenRouter for its provider only", () => {
+    const plan = buildTaskTitlePlan({
+      [TASK_TITLE_MODEL_ENV]: "openrouter/deepseek/deepseek-v4.1-flash",
+    });
+    expect(plan.map((group) => group.kind)).toEqual(["openrouter", ...AUTO_KINDS]);
+    expect(plan[0]?.models[0]).toBe("openrouter/deepseek/deepseek-v4.1-flash");
   });
 
   test("a pinned model outside the table is still tried first", () => {
@@ -129,8 +165,8 @@ describe("buildTaskTitlePlan", () => {
       kind: "claude-cli",
       models: ["sonnet", "haiku"],
     });
-    expect(buildTaskTitlePlan({ [TASK_TITLE_MODEL_ENV]: "google/gemini-2.5-flash-lite" })).toBe(
-      TASK_TITLE_MODEL_CANDIDATES,
+    expect(buildTaskTitlePlan({ [TASK_TITLE_MODEL_ENV]: "google/gemini-2.5-flash-lite" })).toEqual(
+      buildTaskTitlePlan({}),
     );
   });
 
@@ -175,12 +211,7 @@ describe("buildTaskTitlePlan", () => {
     expect(bedrock[0].models).toContain("amazon-bedrock/global.anthropic.claude-haiku-5-5");
     expect(bedrock.map((group) => group.kind)).toEqual([
       "amazon-bedrock",
-      "openrouter",
-      "anthropic",
-      "openai",
-      "openai-codex",
-      "claude-cli",
-      "fireworks",
+      ...AUTO_KINDS.filter((kind) => kind !== "amazon-bedrock"),
     ]);
   });
 });
@@ -230,7 +261,8 @@ describe("generateTaskTitle", () => {
     });
     const result = await generateTaskTitle({
       task: LONG_TASK,
-      env: {},
+      // Pinning the first OpenRouter model opts in to OpenRouter ahead of the auto order.
+      env: { [TASK_TITLE_MODEL_ENV]: "openrouter/deepseek/deepseek-v4.1-flash" },
       _resolveCredentials: resolve,
       _completeStructured: complete,
     });
@@ -249,8 +281,8 @@ describe("generateTaskTitle", () => {
   });
 
   test("resolves one credential kind at a time and stops before the codex probe when an earlier provider answers", async () => {
-    const { resolve, calls } = resolver(["openrouter", "openai-codex"]);
-    const { complete } = completer({ "openrouter/deepseek/deepseek-v4.1-flash": "A title" });
+    const { resolve, calls } = resolver(["anthropic", "openai-codex"]);
+    const { complete } = completer({ "anthropic/claude-haiku-5-5": "A title" });
     await generateTaskTitle({
       task: LONG_TASK,
       env: {},
@@ -259,7 +291,7 @@ describe("generateTaskTitle", () => {
       _resolveCredentials: resolve,
       _completeStructured: complete,
     });
-    expect(calls).toEqual([["openrouter"]]);
+    expect(calls).toEqual([["claude-cli"], ["anthropic"]]);
   });
 
   test("reports no-credentials when nothing resolves and all-models-failed otherwise", async () => {
@@ -273,10 +305,8 @@ describe("generateTaskTitle", () => {
         _completeStructured: silent.complete,
       }),
     ).toEqual({ ok: false, reason: "no-credentials" });
-    // Every kind was asked exactly once, in precedence order.
-    expect(none.calls.map((call) => call[0])).toEqual(
-      TASK_TITLE_MODEL_CANDIDATES.map((group) => group.kind),
-    );
+    // Every auto kind was asked exactly once, in order; OpenRouter never.
+    expect(none.calls.map((call) => call[0])).toEqual(AUTO_KINDS);
 
     const some = resolver(["claude-cli"]);
     expect(
@@ -314,6 +344,42 @@ describe("generateTaskTitle", () => {
       apiKey: "key-openai",
       modelDefault: "openai/gpt-5-nano",
     });
+  });
+
+  test("OPENROUTER_API_KEY + CLAUDE_CODE_OAUTH_TOKEN titles through the claude CLI (#3667)", async () => {
+    const { resolve, calls } = resolver(["openrouter", "claude-cli"]);
+    const { complete, models } = completer({ haiku: "Sessions page Playwright flake" });
+    const result = await generateTaskTitle({
+      task: LONG_TASK,
+      env: { OPENROUTER_API_KEY: "or", CLAUDE_CODE_OAUTH_TOKEN: "oat" },
+      _resolveCredentials: resolve,
+      _completeStructured: complete,
+    });
+    expect(result).toEqual({
+      ok: true,
+      title: "Sessions page Playwright flake",
+      model: "haiku",
+      kind: "claude-cli",
+    });
+    expect(models).toEqual(["haiku"]);
+    expect(calls.flat()).not.toContain("openrouter");
+  });
+
+  test("INTERNAL_LLM_PROVIDER=openrouter titles through OpenRouter even with a claude token", async () => {
+    const { resolve, calls } = resolver(["openrouter", "claude-cli"]);
+    const { complete } = completer({ "openrouter/deepseek/deepseek-v4.1-flash": "A title" });
+    const result = await generateTaskTitle({
+      task: LONG_TASK,
+      env: {
+        OPENROUTER_API_KEY: "or",
+        CLAUDE_CODE_OAUTH_TOKEN: "oat",
+        INTERNAL_LLM_PROVIDER: "openrouter",
+      },
+      _resolveCredentials: resolve,
+      _completeStructured: complete,
+    });
+    expect(result).toMatchObject({ ok: true, kind: "openrouter" });
+    expect(calls).toEqual([["openrouter"]]);
   });
 
   test("an aborted signal stops the walk", async () => {

@@ -869,7 +869,7 @@
       "scenarios": ["route-caller-identity"]
     },
     "llm-emulator-backend": {
-      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429, and task auto-titling lands a title from a streamed set_title tool call",
+      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429; task auto-titling uses the claude CLI when a Claude token and an OpenRouter key are both set, and lands a title from a streamed set_title tool call only after INTERNAL_LLM_PROVIDER=openrouter",
       "scenarios": ["llm-emulate-ai"]
     },
     "post-onboarding-checklist": {
