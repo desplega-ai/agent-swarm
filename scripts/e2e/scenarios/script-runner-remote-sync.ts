@@ -91,7 +91,7 @@ export const scriptRunnerRemoteSync: Scenario = {
     expectStatus(secondCredential, [201], "mint second credential");
     const otherToken = asString(asRecord(secondCredential.json).token, "second token");
     const otherDuplicate = await connectFixture(otherToken);
-    expect(otherDuplicate.code === 1011, "another credential cannot replace a live session");
+    expect(otherDuplicate.code === 1008, "an instance cannot change its bound credential");
     const held = await connectFixture(otherToken, [crypto.randomUUID()]);
     expect(held.code === 1008, "held jobs cannot be adopted");
     try {
