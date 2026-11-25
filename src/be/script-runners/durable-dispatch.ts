@@ -49,10 +49,14 @@ export async function startRemoteDurable(
   input: StartScriptExecutionInput,
   runner: RemoteScriptRunner,
 ): Promise<ScriptExecutionHandle> {
-  const unregisterFence = registerDurableBrokerFence(input.apiKey, input.run.id, runner.id);
+  const unregisterFence = registerDurableBrokerFence(input.apiKey, input.run.id, runner.ownerId);
   const token = crypto.randomUUID();
   const session = createCapabilitySession(
-    { ...input, ownerId: runner.id, authorizeCapability: () => owns(input.run.id, runner.id) },
+    {
+      ...input,
+      ownerId: runner.ownerId,
+      authorizeCapability: () => owns(input.run.id, runner.ownerId),
+    },
     token,
     true,
   );
@@ -61,7 +65,7 @@ export async function startRemoteDurable(
   const exited = new Promise<ScriptExecutionResult>((resolve) => {
     finish = resolve;
   });
-  held.set(input.run.id, { ownerId: runner.id, session, finish });
+  held.set(input.run.id, { ownerId: runner.ownerId, session, finish });
   try {
     await send(runner, { type: "durable-job", jobId: input.run.id, run: input.run });
   } catch (error) {
@@ -112,7 +116,7 @@ export async function durableHeartbeat(runner: RemoteScriptRunner, jobs: string[
     if (
       !(await getStorage().repos.scripts.renewScriptRunLease(
         id,
-        runner.id,
+        runner.ownerId,
         now,
         new Date(Date.now() + DURABLE_LEASE_MS).toISOString(),
       ))
@@ -124,7 +128,7 @@ export async function durableHeartbeat(runner: RemoteScriptRunner, jobs: string[
 }
 export async function durableCapability(runner: RemoteScriptRunner, id: string, frame: string) {
   const job = held.get(id);
-  if (!job || job.ownerId !== runner.id || !(await owns(id, runner.id))) return;
+  if (!job || job.ownerId !== runner.ownerId || !(await owns(id, runner.ownerId))) return;
   const parsed = JSON.parse(frame);
   if (parsed.type === "ack" && typeof parsed.id === "string") {
     job.session.confirmResponse(parsed.id);
@@ -132,7 +136,7 @@ export async function durableCapability(runner: RemoteScriptRunner, id: string, 
   }
   try {
     await job.session.receive(frame, async (response) => {
-      if (await owns(id, runner.id)) {
+      if (await owns(id, runner.ownerId)) {
         const current = scriptRunnerSessions.get(runner.id);
         if (current) await send(current, { type: "cap", jobId: id, frame: response });
       }
@@ -149,18 +153,18 @@ export async function durableResult(
   result: ScriptExecutionResult,
 ) {
   const job = held.get(id);
-  if (result.terminated && job?.ownerId === runner.id) {
-    await getStorage().repos.scripts.releaseScriptRunOwner(id, runner.id);
+  if (result.terminated && job?.ownerId === runner.ownerId) {
+    await getStorage().repos.scripts.releaseScriptRunOwner(id, runner.ownerId);
     job.finish(result);
     await send(runner, { type: "ack", jobId: id });
     return;
   }
-  if (job?.ownerId === runner.id && (await owns(id, runner.id))) {
+  if (job?.ownerId === runner.ownerId && (await owns(id, runner.ownerId))) {
     const now = new Date().toISOString();
     const changed = await getStorage().transaction(() =>
       getStorage().repos.scripts.settleOwnedScriptRun(
         id,
-        runner.id,
+        runner.ownerId,
         now,
         result.exitCode === 0 ? "completed" : "failed",
         result.exitCode === 0 ? scrubSecrets(JSON.stringify(result.output ?? null)) : null,
@@ -179,9 +183,9 @@ export async function durableResult(
 }
 export async function reconnectDurable(runner: RemoteScriptRunner, ids: string[]) {
   for (const id of ids) {
-    if (held.get(id)?.ownerId === runner.id && (await owns(id, runner.id))) continue;
+    if (held.get(id)?.ownerId === runner.ownerId && (await owns(id, runner.ownerId))) continue;
     await send(runner, { type: "cancel", jobId: id });
-    await getStorage().repos.scripts.releaseScriptRunOwner(id, runner.id);
+    await getStorage().repos.scripts.releaseScriptRunOwner(id, runner.ownerId);
   }
 }
 export async function releaseDurableOwner(ownerId: string, runId?: string) {

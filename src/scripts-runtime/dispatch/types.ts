@@ -24,6 +24,7 @@ export type ScriptRunnerHandle = {
   executors?: readonly ScriptExecutorName[];
   runtimes?: readonly ShellRuntime[];
   id: string;
+  ownerId?: string;
   kind: "embedded" | "remote";
   startHeld(input: StartScriptExecutionInput): Promise<ScriptExecutionHandle>;
   run(job: ScriptJob, signal?: AbortSignal): Promise<ExecutorOutput>;

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
@@ -19,6 +20,7 @@ export const scriptRunnerDurable: Scenario = {
     }
     expectStatus(minted, [201], "mint runner credential");
     const token = asString(asRecord(minted.json).token, "token");
+    const credentialId = asString(asRecord(asRecord(minted.json).credential).id, "credential ID");
     const agent = await ctx.api("POST", "/api/agents", {
       body: { name: `durable-${ctx.nonce}`, role: "worker", status: "online" },
     });
@@ -41,6 +43,7 @@ export const scriptRunnerDurable: Scenario = {
           asRecords((await ctx.api("GET", "/api/script-runners")).json, "sessions")[0]!.instanceId,
           "first instance",
         );
+        const firstOwner = createHash("sha256").update(`${credentialId}:${firstId}`).digest("hex");
         runners.push(startScriptRunner(ctx.baseUrl, token));
         expect(
           await pollUntil(
@@ -78,7 +81,7 @@ export const scriptRunnerDurable: Scenario = {
           sql`SELECT "ownerId", pid FROM script_runs WHERE id = ${id}`,
         );
         expect(
-          owned?.ownerId === firstId && owned.pid === null,
+          owned?.ownerId === firstOwner && owned.pid === null,
           "first remote runner owns run with NULL PID",
         );
         const interruptedAt = Date.now();
@@ -98,7 +101,7 @@ export const scriptRunnerDurable: Scenario = {
         const settled = ctx.db.get<{ ownerId: string }>(
           sql`SELECT "ownerId" FROM script_runs WHERE id = ${id}`,
         );
-        expect(settled?.ownerId !== firstId, "replay changes the owner");
+        expect(settled?.ownerId !== firstOwner, "replay changes the owner");
         expect(asRecords(result, "journal").length === 3, "replay stores each step once");
         if (signal === "SIGTERM")
           expect(Date.now() - interruptedAt < 60000, "drain does not wait for lease expiry");

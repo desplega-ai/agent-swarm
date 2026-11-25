@@ -578,3 +578,16 @@ test("unconfirmed heartbeats do not extend a durable guest lease", async () => {
     server.close();
   }
 }, 15000);
+
+test("runner owner identity binds the credential across API restart", async () => {
+  const { scriptRunnerOwnerId } = await import("../be/script-runners/sessions");
+  const instance = crypto.randomUUID();
+  const credential = crypto.randomUUID();
+  expect(scriptRunnerOwnerId(credential, instance)).toBe(scriptRunnerOwnerId(credential, instance));
+  expect(scriptRunnerOwnerId(credential, instance)).not.toBe(
+    scriptRunnerOwnerId(crypto.randomUUID(), instance),
+  );
+  expect(scriptRunnerOwnerId(credential, instance)).not.toBe(
+    scriptRunnerOwnerId(credential, crypto.randomUUID()),
+  );
+});

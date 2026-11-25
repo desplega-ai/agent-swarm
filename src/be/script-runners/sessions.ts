@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { WebSocket } from "ws";
 import {
   apiMessage,
@@ -11,8 +12,13 @@ import type { ScriptJob, ScriptRunnerHandle } from "../../scripts-runtime/dispat
 import type { ExecutorOutput, ScriptExecutorName } from "../../scripts-runtime/executors/types";
 import type { ShellRuntime } from "../../scripts-runtime/shell-job";
 
+export function scriptRunnerOwnerId(credentialId: string, instanceId: string): string {
+  return createHash("sha256").update(`${credentialId}:${instanceId}`).digest("hex");
+}
+
 export class RemoteScriptRunner implements ScriptRunnerHandle {
   readonly kind = "remote";
+  readonly ownerId: string;
   jobsCompleted = 0;
   draining = false;
   readonly pending = new Map<string, { finish: (output: ExecutorOutput) => void }>();
@@ -21,8 +27,11 @@ export class RemoteScriptRunner implements ScriptRunnerHandle {
     readonly slots: number,
     readonly executors: ScriptExecutorName[],
     readonly socket: WebSocket,
+    credentialId: string,
     readonly runtimes: ShellRuntime[] = [],
-  ) {}
+  ) {
+    this.ownerId = scriptRunnerOwnerId(credentialId, id);
+  }
   async startHeld(input: StartScriptExecutionInput) {
     const { startRemoteDurable } = await import("./durable-dispatch");
     return startRemoteDurable(input, this);

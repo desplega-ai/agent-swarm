@@ -116,7 +116,8 @@ Historical runs retain journal-only credentials. The runner receives no broker b
 The guest receives source, arguments, its run identity and a local capability socket.
 The API applies the capability allowlist, dispatch limits and response limits.
 
-Remote owners use the runner instance ID. Remote PIDs stay NULL.
+Remote owners use SHA-256 of the credential ID, a colon, and the runner instance ID. Remote PIDs stay NULL.
+The public instance UUID still identifies sessions and capacity. A different credential cannot renew or settle the persisted owner after API restart.
 A heartbeat renews each live lease every 10 seconds for 60 seconds.
 Expired leases cannot renew. The supervisor clears expired owners and replays their journals.
 Embedded owners use `embedded:<bootId>` without a lease expiry.

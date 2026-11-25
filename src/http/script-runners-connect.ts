@@ -167,6 +167,7 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                     message.slots,
                     message.executors,
                     ws,
+                    credential.id,
                     message.runtimes,
                   );
                   scriptRunnerSessions.set(runner.id, runner);
@@ -186,9 +187,12 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                   if (message.type === "draining") runner.draining = true;
                   else if (message.type === "heartbeat") {
                     const unhandled = [];
-                    for (const id of message.jobs)
-                      if (!(await heldStepHooks()?.heartbeat(runner, id))) unhandled.push(id);
-                    const renewed = await durableHeartbeat(runner, unhandled);
+                    const renewed: string[] = [];
+                    for (const id of message.jobs) {
+                      if (await heldStepHooks()?.heartbeat(runner, id)) renewed.push(id);
+                      else unhandled.push(id);
+                    }
+                    renewed.push(...(await durableHeartbeat(runner, unhandled)));
                     if (message.nonce)
                       ws.send(
                         JSON.stringify({
@@ -215,7 +219,7 @@ export function attachScriptRunnerTransport(server: Server): () => void {
             clearInterval(ping);
             if (runner) {
               if (code === 1000 || code === 1008)
-                void releaseDurableOwner(runner.id).catch((error) =>
+                void releaseDurableOwner(runner.ownerId).catch((error) =>
                   console.error(scrubSecrets(String(error))),
                 );
               runner.close();

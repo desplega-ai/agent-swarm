@@ -79,7 +79,11 @@ async function startOwnedScriptRun(run: ScriptRun, baseUrl: string): Promise<voi
   const reservation = tier ? reserveHeldScriptRunner() : undefined;
   if (tier && !reservation) return;
   const remote = reservation?.runner.kind === "remote";
-  const ownerId = remote ? reservation.runner.id : embeddedOwnerId;
+  const ownerId = remote ? reservation.runner.ownerId : embeddedOwnerId;
+  if (!ownerId) {
+    reservation?.release();
+    throw new Error("Runner owner identity is required");
+  }
   if (
     tier &&
     !(await getStorage().repos.scripts.claimScriptRun(
