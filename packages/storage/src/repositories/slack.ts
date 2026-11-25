@@ -329,14 +329,32 @@ export abstract class BaseSlackRepository implements SlackRepository {
     value: ReturnType<SlackRepository["getRenderV2State"]>;
   };
 
+  /** Open transactions that wrote an activation column; while any is open, reads skip the cache. */
+  private renderV2StatePendingWrites = 0;
+
   private invalidateRenderV2State(): void {
     this.renderV2StateCache = undefined;
-    // A concurrent read before COMMIT must not survive the committed write.
-    if (this.db.client.inTransaction()) {
-      this.db.client.afterCommit(() => {
-        this.renderV2StateCache = undefined;
-      });
-    }
+    const client = this.db.client;
+    if (!client.inTransaction()) return;
+    // Until COMMIT, a read on another connection still sees the old row, and
+    // afterCommit runs a turn after COMMIT. Clearing the cache in a hook would
+    // let a read in that gap return the old row, so reads bypass the cache
+    // until this transaction ends instead.
+    // shortcut: a nested transaction whose rollback the caller catches drops
+    // this afterCommit hook while the outer one commits, so the count never
+    // drops and reads keep bypassing the cache (correct, just uncached). No
+    // caller writes the activation columns inside a transaction today; add a
+    // client hook for "outermost transaction ended" if one starts to.
+    this.renderV2StatePendingWrites += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.renderV2StatePendingWrites -= 1;
+      this.renderV2StateCache = undefined;
+    };
+    client.afterCommit(release);
+    client.onAttemptRollback(release);
   }
 
   touchInboundDuplicate(dedupKey: string, now: string): Promise<SlackInboundReceiptRow | null> {
@@ -569,7 +587,6 @@ export abstract class BaseSlackRepository implements SlackRepository {
         task_tree_enabled_at = ${enabledAt},
         task_tree_enabled = ${enabled}
       WHERE id = 1 RETURNING task_tree_enabled_at`);
-    this.invalidateRenderV2State();
     return row?.task_tree_enabled_at ?? null;
   }
 
@@ -584,7 +601,6 @@ export abstract class BaseSlackRepository implements SlackRepository {
     await this.db.run(
       sql`UPDATE slack_render_v2_state SET reconcile_cursors = ${jsonText(cursors)} WHERE id = 1`,
     );
-    this.invalidateRenderV2State();
   }
 
   abstract pageReconcileCandidates(
@@ -646,8 +662,9 @@ export abstract class BaseSlackRepository implements SlackRepository {
     activated_at: string;
     delegation_activated_at: string | null;
   } | null> {
-    // Transactional reads must see their own writes and never publish uncommitted state.
-    if (this.db.client.inTransaction()) {
+    // Transactional reads must see their own writes and never publish uncommitted
+    // state. Reads during an open singleton write must not cache the pre-commit row.
+    if (this.db.client.inTransaction() || this.renderV2StatePendingWrites > 0) {
       return this.db.get(sql`
         SELECT activated_at, delegation_activated_at FROM slack_render_v2_state WHERE id = 1`);
     }

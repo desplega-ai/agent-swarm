@@ -336,6 +336,51 @@ export function slackContract(engine: ContractEngine): void {
       expect((await repo.getRenderV2State())?.delegation_activated_at).toBe(T2);
     });
 
+    test("a read beside an open activation write does not cache the pre-commit row", async () => {
+      await repo.ensureRenderV2Activation(T0);
+      await repo.getRenderV2State();
+      const written = Promise.withResolvers<void>();
+      const commit = Promise.withResolvers<void>();
+      const tx = storage.executor.client.transaction(async () => {
+        await repo.ensureDelegationActivation(T1);
+        written.resolve();
+        await commit.promise;
+      });
+      await written.promise;
+      // Postgres answers from another connection with the pre-commit row;
+      // SQLite queues the read behind the transaction.
+      const during = repo.getRenderV2State();
+      await Promise.race([during, Bun.sleep(50)]);
+      commit.resolve();
+      await tx;
+      await during;
+      // Read before the deferred afterCommit hooks run.
+      expect((await repo.getRenderV2State())?.delegation_activated_at).toBe(T1);
+    });
+
+    test("activation reads use the cache again once the writing transaction ends", async () => {
+      await repo.ensureRenderV2Activation(T0);
+      await storage.executor.client.transaction(async () => {
+        await repo.ensureDelegationActivation(T1);
+      });
+      await expect(
+        storage.executor.client.transaction(async () => {
+          await repo.ensureDelegationActivation(T2);
+          throw new Error("rollback activation");
+        }),
+      ).rejects.toThrow("rollback activation");
+      // A hook scheduled now runs after the commit's deferred hooks.
+      await new Promise<void>((resolve) => storage.executor.client.afterCommit(resolve));
+      const read = spyOn(storage.executor, "get");
+      try {
+        await repo.getRenderV2State();
+        expect((await repo.getRenderV2State())?.delegation_activated_at).toBe(T1);
+        expect(read).toHaveBeenCalledTimes(1);
+      } finally {
+        read.mockRestore();
+      }
+    });
+
     test("render state: visibility transitions and reconcile cursors", async () => {
       expect(await repo.getTreeVisibility()).toBeNull();
       expect(await repo.getReconcileCursors()).toBeNull();
