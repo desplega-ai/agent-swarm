@@ -1,0 +1,13 @@
+{
+  "revision": "6f583bf3c6",
+  "shutdownRepairEquivalent": "82e0ef397f",
+  "restart": {
+    "status": "completed",
+    "journalRows": 2
+  },
+  "secretStderr": {
+    "status": "failed",
+    "redacted": true
+  },
+  "fixture": "Disposable PostgreSQL API and synthetic config secret. Two journal steps separated by a 20-second sleep. API SIGTERM and restart."
+}
