@@ -4358,6 +4358,15 @@ export function workerToolResultPreview(mcpTool: string | undefined, result: unk
   return telemetryOmitsToolResult(mcpTool) ? TELEMETRY_OMITTED : telemetryPreview(result);
 }
 
+/**
+ * The tool id the telemetry redaction policy keys on: the MCP tool name when the
+ * harness reports one, else the raw tool name (an OpenCode `swarm_<tool>` id, or
+ * a bare name on a tool_end with no recorded start).
+ */
+export function telemetryToolId(toolName: string, args: unknown): string {
+  return classifyTool(toolName, args).mcpTool ?? toolName;
+}
+
 type ToolTelemetry = {
   kind: "mcp" | "harness" | "skill" | "agent" | "shell" | "file" | "unknown";
   name: string;
@@ -4541,7 +4550,7 @@ export function withHarnessTelemetryEnv(
 export type ActiveToolSpanEntry = {
   span: SwarmSpan;
   startedAt: number;
-  /** MCP tool name from tool_start, so tool_end can redact its result. */
+  /** Redaction tool id from tool_start (`telemetryToolId`), so tool_end can redact its result. */
   mcpTool?: string;
 };
 
@@ -5180,6 +5189,7 @@ export async function spawnProviderProcess(
         }
         case "tool_start": {
           const tool = classifyTool(event.toolName, event.args);
+          const redactionId = telemetryToolId(event.toolName, event.args);
           const toolSpan = startSpan(tool.kind === "mcp" ? "worker.mcp.tool" : "worker.tool", {
             "agent.id": opts.agentId,
             "agentswarm.task.id": effectiveTaskId,
@@ -5193,12 +5203,12 @@ export async function spawnProviderProcess(
             "agentswarm.tool.call_id": event.toolCallId,
             "mcp.server.name": tool.mcpServer,
             "mcp.tool.name": tool.mcpTool,
-            "agentswarm.tool.args_preview": workerToolArgsPreview(tool.mcpTool, event.args),
+            "agentswarm.tool.args_preview": workerToolArgsPreview(redactionId, event.args),
           });
           activeToolSpans.set(event.toolCallId, {
             span: toolSpan,
             startedAt: Date.now(),
-            mcpTool: tool.mcpTool,
+            mcpTool: redactionId,
           });
 
           // Auto-progress: report tool activity as task progress (throttled)
@@ -5265,7 +5275,10 @@ export async function spawnProviderProcess(
               "agentswarm.tool.call_id": event.toolCallId,
               "mcp.server.name": tool.mcpServer,
               "mcp.tool.name": tool.mcpTool,
-              "agentswarm.tool.result_preview": workerToolResultPreview(tool.mcpTool, event.result),
+              "agentswarm.tool.result_preview": workerToolResultPreview(
+                telemetryToolId(event.toolName, undefined),
+                event.result,
+              ),
               "agentswarm.tool.missing_start": true,
             });
             span.end();

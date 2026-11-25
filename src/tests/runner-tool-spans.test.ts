@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type ActiveToolSpanEntry,
   implicitCloseActiveToolSpans,
+  telemetryToolId,
   workerToolArgsPreview,
   workerToolResultPreview,
 } from "../commands/runner";
@@ -330,6 +331,33 @@ describe("worker tool span previews keep data-query payloads out of telemetry", 
       expect(preview).toContain("/shared/x.csv");
       expect(String(workerToolArgsPreview("db-query", codexArgs))).toContain(sentinel);
     }
+  });
+
+  test("OpenCode swarm_data-query ids are redacted on args and result", () => {
+    const id = telemetryToolId("swarm_data-query", args);
+    expect(id).toBe("swarm_data-query");
+    // Control: the raw OpenCode args really carry the SQL.
+    expect(JSON.stringify(args)).toContain(sentinel);
+    const preview = String(workerToolArgsPreview(id, args));
+    expect(preview).not.toContain(sentinel);
+    expect(preview).toContain("/shared/x.csv");
+    expect(workerToolResultPreview(id, result)).toBe("[omitted]");
+    expect(
+      workerToolResultPreview(telemetryToolId("mcp__agent-swarm__data-query", args), result),
+    ).toBe("[omitted]");
+    expect(
+      String(workerToolResultPreview(telemetryToolId("swarm_db-query", args), result)),
+    ).toContain(sentinel);
+  });
+
+  test("a bare data-query tool_end without a start still omits its result", () => {
+    // The missing-start path classifies with no args, so only the name is known.
+    expect(workerToolResultPreview(telemetryToolId("data-query", undefined), result)).toBe(
+      "[omitted]",
+    );
+    expect(workerToolResultPreview(telemetryToolId("swarm_data-query", undefined), result)).toBe(
+      "[omitted]",
+    );
   });
 
   test("control: other tools keep their args and result previews", () => {
