@@ -32,11 +32,11 @@ The ten-step manual walkthrough also passed on `5352fdd087`. Eight one-second bo
 
 ## Kubernetes pod deletion
 
-The local cluster ran Linux binaries compiled from `39e5a796e0` in the verified runner image. Both pods passed binary checksum checks. The test deleted the pod that owned a running durable guest.
+The first local cluster test used Linux binaries from `39e5a796e0` in the earlier runner image. Recovery took 27.53 seconds.
 
-Recovery took 27.53 seconds. Ownership moved to the other runner. Two guests executed the source. The first persisted journal entry stayed identical. The three journaled results were 41, 1 and 0, and the counted effect occurred once.
+A second test built the complete Dockerfile from `061bd3870a` and imported the image into a fresh cluster. The API and both runners reported image ID `sha256:e9eee21537148fec584a8ae736ccefd1bb831c1b486fab3b72fd2bcc3f0f1f94`. Native execution reported UID 65534. QuickJS returned 42.
 
-The complete image build passed on the earlier packaging revision. The final pod test mounted the newly compiled binaries and runtime bundles into that image. The local build guard requires 20 GB of free space for another complete Dockerfile build. KEDA configuration received template validation.
+The test deleted the Kubernetes pod that owned a running durable guest. The surviving runner completed the run in 26.602 seconds. Two guests executed the source, the first journal entry stayed identical, and the counted effect occurred once. The three journal results were 41, 1 and 0. KEDA configuration received template validation.
 
 ## Performance
 
@@ -60,7 +60,7 @@ The final Opus 5.5 review approved the integration. Three details received furth
 
 The integrated affected unit suite passed 9,674 tests, with 31 skips. Both TypeScript 5 projects passed. The storage SQL portability, RBAC coverage and async checks passed. Three additional failures from the full root suite reproduced in isolation on main at `361eb90ca4`. They cover a Pi model presence check and two macOS shell path expectations.
 
-The full dashboard run had 295 passes, 79 skips and one failed Slack sidebar assertion. That case passed on an isolated rerun. The complete image rebuild, live KEDA scaling and the 5% performance criterion remain unverified.
+The full dashboard run had 295 passes, 79 skips and one failed Slack sidebar assertion. That case passed on an isolated rerun. Live KEDA scaling and the 5% performance criterion remain unverified.
 
 ## Reproduction
 
