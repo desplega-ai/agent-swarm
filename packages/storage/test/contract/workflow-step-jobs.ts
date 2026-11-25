@@ -35,15 +35,19 @@ export function workflowStepJobsContract(engine: ContractEngine): void {
         await repo.insert(row);
         expect(await repo.get("j")).toEqual(row);
         expect(await repo.claim("a", now, later)).toBeNull();
+        expect(await repo.listClaimable(now)).toEqual([]);
         await storage.executor.run(
           sql`UPDATE workflow_run_steps SET status = 'waiting' WHERE id = 's'`,
         );
-        expect((await repo.claim("a", now, later))?.ownerId).toBe("a");
+        for (let attempt = 1; attempt <= 101; attempt++)
+          await repo.insert({ ...row, id: `abandoned-${attempt}`, attempt });
+        expect((await repo.listClaimable(now)).map((job) => job.id)).toEqual(["j"]);
+        expect((await repo.claim("a:old", now, later))?.ownerId).toBe("a:old");
         expect(await repo.claim("b", now, later)).toBeNull();
         expect(await repo.settle("j", "b", now, "completed", null)).toBe(false);
         expect(await repo.renew("j", "b", now, end)).toBe(false);
         expect((await repo.claim("b", later, end))?.ownerId).toBe("b");
-        expect(await repo.settle("j", "a", later, "completed", null)).toBe(false);
+        expect(await repo.settle("j", "a:old", later, "completed", null)).toBe(false);
         await expect(
           storage.transaction(async () => {
             expect(await repo.settle("j", "b", later, "completed", null)).toBe(true);
@@ -51,7 +55,7 @@ export function workflowStepJobsContract(engine: ContractEngine): void {
           }),
         ).rejects.toThrow("rollback checkpoint");
         expect((await repo.get("j"))?.status).toBe("running");
-        expect((await repo.cancelRun("r", later)).map((j) => j.id)).toEqual(["j"]);
+        expect((await repo.cancelRun("r", later)).length).toBe(102);
         expect(await repo.settle("j", "b", later, "completed", null)).toBe(false);
         expect(await repo.listOpen("r")).toEqual([]);
         expect((await repo.get("j"))?.status).toBe("cancelled");
@@ -59,6 +63,6 @@ export function workflowStepJobsContract(engine: ContractEngine): void {
       } finally {
         await engine.release(storage);
       }
-    });
+    },30000);
   });
 }

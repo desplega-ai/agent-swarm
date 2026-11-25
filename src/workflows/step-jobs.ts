@@ -32,7 +32,7 @@ export async function parkStepJob<T = never>(
     )
       throw new Error("Workflow step no longer accepts a job");
     const saved = { ...((step.input ?? {}) as Record<string, unknown>) };
-    delete saved._stepJobReferences;
+    if (step.retryCount === 0) delete saved._stepJobReferences;
     await storage.repos.workflows.updateStepColumns(step.id, { input: JSON.stringify(saved) });
     const now = new Date().toISOString();
     await storage.repos.workflowStepJobs.insert({

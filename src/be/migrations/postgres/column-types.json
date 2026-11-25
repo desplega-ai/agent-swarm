@@ -3094,6 +3094,10 @@
       }
     },
     "workflow_step_jobs": {
+      "attempt": {
+        "class": "bigint",
+        "evidence": "workflow step attempt counters use SQLite INTEGER"
+      },
       "lease_expires_at": {
         "class": "timestamptz",
         "format": "iso-ms-z",

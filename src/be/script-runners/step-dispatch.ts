@@ -54,6 +54,7 @@ const active = new Map<
 >();
 const adoptedSlots = new Map<string, { owner: string; release: () => void }>();
 let draining = false;
+let drainAgain = false;
 let registry: ExecutorRegistry;
 let timer: ReturnType<typeof setInterval> | undefined;
 const subscriptions: (() => void)[] = [];
@@ -298,7 +299,11 @@ async function rejectCandidate(
 }
 
 export async function drainWorkflowStepJobs(): Promise<void> {
-  if (draining || !registry || !getStorage().capabilities.scriptRunners) return;
+  if (!registry || !getStorage().capabilities.scriptRunners) return;
+  if (draining) {
+    drainAgain = true;
+    return;
+  }
   draining = true;
   try {
     const storage = getStorage();
@@ -421,6 +426,10 @@ export async function drainWorkflowStepJobs(): Promise<void> {
     }
   } finally {
     draining = false;
+    if (drainAgain) {
+      drainAgain = false;
+      void drainWorkflowStepJobs().catch(report);
+    }
   }
 }
 
