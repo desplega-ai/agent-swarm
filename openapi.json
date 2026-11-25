@@ -175,7 +175,8 @@
               "linear",
               "jira",
               "comb",
-              "chat"
+              "chat",
+              "alert"
             ],
             "default": "mcp"
           },
@@ -40067,6 +40068,16 @@
           {
             "schema": {
               "type": "string",
+              "description": "Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all."
+            },
+            "required": false,
+            "description": "Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all.",
+            "name": "tags",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "minLength": 1
             },
             "required": false,
@@ -40229,7 +40240,8 @@
                                   "linear",
                                   "jira",
                                   "comb",
-                                  "chat"
+                                  "chat",
+                                  "alert"
                                 ],
                                 "default": "mcp"
                               },
@@ -40606,7 +40618,8 @@
                       "linear",
                       "jira",
                       "comb",
-                      "chat"
+                      "chat",
+                      "alert"
                     ]
                   },
                   "outputSchema": {
@@ -41958,7 +41971,8 @@
                               "linear",
                               "jira",
                               "comb",
-                              "chat"
+                              "chat",
+                              "alert"
                             ],
                             "default": "mcp"
                           },
@@ -60739,7 +60753,8 @@
                                       "linear",
                                       "jira",
                                       "comb",
-                                      "chat"
+                                      "chat",
+                                      "alert"
                                     ],
                                     "default": "mcp"
                                   },
