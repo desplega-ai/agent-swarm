@@ -814,9 +814,11 @@ export async function handleScripts(
   if (runRoute.match(req.method, pathSegments)) {
     if (res.destroyed) return true;
     const clientAbort = new AbortController();
-    res.once("close", () => {
-      if (!res.writableEnded) clientAbort.abort();
-    });
+    if (req.socket) {
+      res.once("close", () => {
+        if (!res.writableEnded) clientAbort.abort();
+      });
+    }
     const parsed = await runRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const agent = await requireAgent(res, agentId);

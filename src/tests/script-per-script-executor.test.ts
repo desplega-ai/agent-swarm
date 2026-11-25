@@ -14,6 +14,7 @@ import {
 } from "../scripts-runtime/executors/registry";
 import { runScript } from "../scripts-runtime/loader";
 import { type ScheduledTask, ScriptExecutorNameSchema, ScriptRecordSchema } from "../types";
+import { InProcessEventBus } from "../workflows/event-bus";
 import { SwarmScriptExecutor } from "../workflows/executors/swarm-script";
 
 process.env.TMPDIR ??= os.tmpdir().replaceAll("\\", "/");
@@ -344,21 +345,30 @@ describe("scripts DB & runSavedScriptAsAgent executor persistence (#2013)", () =
       typeChecked: true,
     });
 
+    const db = await import("../be/db");
+    const workflow = await db.createWorkflow({
+      name: globalQuickjs.name,
+      createdByAgentId: agentId,
+      definition: { nodes: [] },
+    });
+    const run = await db.createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      principal: JSON.stringify({ ok: true, agentId }),
+    });
     const wfExecutor = new SwarmScriptExecutor({
-      db: {
-        getWorkflow: async () => null,
-        getRunWorkflow: async () => ({ createdByAgentId: agentId }),
-      } as never,
-      eventBus: { emit: () => {} } as never,
+      db,
+      eventBus: new InProcessEventBus(),
+      interpolate: (value) => value,
     });
     const wfResult = await wfExecutor.run({
       config: { scriptName: globalQuickjs.name, scope: "global", fsMode: "none" },
       context: { agentId },
       meta: {
-        runId: crypto.randomUUID(),
+        runId: run.id,
         stepId: crypto.randomUUID(),
         nodeId: "n1",
-        workflowId: crypto.randomUUID(),
+        workflowId: workflow.id,
       },
     });
     expect(wfResult.status).toBe("success");
