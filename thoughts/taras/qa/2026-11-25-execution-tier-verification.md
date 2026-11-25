@@ -54,6 +54,8 @@ The final Opus 5.5 review approved the integration. Three details received furth
 - Deleted agents and inactive users receive a structured executor error. Direct credential acquisition still refuses an unknown principal. All sixteen credential tests passed.
 - The dispatch failure handler calls the owner-checked release function. It deletes the active entry, aborts execution, releases the credential and returns capacity.
 
+The integrated affected unit suite passed 9,674 tests, with 31 skips. Both TypeScript 5 projects passed. The storage SQL portability, RBAC coverage and async checks passed. Three additional failures from the full root suite reproduced in isolation on main at `361eb90ca4`. They cover a Pi model presence check and two macOS shell path expectations.
+
 The full dashboard run had 295 passes, 79 skips and one failed Slack sidebar assertion. That case passed on an isolated rerun. The complete image rebuild, live KEDA scaling and the 5% performance criterion remain unverified.
 
 ## Reproduction
