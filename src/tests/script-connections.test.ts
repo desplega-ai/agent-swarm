@@ -740,8 +740,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "367_workflow_run_principal.sql");
       // The UTC backfill needs scheduled_tasks, which this fixture does not create.
       markMigrationApplied(database, "374_schedule_next_run_at_utc.sql");
-      // 382 indexes script_runs, which this fixture does not create.
-      markMigrationApplied(database, "382_script_runs_parent_started_index.sql");
+      // 385 indexes script_runs, which this fixture does not create.
+      markMigrationApplied(database, "385_script_runs_parent_started_index.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
