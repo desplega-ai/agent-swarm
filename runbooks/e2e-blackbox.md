@@ -113,6 +113,38 @@ Download two reports and compare them locally with `bun run e2e:bench`.
 Use runs from the same environment because timing depends on runner load.
 The job uses only `contents: read` permission.
 
+### Commit budget
+
+`.github/workflows/nightly-commit-budget.yml` checks the PostgreSQL commit budget
+(`scripts/e2e/bench-budget.json`). An external scheduler dispatches it on `main` daily. Six
+`measure` jobs run one Merge Gate band each, on SQLite and on PostgreSQL 16 with pgvector.
+The `report` job compares, per scenario, the most PostgreSQL commits and write statements of
+one HTTP request with the budget. The budget guards the slow path: one commit per row costs
+one WAL flush per row on PostgreSQL and nearly nothing on SQLite. Scenario totals are no gate:
+pollers and timers make them change with time. The job summary also has the PostgreSQL / SQLite
+duration ratio per scenario, for information only.
+
+On `main`, a failure opens the issue "Nightly PostgreSQL commit budget exceeded" (label
+`bug`), or comments on the open one. The first green run closes it. A dispatch on another
+branch only reports in its summary.
+
+To read a failure, open the job summary. Each row is a scenario over budget: the request
+with the most commits, and measured / budget for commits and write statements. Reproduce it
+locally:
+
+```bash
+bun run e2e:bench --check --only <scenario>
+```
+
+Then find the change that added commits to that request, usually a loop that commits once
+per row. When
+the new count is intended, regenerate the entry in the same PR:
+`bun run e2e:bench --write-budget --only <scenario>`. To regenerate the whole budget from CI,
+dispatch the workflow with `write_budget=true` and commit the `bench-budget` artifact.
+"Not checked" scenarios had no passing first attempt. "Not measured" means a band left no
+result, which fails the check. "No budget yet" lists new scenarios: regenerate to add them.
+Authoring details: [scripts/e2e/README.md](../scripts/e2e/README.md#commit-budget).
+
 ## CI
 
 `.github/workflows/merge-gate.yml` runs the suite as six **E2E Contract (shard i/6)** jobs,

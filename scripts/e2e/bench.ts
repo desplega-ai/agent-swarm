@@ -10,6 +10,15 @@
 //
 // Exit code is 0 unless a file is unreadable. The numbers are for a human or a PR
 // comment; thresholds belong to whoever reads them, not to this script.
+//
+// Commit budget (bench-budget.ts): the one gated mode. It counts Postgres commits and
+// write statements per scenario and fails when a scenario goes over bench-budget.json.
+//
+//   bun scripts/e2e/bench.ts --check [--only a,b] [--results <dir>] [--md out.md]
+//   bun scripts/e2e/bench.ts --write-budget [--only a,b] [--results <dir>]
+//   bun scripts/e2e/bench.ts --collect <dir> [--shard i/6 | --only a,b] [--no-sqlite]
+import { budgetMain } from "./bench-budget";
+
 type Latency = { count: number; p50: number; p95: number; max: number };
 type Result = {
   startedAt: string;
@@ -26,7 +35,8 @@ type Result = {
 function usage(): never {
   console.error(
     "usage: bun scripts/e2e/bench.ts <before.json> <after.json> [--md <out.md>]\n" +
-      "       bun scripts/e2e/bench.ts --engine postgres [--only <a,b>] [--md <out.md>]",
+      "       bun scripts/e2e/bench.ts --engine postgres [--only <a,b>] [--md <out.md>]\n" +
+      "       bun scripts/e2e/bench.ts --check | --write-budget | --collect <dir> (see bench-budget.ts)",
   );
   process.exit(2);
 }
@@ -143,6 +153,10 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const mdIndex = args.indexOf("--md");
   const mdPath = mdIndex >= 0 ? args[mdIndex + 1] : undefined;
+  if (["--check", "--write-budget", "--collect"].some((flag) => args.includes(flag))) {
+    process.exitCode = await budgetMain(args);
+    return;
+  }
   if (args.includes("--engine")) {
     await engineMode(args, mdPath ?? "e2e-bench-report.md");
     return;

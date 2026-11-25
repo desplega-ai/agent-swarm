@@ -43,6 +43,7 @@ import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
+import { withRequestWriteScope } from "../be/write-stats";
 import { initBitbucket } from "../bitbucket";
 import {
   loadEnabledExtensions,
@@ -506,9 +507,12 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     };
 
-    // Name the entry point for the event-loop stall line.
-    await withLoopPath(loopPathForRequest(req.method, pathSegments), () =>
-      span ? withSpanContext(span, handleRequest) : handleRequest(),
+    // Name the entry point for the event-loop stall line (and the e2e commit budget).
+    const loopPath = loopPathForRequest(req.method, pathSegments);
+    await withLoopPath(loopPath, () =>
+      withRequestWriteScope(loopPath, () =>
+        span ? withSpanContext(span, handleRequest) : handleRequest(),
+      ),
     );
   });
 });

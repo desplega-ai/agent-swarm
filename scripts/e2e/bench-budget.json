@@ -1,0 +1,8 @@
+{
+  "about": "Per e2e scenario: the most Postgres commits and write statements that one HTTP request may make. Regenerate with `bun run e2e:bench --write-budget` (scripts/e2e/README.md, Commit budget).",
+  "headroom": {
+    "percent": 20,
+    "minimum": 10
+  },
+  "scenarios": {}
+}
