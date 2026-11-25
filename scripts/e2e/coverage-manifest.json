@@ -234,16 +234,20 @@
     },
     "execution-tier-baseline": {
       "description": "Script schedule principals, synchronous workflow scripts, sequential foreach bodies and nested durable execution.",
-      "scenarios": [
-        "script-schedule-fire",
-        "workflow-script-sync-baseline",
-        "workflow-script-fanout",
-        "workflow-script-park-restart"
-      ]
+      "scenarios": ["script-schedule-fire", "workflow-script-sync-baseline"]
     },
     "script-runner-operations": {
-      "description": "Connect a runner, execute scripts and observe its available capacity.",
-      "scenarios": ["cli-script-runner", "script-runner-capacity", "script-runner-remote-sync"]
+      "description": "Run synchronous, durable and workflow scripts on remote runners. Verify capacity, cancellation and recovery after a runner or API restart.",
+      "scenarios": [
+        "cli-script-runner",
+        "script-runner-capacity",
+        "script-runner-remote-sync",
+        "script-runner-durable",
+        "script-runner-api-restart",
+        "workflow-script-fanout",
+        "workflow-script-park-restart",
+        "workflow-script-node-remote"
+      ]
     },
     "storage-engine-parity": {
       "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
