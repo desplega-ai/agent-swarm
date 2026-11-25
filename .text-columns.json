@@ -4594,5 +4594,43 @@
     "updated_by": {
       "exempt": "identifier"
     }
+  },
+  "workflow_step_jobs": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "run_id": {
+      "exempt": "identifier"
+    },
+    "step_id": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "owner_id": {
+      "exempt": "identifier"
+    },
+    "lease_expires_at": {
+      "exempt": "timestamp"
+    },
+    "error": {
+      "exempt": "scrubbed and capped error"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
   }
 }

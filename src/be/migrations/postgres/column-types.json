@@ -3092,6 +3092,23 @@
         "format": "iso-ms-z",
         "evidence": "credentials.ts writes ISO timestamps"
       }
+    },
+    "workflow_step_jobs": {
+      "lease_expires_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflow step jobs use ISO timestamps"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflow step jobs use ISO timestamps"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflow step jobs use ISO timestamps"
+      }
     }
   }
 }

@@ -62,6 +62,7 @@ export {
 } from "./query-reader";
 export * from "./repositories";
 export * from "./repositories/script-runners";
+export * from "./repositories/workflow-step-jobs";
 export {
   type DialectFragment,
   dialectFragment,

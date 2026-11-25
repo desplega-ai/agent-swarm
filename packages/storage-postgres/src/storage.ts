@@ -39,6 +39,7 @@ import { PostgresSlackRepository } from "./repositories/slack";
 import { PostgresTasksRepository } from "./repositories/tasks";
 import { PostgresTrackersRepository } from "./repositories/trackers";
 import { PostgresUsersRepository } from "./repositories/users";
+import { PostgresWorkflowStepJobsRepository } from "./repositories/workflow-step-jobs";
 import { PostgresWorkflowsRepository } from "./repositories/workflows";
 
 export type PostgresStorageOptions = {
@@ -68,6 +69,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
     ...(options.queryReader ? { queryReader: options.queryReader } : {}),
     memoryIndexes: new PostgresMemoryIndexes(memory, options.vectorSearch),
     repos: {
+      workflowStepJobs: new PostgresWorkflowStepJobsRepository(executor),
       extensions: new PostgresExtensionsRepository(executor),
       models: new PostgresModelsRepository(executor),
       scriptRunners: new PostgresScriptRunnersRepository(executor),

@@ -31,6 +31,7 @@ import { tasksContract } from "./tasks";
 import { trackersContract } from "./trackers";
 import { userReferencesContract } from "./user-references";
 import { usersContract } from "./users";
+import { workflowStepJobsContract } from "./workflow-step-jobs";
 import { workflowsContract } from "./workflows";
 
 export type { ContractEngine } from "./env";
@@ -38,6 +39,7 @@ export type { ContractEngine } from "./env";
 /** The repository contract suite. Every engine runs all of it. */
 export function runStorageContract(engine: ContractEngine): void {
   scriptRunnersContract(engine);
+  workflowStepJobsContract(engine);
   clientContract(engine);
   extensionsContract(engine);
   modelsContract(engine);

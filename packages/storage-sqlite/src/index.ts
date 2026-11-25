@@ -39,6 +39,7 @@ import { SqliteSlackRepository } from "./repositories/slack";
 import { SqliteTasksRepository } from "./repositories/tasks";
 import { SqliteTrackersRepository } from "./repositories/trackers";
 import { SqliteUsersRepository } from "./repositories/users";
+import { SqliteWorkflowStepJobsRepository } from "./repositories/workflow-step-jobs";
 import { SqliteWorkflowsRepository } from "./repositories/workflows";
 
 export {
@@ -89,6 +90,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       searchReader: options.memorySearchReader,
     }),
     repos: {
+      workflowStepJobs: new SqliteWorkflowStepJobsRepository(executor),
       extensions: new SqliteExtensionsRepository(executor),
       models: new SqliteModelsRepository(executor),
       scriptRunners: new SqliteScriptRunnersRepository(executor),
