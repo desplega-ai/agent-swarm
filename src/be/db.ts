@@ -4063,8 +4063,8 @@ export async function createSessionLogs(logs: {
       const accepted = [...batch];
       let budgetExhausted = false;
       // Budget accounting shares this transaction with the inserts, so two
-      // concurrent batches cannot both spend the same remaining bytes: the
-      // second one blocks on the write lock and then reads the first's total.
+      // batches cannot both spend the same bytes: SQLite serializes writers;
+      // Postgres retries the transaction when its serializable snapshot loses.
       const account = await getStorage().repos.sessions.findLogBudget(accountKey);
       // `exhaustedAt`, not a byte comparison: the batch stops *before* the row
       // that would cross, so a spent session's total stays under the bound.
