@@ -32,7 +32,7 @@ async function runNode(ctx: ScenarioContext, config: Record<string, unknown>) {
 
 export const workflowScriptNodeRemote: Scenario = {
   name: "workflow-script-node-remote",
-  order: 498,
+  order: 61,
   async run(ctx) {
     if (ctx.db.engine !== "postgres") return;
     const marker = `shell-${ctx.nonce}`;
