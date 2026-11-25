@@ -1,5 +1,5 @@
 import { normalizeAssetKey } from "../assets/key";
-import { getLeadAgent } from "../be/db";
+import { getLeadAgent, recordInlineScriptRun, updateScriptRunIfRunning } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { resolveTemplate } from "../prompts/resolver";
@@ -19,6 +19,9 @@ function syncPassError(sync: Awaited<ReturnType<typeof runAppSync>>): string | u
   if (failed.length === 0) return undefined;
   return failed.map((pass) => `${pass.model}.${pass.source}: ${pass.error}`).join("; ");
 }
+
+/** The error a failed action's script_runs row stores; the detail goes only to the caller. */
+const ACTION_RUN_ROOT_ERROR = "the app action script failed; its error is in the action response";
 
 export async function runAppAction({
   app,
@@ -85,17 +88,63 @@ export async function runAppAction({
       };
     }
 
-    const output = await runSavedScriptAsAgent({
-      script,
-      input: { ...action.args, ...input, app: { id: app.id }, caller },
-      agentId: runAsAgentId,
-    });
+    // The run's row is written `running` before the script starts and its id is
+    // stamped on the run's token, so every run the script launches or calls
+    // records an existing parent: the run tree `app-action-status` waits on.
+    // `args.app.id` is what ties the run to this app. The row holds no caller
+    // input, caller identity, result or script error text (an error can echo
+    // the input): any authenticated principal can read script_runs, and the
+    // action's response already carries the result and the detailed error.
+    const runId = crypto.randomUUID();
+    const scriptInput = { ...action.args, ...input, app: { id: app.id }, caller };
+    let recorded = false;
+    try {
+      await recordInlineScriptRun({
+        id: runId,
+        agentId: runAsAgentId,
+        source: script.source,
+        args: { app: { id: app.id }, action: name },
+        scriptName: script.name,
+        status: "running",
+        startedAt: new Date().toISOString(),
+      });
+      recorded = true;
+    } catch {
+      // swallow: the row is observability and the wait handle; the action still runs, untracked.
+    }
+    const finish = async (status: "completed" | "failed") => {
+      if (!recorded) return;
+      try {
+        // Running-guarded: a cancel that landed while the script ran keeps its status.
+        await updateScriptRunIfRunning(runId, {
+          status,
+          error: status === "failed" ? ACTION_RUN_ROOT_ERROR : null,
+          finishedAt: new Date().toISOString(),
+        });
+      } catch {
+        // swallow: the action already ran.
+      }
+    };
+    let output: Awaited<ReturnType<typeof runSavedScriptAsAgent>>;
+    try {
+      output = await runSavedScriptAsAgent({
+        script,
+        input: scriptInput,
+        agentId: runAsAgentId,
+        // Untracked run: no provenance, so no child points at a missing parent.
+        ...(recorded ? { provenance: { sourceScriptRunId: runId } } : {}),
+      });
+    } catch (err) {
+      await finish("failed");
+      throw err;
+    }
     const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
     const error = ok
       ? undefined
       : output.runtimeError
         ? `${output.runtimeError.name}: ${output.runtimeError.message}`
         : (output.error ?? `Script exited with code ${output.exitCode}`);
+    await finish(ok ? "completed" : "failed");
     return {
       status: 200 as const,
       body: scrubObject({
@@ -104,6 +153,7 @@ export async function runAppAction({
         stdout: output.stdout,
         ...(error === undefined ? {} : { error }),
         durationMs: output.durationMs,
+        ...(recorded ? { run: { id: runId } } : {}),
       }),
     };
   }
@@ -165,6 +215,6 @@ export async function runAppAction({
   );
   return {
     status: 200 as const,
-    body: { ok: true as const, taskId: task.id, status: task.status },
+    body: { ok: true as const, taskId: task.id, status: task.status, run: { id: task.id } },
   };
 }

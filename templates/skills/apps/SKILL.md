@@ -28,6 +28,7 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | `app-row-delete` | Delete a row by `rowId`. Returns `{ ok: true }`. |
 | `app-rows-delete` | Delete matching rows with a non-empty `equals` filter. Returns `{ deleted }`. |
 | `app-action-run` | Run a declared script, task, or sync action with `{ appId, action, input? }`. Agents can invoke it through MCP only. |
+| `app-action-status` | Read or wait on the run an action returned: `{ appId, runId, waitSeconds? }`. A script run settles when it and every run its script launched have finished. |
 | `app-history` | List definition snapshots and their compact model/column digests before choosing a restore point. |
 | `app-diff` | Show a unified definition diff; defaults to newest snapshot → CURRENT. |
 | `app-rollback` | Restore a snapshot through the normal schema-migration engine. |
@@ -537,7 +538,7 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, Dialog, and Svg). `watch` maps state paths to an action step or chain. A page may also declare `state`: page-local values read and written at `/local/<name>` (see Low-level primitives).
 
-## Component catalog (all 53)
+## Component catalog (all 54)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -591,10 +592,11 @@ Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `e
 | `File` | `path` | `height`, `fill`; one agent-fs file (Markdown, image, PDF, text) read as the viewer; see below. |
 | `DateRange` | `id` | `presets` (any of `7d`, `30d`, `90d`, `mtd`, `custom`; default all five), `defaultPreset` (default the first), `label`; writes `/ui/<id>/from` and `/ui/<id>/to`; see below. |
 | `Timeline` | `timeField`, `titleField` | `data`, `loading`, `descriptionField`, `statusField`, `tones`, `icon`, `emptyMessage`, `onSelect`; vertical event list, newest first, grouped by day; see below. |
+| `LogStream` | `timeField`, `bodyField` | `data`, `loading`, `severityField`, `serviceField`, `attributesField`, `resourceField`, `traceField`, `keyField`, `follow`, `maxRows`, `height`, `fill`, `emptyMessage`, `onTrace`; a dense log tail, one line per entry; see below. |
 | `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
 | `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
 | `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`, `attachments`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
-| `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`; a live, clickable swarm Page that reloads when the page changes; see below. |
+| `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`, `id`, `params`, `actions`, `expose`; a live, clickable swarm Page that reloads when the page changes; an HTML page inside an app gets `window.appContext`; see below. |
 | `Input` | none | Low-level text field: `value` (bind two-way with `$bindState` / `$bindItem`), `id` (the `ui.focus` target), `label`, `placeholder`, `type: "text"` or `"password"`, `inputMode`, `autoComplete: "off"` or `"one-time-code"`, `maxLength`, `size: "default"` or `"cell"` (square one-character box), `selectOnFocus`, `disabled`; chains `onInput`, `onPaste`, `onKeyDown:<Key>`; see Low-level primitives. |
 | `Svg` | `width`, `height` on the outer Svg | Vector drawing in `width` x `height` user units, scaled to its container; `label` (accessible name). Children: `Rect`, `Line`, `Path`, `Circle`, `SvgText`, or a nested `Svg` (a group offset by `x`/`y`, the place for `repeat`). |
 | `Rect` | `x`, `y`, `width`, `height` | `rx`, `fill`, `stroke`, `strokeWidth`, `opacity`, `title` (tooltip); only inside an Svg. |
@@ -668,7 +670,26 @@ DateRange and Timeline details:
 - `DateRange` writes inclusive `YYYY-MM-DD` dates (the viewer's local calendar) to `/ui/<id>/from` and `/ui/<id>/to`, and the active preset to `/ui/<id>/preset`. On first load it writes `defaultPreset` unless the state already holds a range. Bind query params with `{ "$state": "/ui/<id>/from" }` so the query refetches when the range changes. `7d` is today and the six days before it; `mtd` starts on the 1st. `custom` opens two date inputs in a popover; Apply needs both dates, from not after to. `id` must match `[A-Za-z0-9_-]+`, and `defaultPreset` must be one of `presets`.
 - `Timeline` reads `timeField` as an ISO date or epoch ms (rows that do not parse are left out), sorts newest first and groups under day headings: Today, Yesterday, then the date. Each event shows `titleField`, the time, `descriptionField` (two lines at most) and a `statusField` pill (`tones` maps value to tone; lifecycle values get the status chip). `icon` replaces the marker dot. `onSelect` runs with `$row` (the row) and `$rowIndex` (its index in `data`); without it events are not clickable.
 
-SchemaForm details:
+LogStream details — logs as a tail, not a table:
+
+- One monospace line per entry, newest first: `HH:mm:ss.SSS`, a 3 px severity bar (text like `WARN` or an OTel number), the service, the body on one line. Click a line to expand the full body, `attributesField` and `resourceField` (objects or JSON strings) and a trace link that runs `onTrace` with `$row`.
+- Virtualized and memoized: 50k entries scroll smoothly, and a refresh re-renders only the lines it adds. Set `keyField` to a unique id so expanded lines stay open across refreshes and a refetched entry is reused, not redrawn.
+- `maxRows` (default 10,000, at most 100,000) keeps the newest entries; the oldest past it drop with a notice at the bottom. Keep the source query bounded too (a `limit` or a `since` window).
+- Live tail: refresh the source with `OnEnter.everyMs` (and a `since` cursor in the action) and set `follow: true`. The newest entry stays in view; once the viewer scrolls down, new entries show an "N new" pill instead of moving the view.
+- Pair it with a severity histogram (`Chart` kind `bar`, stacked per severity) on top and facets (`Chips` or `Select` over service and severity) beside it.
+
+```json
+{ "type": "LogStream", "props": {
+  "data": { "$state": "/actions/tail/result/logs" },
+  "loading": { "$state": "/actions/tail/running" },
+  "timeField": "timestamp", "bodyField": "body", "severityField": "severity_text",
+  "serviceField": "service.name", "attributesField": "attributes", "traceField": "traceId", "keyField": "cursor",
+  "follow": true, "fill": true,
+  "onTrace": [{ "action": "app.navigate", "params": { "page": "trace", "params": { "traceId": { "$row": "traceId" } } } }]
+} }
+```
+
+Form details:
 
 - `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
 - Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
@@ -753,6 +774,65 @@ PageFrame details — a live swarm Page inside the app, for a preview pane next 
   "device": { "$state": "/ui/device/value" },
   "fill": true
 } }
+```
+
+#### Pages inside an app (`appContext`)
+
+An HTML page in an app `PageFrame` talks to the app through `window.appContext`. Outside an app (a page opened on its own, or embedded by another page) it is `null`, so one page serves both.
+
+- **App side**, on the `PageFrame`: `params` (scalars, usually bound) reach the page as its query string and as `appContext.params`; a change reloads the frame. `actions` lists the app actions the page may run (script actions only; task actions stay on app buttons). `expose` lists the app state paths the page may read (`/app/<name>`, `/ui/<id>/...`). `id` plus `on.message` receive the page's messages: each one is stored at `/ui/<id>/message` (`{ name, data, seq }`) before the chain runs. The frame also follows the app's theme preset, not the dashboard's.
+- **Page side**: `await appContext.ready` (rejects after 5 s with no app), then read `appContext.route` (`{ page, params }`), `.params`, `.theme` (`{ mode, preset }`) and `.state` (keyed by exposed path). `appContext.on("change" | "route" | "params" | "theme" | "state", fn)` returns an unsubscribe. `await appContext.action(name, input)` returns `{ status: "ok", result }` or `{ status: "error", error }`. `appContext.navigate(page, params)` opens another page of this app. `appContext.emit(name, data)` runs `on.message`.
+- **Security**: the page holds no credential. The app runs each action with its own `app.action` step as the viewer, so the server's `app.use` gate and the script's `caller` checks apply. A page never gets more than the viewer: an action outside `actions` and a path outside `expose` are refused, and navigation stays inside this app. The frame answers only its own iframe on the API origin, and caps requests at 20 per second and 64 KiB each.
+- JSON pages render inline and get no `appContext`. Keep one static page per view and feed it with `params` and `appContext.action`, instead of writing a page per viewer.
+
+### Example: Page inside an app
+
+The trace page draws a waterfall for `?traceId=`, loads spans through `traceDetail`, and asks the app to open a span: `appContext.emit("open", { spanId })`.
+
+```json
+{
+  "models": {},
+  "defaultPage": "trace",
+  "state": { "window": "1h" },
+  "actions": { "traceDetail": { "kind": "script", "scriptId": "00000000-0000-4000-8000-000000000001" } },
+  "pages": {
+    "trace": {
+      "title": "Trace",
+      "params": { "traceId": { "kind": "string" } },
+      "root": "frame",
+      "elements": {
+        "frame": {
+          "type": "PageFrame",
+          "props": {
+            "id": "waterfall",
+            "pageId": "8b8077e8b7a94dfc89c88636889a46ac",
+            "params": { "traceId": { "$state": "/route/params/traceId" } },
+            "actions": ["traceDetail"],
+            "expose": ["/app/window"],
+            "fill": true
+          },
+          "on": {
+            "message": [
+              { "action": "ui.set", "params": { "path": "/app/window", "value": { "$state": "/ui/waterfall/message/data/window" } } }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+In the page:
+
+```js
+const ctx = window.appContext;
+if (ctx) {
+  await ctx.ready;
+  const { result } = await ctx.action("traceDetail", { traceId: ctx.params.traceId });
+  draw(result.spans, ctx.theme.mode);
+  ctx.on("state", (state) => redraw(state["/app/window"]));
+}
 ```
 
 Form details:
@@ -931,6 +1011,8 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 **`watch` rules.** A `watch` skips the value it sees on first render: it only fires on a later change, so it never loads data on page open. Any state write while a `watch` chain runs cancels the steps after it, and `app.action` always writes (`/actions/<name>`), so a `watch` chain runs at most one `app.action` or `ui.set`, and it must be the last step. Put multi-step loads in `OnEnter` instead.
 
 **Live data.** `OnEnter.everyMs` (1000 or more) re-runs the chain on an interval while the tab is visible; a tick is skipped while any earlier run (a tick or a `deps` change) is still going. Bind it to a toggle (`{ "$if": [{ "$state": "/local/live" }, 2000, null] }`) for a pausable live tail.
+
+**Realtime.** An open app page holds one realtime socket (the same one pages use). A row write (UI, `app-row-*` tools, a sync pass) refreshes every query over that model on every open page within about 250 ms, with no polling needed; polling stays as the fallback. `/presence/peers` lists the other people on the same app page (`[{ id, name, avatar? }]`), `/presence/names` their names and `/presence/count` how many: `{ "type": "AvatarStack", "props": { "users": { "$state": "/presence/names" } } }`. Viewers need `app.use`. Script query results and action results are not pushed: refresh those with `OnEnter.everyMs`.
 
 **`OnEnter`: load on open.** An `OnEnter` element renders nothing. It runs its `on.enter` chain on mount, then again each time its resolved `deps` value changes. Its steps always run to the end (no `watch` cancel). Use `deps: { "$state": "/route" }` to re-run it when the page or a route param changes; omit `deps` to run it once per mount. Put it anywhere in the page tree.
 
@@ -1343,3 +1425,11 @@ Equality filters accept declared columns and system columns. Filter values must 
 
 `app-action-run` returns the REST action body under `data`. Script actions run with the script owner's identity and receive the verified invoking agent as `caller`.
 Scripts and extensions cannot invoke `app-action-run`.
+
+#### Async refresh: wait on the run, not on rows
+
+A script or task action returns `run: { id, state, settled, runs, failures?, next? }`. For a script action, the run tree is the action's own run plus every run its script launched with `ctx.swarm.script_launchRun` or called with `ctx.swarm.script_run`. The tree settles when none of them is running; `state` is `failed` when any of them failed, and `failures` names the first three. Runs that a launched background run starts itself are not in the tree: keep them nested (`script_run`) so the background run stays running until they finish, and let it fail when they fail.
+
+- Launch background work from the action script itself, before it returns, so the launched run joins the tree.
+- Wait with `app-action-run { waitSeconds: 25 }`. While `run.settled` is false, call `app-action-status { appId, runId: run.id, waitSeconds: 25 }` (REST: `GET /api/apps/<id>/action-runs/<runId>?waitSeconds=25`).
+- Never write sleep loops against a progress `meta` row: the run tree is the done signal.

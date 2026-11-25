@@ -201,6 +201,7 @@ import type {
   FormField,
   GridColumns,
   KanbanColumn,
+  LogStreamProps,
   MetricTrend,
   SelectOption,
   SpacingToken,
@@ -228,6 +229,7 @@ import {
   linkCell,
   tipText,
 } from "./link-cell-model";
+import { LogStreamView } from "./log-stream";
 import { parseNumberInputValue } from "./number-input-value";
 import { PageFrameComponent } from "./page-frame";
 import {
@@ -3516,6 +3518,21 @@ function TimelineComponent({ props }: { props: TimelineProps }) {
   );
 }
 
+/** `LogStream` with its `onTrace` chain run with `$row` / `$rowIndex`. */
+function LogStreamComponent({ props }: { props: LogStreamProps }) {
+  const runChain = useRowActionRunner();
+  return (
+    <LogStreamView
+      props={props}
+      onTrace={
+        props.onTrace
+          ? (row, index) => void runChain(props.onTrace as ActionChain | undefined, row, index)
+          : undefined
+      }
+    />
+  );
+}
+
 function BlockSkeleton({ testId }: { testId: string }) {
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
@@ -4472,9 +4489,10 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   ObjectEmbed: ({ props }) => <ObjectEmbedComponent props={props} />,
   DateRange: ({ props }) => <DateRangeComponent props={props} />,
   Timeline: ({ props }) => <TimelineComponent props={props} />,
+  LogStream: ({ props }) => <LogStreamComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
   SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
-  PageFrame: ({ props }) => <PageFrameComponent props={props} />,
+  PageFrame: ({ props, emit }) => <PageFrameComponent props={props} emit={emit} />,
 };
 
 /**

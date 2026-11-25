@@ -129,6 +129,17 @@ export function kvContract(engine: ContractEngine): void {
       expect(await repo.findEntry("fam:z", "live")).not.toBeNull();
     });
 
+    test("namespace-pattern purge deletes live and expired entries in batches", async () => {
+      await repo.upsertEntry(entry("room:a:x", "k"));
+      await repo.upsertEntry(entry("room:a:y", "k", { expires_at: 1 }));
+      await repo.upsertEntry(entry("room:a:y", "j"));
+      await repo.upsertEntry(entry("room:ab", "k"));
+      expect(await repo.deleteNamespacesLikeBatch("room:a:%", 2)).toBe(2);
+      expect(await repo.deleteNamespacesLikeBatch("room:a:%", 2)).toBe(1);
+      expect(await repo.deleteNamespacesLikeBatch("room:a:%", 2)).toBe(0);
+      expect(await repo.findEntry("room:ab", "k")).not.toBeNull();
+    });
+
     test("live lists: key ranges, JSON field filters, paging, counts", async () => {
       await repo.upsertEntry(entry("l", "a1"));
       await repo.upsertEntry(entry("l", "a2", { value: '{"kind":"b","n":2}' }));

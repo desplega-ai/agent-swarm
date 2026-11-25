@@ -500,10 +500,11 @@ export function scriptsContract(engine: ContractEngine): void {
         created_by: null,
         updated_by: null,
         startedAt: T0,
+        parentScriptRunId: null,
       };
       const r1 = await repo.insertScriptRun({ ...base, id: "r1", idempotencyKey: "k1" });
       expect(r1).toMatchObject({ id: "r1", source: "", status: "running", kind: "workflow" });
-      await repo.insertScriptRun({ ...base, id: "r2" });
+      await repo.insertScriptRun({ ...base, id: "r2", parentScriptRunId: "r1" });
       await repo.insertInlineScriptRun({
         id: "r3",
         agentId: "ag",
@@ -520,18 +521,64 @@ export function scriptsContract(engine: ContractEngine): void {
         updated_by: null,
         apiEndpointId: null,
         sourceStepId: null,
-        parentScriptRunId: null,
+        parentScriptRunId: "r2",
         objectScriptId: null,
         objectId: null,
         objectMethod: null,
       });
       expect((await repo.findScriptRun("r1"))?.storedSource).toBe("console.log(1)");
+      const wide = { maxRows: 10, maxDepth: 10 };
+      const t1 = await repo.listScriptRunTree("r1", wide);
+      expect(t1.rows.map((r) => [r.id, r.status])).toEqual([
+        ["r1", "running"],
+        ["r2", "running"],
+        ["r3", "completed"],
+      ]);
+      expect(t1.truncated).toBe(false);
+      expect((await repo.listScriptRunTree("r2", wide)).rows.map((r) => r.id)).toEqual([
+        "r2",
+        "r3",
+      ]);
+      expect(await repo.listScriptRunTree("r1", { maxRows: 2, maxDepth: 10 })).toMatchObject({
+        rows: [{ id: "r1" }, { id: "r2" }],
+        truncated: true,
+      });
+      expect(await repo.listScriptRunTree("r1", { maxRows: 3, maxDepth: 10 })).toMatchObject({
+        truncated: false,
+      });
+      expect(await repo.listScriptRunTree("missing", wide)).toEqual({ rows: [], truncated: false });
       expect((await repo.findScriptRunByIdempotencyKey("k1"))?.id).toBe("r1");
       expect((await repo.listScriptRuns({}, 10, 0)).map((r) => r.id)).toEqual(["r3", "r2", "r1"]);
       expect((await repo.listScriptRuns({ scriptName: "s" }, 1, 1)).map((r) => r.id)).toEqual([
         "r1",
       ]);
       expect(await repo.countScriptRuns({ status: "completed" })).toBe(1);
+      expect(await repo.countActiveScriptRuns()).toBe(2);
+      expect((await repo.listActiveScriptRuns()).map((r) => r.id)).toEqual(["r1", "r2"]);
+      // An in-process inline run recorded `running` (an app action's root) is
+      // outside the supervisor: never relaunched, never counted against its cap.
+      await repo.insertInlineScriptRun({
+        id: "r4",
+        agentId: "ag",
+        scriptName: "action",
+        sourceHash: "h1",
+        args: "{}",
+        status: "running",
+        output: null,
+        error: null,
+        startedAt: T1,
+        finishedAt: null,
+        requestedByUserId: null,
+        created_by: null,
+        updated_by: null,
+        apiEndpointId: null,
+        sourceStepId: null,
+        parentScriptRunId: null,
+        objectScriptId: null,
+        objectId: null,
+        objectMethod: null,
+      });
+      expect(await repo.findScriptRun("r4")).toMatchObject({ status: "running", finishedAt: null });
       expect(await repo.countActiveScriptRuns()).toBe(2);
       expect((await repo.listActiveScriptRuns()).map((r) => r.id)).toEqual(["r1", "r2"]);
       expect(await repo.updateScriptRun("r1", {})).toBe(0);
@@ -546,6 +593,53 @@ export function scriptsContract(engine: ContractEngine): void {
         ),
       ).toBe(1);
       expect((await repo.findScriptRun("r1"))?.pid).toBe(3);
+    });
+
+    test("script run tree: the walk stops at its row and depth bounds", async () => {
+      await storage.executor.run(sql`
+        INSERT INTO agents (id, name, status, "createdAt", "lastUpdatedAt")
+        VALUES ('ag', 'ag', 'idle', ${T0}, ${T0})`);
+      await repo.storeScriptRunSource("h1", "x");
+      const run = (id: string, parentScriptRunId: string | null, startedAt = T0) =>
+        repo.insertScriptRun({
+          id,
+          agentId: "ag",
+          scriptName: "s",
+          sourceHash: "h1",
+          args: "{}",
+          idempotencyKey: null,
+          requestedByUserId: null,
+          sourceTaskId: null,
+          created_by: null,
+          updated_by: null,
+          startedAt,
+          parentScriptRunId,
+        });
+      // A chain root -> d1 -> ... -> d6, and 50 direct children of a second root.
+      await run("d0", null);
+      for (let i = 1; i <= 6; i++) await run(`d${i}`, `d${i - 1}`);
+      await run("w", null);
+      for (let i = 0; i < 50; i++) {
+        await run(`w${String(i).padStart(2, "0")}`, "w", i < 25 ? T1 : T0);
+      }
+
+      const deep = await repo.listScriptRunTree("d0", { maxRows: 100, maxDepth: 3 });
+      expect(deep.rows.map((r) => r.id)).toEqual(["d0", "d1", "d2", "d3"]);
+      expect(deep.truncated).toBe(true);
+      const exact = await repo.listScriptRunTree("d0", { maxRows: 100, maxDepth: 6 });
+      expect(exact.rows.length).toBe(7);
+      expect(exact.truncated).toBe(false);
+
+      const capped = await repo.listScriptRunTree("w", { maxRows: 11, maxDepth: 5 });
+      expect(capped.truncated).toBe(true);
+      // Root first, then the earliest-started children.
+      expect(capped.rows.map((r) => r.id)).toEqual([
+        "w",
+        ...Array.from({ length: 10 }, (_, i) => `w${25 + i}`),
+      ]);
+      const all = await repo.listScriptRunTree("w", { maxRows: 51, maxDepth: 1 });
+      expect(all.rows.length).toBe(51);
+      expect(all.truncated).toBe(false);
     });
 
     test("script run journal: insert once per step, order, counts", async () => {
@@ -565,6 +659,7 @@ export function scriptsContract(engine: ContractEngine): void {
         created_by: null,
         updated_by: null,
         startedAt: T0,
+        parentScriptRunId: null,
       });
       const step = (id: string, stepKey: string, stepType: string) => ({
         id,

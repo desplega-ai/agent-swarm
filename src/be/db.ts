@@ -10760,6 +10760,7 @@ export async function createScriptRun(data: {
   sourceTaskId?: string;
   createdBy?: string;
   updatedBy?: string;
+  parentScriptRunId?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
   const storage = getStorage();
   return storage.transaction(async () => {
@@ -10787,6 +10788,9 @@ export async function createScriptRun(data: {
       updated_by: data.updatedBy ?? data.createdBy ?? null,
       // ISO like finishedAt and the inline path, not the column's datetime('now') default.
       startedAt: new Date().toISOString(),
+      // A run launched through another run's token joins that run's tree.
+      parentScriptRunId:
+        getCurrentRunProvenance()?.sourceScriptRunId ?? data.parentScriptRunId ?? null,
     });
     if (!row) throw new Error("Failed to create script run");
     return { run: rowToScriptRun({ ...row, storedSource: data.source }), existing: false };
@@ -10794,8 +10798,9 @@ export async function createScriptRun(data: {
 }
 
 // Persist a synchronous inline run (POST /api/scripts/run) as an already-terminal
-// row. Unlike createScriptRun these never get a journal and never use the
-// idempotencyKey column (inline idempotency lives in the kv table).
+// row, or (an app action's root) as `running` before it executes, finished later
+// with updateScriptRunIfRunning. Unlike createScriptRun these never get a journal
+// and never use the idempotencyKey column (inline idempotency lives in the kv table).
 export async function recordInlineScriptRun(data: {
   id: string;
   agentId: string;
@@ -10805,11 +10810,11 @@ export async function recordInlineScriptRun(data: {
   objectScriptId?: string;
   objectId?: string;
   objectMethod?: string;
-  status: "completed" | "failed";
+  status: "running" | "completed" | "failed";
   output?: unknown;
   error?: ScrubbedText;
   startedAt: string;
-  finishedAt: string;
+  finishedAt?: string;
   requestedByUserId?: string;
   createdBy?: string;
   /** Set when this run originated from an external API endpoint (POST /api/x/script/<id>). */
@@ -10833,7 +10838,7 @@ export async function recordInlineScriptRun(data: {
       output,
       error: data.error ?? null,
       startedAt: data.startedAt,
-      finishedAt: data.finishedAt,
+      finishedAt: data.finishedAt ?? null,
       requestedByUserId: data.requestedByUserId ?? null,
       created_by: data.createdBy ?? null,
       updated_by: data.createdBy ?? null,

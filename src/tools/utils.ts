@@ -435,7 +435,15 @@ const createPageNudge = (r: SwarmToolResult): string | undefined => {
  * pipeline when the tool did not set an explicit nudge. Keep entries to a
  * single sentence; derive only from already-scrubbed result fields.
  */
+/** An action run still going: wait on it with app-action-status, never a sleep loop. */
+const appActionRunningNudge = (r: SwarmToolResult): string | undefined =>
+  (r.data as { run?: { settled?: unknown } } | undefined)?.run?.settled === false
+    ? "The run is still going: call `app-action-status` with `waitSeconds: 25` until `run.settled` is true, instead of sleeping or polling app rows."
+    : undefined;
+
 export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefined> = {
+  "app-action-run": appActionRunningNudge,
+  "app-action-status": appActionRunningNudge,
   "defer-task": (r) =>
     r.ok ? "Stop working on this task now; the wake-up task will carry your note." : undefined,
   "store-progress": storeProgressNudge,

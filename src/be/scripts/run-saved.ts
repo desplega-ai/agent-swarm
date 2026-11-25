@@ -1,6 +1,7 @@
 import { startSpan, withSpan } from "../../otel";
 import type { RunScriptOutput } from "../../scripts-runtime/loader";
 import type { ScriptRecord } from "../../types";
+import type { ScriptRunProvenance } from "../../utils/request-auth-context";
 import {
   getScriptApiConnectionDescriptors,
   getScriptMcpConnectionDescriptors,
@@ -25,6 +26,8 @@ export async function runSavedScriptAsAgent(
     agentId: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    /** Stamped on the run's token, so rows the script creates point back at it. */
+    provenance?: ScriptRunProvenance;
   },
   deps: { buildCredentials?: typeof buildScriptCredentialBindingsWithFailures } = {},
 ) {
@@ -55,21 +58,24 @@ export async function runSavedScriptAsAgent(
         exitCode: 1,
         error: "killed",
       }
-    : await runScriptWithRunCredential({
-        source: args.script.source,
-        args: args.input,
-        fsMode: args.script.fsMode,
-        executor: args.script.executor,
-        agentId: args.agentId,
-        egressSecrets: credentials.egressSecrets,
-        failedBindings: credentials.failedBindings,
-        userConfig: credentials.userConfig,
-        agentFs: credentials.agentFs,
-        apiConnections,
-        mcpConnections,
-        ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
-        ...(args.signal ? { signal: args.signal } : {}),
-      });
+    : await runScriptWithRunCredential(
+        {
+          source: args.script.source,
+          args: args.input,
+          fsMode: args.script.fsMode,
+          executor: args.script.executor,
+          agentId: args.agentId,
+          egressSecrets: credentials.egressSecrets,
+          failedBindings: credentials.failedBindings,
+          userConfig: credentials.userConfig,
+          agentFs: credentials.agentFs,
+          apiConnections,
+          mcpConnections,
+          ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
+          ...(args.signal ? { signal: args.signal } : {}),
+        },
+        args.provenance,
+      );
   if (output.exitCode === 0 && !output.error && !output.runtimeError) {
     await touchScratchScriptLastUsed(args.script.id);
   } else if (runStartTouch) {

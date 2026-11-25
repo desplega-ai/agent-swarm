@@ -48,6 +48,7 @@
     "ObjectEmbed",
     "DateRange",
     "Timeline",
+    "LogStream",
     "SchemaForm",
     "SessionThread",
     "PageFrame",
@@ -3763,6 +3764,91 @@
         "additionalProperties": false
       }
     },
+    "LogStream": {
+      "description": "A log tail, not a table: one dense monospace line per entry, newest first, with the time (HH:mm:ss.SSS), a severity colour bar (OTel text or number), the service and the one-line body. Click a line to expand the full body, `attributesField` and `resourceField` as key/value lists, and a trace link that runs `onTrace` with `$row`. Virtualized and memoized, so tens of thousands of rows scroll smoothly; past `maxRows` (default 10,000) the oldest entries are dropped with a notice. `follow: true` keeps the newest entry in view; once the viewer scrolls down, a refresh that adds entries on top shows an \"N new\" pill. 480 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. Feed it from a query or an action result, and refresh with `OnEnter.everyMs` for a live tail.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "loading": {
+            "type": "boolean"
+          },
+          "timeField": {
+            "type": "string"
+          },
+          "bodyField": {
+            "type": "string"
+          },
+          "severityField": {
+            "type": "string"
+          },
+          "serviceField": {
+            "type": "string"
+          },
+          "attributesField": {
+            "type": "string"
+          },
+          "resourceField": {
+            "type": "string"
+          },
+          "traceField": {
+            "type": "string"
+          },
+          "keyField": {
+            "type": "string"
+          },
+          "follow": {
+            "type": "boolean"
+          },
+          "maxRows": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          },
+          "height": {
+            "type": "string"
+          },
+          "fill": {
+            "type": "boolean"
+          },
+          "emptyMessage": {
+            "type": "string"
+          },
+          "onTrace": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["timeField", "bodyField"],
+        "additionalProperties": false
+      }
+    },
     "SchemaForm": {
       "description": "Schema-driven props panel. Walks `schema.properties` and renders one control per property — text input (or a select when `enum` is present), number input, or switch — labelled by key with the property `description` as tooltip. Each field seeds from `value?.[key] ?? property.default`. On every field commit the draft object is written to `/ui/<id>/value` and the `onChange` chain is dispatched with `$form` = the current values and `{ \"$value\": true }` = the value just written (the whole merged doc when `baseDoc` is set; never read `/ui/<id>/value` with `$state` in `onChange`, the renderer resolves it before the commit and it is one edit stale). The draft rebuilds whenever the bound `schema` identity changes. With `baseDoc` (a `{ root, elements }` doc) and `nodeKey`, it edits `baseDoc.elements[nodeKey].props` and `/ui/<id>/value` holds the whole doc with the edit merged in, ready for one `app.mutate` (pass it as `{ \"$value\": true }`). At most 100 fields and 200 enum options render, and a `baseDoc` over 5,000 elements is refused. `fill: true` grows the field list to fill a `fill`-aware parent and scrolls internally instead of sizing to content — pair it with a `fill` sibling (e.g. Tree) in the same column Stack to split the available height evenly between them.",
       "props": {
@@ -3899,7 +3985,7 @@
       }
     },
     "PageFrame": {
-      "description": "A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ \"$state\": \"/queries/<name>/data/0/pageId\" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: \"mobile\"` narrows the frame to 390 px, so the page's own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows \"No page selected\".",
+      "description": "A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ \"$state\": \"/queries/<name>/data/0/pageId\" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: \"mobile\"` narrows the frame to 390 px, so the page's own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows \"No page selected\". Inside an app, an HTML page gets `window.appContext` (see the apps skill, \"Pages inside an app\"): it reads the route, theme, `params` and the `expose`d state, runs the `actions` listed here as the viewer, navigates the app, and sends messages that run `on.message` with the message at `/ui/<id>/message`.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -3916,6 +4002,30 @@
           },
           "fill": {
             "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": ["string", "number", "boolean"]
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expose": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": ["pageId"],
