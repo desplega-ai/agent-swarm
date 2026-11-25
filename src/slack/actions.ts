@@ -9,6 +9,11 @@ import { registerApprovalActionHandlers } from "./approval-actions";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
 import { EXTERNAL_CHANNEL_BLOCKED_REPLY, shouldBlockChannel } from "./external-channel";
+import {
+  parseSlackFeedbackValue,
+  recordSlackFeedbackVote,
+  SLACK_FEEDBACK_ACTION_ID,
+} from "./feedback";
 import { isUserAllowed } from "./handlers";
 import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispatch";
 import { ensureSlackThreadPresentation, isSlackRenderV2Enabled } from "./render-v2";
@@ -247,6 +252,32 @@ export function registerActionHandlers(app: App): void {
     } catch (error) {
       console.error("[Slack] Failed to post card button reply:", error);
     }
+  });
+
+  // 👍/👎 on an outcome card: store the vote. Slack shows the pressed state itself.
+  app.action(SLACK_FEEDBACK_ACTION_ID, async ({ ack, action, body, client }) => {
+    await ack();
+
+    const parsed = parseSlackFeedbackValue("value" in action ? action.value : undefined);
+    if (!parsed) return ignoreSlackInbound("feedback_malformed");
+    const task = await getTaskById(parsed.taskId);
+    const channelId = "channel" in body ? body.channel?.id : undefined;
+    if (!task || !channelId || channelId !== task.slackChannelId) {
+      return ignoreSlackInbound("feedback_channel_mismatch");
+    }
+    if (await shouldBlockChannel(client, channelId)) return ignoreSlackInbound("external_channel");
+    if (!(await isUserAllowed(client, body.user.id, body.user.team_id))) {
+      return ignoreSlackInbound("unauthorized_user");
+    }
+
+    noteSlackInboundSideEffect("feedback_vote");
+    const messageTs = "message" in body ? body.message?.ts : undefined;
+    await recordSlackFeedbackVote({
+      task,
+      vote: parsed.vote,
+      slackUserId: body.user.id,
+      messageTs: typeof messageTs === "string" ? messageTs : undefined,
+    });
   });
 
   // "Cancel" — cancel the task and update the message
