@@ -319,7 +319,8 @@
         "knowledge-apps-limits",
         "knowledge-apps-log-stream",
         "knowledge-apps-primitives",
-        "knowledge-apps-session-thread-files"
+        "knowledge-apps-session-thread-files",
+        "knowledge-apps-template-refs"
       ]
     },
     "asset-namespaces": {
