@@ -106,7 +106,13 @@ export const runnerMessage = z.discriminatedUnion("type", [
 export const apiMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("welcome"), sessionId: id }),
   z.discriminatedUnion("kind", [
-    z.object({ type: z.literal("job"), jobId: id, kind: z.enum(["inline", "step-script"]), executor, input }),
+    z.object({
+      type: z.literal("job"),
+      jobId: id,
+      kind: z.enum(["inline", "step-script"]),
+      executor,
+      input,
+    }),
     z.object({
       type: z.literal("job"),
       jobId: id,

@@ -1,6 +1,6 @@
 export type BusTopics = {
-  "workflow.step_job.requested": {jobId:string};
-  "workflow.step_job.finished": {jobId:string;runId:string};
+  "workflow.step_job.requested": { jobId: string };
+  "workflow.step_job.finished": { jobId: string; runId: string };
   "script.job.requested": { runId: string; deferredByBootId?: string };
 };
 export const BUS_TOPICS: Record<keyof BusTopics, "durable" | "ephemeral"> = {

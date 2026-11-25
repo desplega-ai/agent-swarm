@@ -112,7 +112,11 @@ export function startScriptRunner(options: {
   const sendHeartbeat = () => {
     heartbeatNonce = crypto.randomUUID();
     heartbeatSentAt = performance.now();
-    sendCurrent({ type: "heartbeat", nonce: heartbeatNonce, jobs: [...durable.keys(), ...steps.keys()] });
+    sendCurrent({
+      type: "heartbeat",
+      nonce: heartbeatNonce,
+      jobs: [...durable.keys(), ...steps.keys()],
+    });
   };
   const expire = (job: HeldGuest) => {
     job.cancelled = true;
