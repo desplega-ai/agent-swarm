@@ -50,6 +50,21 @@ export const scriptBackgroundRunTree: Scenario = {
   async run(ctx) {
     const owner = await registerAgent(ctx, "bg-tree-owner");
     const outsider = await registerAgent(ctx, "bg-tree-outsider");
+    const created = await ctx.api("POST", "/api/users", {
+      body: { name: `bg tree admin ${ctx.nonce}`, status: "active" },
+    });
+    expectStatus(created, [200], "create the user");
+    const userId = asString(asRecord(asRecord(created.json).user).id, "user id");
+    expectStatus(
+      await ctx.api("PUT", `/api/users/${userId}/roles`, { body: { roles: ["admin"] } }),
+      [200],
+      "make the user an admin",
+    );
+    const minted = await ctx.api("POST", `/api/users/${userId}/mcp-tokens`, {
+      body: { label: "bg-tree" },
+    });
+    expectStatus(minted, [200], "mint the user token");
+    const userToken = asString(asRecord(minted.json).plaintext, "user token");
     const script = await upsertScript(ctx, owner, {
       name: `e2e-bg-tree-refresh-${ctx.nonce}`,
       scope: "agent",
@@ -61,7 +76,11 @@ export const scriptBackgroundRunTree: Scenario = {
       models: {},
       actions: { refresh: { kind: "script", scriptId: script.id } },
       pages: {
-        main: { title: "Main", root: "t", elements: { t: { type: "Text", props: { content: "x" } } } },
+        main: {
+          title: "Main",
+          root: "t",
+          elements: { t: { type: "Text", props: { content: "x" } } },
+        },
       },
       defaultPage: "main",
     };
@@ -89,10 +108,11 @@ export const scriptBackgroundRunTree: Scenario = {
       }, 30_000);
       expect(done, `the orchestrator completes: ${JSON.stringify(orchestrator)}`);
       const orchestratorId = asString(asRecord(orchestrator).id, "orchestrator id");
-      let children: { scriptName: string | null; status: string }[] = [];
+      type Child = { id: string; scriptName: string | null; status: string };
+      let children: Child[] = [];
       await pollUntil(() => {
-        children = ctx.db.query<{ scriptName: string | null; status: string }>(
-          sql`SELECT "scriptName", status FROM script_runs WHERE "parentScriptRunId" = ${orchestratorId}`,
+        children = ctx.db.query<Child>(
+          sql`SELECT id, "scriptName", status FROM script_runs WHERE "parentScriptRunId" = ${orchestratorId}`,
         );
         return children.length >= 3;
       }, 10_000);
@@ -100,7 +120,7 @@ export const scriptBackgroundRunTree: Scenario = {
         children.length === 3 &&
           children.filter((c) => c.scriptName === "(inline source)").length === 2 &&
           children.some((c) => c.scriptName === "e2e-bg-grandchild" && c.status === "running"),
-      `the step child, the nested run and the running grandchild name the orchestrator: ${JSON.stringify(children)}`,
+        `the step child, the nested run and the running grandchild name the orchestrator: ${JSON.stringify(children)}`,
       );
 
       response = await ctx.api("GET", `/api/apps/${appId}/action-runs/${rootId}?waitSeconds=0`);
@@ -108,17 +128,44 @@ export const scriptBackgroundRunTree: Scenario = {
       let state = asRecord(response.json);
       let runs = asRecord(state.runs);
       expect(
-        state.settled === false && state.state === "running" && runs.total === 5 && runs.running === 1,
+        state.settled === false &&
+          state.state === "running" &&
+          runs.total === 5 &&
+          runs.running === 1,
         `the tree counts every run and stays unsettled while the grandchild runs: ${JSON.stringify(state)}`,
       );
 
-      // Only a live run of the calling agent can take a child through /api/scripts/run.
+      // Only a live run of the calling agent takes a body-named child. The grandchild is the
+      // owner's and still running, so only the agent check refuses another agent's graft.
+      const grandchildId = asString(
+        children.find((c) => c.scriptName === "e2e-bg-grandchild")?.id,
+        "grandchild id",
+      );
       const graft = { source: "export default async function () { return 3; }" };
       response = await ctx.api("POST", "/api/scripts/run", {
         agentId: outsider,
-        body: { ...graft, parentScriptRunId: orchestratorId },
+        body: { ...graft, parentScriptRunId: grandchildId },
       });
-      expectStatus(response, [404], "another agent cannot name the run as parent");
+      expectStatus(response, [404], "another agent cannot name a running run as parent");
+      response = await ctx.api("POST", "/api/script-runs", {
+        agentId: outsider,
+        body: { ...graft, background: true, parentScriptRunId: grandchildId },
+      });
+      expectStatus(response, [404], "another agent cannot launch a run under a running run");
+      // A user token has no calling run: its body-named parent is ignored, not recorded.
+      response = await ctx.api("POST", "/api/scripts/run", {
+        apiKey: userToken,
+        agentId: owner,
+        body: { ...graft, parentScriptRunId: grandchildId },
+      });
+      expectStatus(response, [200], "a user token runs inline source as the owner");
+      const grafted = ctx.db.query<{ id: string }>(
+        sql`SELECT id FROM script_runs WHERE "parentScriptRunId" = ${grandchildId}`,
+      );
+      expect(
+        grafted.length === 0,
+        `the running grandchild took no child: ${JSON.stringify(grafted)}`,
+      );
       response = await ctx.api("POST", "/api/scripts/run", {
         agentId: owner,
         body: { ...graft, parentScriptRunId: orchestratorId },
@@ -135,7 +182,10 @@ export const scriptBackgroundRunTree: Scenario = {
       state = asRecord(response.json);
       runs = asRecord(state.runs);
       expect(
-        state.settled === true && state.state === "succeeded" && runs.total === 5 && runs.completed === 5,
+        state.settled === true &&
+          state.state === "succeeded" &&
+          runs.total === 5 &&
+          runs.completed === 5,
         `the tree settles once the grandchild finishes: ${JSON.stringify(state)}`,
       );
     } finally {
