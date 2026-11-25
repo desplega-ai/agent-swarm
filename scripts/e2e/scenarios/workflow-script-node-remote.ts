@@ -198,6 +198,13 @@ export const workflowScriptNodeRemote: Scenario = {
           asRecord(remoteOrdinary.followOutput).stdout === "ordinary",
         "remote shell preserves ordinary field values for downstream nodes",
       );
+      expect(
+        await pollUntil(
+          async () => Number((await sessions())[0]?.jobsCompleted) === before + configs.length + 2,
+          5000,
+        ),
+        "empty cwd permits remote execution for the shell and its successor",
+      );
 
       const failed = await runNode(ctx, {
         runtime: "bash",
@@ -232,8 +239,38 @@ export const workflowScriptNodeRemote: Scenario = {
         !JSON.stringify(scrubbed.output).includes(secret),
         "API scrubs synthetic secret before JSON mapping",
       );
-      const cancelled = await runNode(ctx, { runtime: "bash", script: "sleep 30" }, true);
+      const pidFile = join(cwd, "cancel-child.pid");
+      let childPid = 0;
+      const cancelled = await runNode(
+        ctx,
+        {
+          runtime: "bash",
+          script: 'sleep 30 & child=$!; printf "%s" "$child" > "$PID_FILE"; wait',
+          env: { PID_FILE: pidFile },
+        },
+        true,
+        async () => {
+          expect(
+            await pollUntil(async () => {
+              childPid = Number(await Bun.file(pidFile).text().catch(() => ""));
+              return Number.isInteger(childPid) && childPid > 0;
+            }, 15000),
+            "cancellable shell starts its synthetic child",
+          );
+        },
+      );
       expect(cancelled.run.status === "cancelled", "shell cancellation settles run");
+      expect(
+        await pollUntil(async () => {
+          try {
+            process.kill(childPid, 0);
+            return false;
+          } catch {
+            return true;
+          }
+        }, 10000),
+        "cancellation terminates the synthetic descendant",
+      );
       expect(
         await pollUntil(
           async () => (await sessions()).every((runner) => Number(runner.jobsInFlight) === 0),
