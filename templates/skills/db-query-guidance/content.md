@@ -31,6 +31,10 @@ Write Postgres SQL. Parameters are `$1`, `$2`, ... Quote every identifier that
 has an uppercase letter: `"taskId"`, `"createdAt"`. Flags are `boolean`
 (`"isLead"`, not `"isLead" = 1`). Timestamps are `timestamptz`; JSON columns
 are `jsonb` (`meta->>'field'`, `jsonb_array_elements_text(...)`).
+Pass a JSON list as a string with `$1::text::jsonb`, or as a real array with
+`$1::jsonb`: `jsonb_array_elements_text($1::text::jsonb)` with `'["a","b"]'`
+gives two rows. A string param in a `json` or `jsonb` position must be JSON
+text: `'"abc"'` is the JSON string, `'abc'` fails.
 
 ## Execution model
 

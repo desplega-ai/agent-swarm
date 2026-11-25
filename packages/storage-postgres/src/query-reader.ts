@@ -61,7 +61,19 @@ export async function openPostgresQueryReader(
 ): Promise<QueryReaderProbeResult> {
   let pool: SQL;
   try {
-    pool = new Bun.SQL({ url, max: READER_POOL_MAX, idleTimeout: 30, connectionTimeout: 10 });
+    pool = new Bun.SQL({
+      url,
+      max: READER_POOL_MAX,
+      idleTimeout: 30,
+      connectionTimeout: 10,
+      // A string param in a json or jsonb position (`$1::jsonb`, `CAST($1 AS json)`, a
+      // jsonb column) is JSON text, as SQLite reads `json_each(?)`. With prepared
+      // statements, Bun.SQL JSON-encodes a string bound to a json or jsonb param, so
+      // '["a","b"]' arrives as a JSON string scalar. Unprepared statements send the
+      // string as is. Arrays and objects bind the same in both modes. Only this reader
+      // pool changes: API writes go through the shared client, which still encodes.
+      prepare: false,
+    });
   } catch (err) {
     // A malformed optional URL (ERR_INVALID_URL) turns the reader off, not the API.
     return { ok: false, reason: `invalid reader URL: ${pgError(err).message ?? String(err)}` };

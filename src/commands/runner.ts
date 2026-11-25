@@ -4855,6 +4855,9 @@ export async function spawnProviderProcess(
     "agentswarm.session.vcs_repo": opts.vcsRepo,
     "gen_ai.request.model": model || undefined,
   });
+  // The harness sends its swarm MCP calls itself, with headers fixed at spawn,
+  // so `worker.session` is the closest span a `POST /mcp` can name as parent.
+  config.traceHeaders = withSpanContext(sessionSpan, () => injectTraceContext({}));
 
   const session = await withSpanContext(sessionSpan, () =>
     withSpan(

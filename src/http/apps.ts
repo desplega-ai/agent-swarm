@@ -8,6 +8,14 @@ import {
 } from "../apps/action-run-status";
 import { runAppAction } from "../apps/action-runner";
 import {
+  CATALOG_TOPICS,
+  catalogAction,
+  catalogComponent,
+  catalogIndex,
+  catalogTopic,
+} from "../apps/catalog-reference";
+import { CLOSEST_NAME_MAX_LENGTH } from "../apps/closest-names";
+import {
   type AppDefinition,
   AppDefinitionOpSchema,
   AppNameSchema,
@@ -325,6 +333,29 @@ const listAppsRoute = route({
   },
   // App summaries remain list-level until a future policy can filter them per app.
   rbac: { ungated: "app summaries are list-level; per-app filtering is future work" },
+});
+
+// Before getAppRoute: `/api/apps/catalog` must not read as an app id.
+const appCatalogRoute = route({
+  method: "get",
+  path: "/api/apps/catalog",
+  pattern: ["api", "apps", "catalog"],
+  summary: "Read the app component catalog",
+  description:
+    "No query: every component (one line, child slots) and action type. `component` returns its props schema (`prop` drills into one prop), `action` an action step's params, `topic=expressions` the binding reference.",
+  tags: ["Apps"],
+  query: z.object({
+    component: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    prop: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    action: z.string().min(1).max(CLOSEST_NAME_MAX_LENGTH).optional(),
+    topic: z.enum(CATALOG_TOPICS).optional(),
+  }),
+  responses: {
+    200: { description: "Catalog entry", schema: z.record(z.string(), z.unknown()) },
+    400: { description: "More than one of component, action and topic, or prop without component" },
+    404: { description: "Unknown component, prop or action; names the closest" },
+  },
+  rbac: { ungated: "static catalog of the app vocabulary; holds no app data" },
 });
 
 const createAppRoute = route({
@@ -1221,6 +1252,36 @@ export async function handleApps(
       app,
       ...(warnings.length > 0 ? { warnings } : {}),
     });
+    return true;
+  }
+
+  if (appCatalogRoute.match(req.method, pathSegments)) {
+    const parsed = await appCatalogRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { component, prop, action, topic } = parsed.query;
+    if ([component, action, topic].filter((value) => value !== undefined).length > 1) {
+      jsonError(res, "give at most one of component, action or topic", 400);
+      return true;
+    }
+    if (prop !== undefined && component === undefined) {
+      jsonError(res, "prop needs component", 400);
+      return true;
+    }
+    if (topic !== undefined) {
+      appCatalogRoute.respond(res, 200, { topic, content: catalogTopic(topic) });
+      return true;
+    }
+    const lookup =
+      component !== undefined
+        ? catalogComponent(component, prop)
+        : action !== undefined
+          ? catalogAction(action)
+          : { ok: true as const, value: catalogIndex() };
+    if (!lookup.ok) {
+      json(res, { error: lookup.message, closest: lookup.closest }, 404);
+      return true;
+    }
+    appCatalogRoute.respond(res, 200, lookup.value);
     return true;
   }
 

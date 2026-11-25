@@ -157,6 +157,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-list](#app-list)
   - [app-patch](#app-patch)
   - [app-patch-node](#app-patch-node)
+  - [app-catalog](#app-catalog)
   - [app-query](#app-query)
   - [app-rollback](#app-rollback)
   - [app-sync](#app-sync)
@@ -1807,7 +1808,7 @@ Capability: `pages` (enabled by default)
 
 **Get an app**
 
-Get an app by ID, including its models, named queries, actions, and json-render pages definition. To edit, read less: outline: true returns the tree without props (pages with params and {nodeId: [type, childIds]}, model columns, queries, actions); path returns one subtree (dot path pages.main.elements.title or JSON pointer /pages/main/elements/title). Then change it with app-patch-node.
+Get an app by ID, including its models, named queries, actions, and json-render pages definition. To edit, read less: outline: true returns the tree without props (pages with params and {nodeId: [type, childIds]}, model columns, queries, actions); path returns one subtree (dot path pages.main.elements.title or JSON pointer /pages/main/elements/title). Then change it with app-patch-node. A whole read also returns sourcesPath, the app's agent-fs folder for generators, backing-script drafts and NOTES.md (sourceFiles lists it when agent-fs is set up); read NOTES.md there first on a follow-up edit. For valid components, props and bindings, call app-catalog.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1988,6 +1989,19 @@ Edit one node of a page (page) or reusable element (element) without resending t
 | `appId` | `string` | Yes | - | App ID to patch. |
 | `dryRun` | `boolean` | No | - | Validate the edit and report changed paths and issues, store nothing. |
 | `includeApp` | `boolean` | No | - | Also return the whole stored app. Off by default. |
+
+### app-catalog
+
+**App component catalog**
+
+What an app page may contain, from the catalog the server validates against. No args: every component (one line, child slots) and action type. component: "Chart": its description, slots and props schema (prop: "columns" drills into one prop). action: "app.mutate": that action step's params. topic: "expressions": the binding reference ($state roots, route params and $param, $template, repeat/$item, watch, OnEnter.everyMs, visibility). Read this instead of guessing props.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `component` | `string` | No | - | Component type, e.g. Chart. |
+| `prop` | `string` | No | - | With component: return one prop's schema. |
+| `action` | `string` | No | - | Action step type, e.g. app.mutate. |
+| `topic` | `unknown` | No | - | Reference topic. |
 
 ### app-query
 

@@ -1,3 +1,5 @@
+/** Longest name worth scoring: edit distance is O(name × candidate) per candidate, so tool inputs that name a key are capped at this length. */
+export const CLOSEST_NAME_MAX_LENGTH = 128;
 /** Scoring budget: callers pass caller-controlled tokens and stored keys of any size. */
 const MAX_SCORED_CHARS = 64;
 // shortcut: only the first MAX_SCORED_NAMES keys are ranked, raise it if real apps outgrow it.

@@ -190,6 +190,7 @@ export const DEFERRED_TOOLS = new Set([
   "manage-user",
 
   // Pages and apps (11)
+  "app-catalog",
   "app-get",
   "app-list",
   "app-patch",
