@@ -5,6 +5,7 @@ import {
   closeDb,
   createAgent,
   createWorkflow,
+  createWorkflowRun,
   getDbClient,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
@@ -93,6 +94,15 @@ async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
     createdByAgentId: agentId,
   });
   return wf;
+}
+
+async function createExecutorRun(workflow: Workflow): Promise<string> {
+  const run = await createWorkflowRun({
+    id: crypto.randomUUID(),
+    workflowId: workflow.id,
+    principal: JSON.stringify({ ok: true, agentId }),
+  });
+  return run.id;
 }
 
 async function saveScript(name: string, source: string, isScratch = false) {
@@ -209,7 +219,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "scratch-add-one-a1b2c3d4", args: { value: 6 } },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,
@@ -238,7 +248,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "unresolved-source", args: { payload: "safe-argv-data" } },
       context: { trigger: { payload: "must-not-enter-source" } },
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "named-script-node",
         workflowId: wf.id,
@@ -265,7 +275,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "literal-mustache-source" },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "literal-template-node",
         workflowId: wf.id,
@@ -317,7 +327,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "declared-alias-source" },
       context: { upstream: { name: "Ada" } },
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "declared-alias-node",
         workflowId: wf.id,
@@ -360,7 +370,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "ctx-api-keys" },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,
@@ -393,7 +403,7 @@ describe("SwarmScriptExecutor", () => {
         config: { scriptName: "ctx-config-get" },
         context: {},
         meta: {
-          runId: crypto.randomUUID(),
+          runId: await createExecutorRun(wf),
           stepId: crypto.randomUUID(),
           nodeId: "script",
           workflowId: wf.id,
@@ -418,7 +428,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "versioned", pinHash: first.script.contentHash },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,
@@ -692,7 +702,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "noop", fsMode: "workspace-rw" },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,
@@ -707,7 +717,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "noop", fsMode: "none" },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,
@@ -725,7 +735,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "quick" },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,
@@ -748,7 +758,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "sleeper", timeoutMs: 300 },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,
@@ -776,7 +786,7 @@ describe("SwarmScriptExecutor", () => {
         config: { scriptName: "one-shot", timeoutMs: 30_000 },
         context: {},
         meta: {
-          runId: crypto.randomUUID(),
+          runId: await createExecutorRun(wf),
           stepId: crypto.randomUUID(),
           nodeId: "script",
           workflowId: wf.id,
@@ -802,7 +812,7 @@ describe("SwarmScriptExecutor", () => {
       config: { scriptName: "throws" },
       context: {},
       meta: {
-        runId: crypto.randomUUID(),
+        runId: await createExecutorRun(wf),
         stepId: crypto.randomUUID(),
         nodeId: "script",
         workflowId: wf.id,

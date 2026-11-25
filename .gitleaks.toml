@@ -15,3 +15,9 @@ paths = [
   '''^thoughts/''',
   '''^mockups/''',
 ]
+
+[[rules]]
+id = "agent-swarm-script-runner"
+description = "Script-runner credential"
+regex = 'assr_[A-Za-z0-9]{20,}'
+keywords = ["assr_"]

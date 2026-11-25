@@ -22141,7 +22141,7 @@ export interface paths {
         put?: never;
         /**
          * Launch a durable script workflow run
-         * @description Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.
+         * @description An authenticated agent or operator can create a durable run and receive its dashboard URL.
          */
         post: operations["script_runs_create"];
         delete?: never;
@@ -26053,6 +26053,252 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/script-runners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List live script-runner sessions */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Live sessions */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            lanes: {
+                                long: {
+                                    queued: number;
+                                    oldestWaitMs: number;
+                                    inFlight: number;
+                                };
+                                sync: {
+                                    queued: number;
+                                    oldestWaitMs: number;
+                                    inFlight: number;
+                                    slots: number | null;
+                                };
+                            };
+                            sessions: {
+                                instanceId: string;
+                                slots: number;
+                                jobsInFlight: number;
+                                jobsCompleted: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/script-runners/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List script-runner credentials without token material */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Credentials */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            credentials: {
+                                id: string;
+                                name: string;
+                                expiresAt: string;
+                                revokedAt: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                createdBy: string | null;
+                                updatedBy: string | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Mint a script-runner credential */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        /** Format: date-time */
+                        expiresAt?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Token returned once */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            credential: {
+                                id: string;
+                                name: string;
+                                expiresAt: string;
+                                revokedAt: string | null;
+                                createdAt: string;
+                                updatedAt: string;
+                                createdBy: string | null;
+                                updatedBy: string | null;
+                            };
+                            token: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description script_runners_need_postgres */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/script-runners/credentials/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a script-runner credential */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Revoked */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            revoked: boolean;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Credential not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mcp-servers": {
         parameters: {
             query?: never;
@@ -28671,7 +28917,7 @@ export interface paths {
         get: operations["users_getRbacRoles"];
         /**
          * Set a user's RBAC roles
-         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.
+         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Only the operator can assign roles with session.read.all or script_runner.write. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.
          */
         put: operations["users_setRbacRoles"];
         post?: never;
@@ -32769,6 +33015,67 @@ export interface paths {
                 };
                 /** @description Runtime pools disabled */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/script-runners/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connect a script runner with its dedicated bearer credential */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description WebSocket upgrade */
+                101: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid runner credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description script_runners_need_postgres */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Runner credential lookup temporarily unavailable */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -37288,6 +37595,15 @@ export interface operations {
             };
             /** @description Validation or label-lint failure */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Durable execution requires an authenticated agent or operator */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

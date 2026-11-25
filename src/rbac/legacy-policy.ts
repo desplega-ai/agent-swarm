@@ -383,6 +383,8 @@ export const LEGACY_POLICY = {
   "runtime_pool.write": operatorOrUser,
   "runtime_pool.bind": leadOrOperatorOrUser,
   "runtime_controller.write": operatorOrUser,
+  "script_runner.read": operatorOrUser,
+  "script_runner.write": operatorOrUser,
   // A worker token stands in for the swarm API key on a worker, so only humans mint it.
   "agent.token.manage": operatorOrUser,
   // Deleting or restoring an agent is a human decision; no agent, the lead included.

@@ -105,6 +105,10 @@ export function workflowsContract(engine: ContractEngine): void {
         parentStepAttempt: 0,
       });
       expect(await repo.getRunPrincipal("r1")).toEqual({
+        createdBy: null,
+        parentStepId: null,
+        startedAt: T0,
+        triggerType: "manual",
         principal: '{"kind":"user"}',
         triggeredByAgentId: "agent-1",
       });

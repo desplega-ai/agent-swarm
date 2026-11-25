@@ -1,6 +1,11 @@
 import type { IncomingMessage } from "node:http";
 import { getPage } from "../be/db";
 import {
+  LEGACY_JOURNAL_TOKEN_PREFIX,
+  resolveLegacyJournalCredential,
+} from "../be/scripts/legacy-journal-credential";
+import {
+  BROKER_TOKEN_PREFIX,
   findUserById,
   fingerprintApiKey,
   resolveSessionToken,
@@ -10,6 +15,7 @@ import type { User } from "../types";
 import { verifyPageSession } from "../utils/page-session";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
 import { verifyTokenEquality } from "../workflows/triggers";
+import { getPathSegments } from "./utils";
 
 function extractBearer(req: IncomingMessage): string | null {
   const raw = req.headers.authorization;
@@ -58,11 +64,25 @@ export async function resolveHttpRequestAuth(
     const resolved = await resolveUserToken(bearer);
     const user = resolved?.user ?? null;
     if (resolved && isActiveUser(user)) {
-      return { kind: "user", userId: user.id, user, tokenId: resolved.tokenId };
+      return {
+        kind: "user",
+        userId: user.id,
+        user,
+        tokenId: resolved.tokenId,
+        ...resolved.provenance,
+      };
     }
   }
 
-  if (bearer.startsWith("aseph_")) {
+  if (bearer.startsWith("aseph_") || bearer.startsWith(BROKER_TOKEN_PREFIX)) {
+    if (bearer.startsWith(LEGACY_JOURNAL_TOKEN_PREFIX)) {
+      const journal = resolveLegacyJournalCredential(
+        bearer,
+        req.method,
+        getPathSegments(req.url ?? ""),
+      );
+      if (journal) return journal;
+    }
     return await resolveSessionToken(bearer, { touch: options.touchSessionToken });
   }
 

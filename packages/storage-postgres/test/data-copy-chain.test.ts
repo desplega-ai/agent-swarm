@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CopyCell, CopyRow, CopySource, CopyTable } from "@desplega/storage";
 import { createPostgresClient, runPostgresMigrations } from "../src";
-import { copyIntoPostgres } from "../src/data-copy";
+import { copyIntoPostgres, POSTGRES_ONLY_COPY_TABLES } from "../src/data-copy";
 import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 
 /**
@@ -22,7 +22,7 @@ import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 const CHAIN_DIR = join(import.meta.dir, "../../../src/be/migrations/postgres");
 
 /** Tables the copy fills by other means: no cell of them is converted. */
-const NOT_COPIED = new Set(["_migrations", "memory_vec"]);
+const NOT_COPIED = new Set(["_migrations", "memory_vec", ...POSTGRES_ONLY_COPY_TABLES]);
 
 const enc = new TextEncoder();
 const text = (value: string): CopyCell => ({ kind: "text", bytes: enc.encode(value) });

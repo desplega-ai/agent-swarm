@@ -264,6 +264,7 @@ export async function handleWebhookTrigger(
 
   const runId = await startWorkflowExecution(workflow, triggerData, registry, {
     triggerType: "event",
+    executionPrincipal: { ok: true, operator: true },
     requestedByUserId: options.requestedByUserId,
   });
   return { runId };
@@ -352,6 +353,7 @@ export async function handleEventTrigger(
       }
       const runId = await startWorkflowExecution(workflow, payload, registry, {
         triggerType: "event",
+        executionPrincipal: { ok: true, operator: true },
         accept: claim
           ? async (run) => {
               await recordAcceptedWorkflowOperation(claim, {
@@ -404,6 +406,11 @@ export async function handleScheduleTrigger(
     };
     const runId = await startWorkflowExecution(workflow, triggerData, registry, {
       triggerType: "schedule",
+      executionPrincipal: schedule.createdByAgentId
+        ? { ok: true, agentId: schedule.createdByAgentId }
+        : schedule.createdBy
+          ? { ok: true, userId: schedule.createdBy }
+          : { ok: true, operator: true },
       triggeredByAgentId: schedule.createdByAgentId,
       requestedByUserId: schedule.createdBy,
     });

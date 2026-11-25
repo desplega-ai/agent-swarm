@@ -31,6 +31,7 @@ import { SqliteRetentionRepository } from "./repositories/retention";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { SqliteSavingsRepository } from "./repositories/savings";
 import { SqliteSchedulesRepository } from "./repositories/schedules";
+import { SqliteScriptRunnersRepository } from "./repositories/script-runners";
 import { SqliteScriptsRepository } from "./repositories/scripts";
 import { SqliteSessionsRepository } from "./repositories/sessions";
 import { SqliteSkillsRepository } from "./repositories/skills";
@@ -38,6 +39,7 @@ import { SqliteSlackRepository } from "./repositories/slack";
 import { SqliteTasksRepository } from "./repositories/tasks";
 import { SqliteTrackersRepository } from "./repositories/trackers";
 import { SqliteUsersRepository } from "./repositories/users";
+import { SqliteWorkflowStepJobsRepository } from "./repositories/workflow-step-jobs";
 import { SqliteWorkflowsRepository } from "./repositories/workflows";
 
 export {
@@ -71,6 +73,7 @@ function noRawHandle(): Database {
 export function createSqliteStorage(client: DbClient, options: SqliteStorageOptions): Storage {
   const executor = new SqlExecutor(client, sqliteDialect);
   const capabilities: Capabilities = {
+    scriptRunners: false,
     fullTextSearch: true,
     vectorSearch: options.vectorSearch,
     dbQuery: true,
@@ -87,8 +90,10 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
       searchReader: options.memorySearchReader,
     }),
     repos: {
+      workflowStepJobs: new SqliteWorkflowStepJobsRepository(executor),
       extensions: new SqliteExtensionsRepository(executor),
       models: new SqliteModelsRepository(executor),
+      scriptRunners: new SqliteScriptRunnersRepository(executor),
       runtimePools: new SqliteRuntimePoolsRepository(executor),
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),

@@ -474,3 +474,53 @@ export const cliController: Scenario = {
     expectOutput(k8s, "Remote k8s controllers are not supported", "controller --kind k8s");
   },
 };
+
+export const cliScriptRunner: Scenario = {
+  name: "cli-script-runner",
+  order: 39,
+  groups: ["cli"],
+  async run(ctx) {
+    expectExit(await runCli(["script-runner"]), 1, "runner missing URL");
+    expectExit(
+      await runCli(["script-runner", "--api-url", ctx.baseUrl]),
+      1,
+      "runner missing token",
+    );
+    if (ctx.db.engine === "sqlite") return;
+    const minted = await ctx.api("POST", "/api/script-runners/credentials", {
+      body: { name: `cli-${ctx.nonce}`, expiresAt: new Date(Date.now() + 3600000).toISOString() },
+    });
+    expectStatus(minted, [201], "runner mint");
+    const body = asRecord(minted.json);
+    try {
+      const result = await runCli(
+        ["script-runner", "--api-url", ctx.baseUrl, "--allow-shared-uid"],
+        {
+          env: { SCRIPT_RUNNER_TOKEN: String(body.token), SCRIPT_RUNNER_SLOTS: "1" },
+          timeoutMs: 30000,
+          whileRunning: async ({ stdout }) => {
+            expect(
+              await pollUntil(() => stdout().includes("connected"), 15000, 50),
+              "CLI runner connects",
+            );
+            const agent = await ctx.api("POST", "/api/agents", {
+              body: { name: `cli-runner-${ctx.nonce}`, role: "worker", status: "online" },
+            });
+            const run = await ctx.api("POST", "/api/scripts/run", {
+              agentId: String(asRecord(agent.json).id),
+              body: { source: "export default () => 42", executor: "quickjs" },
+            });
+            expect(asRecord(run.json).result === 42, "CLI served run");
+          },
+        },
+      );
+      expectExit(result, 0, "runner graceful shutdown");
+      expectOutput(result, "completed", "runner served run");
+    } finally {
+      await ctx.api(
+        "DELETE",
+        `/api/script-runners/credentials/${String(asRecord(body.credential).id)}`,
+      );
+    }
+  },
+};

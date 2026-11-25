@@ -37,6 +37,9 @@ data:
   {{- if .Values.config.githubApiUrl }}
   GITHUB_API_URL: {{ .Values.config.githubApiUrl | quote }}
   {{- end }}
+  {{- if and .Values.scriptRunner.enabled (not (hasKey .Values.config.extraEnv "SCRIPT_EMBEDDED_RUNNER_SLOTS")) }}
+  SCRIPT_EMBEDDED_RUNNER_SLOTS: "0"
+  {{- end }}
   {{- range $k, $v := .Values.config.extraEnv }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}

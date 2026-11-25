@@ -1,3 +1,10 @@
+export {
+  BUS_DURABLE_GROUPS,
+  BUS_TOPICS,
+  type BusDurableGroups,
+  type BusTopics,
+} from "./bus/topics";
+export type { Bus, BusDelivery, BusErrorContext, ManagedBus } from "./bus/types";
 export type { Capabilities, CapabilityName } from "./capabilities";
 export {
   type DbClient,
@@ -59,6 +66,8 @@ export {
   QueryReaderTimeoutError,
 } from "./query-reader";
 export * from "./repositories";
+export * from "./repositories/script-runners";
+export * from "./repositories/workflow-step-jobs";
 export {
   type DialectFragment,
   dialectFragment,

@@ -1,4 +1,5 @@
 import { MAX_KV_BODY_BYTES } from "../../kv-limits";
+import { syncQueueWaitMs } from "../../scripts-runtime/dispatch/capacity-config";
 import {
   DEFAULT_SCRIPT_RESOURCES,
   type ScriptCaller,
@@ -88,6 +89,9 @@ export async function callDurableObject({
   const leaseKey = `lease/${objectId}`;
   const stateKey = `state/${objectId}`;
   const token = crypto.randomUUID();
+  const queueBudgetMs =
+    process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS === undefined ? 0 : syncQueueWaitMs();
+  const invocationBudgetMs = queueBudgetMs + DEFAULT_SCRIPT_RESOURCES.wallClockMs;
   const deadline = Date.now() + (nested ? 5_000 : 30_000);
   for (;;) {
     if (
@@ -96,7 +100,7 @@ export async function callDurableObject({
         key: leaseKey,
         value: { token },
         valueType: "json",
-        expiresAt: Date.now() + DEFAULT_SCRIPT_RESOURCES.wallClockMs + 10_000,
+        expiresAt: Date.now() + invocationBudgetMs + 10_000,
       })
     )
       break;
@@ -128,7 +132,7 @@ export async function callDurableObject({
         agentId,
         executor: executor === undefined ? script.executor : executor,
         fsMode: fsMode ?? script.fsMode,
-        signal: AbortSignal.timeout(DEFAULT_SCRIPT_RESOURCES.wallClockMs),
+        signal: AbortSignal.timeout(invocationBudgetMs),
         durable: {
           id: objectId,
           method,

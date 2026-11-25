@@ -12,7 +12,7 @@
 
 // Worker-side code (see scripts/check-db-boundary.sh WORKER_PATHS).
 const WORKER_SIDE =
-  "^src/(commands|hooks|providers|prompts|scripts-runtime|utils)/|^src/(cli\\.tsx|claude\\.ts)$";
+  "^src/(commands|hooks|providers|prompts|scripts-runtime|script-runner|utils)/|^src/(cli\\.tsx|claude\\.ts)$";
 
 // Storage packages (Postgres brief D4). The composition root is the only src/
 // file that may import an engine package.

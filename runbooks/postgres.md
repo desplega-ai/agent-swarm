@@ -60,6 +60,10 @@ At start, a probe checks that the role cannot read the 7 denied tables (directly
 
 ## One process per database
 
+This restriction applies to API processes. Script runners connect through WebSocket and hold no database connection.
+PostgreSQL can serve one API with several script runners. The execution tier does not enable several API replicas.
+See [script-runners.md](./script-runners.md) for placement, leases and recovery.
+
 The API holds a session advisory lock on its database for its whole life. A second API process on the same database waits 10 seconds, then stops with `another API process holds this Postgres database`. `db-copy` takes the same lock, so it refuses a database an API runs on. If the lock session ends while the API runs (a database restart, a dropped connection), the API logs `lost the one-process lock` and exits within about a second; the supervisor restarts it, and the new process waits for the lock again. Writes are fenced in that window: each write transaction first checks that the process still holds the lock, and a new holder waits for the old holder's open write transactions before it writes (`packages/storage-postgres/src/owner-fence.ts`). A write after a takeover fails with `no longer holds the one-process lock`.
 
 Connection budget per API process: 1 session for the one-process lock, up to 10 for the application pool, and up to 4 for the optional db-query reader (15 in total). Set the role's or the server's connection limit to at least that. With a connection pooler (PgBouncer, a cloud proxy) between the API and Postgres, use session pooling for the API's `DATABASE_URL`. The lock is a session advisory lock, so the lock connection needs session affinity: in transaction pooling the lock lands on a server connection that other clients share, and the write fence cannot see the owner session. Connect directly when the pooler offers only transaction pooling.
@@ -128,6 +132,11 @@ In the window:
 Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the untouched SQLite file. Writes made on Postgres after the cutover are not copied back.
 
 What the copy does, step by step: opens the SQLite file read-only; skips the two tables that Litestream adds to a replicated database (`_litestream_seq`, `_litestream_lock`); refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table; after COMMIT, runs `VACUUM (ANALYZE)` so the API starts with planner statistics (a `WARNING` line says so when this step fails: run it by hand before you start the API).
+
+The PostgreSQL-only tables `bus_events` and `bus_deliveries` start empty. The copy verifies their emptiness before copying and before COMMIT, and lists them under `rebuilt` in the report.
+SQLite has no durable bus rows to transfer. The supervisor recovers unfinished script runs from their copied run rows when the target API starts.
+The copy still refuses every target that already holds tables, including targets with pending bus work. Unknown table differences still refuse the copy.
+Later API releases apply only appended migrations and preserve existing bus rows. Never use `db-copy` to append source rows into an existing target.
 
 Refused rows: one run lists every row the target cannot store. The copy first reads the orphan rows from SQLite (`PRAGMA foreign_key_check`: a row whose parent row is gone), then checks every value. After the first refused row it writes no more rows, so a refused run takes minutes, not the time of a full copy. Each line names the table, the column and the rowid.
 
@@ -201,3 +210,17 @@ These assertion groups stay, with the reason:
 | `db-copy: cannot store <table>.<column> (rowid N): ...` | Fix that value in the SQLite file, then copy again. Nothing was written. |
 
 Sources: decision records in `thoughts/taras/brainstorms/2026-11-20-postgres-storage-engine-goal-prompt.md` (D1 to D18) and the ledger `thoughts/taras/plans/2026-11-20-postgres-storage-engine-ledger.md`.
+
+## Script-runner credentials
+
+PostgreSQL supports minting independent script-runner credentials. SQLite refuses minting with HTTP 409 and `script_runners_need_postgres`.
+
+All three routes require an operator or user principal with `script_runner.write`:
+
+- `POST /api/script-runners/credentials` accepts `name` and a future `expiresAt` ISO timestamp.
+- `GET /api/script-runners/credentials` returns metadata without token material.
+- `DELETE /api/script-runners/credentials/{id}` revokes a credential.
+
+Mint returns an `assr_` token once. Storage retains only its SHA-256 hash.
+The credential cannot authenticate ordinary HTTP requests. Only `/api/script-runners/connect` accepts it.
+The credential lookup rejects expired and revoked credentials.

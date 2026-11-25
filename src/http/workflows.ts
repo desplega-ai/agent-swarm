@@ -52,6 +52,7 @@ import {
   WorkflowSchema,
   WorkflowVersionSchema,
 } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { definitionNodeIds, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
@@ -61,6 +62,7 @@ import { workflowModelErrors } from "../workflows/model-validation";
 import { patchWorkflowDefinition } from "../workflows/patch-definition";
 import { workflowSaveWarnings } from "../workflows/readiness";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
+import { workflowRequestPrincipal, workflowTriggerAgentId } from "../workflows/run-principal";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { authorizeHttpAssetKeyWrite } from "./asset-key-write";
@@ -1140,9 +1142,12 @@ export async function handleWorkflows(
     let runId: string;
     let accepted: { runId: string; skipped: boolean } | undefined;
     try {
+      const auth = getRequestAuth(req);
+      const triggerAgentId = workflowTriggerAgentId(auth, myAgentId);
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
-        triggeredByAgentId: myAgentId,
+        executionPrincipal: workflowRequestPrincipal(auth, triggerAgentId),
+        triggeredByAgentId: triggerAgentId,
         requestedByUserId: (await resolveHttpRequesterUserId(req, myAgentId)) ?? undefined,
         detach: parsed.query.wait === "false",
         // Recorded in the run's own transaction, before the walk starts.

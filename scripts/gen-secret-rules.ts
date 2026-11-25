@@ -19,6 +19,9 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 const REPO_ROOT = join(import.meta.dir, "..");
+const LOCAL_RULES = Bun.TOML.parse(await Bun.file(join(REPO_ROOT, ".gitleaks.toml")).text()) as {
+  rules?: GitleaksRule[];
+};
 const VENDOR_PATH = join(REPO_ROOT, "scripts", "vendor", "gitleaks", "gitleaks.toml");
 const OUT_PATH = join(REPO_ROOT, "src", "utils", "secret-rules.generated.ts");
 const MARKER = "# ---- upstream gitleaks.toml below ----\n";
@@ -370,7 +373,7 @@ export function generate(text: string): string {
 
   const excluded: { id: string; reason: string }[] = [];
   const rules = [];
-  for (const rule of config.rules) {
+  for (const rule of [...config.rules, ...(LOCAL_RULES.rules ?? [])]) {
     const reason =
       EXCLUDED[rule.id] ??
       (rule.path ? "path-scoped: gitleaks applies it to matching file names only" : undefined) ??

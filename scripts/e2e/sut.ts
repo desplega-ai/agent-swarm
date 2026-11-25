@@ -478,8 +478,13 @@ export async function runDataCopyCli(
  * Restart only the API process while preserving every externalized SUT resource.
  * `extraEnv` applies to this process only; the next restart boots the base env again.
  */
-export async function restartSut(sut: Sut, extraEnv: Record<string, string> = {}): Promise<void> {
+export async function restartSut(
+  sut: Sut,
+  extraEnv: Record<string, string> = {},
+  afterStop?: () => Promise<void>,
+): Promise<void> {
   await stopSutProcess(sut);
+  await afterStop?.();
   sut.logPath = `${sut.logPaths[0]}.restart-${sut.logPaths.length}`;
   sut.logPaths.push(sut.logPath);
   await launch(sut, true, extraEnv);

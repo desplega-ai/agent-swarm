@@ -769,3 +769,20 @@ reject the reserved key; legacy stored values are ignored at startup and reload 
 The API warns once per process at startup or first use when the deployment opt-out is enabled.
 Denied-origin logs name the origin and `CORS_ALLOWED_ORIGINS` so a missing SPA origin is diagnosable.
 CORS controls browser response access; it does not replace authentication or CSRF protection.
+
+### Script runner capacity
+
+| Variable | Default | Engine | Meaning |
+| --- | --- | --- | --- |
+| `SCRIPT_EMBEDDED_RUNNER_SLOTS` | Unset (unlimited) | PostgreSQL only | Embedded slots, 0 to 1024. Zero disables embedded execution. |
+| `SCRIPT_QUEUE_WAIT_SYNC_MS` | `30000` | PostgreSQL only | FIFO queue wait limit, 0 to 540000 milliseconds. |
+| `SCRIPT_RUNNER_SLOTS` | `2` | Runner environment | Advertised slots, 1 to 1024. Configure on the runner, outside Settings. |
+
+SQLite rejects both API capacity settings at boot and through configuration writes.
+The API accepts these settings through global configuration without a restart.
+Queue expiry returns `capacity_exceeded`. The caller signal bounds queue time plus execution time.
+Execution wall time begins on the runner. The maximum queue wait plus execution time stays below the credential lifetime.
+`SCRIPT_RUN_CONCURRENCY_CAP` still controls durable workflow runs.
+`SCRIPT_QUICKJS_POOL_SIZE` still controls the executor's QuickJS pool.
+`GET /api/script-runners` exposes queue depth, oldest wait, active runs and slots in `lanes.sync`.
+Unlimited embedded capacity appears as `slots: null`.

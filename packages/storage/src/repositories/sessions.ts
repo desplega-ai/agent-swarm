@@ -460,10 +460,15 @@ export type NewSessionToken = {
   controllerId: string | null;
   parentTokenId: string | null;
   scriptRun: boolean;
+  operatorRun?: boolean;
+  brokerParentId?: string | null;
 };
 
 /** A session token by hash, with its controller's placement. */
 export type SessionTokenLookupRow = {
+  scriptRun: number;
+  brokerParentId: string | null;
+  operatorRun: number;
   id: string;
   agentId: string;
   taskId: string | null;
@@ -851,6 +856,7 @@ export interface SessionsRepository {
   /** Unrevoked tokens that authenticate as `agentId` (not controller tokens). Unordered. */
   listUnrevokedAgentSessionTokenIds(agentId: string): Promise<string[]>;
   findSessionTokenByHash(tokenHash: string): Promise<SessionTokenLookupRow | null>;
+  findSessionTokenById(id: string): Promise<SessionTokenLookupRow | null>;
   touchSessionToken(id: string, now: string): Promise<void>;
 }
 
@@ -869,6 +875,11 @@ const RESOURCE_NAMES: Record<SessionResourceKind, { table: string; column: strin
  * leaves out a script run's ephemeral token (same all-null binding shape).
  */
 const AGENT_TOKEN_BINDING = sql`"taskId" IS NULL AND "runtimeId" IS NULL AND "controllerId" IS NULL AND "parentRuntimeId" IS NULL AND "scriptRun" = ${false}`;
+
+const SESSION_TOKEN_LOOKUP = sql`SELECT s.id, s."agentId", s."taskId", s."runtimeId",
+  s."controllerId", s."expiresAt", s."revokedAt", s."operatorRun", s."scriptRun", s."brokerParentId",
+  s."sourceStepId", s."sourceScriptRunId", s."objectChain", s.depth, c.placement
+  FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s."controllerId"`;
 
 const PRICING_COLUMNS = sql`provider, model, token_class, effective_from, price_per_million_usd, "createdAt", "lastUpdatedAt"`;
 const COMPOSITION_COLUMNS = sql`id, "taskId", "agentId", "sessionId", seq, provider, model, source, parts, "staticEstTokens", "tokenRatio", "createdAt"`;
@@ -1483,9 +1494,9 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   async insertSessionToken(t: NewSessionToken): Promise<void> {
     await this.db.run(sql`
       INSERT INTO session_tokens
-      (id, "tokenHash", "tokenPreview", "agentId", "taskId", "runtimeId", "parentRuntimeId", "expiresAt", "createdAt", "controllerId", "parentTokenId", "scriptRun")
+      (id, "tokenHash", "tokenPreview", "agentId", "taskId", "runtimeId", "parentRuntimeId", "expiresAt", "createdAt", "controllerId", "parentTokenId", "scriptRun", "operatorRun", "brokerParentId")
       VALUES (${t.id}, ${t.tokenHash}, ${t.tokenPreview}, ${t.agentId}, ${t.taskId}, ${t.runtimeId},
-        ${t.parentRuntimeId}, ${t.expiresAt}, ${t.createdAt}, ${t.controllerId}, ${t.parentTokenId}, ${t.scriptRun})`);
+        ${t.parentRuntimeId}, ${t.expiresAt}, ${t.createdAt}, ${t.controllerId}, ${t.parentTokenId}, ${t.scriptRun}, ${t.operatorRun ?? false}, ${t.brokerParentId ?? null})`);
   }
 
   async setSessionTokenProvenance(
@@ -1560,10 +1571,13 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   }
 
   findSessionTokenByHash(tokenHash: string): Promise<SessionTokenLookupRow | null> {
-    return this.db.get<SessionTokenLookupRow>(sql`
-      SELECT s.id, s."agentId", s."taskId", s."runtimeId", s."controllerId", s."expiresAt", s."revokedAt",
-      s."sourceStepId", s."sourceScriptRunId", s."objectChain", s.depth, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s."controllerId"
-      WHERE s."tokenHash" = ${tokenHash}`);
+    return this.db.get<SessionTokenLookupRow>(
+      sql`${SESSION_TOKEN_LOOKUP} WHERE s."tokenHash" = ${tokenHash}`,
+    );
+  }
+
+  findSessionTokenById(id: string): Promise<SessionTokenLookupRow | null> {
+    return this.db.get<SessionTokenLookupRow>(sql`${SESSION_TOKEN_LOOKUP} WHERE s.id = ${id}`);
   }
 
   async touchSessionToken(id: string, now: string): Promise<void> {

@@ -1977,6 +1977,35 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/scripts-runtime#egress-policy`,
       },
       {
+        key: "SCRIPT_RUNNER_LONG_LANE_SHARE",
+        label: "Long lane share",
+        description:
+          "Maximum share of each remote runner for durable jobs. At least one slot remains eligible. PostgreSQL only.",
+        kind: "number",
+        defaultValue: "0.5",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#script-executor`,
+      },
+      {
+        key: "SCRIPT_EMBEDDED_RUNNER_SLOTS",
+        label: "Embedded script runner slots",
+        description:
+          "PostgreSQL only. Unset allows unlimited embedded runs. Zero disables the embedded runner.",
+        kind: "number",
+        defaultValue: "",
+        docsUrl: `${DOCS}ui/configuration#script-runner-capacity`,
+      },
+      {
+        key: "SCRIPT_QUEUE_WAIT_SYNC_MS",
+        label: "Sync script queue wait",
+        description:
+          "PostgreSQL only. Maximum wait in the sync queue, from 0 to 540000 milliseconds.",
+        kind: "number",
+        defaultValue: "30000",
+        unit: "ms",
+        docsUrl: `${DOCS}ui/configuration#script-runner-capacity`,
+      },
+      {
         key: "SCRIPT_QUICKJS_POOL_SIZE",
         label: "QuickJS worker pool size",
         description:

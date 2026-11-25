@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CopyCell, CopyMigration, CopyRow, CopySource, CopyTable } from "@desplega/storage";
@@ -38,6 +38,13 @@ CREATE FUNCTION refuse_write() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'trigger fired'; END $$;
 CREATE TRIGGER items_refuse BEFORE INSERT ON items FOR EACH ROW EXECUTE FUNCTION refuse_write();
 `;
+
+const BUS_CHAIN = readFileSync(
+  join(import.meta.dir, "../../../src/be/migrations/postgres/381_bus_tables.sql"),
+  "utf8",
+);
+const BUS_EVENT = `INSERT INTO bus_events (id, topic, payload, "createdAt")
+  VALUES ('pending-event', 'script.run.requested', '{"runId":"pending-run"}', 1)`;
 
 const enc = new TextEncoder();
 const text = (value: string): CopyCell => ({ kind: "text", bytes: enc.encode(value) });
@@ -155,6 +162,97 @@ const run = (src: CopySource) =>
   copyIntoPostgres(src, { url: db.url, migrationsDir: dir, embeddingDimensions: 4, log: () => {} });
 
 describe("copyIntoPostgres", () => {
+  test("initializes PostgreSQL-only bus tables empty and verifies them in the report", async () => {
+    writeFileSync(join(dir, "001_chain.sql"), CHAIN + BUS_CHAIN);
+    const report = await run(fullSource());
+    expect(report.error).toBeUndefined();
+    expect(report.ok).toBe(true);
+    for (const table of ["bus_events", "bus_deliveries"]) {
+      expect((await sql.unsafe(`SELECT count(*)::int AS n FROM ${table}`))[0].n).toBe(0);
+      expect(report.rebuilt).toContainEqual({
+        table,
+        rows: 0,
+        reason: "PostgreSQL-only execution queue initialized empty",
+      });
+    }
+  });
+
+  test("refuses an unknown target table and rolls back the schema", async () => {
+    writeFileSync(
+      join(dir, "001_chain.sql"),
+      `${CHAIN}${BUS_CHAIN}\nCREATE TABLE unknown_table (id text);`,
+    );
+    const report = await run(fullSource());
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/only in Postgres \[unknown_table\]/);
+    expect(await tableCount()).toBe(0);
+  });
+
+  test.each(["unknown_table", "bus_events"])("refuses unexpected SQLite table %s", async (name) => {
+    writeFileSync(join(dir, "001_chain.sql"), CHAIN + BUS_CHAIN);
+    const src = fullSource();
+    const report = await run({
+      ...src,
+      tables: () => [...src.tables(), { name, hasRowid: false, columns: [] }],
+    });
+    expect(report.ok).toBe(false);
+    expect(report.error).toContain(name);
+    expect(await tableCount()).toBe(0);
+  });
+
+  test("refuses bus work written by the migration chain instead of deleting it", async () => {
+    writeFileSync(join(dir, "001_chain.sql"), `${CHAIN}${BUS_CHAIN}\n${BUS_EVENT};`);
+    const report = await run(fullSource());
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/PostgreSQL-only table bus_events is not empty/);
+    expect(await tableCount()).toBe(0);
+  });
+
+  test("verifies bus tables again after migrations run on copied rows", async () => {
+    writeFileSync(join(dir, "001_chain.sql"), CHAIN + BUS_CHAIN);
+    writeFileSync(
+      join(dir, "002_queue.sql"),
+      `INSERT INTO bus_events (id, topic, payload, "createdAt")
+       SELECT 'pending-event', 'script.run.requested', '{}', 1 WHERE EXISTS (SELECT 1 FROM items);`,
+    );
+    writeFileSync(
+      join(dir, "after-copy.json"),
+      JSON.stringify({ format: 2, reapply: ["002_queue"] }),
+    );
+    const report = await run({ ...fullSource(), migrationHead: () => 2 });
+    expect(report.ok).toBe(false);
+    expect(report.error).toMatch(/PostgreSQL-only table bus_events is not empty/);
+    expect(await tableCount()).toBe(0);
+  });
+
+  test("refuses existing pending bus work, including before an appended migration", async () => {
+    writeFileSync(join(dir, "001_chain.sql"), CHAIN + BUS_CHAIN);
+    expect((await run(fullSource())).ok).toBe(true);
+    await sql.unsafe(BUS_EVENT);
+    await sql.unsafe(`INSERT INTO bus_deliveries ("eventId", "groupName", "availableAt")
+      VALUES ('pending-event', 'script-supervisor', 1)`);
+    const work = async () => ({
+      events: await sql.unsafe("SELECT * FROM bus_events"),
+      deliveries: await sql.unsafe("SELECT * FROM bus_deliveries"),
+    });
+    const before = await work();
+    const sameHead = await run(fullSource());
+    expect(sameHead.ok).toBe(false);
+    expect(sameHead.error).toMatch(/already holds tables/);
+    expect(await work()).toEqual(before);
+
+    writeFileSync(join(dir, "002_next.sql"), "CREATE TABLE later_release (id text PRIMARY KEY);");
+    const later = await run({ ...fullSource(), migrationHead: () => 2 });
+    expect(later.ok).toBe(false);
+    expect(later.error).toMatch(/target database is at migration 1, this build at 2/);
+    expect(await work()).toEqual(before);
+    expect((await sql.unsafe("SELECT MAX(version)::int AS v FROM _migrations"))[0].v).toBe(1);
+
+    await runPostgresMigrations(sql as never, { migrationsDir: dir, log: () => {} });
+    expect((await sql.unsafe("SELECT MAX(version)::int AS v FROM _migrations"))[0].v).toBe(2);
+    expect(await work()).toEqual(before);
+  });
+
   test("copies every type, keeps rowids, compares equal, restarts sequences", async () => {
     const report = await run(fullSource(goodItems(), [item(1, [text("c1"), text("a")])]));
     expect(report.error).toBeUndefined();

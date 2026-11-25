@@ -80,6 +80,11 @@ const MAX_PARAMS = 60_000;
  */
 const DEFAULT_BATCH_BYTES = 16 * 1024 * 1024;
 const TABLE_ORDER_KEY = ROWID_COLUMN;
+/** PostgreSQL execution state has no SQLite counterpart and must start empty. */
+export const POSTGRES_ONLY_COPY_TABLES: ReadonlySet<string> = new Set([
+  "bus_events",
+  "bus_deliveries",
+]);
 
 function quote(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;
@@ -216,6 +221,17 @@ async function readTargetTables(conn: Conn): Promise<Map<string, TargetTable>> {
     });
   }
   return tables;
+}
+
+async function executionBusProblem(
+  conn: Conn,
+  targets: Map<string, TargetTable>,
+): Promise<string | undefined> {
+  for (const name of POSTGRES_ONLY_COPY_TABLES) {
+    if (!targets.has(name)) continue;
+    const [row] = await conn.unsafe(`SELECT EXISTS (SELECT 1 FROM ${quote(name)}) AS occupied`);
+    if (row?.occupied) return `the PostgreSQL-only table ${name} is not empty. Nothing was written`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -542,7 +558,7 @@ function copyMetadataProblem(migrationsDir: string): string | null {
     try {
       format = (JSON.parse(readFileSync(file, "utf8")) as { format?: unknown }).format;
     } catch (error) {
-      return `${file} is not valid JSON: ${(error instanceof Error ? error.message : String(error))}`;
+      return `${file} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
     }
     if (format !== COPY_METADATA_FORMAT) {
       return (
@@ -621,7 +637,7 @@ async function planReadOnly(url: string, query: MetricQuery): Promise<string | n
         );
         return null;
       } catch (error) {
-        return (error instanceof Error ? error.message : String(error));
+        return error instanceof Error ? error.message : String(error);
       } finally {
         await conn.unsafe("ROLLBACK").catch(() => {});
       }
@@ -781,7 +797,7 @@ export async function copyIntoPostgres(
     try {
       conn = (await pool.reserve()) as unknown as Conn;
     } catch (error) {
-      report.error = `cannot connect to the target database: ${(error instanceof Error ? error.message : String(error))}`;
+      report.error = `cannot connect to the target database: ${error instanceof Error ? error.message : String(error)}`;
       return report;
     }
     try {
@@ -841,13 +857,27 @@ export async function copyIntoPostgres(
 
         const sourceTables = source.tables();
         const sourceNames = new Set(sourceTables.map((t) => t.name));
+        const sourceBus = sourceTables.find((t) => POSTGRES_ONLY_COPY_TABLES.has(t.name));
+        if (sourceBus) {
+          report.error = `the SQLite source contains PostgreSQL-only table ${sourceBus.name}. Nothing was written`;
+          return report;
+        }
         const rebuiltTables = new Set(["memory_vec"]);
         const missing = sourceTables.filter((t) => !targets.has(t.name)).map((t) => t.name);
         const extra = [...targets.keys()].filter(
-          (name) => name !== "_migrations" && !sourceNames.has(name) && !rebuiltTables.has(name),
+          (name) =>
+            name !== "_migrations" &&
+            !sourceNames.has(name) &&
+            !rebuiltTables.has(name) &&
+            !POSTGRES_ONLY_COPY_TABLES.has(name),
         );
         if (missing.length > 0 || extra.length > 0) {
           report.error = `the schemas differ: only in SQLite [${missing.join(", ")}], only in Postgres [${extra.join(", ")}]`;
+          return report;
+        }
+        const busProblem = await executionBusProblem(conn, targets);
+        if (busProblem) {
+          report.error = busProblem;
           return report;
         }
 
@@ -1067,6 +1097,20 @@ export async function copyIntoPostgres(
             reason: "Postgres rows of this migration restored over the copied SQLite rows",
           });
         }
+        const finalBusProblem = await executionBusProblem(conn, targets);
+        if (finalBusProblem) {
+          report.error = finalBusProblem;
+          return report;
+        }
+        for (const name of POSTGRES_ONLY_COPY_TABLES) {
+          if (targets.has(name)) {
+            report.rebuilt.push({
+              table: name,
+              rows: 0,
+              reason: "PostgreSQL-only execution queue initialized empty",
+            });
+          }
+        }
         // Ownership and writes share this session; still check that it holds the
         // lock before the copy becomes visible.
         const held = await conn.unsafe(
@@ -1109,7 +1153,7 @@ export async function copyIntoPostgres(
               table: "metrics",
               column: pending.where,
               row: pending.row,
-              reason: `could not be checked on Postgres: ${(error instanceof Error ? error.message : String(error))}`,
+              reason: `could not be checked on Postgres: ${error instanceof Error ? error.message : String(error)}`,
             });
             continue;
           }
@@ -1126,7 +1170,7 @@ export async function copyIntoPostgres(
         return report;
       } catch (error) {
         if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
-        report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${(error instanceof Error ? error.message : String(error))}`;
+        report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${error instanceof Error ? error.message : String(error)}`;
         return report;
       } finally {
         // An early refusal returns without COMMIT: undo the chain and every write.
@@ -1135,7 +1179,7 @@ export async function copyIntoPostgres(
     } catch (error) {
       // A failure before the copy transaction (target inspection):
       // it still goes into the report, so --json is written.
-      report.error = `the copy did not start, no row was copied: ${(error instanceof Error ? error.message : String(error))}`;
+      report.error = `the copy did not start, no row was copied: ${error instanceof Error ? error.message : String(error)}`;
       return report;
     } finally {
       await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});

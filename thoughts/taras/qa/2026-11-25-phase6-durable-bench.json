@@ -1,0 +1,48 @@
+{
+  "revision": "e2539682c5",
+  "n": 200,
+  "embedded": {
+    "newStep": {
+      "n": 200,
+      "p50": 186.71341699999903,
+      "p95": 619.2091660000006
+    },
+    "replayedStep": {
+      "n": 200,
+      "p50": 17.052875000001222,
+      "p95": 207.6809579999972
+    },
+    "swarmCall": {
+      "n": 200,
+      "p50": 41.15020800000639,
+      "p95": 195.9327090000006
+    },
+    "concurrent32Ms": 775.0269169999956,
+    "concurrentOk": 32
+  },
+  "remote": {
+    "newStep": {
+      "n": 200,
+      "p50": 40.0268329999999,
+      "p95": 95.94358299999999
+    },
+    "replayedStep": {
+      "n": 200,
+      "p50": 2.9981250000000728,
+      "p95": 4.994958000001134
+    },
+    "swarmCall": {
+      "n": 200,
+      "p50": 5.667916000000332,
+      "p95": 20.34058300000106
+    },
+    "concurrent32Ms": 58.08979100000033,
+    "concurrentOk": 32
+  },
+  "deltaP50": {
+    "newStep": -146.68658399999913,
+    "replayedStep": -14.05475000000115,
+    "swarmCall": -35.482292000006055
+  },
+  "limits": "Sequential measurements under variable shared machine load. These results do not isolate tunnel overhead."
+}

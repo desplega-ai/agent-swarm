@@ -26,6 +26,7 @@ import type { RetentionRepository } from "./repositories/retention";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { SavingsRepository } from "./repositories/savings";
 import type { SchedulesRepository } from "./repositories/schedules";
+import type { ScriptRunnersRepository } from "./repositories/script-runners";
 import type { ScriptsRepository } from "./repositories/scripts";
 import type { SessionsRepository } from "./repositories/sessions";
 import type { SkillsRepository } from "./repositories/skills";
@@ -33,10 +34,13 @@ import type { SlackRepository } from "./repositories/slack";
 import type { TasksRepository } from "./repositories/tasks";
 import type { TrackersRepository } from "./repositories/trackers";
 import type { UsersRepository } from "./repositories/users";
+import type { WorkflowStepJobsRepository } from "./repositories/workflow-step-jobs";
 import type { WorkflowsRepository } from "./repositories/workflows";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
+  workflowStepJobs: WorkflowStepJobsRepository;
+  scriptRunners: ScriptRunnersRepository;
   extensions: ExtensionsRepository;
   models: ModelsRepository;
   runtimePools: RuntimePoolsRepository;
@@ -74,6 +78,7 @@ export type Repositories = {
  * transaction entry point. The API server holds exactly one.
  */
 export interface Storage {
+  readonly executionBus?: import("./bus/types").ManagedBus;
   readonly dialect: Dialect;
   readonly capabilities: Capabilities;
   readonly repos: Repositories;

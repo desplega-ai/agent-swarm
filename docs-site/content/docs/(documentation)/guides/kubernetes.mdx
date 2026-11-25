@@ -233,3 +233,38 @@ If the response redirects, demands authentication, lacks CORS headers, or contai
 - [Deployment guide](/docs/guides/deployment) for Compose, Docker, and systemd.
 - [Dashboard UI](/docs/ui) for hosted and self-hosted dashboard setup.
 - [Chart values](https://github.com/desplega-ai/agent-swarm/blob/main/charts/agent-swarm/values.yaml) and [ingress template](https://github.com/desplega-ai/agent-swarm/blob/main/charts/agent-swarm/templates/ingress.yaml) for the chart configuration.
+
+## Optional script runners
+
+Script runners require PostgreSQL. SQLite deployments retain the embedded executor.
+The API remains the only database owner.
+The runner link carries run secrets. Use an HTTPS API URL outside a trusted network.
+Runners receive their own credential file and no API key or database credentials.
+
+Enable `scriptRunner.enabled` with `database.url` or `database.existingSecret`.
+Provide `scriptRunner.existingSecret` with key `SCRIPT_RUNNER_TOKEN`, containing a minted runner credential.
+The chart also accepts `scriptRunner.token` for an inline credential.
+Set `scriptRunner.apiUrl` for an HTTPS API endpoint outside the cluster.
+
+```bash
+helm upgrade --install swarm charts/agent-swarm --reuse-values \
+  --set database.existingSecret=swarm-db \
+  --set scriptRunner.enabled=true --set scriptRunner.existingSecret=swarm-runner \
+  --set scriptRunner.replicas=2
+```
+
+The default replica count is one. The default grace period is 60 seconds.
+The probe checks `/tmp/script-runner.ready`, which the client creates while connected.
+The pod starts as root so native guests can run as `nobody:nogroup`.
+
+The chart sets API `SCRIPT_EMBEDDED_RUNNER_SLOTS=0` unless `config.extraEnv` supplies a value.
+Optional KEDA scaling reads `lanes.sync.queued` through the `metrics-api` scaler.
+Install KEDA first and set `scriptRunner.keda.enabled=true`.
+Set `scriptRunner.keda.existingSecret` to a separate Secret with key `token`.
+Use a user token with `script_runner.read`. Never use the operator key or runner credential.
+KEDA keeps between one and ten replicas by default, with four queued jobs as its target.
+This metric measures sync jobs only. The chart refuses zero minimum replicas and invalid bounds.
+
+A `swarm_config` row overrides environment values. Check Configuration before disabling embedded capacity.
+With embedded slots at zero and no connected runner, scripts wait and then fail.
+This includes the heartbeat script probe.

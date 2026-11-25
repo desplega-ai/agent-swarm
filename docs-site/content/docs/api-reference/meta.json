@@ -48,6 +48,7 @@
     "schedules",
     "script-connections",
     "script-runs",
+    "script-runners",
     "scripts",
     "session-data",
     "sessions",

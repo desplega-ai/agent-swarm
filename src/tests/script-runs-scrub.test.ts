@@ -162,7 +162,10 @@ describe("script run writers scrub at write", () => {
       async terminatePid() {},
     });
     try {
-      await startScriptRunProcess(recovered!, "http://127.0.0.1:1", "test-key");
+      await (await import("../be/storage"))
+        .getStorage()
+        .repos.scripts.setScriptRunPrincipal(recovered!.id, JSON.stringify({ kind: "operator" }));
+      await startScriptRunProcess(recovered!, "http://127.0.0.1:1");
       expect(launched?.run.args).toEqual(args);
     } finally {
       exit({ exitCode: 0, stderr: "" });

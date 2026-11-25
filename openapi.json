@@ -55815,7 +55815,7 @@
       "post": {
         "operationId": "script_runs_create",
         "summary": "Launch a durable script workflow run",
-        "description": "Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.",
+        "description": "An authenticated agent or operator can create a durable run and receive its dashboard URL.",
         "tags": [
           "Script Runs"
         ],
@@ -55898,6 +55898,16 @@
           },
           "400": {
             "description": "Validation or label-lint failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Durable execution requires an authenticated agent or operator",
             "content": {
               "application/json": {
                 "schema": {
@@ -66508,6 +66518,415 @@
         }
       }
     },
+    "/api/script-runners": {
+      "get": {
+        "summary": "List live script-runner sessions",
+        "tags": [
+          "Script runners"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lanes": {
+                      "type": "object",
+                      "properties": {
+                        "long": {
+                          "type": "object",
+                          "properties": {
+                            "queued": {
+                              "type": "number"
+                            },
+                            "oldestWaitMs": {
+                              "type": "number"
+                            },
+                            "inFlight": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "queued",
+                            "oldestWaitMs",
+                            "inFlight"
+                          ]
+                        },
+                        "sync": {
+                          "type": "object",
+                          "properties": {
+                            "queued": {
+                              "type": "number"
+                            },
+                            "oldestWaitMs": {
+                              "type": "number"
+                            },
+                            "inFlight": {
+                              "type": "number"
+                            },
+                            "slots": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "queued",
+                            "oldestWaitMs",
+                            "inFlight",
+                            "slots"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "long",
+                        "sync"
+                      ]
+                    },
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "instanceId": {
+                            "type": "string"
+                          },
+                          "slots": {
+                            "type": "number"
+                          },
+                          "jobsInFlight": {
+                            "type": "number"
+                          },
+                          "jobsCompleted": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "instanceId",
+                          "slots",
+                          "jobsInFlight",
+                          "jobsCompleted"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "lanes",
+                    "sessions"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/script-runners/credentials": {
+      "get": {
+        "summary": "List script-runner credentials without token material",
+        "tags": [
+          "Script runners"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "credentials": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          },
+                          "revokedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "createdBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "updatedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "expiresAt",
+                          "revokedAt",
+                          "createdAt",
+                          "updatedAt",
+                          "createdBy",
+                          "updatedBy"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "credentials"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Mint a script-runner credential",
+        "tags": [
+          "Script runners"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Token returned once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "credential": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "createdBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "updatedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "expiresAt",
+                        "revokedAt",
+                        "createdAt",
+                        "updatedAt",
+                        "createdBy",
+                        "updatedBy"
+                      ]
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "credential",
+                    "token"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "script_runners_need_postgres",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/script-runners/credentials/{id}": {
+      "delete": {
+        "summary": "Revoke a script-runner credential",
+        "tags": [
+          "Script runners"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "revoked"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Credential not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/mcp-servers": {
       "get": {
         "summary": "List MCP servers with optional filters",
@@ -71206,7 +71625,7 @@
       "put": {
         "operationId": "users_setRbacRoles",
         "summary": "Set a user's RBAC roles",
-        "description": "Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.",
+        "description": "Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Only the operator can assign roles with session.read.all or script_runner.write. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.",
         "tags": [
           "Users"
         ],
@@ -79781,6 +80200,54 @@
           },
           "404": {
             "description": "Runtime pools disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/script-runners/connect": {
+      "get": {
+        "summary": "Connect a script runner with its dedicated bearer credential",
+        "tags": [
+          "Script runners"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket upgrade"
+          },
+          "401": {
+            "description": "Invalid runner credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "script_runners_need_postgres",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runner credential lookup temporarily unavailable",
             "content": {
               "application/json": {
                 "schema": {

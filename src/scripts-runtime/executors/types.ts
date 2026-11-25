@@ -32,6 +32,7 @@ export type DurableInvocation = {
 
 export type SwarmConfigPayload = {
   system: {
+    connectRetryMs?: number;
     apiKey: { value: string; isSecret: true };
     agentId: { value: string; isSecret: false };
     mcpBaseUrl: { value: string; isSecret: false };
@@ -114,9 +115,7 @@ export type ScriptExecutorError =
    * happens AFTER user code starts running is classified `eval_error`
    * instead (see `classifyExit` in `./native.ts`), since the script may
    * already have caused a side effect that a retry must not replay.
-   * Transient and independent of any concurrency limiter this process
-   * holds; `runScript` in `../loader.ts` retries it a bounded number of
-   * times before giving up.
+   * The runner retries this transient error at most twice.
    */
   | "capacity_exceeded";
 

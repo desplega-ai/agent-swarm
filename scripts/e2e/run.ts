@@ -52,6 +52,7 @@ import {
 } from "./report";
 import { rerunPlan, settleRerun } from "./rerun";
 import { loadScenarios } from "./scenarios/registry";
+import { startScriptRunner } from "./script-runner";
 import { bandOf, bandProblems, coverageInputs, type Observations } from "./shard";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import {
@@ -81,6 +82,7 @@ export type ScenarioContext = {
    * every agent a scenario started when the scenario ends, so a lingering poller cannot
    * steal the next scenario's pool tasks. Stop earlier yourself when the scenario needs it.
    */
+  startScriptRunner: (token: string, slots?: number) => ReturnType<typeof startScriptRunner>;
   startAgent: (options?: SimulatedAgentOptions) => Promise<SimulatedAgent>;
   /** Count a request made outside `ctx.api` (raw fetch, WebSocket, SSE) toward coverage. */
   recordHttpCall: typeof recordHttpCall;
@@ -104,7 +106,13 @@ export type ScenarioContext = {
    */
   slackJournal: () => SlackJournal | undefined;
   /** `env` adds variables to the restarted process only; the next restart drops them. */
-  restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
+  restartSut: (options?: {
+    env?: Record<string, string>;
+    /** Run while the API is stopped, before the next process starts. */
+    afterStop?: () => Promise<void>;
+    /** Run after health succeeds, before waiting for Slack to reconnect. */
+    onHealthy?: () => Promise<void>;
+  }) => Promise<void>;
   /**
    * Boot a second API on a named fixture or a prepared SQLite image (Slack off).
    * The main SUT keeps running. Call `stop` when done; the runner stops it otherwise.
@@ -263,7 +271,10 @@ const stacks = new Set<Stack>();
 const activeAgents = new Set<SimulatedAgent>();
 let cleaning = false;
 
+const activeScriptRunners = new Set<ReturnType<typeof startScriptRunner>>();
 async function stopActiveAgents(): Promise<void> {
+  await Promise.all([...activeScriptRunners].map((runner) => runner.stop()));
+  activeScriptRunners.clear();
   const agents = [...activeAgents];
   activeAgents.clear();
   await Promise.all(agents.map((agent) => agent.stop().catch(() => {})));
@@ -363,6 +374,11 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
       db,
       slack: slack.mock,
       llm,
+      startScriptRunner(token, slots) {
+        const runner = startScriptRunner(sut.baseUrl, token, slots);
+        activeScriptRunners.add(runner);
+        return runner;
+      },
       async startAgent(agentOptions) {
         const agent = await startSimulatedAgent({ api, nonce }, agentOptions);
         activeAgents.add(agent);
@@ -467,7 +483,8 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
         // A scenario that moved Slack to HTTP mode has no socket to come back.
         const hadSocket = slack.mock.connectionCount > 0;
         db.close();
-        await restartSut(sut, options?.env);
+        await restartSut(sut, options?.env, options?.afterStop);
+        await options?.onHealthy?.();
         if (!hadSocket) return;
         const reconnected = await pollUntil(
           () => slack.mock.apiCalls("apps.connections.open").length > connectionCalls,

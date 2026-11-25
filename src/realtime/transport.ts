@@ -82,7 +82,7 @@ type AuthenticatedConnection = {
   me: Viewer;
   runtimeId?: string;
   expiresAt: number | undefined;
-  sessionToken?: { tokenId: string; check: () => Promise<void> };
+  sessionToken?: { tokenIds: string[]; check: () => Promise<void> };
 };
 
 function header(req: IncomingMessage, name: string): string | undefined {
@@ -130,16 +130,26 @@ function identityFromHttpAuth(
       name: user ? user.name : (agentId ?? `Guest ${guestId.slice(-6)}`),
       kind: user ? "user" : agentId ? "agent" : "guest",
     } as Viewer,
-    expiresAt: auth.kind === "agent" ? Date.parse(auth.expiresAt) : undefined,
-    ...(auth.kind === "agent"
+    expiresAt:
+      (auth.kind === "agent" || auth.kind === "operator") && auth.expiresAt
+        ? Date.parse(auth.expiresAt)
+        : undefined,
+    ...((auth.kind === "agent" || auth.kind === "operator") && auth.tokenId
       ? {
           sessionToken: {
-            tokenId: auth.tokenId,
+            tokenIds:
+              auth.kind === "agent" && auth.brokerTokenId
+                ? [auth.tokenId, auth.brokerTokenId]
+                : [auth.tokenId],
             check: async () => {
               const current = await resolveHttpRequestAuth(req, getApiKey(), {
                 touchSessionToken: false,
               });
-              if (current?.kind !== "agent" || current.tokenId !== auth.tokenId)
+              if (
+                current?.kind !== auth.kind ||
+                !("tokenId" in current) ||
+                current.tokenId !== auth.tokenId
+              )
                 throw new Error("Session token revoked or expired");
             },
           },
@@ -192,7 +202,7 @@ export function attachRealtimeTransport(server: Server): () => void {
   // Authentication precedes upgrade on both direct and proxied paths.
   const onUpgrade = (req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => {
     const path = req.url?.split("?")[0];
-    if (path === "/api/controllers/connect") return;
+    if (path === "/api/controllers/connect" || path === "/api/script-runners/connect") return;
     if (
       closing ||
       (path !== "/@swarm/realtime" && path !== "/api/realtime") ||
@@ -235,11 +245,9 @@ function connect(
   auth: Awaited<ReturnType<typeof authenticate>>,
   runtimeId?: string,
 ): void {
-  const unregisterToken = auth.sessionToken
-    ? registerSessionTokenConnection(auth.sessionToken.tokenId, () =>
-        ws.close(1008, "Session token revoked"),
-      )
-    : undefined;
+  const tokenListeners = auth.sessionToken?.tokenIds.map((id) =>
+    registerSessionTokenConnection(id, () => ws.close(1008, "Session token revoked")),
+  );
   void auth.sessionToken?.check().catch(() => ws.close(1008, "Session token revoked or expired"));
   // `suspended`: a session presence room whose access is being re-checked
   // after a share change; nothing is forwarded until the check passes.
@@ -581,7 +589,7 @@ function connect(
   }, 15_000);
   timer.unref();
   ws.on("close", () => {
-    unregisterToken?.();
+    for (const unregister of tokenListeners ?? []) unregister();
     closed = true;
     clearInterval(timer);
     for (const key of rooms.keys()) leave(key);

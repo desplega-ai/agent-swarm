@@ -2045,6 +2045,11 @@
         "class": "text",
         "evidence": "src/be/db.ts:13458 binds new Date().toISOString() (comment: not the datetime('now') default); src/be/db.ts:13517 binds data.startedAt from new Date().toISOString() (http/scripts.ts:885, http/x.ts:244, user-code-mode.ts:111, scheduler.ts:105)",
         "reason": "current writers use toISOString, but older rows used datetime('now') (src/be/db-retention.ts:91); mixed formats in existing databases"
+      },
+      "leaseExpiresAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "durable dispatcher writes ISO timestamps"
       }
     },
     "script_versions": {
@@ -2270,6 +2275,10 @@
       "scriptRun": {
         "class": "boolean",
         "evidence": "src/be/users.ts:729 scriptRun ? 1 : 0; read row?.scriptRun === 1 (:688)"
+      },
+      "operatorRun": {
+        "class": "boolean",
+        "evidence": "377_script_run_operator_token.sql"
       }
     },
     "skill_files": {
@@ -2780,6 +2789,10 @@
       }
     },
     "user_identity_events": {
+      "runProvenance": {
+        "class": "jsonb",
+        "evidence": "src/be/users.ts records server-assigned script provenance as JSON"
+      },
       "afterJson": {
         "class": "jsonb",
         "evidence": "src/be/users.ts:275 after == null ? null : JSON.stringify(after), inserted at packages/storage/src/repositories/users.ts:490"
@@ -2825,6 +2838,10 @@
       }
     },
     "user_tokens": {
+      "runProvenance": {
+        "class": "jsonb",
+        "evidence": "src/be/users.ts records server-assigned script provenance as JSON"
+      },
       "createdAt": {
         "class": "timestamptz",
         "format": "iso-ms-z",
@@ -3052,6 +3069,49 @@
       "triggers": {
         "class": "jsonb",
         "evidence": "src/be/db.ts:7402,7540 JSON.stringify(triggers ?? []); DEFAULT '[]'"
+      }
+    },
+    "script_runner_credentials": {
+      "expires_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      },
+      "revoked_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      }
+    },
+    "workflow_step_jobs": {
+      "attempt": {
+        "class": "bigint",
+        "evidence": "workflow step attempt counters use SQLite INTEGER"
+      },
+      "lease_expires_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflow step jobs use ISO timestamps"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflow step jobs use ISO timestamps"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "workflow step jobs use ISO timestamps"
       }
     }
   }

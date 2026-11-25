@@ -49,6 +49,12 @@ describe("scrubSecrets — edge cases", () => {
     }
   });
 
+  test("redacts runner credentials without volatile registration", () => {
+    const token = `assr_${"aB3".repeat(22)}`;
+    expect(scrubSecrets(`Bearer ${token}`)).not.toContain(token);
+    expect(scrubSecrets(`revoked: ${token}`)).toContain("[REDACTED:");
+  });
+
   test("empty string passes through", () => {
     expect(scrubSecrets("")).toBe("");
   });
@@ -119,7 +125,7 @@ describe("scrubSecrets — env-based replacement", () => {
       version: SCRUBBER_RULES_VERSION,
       keyVars: [...openAICompatibleKeyVars()].sort(),
     }).toEqual({
-      version: 16,
+      version: 17,
       keyVars: [
         "AI_GATEWAY_API_KEY",
         "HELMCODE_API_KEY",

@@ -1,4 +1,5 @@
 import {
+  type BusErrorContext,
   type Capabilities,
   type DbClient,
   type QueryReader,
@@ -6,6 +7,7 @@ import {
   type Storage,
   type TransactionOptions,
 } from "@desplega/storage";
+import { PostgresTableBus } from "./bus/table-backend";
 import { postgresDialect } from "./dialect";
 import { PostgresMemoryIndexes } from "./memory-indexes";
 import { PostgresAgentFsWebhooksRepository } from "./repositories/agent-fs-webhooks";
@@ -30,6 +32,7 @@ import { PostgresRetentionRepository } from "./repositories/retention";
 import { PostgresRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { PostgresSavingsRepository } from "./repositories/savings";
 import { PostgresSchedulesRepository } from "./repositories/schedules";
+import { PostgresScriptRunnersRepository } from "./repositories/script-runners";
 import { PostgresScriptsRepository } from "./repositories/scripts";
 import { PostgresSessionsRepository } from "./repositories/sessions";
 import { PostgresSkillsRepository } from "./repositories/skills";
@@ -37,6 +40,7 @@ import { PostgresSlackRepository } from "./repositories/slack";
 import { PostgresTasksRepository } from "./repositories/tasks";
 import { PostgresTrackersRepository } from "./repositories/trackers";
 import { PostgresUsersRepository } from "./repositories/users";
+import { PostgresWorkflowStepJobsRepository } from "./repositories/workflow-step-jobs";
 import { PostgresWorkflowsRepository } from "./repositories/workflows";
 
 export type PostgresStorageOptions = {
@@ -44,12 +48,17 @@ export type PostgresStorageOptions = {
   vectorSearch: boolean;
   /** The `DATABASE_QUERY_URL` reader, when its restricted-role probe passed (decision D10). */
   queryReader: QueryReader | null;
+  bus?: {
+    retentionMs?: number;
+    onError?: (error: unknown, context: BusErrorContext) => void;
+  };
 };
 
 /** Assemble the Postgres engine over an open Postgres client. */
 export function createPostgresStorage(client: DbClient, options: PostgresStorageOptions): Storage {
   const executor = new SqlExecutor(client, postgresDialect);
   const capabilities: Capabilities = {
+    scriptRunners: true,
     fullTextSearch: true,
     vectorSearch: options.vectorSearch,
     dbQuery: options.queryReader !== null,
@@ -57,6 +66,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
   };
   const memory = new PostgresMemoryRepository(executor);
   return {
+    executionBus: new PostgresTableBus(client, options.bus),
     dialect: postgresDialect,
     capabilities,
     executor,
@@ -64,8 +74,10 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
     ...(options.queryReader ? { queryReader: options.queryReader } : {}),
     memoryIndexes: new PostgresMemoryIndexes(memory, options.vectorSearch),
     repos: {
+      workflowStepJobs: new PostgresWorkflowStepJobsRepository(executor),
       extensions: new PostgresExtensionsRepository(executor),
       models: new PostgresModelsRepository(executor),
+      scriptRunners: new PostgresScriptRunnersRepository(executor),
       runtimePools: new PostgresRuntimePoolsRepository(executor),
       config: new PostgresConfigRepository(executor),
       agents: new PostgresAgentsRepository(executor),

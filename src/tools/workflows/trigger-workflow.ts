@@ -11,8 +11,10 @@ import {
 } from "@/be/db/workflow-idempotency";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/http/idempotency-key";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { getCurrentRequestAuth } from "@/utils/request-auth-context";
 import { getExecutorRegistry, startWorkflowExecution } from "@/workflows";
 import { TriggerSchemaError } from "@/workflows/engine";
+import { workflowRequestPrincipal, workflowTriggerAgentId } from "@/workflows/run-principal";
 
 /**
  * Answer from the run already accepted under this key, or null when there is
@@ -112,9 +114,12 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         let accepted: { runId: string; skipped: boolean } | undefined;
         let runId: string;
         try {
+          const auth = getCurrentRequestAuth();
+          const triggerAgentId = workflowTriggerAgentId(auth, requestInfo.agentId);
           runId = await startWorkflowExecution(workflow, triggerData ?? {}, getExecutorRegistry(), {
             triggerType: "manual",
-            triggeredByAgentId: requestInfo.agentId,
+            executionPrincipal: workflowRequestPrincipal(auth, triggerAgentId),
+            triggeredByAgentId: triggerAgentId,
             requestedByUserId:
               (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
               undefined,

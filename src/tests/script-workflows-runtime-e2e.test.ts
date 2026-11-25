@@ -19,6 +19,7 @@ import {
   initDb,
   listScriptRunJournalSteps,
 } from "../be/db";
+import { resolveHttpRequestAuth } from "../http/auth";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
@@ -75,7 +76,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "POST" && req.url?.endsWith("/heartbeat")) heartbeatCount += 1;
   if (await handleCore(req, res, agentId, API_KEY)) return;
   if (req.method === "POST" && req.url === "/api/mcp-bridge") {
-    if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+    if ((await resolveHttpRequestAuth(req, API_KEY))?.kind !== "operator") {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "unauthorized" }));
       return;

@@ -177,6 +177,9 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 await completeRunIfSettled(run.id, ctx);
               }
             } else if ("async" in result && (result as AsyncExecutorResult).async) {
+              if ((result as AsyncExecutorResult).waitFor === "workflow.step_job.finished") {
+                continue;
+              }
               // An async executor (agent-task, foreach) re-dispatched its work —
               // the step is waiting on task events again, exactly like the
               // executeStep async path. Checkpointing the async marker as a

@@ -2,6 +2,7 @@ import type { SwarmConfigPayload } from "./executors/types";
 import { Redacted, type Redacted as RedactedValue } from "./redacted";
 
 export class SwarmConfig {
+  readonly connectRetryMs: number;
   readonly apiKey: RedactedValue<string>;
   readonly agentId: RedactedValue<string>;
   readonly mcpBaseUrl: RedactedValue<string>;
@@ -17,6 +18,7 @@ export class SwarmConfig {
   private readonly userValues: Map<string, RedactedValue<string>>;
 
   constructor(payload: SwarmConfigPayload) {
+    this.connectRetryMs = Math.min(30000, Math.max(0, payload.system.connectRetryMs ?? 0));
     this.apiKey = Redacted.make(payload.system.apiKey.value, {
       type: "system",
       isSecret: payload.system.apiKey.isSecret,

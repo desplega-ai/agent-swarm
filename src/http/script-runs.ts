@@ -24,8 +24,11 @@ import {
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { assertDurableBrokerFence } from "../be/script-runners/broker-fence";
+import { publishDurableRunRequested } from "../be/script-runners/durable-launch-bus";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import { getStorage } from "../be/storage";
+import { isScriptRunToken } from "../be/users";
 import { can } from "../rbac";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
@@ -52,6 +55,7 @@ import {
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
 import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
@@ -152,12 +156,13 @@ const createScriptRunRoute = route({
   operationId: "script_runs_create",
   summary: "Launch a durable script workflow run",
   description:
-    "Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.",
+    "An authenticated agent or operator can create a durable run and receive its dashboard URL.",
   tags: ["Script Runs"],
   body: createScriptRunBodySchema,
   responses: {
     201: { description: "Script run created", schema: scriptRunCreatedSchema },
     400: { description: "Validation or label-lint failure" },
+    403: { description: "Durable execution requires an authenticated agent or operator" },
     // Idempotency conflict returns the EXISTING run's pointer, not the
     // standard error envelope — declare it so the fallback doesn't lie.
     409: { description: "Existing idempotent run returned", schema: scriptRunCreatedSchema },
@@ -432,12 +437,6 @@ function scriptRunConcurrencyCap(): number {
     : DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP;
 }
 
-function bearerToken(req: IncomingMessage): string | undefined {
-  const raw = req.headers.authorization;
-  const header = Array.isArray(raw) ? raw[0] : raw;
-  return header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -476,6 +475,12 @@ export async function handleScriptRuns(
     if (!parsed) return true;
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
+
+    const auth = getRequestAuth(req);
+    if (auth?.kind !== "operator" && auth?.kind !== "agent") {
+      jsonError(res, "Durable runs require an authenticated agent or operator", 403);
+      return true;
+    }
 
     if (!durableScriptRunsAllowed()) {
       jsonError(res, DURABLE_RUNS_NATIVE_REFUSED, 400);
@@ -524,7 +529,7 @@ export async function handleScriptRuns(
       : undefined;
     const creation = await getStorage().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
-      return await createScriptRun({
+      const creation = await createScriptRun({
         id: crypto.randomUUID(),
         agentId: agent.id,
         source: parsed.body.source,
@@ -535,6 +540,25 @@ export async function handleScriptRuns(
         sourceTaskId,
         createdBy: requestedByUserId,
       });
+      if (!creation.existing) {
+        const principal =
+          auth.kind === "operator"
+            ? { kind: "operator" }
+            : {
+                kind: "agent",
+                agentId: auth.agentId,
+                ...(auth.tokenKind === "agent" && (await isScriptRunToken(auth.tokenId))
+                  ? {}
+                  : { parentTokenId: auth.tokenId }),
+              };
+        await getStorage().repos.scripts.setScriptRunPrincipal(
+          creation.run.id,
+          JSON.stringify({ ...principal, depth: auth.depth, objectChain: auth.objectChain }),
+        );
+      }
+      if (!creation.existing)
+        await publishDurableRunRequested(creation.run.id, !parsed.body.background);
+      return creation;
     });
     if (!creation) {
       json(res, { error: "script_run_concurrency_cap", cap }, 429);
@@ -543,7 +567,7 @@ export async function handleScriptRuns(
     const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, getScriptApiBaseUrl(), bearerToken(req)).catch(async (err) => {
+      startScriptRunProcess(run, getScriptApiBaseUrl()).catch(async (err) => {
         await updateScriptRun(run.id, {
           status: "failed",
           pid: null,
@@ -663,6 +687,7 @@ export async function handleScriptRuns(
     // land before any of them counts, and every one of them would see (and be
     // refused by) the post-write total.
     const limit = await getStorage().transaction(async () => {
+      await assertDurableBrokerFence(req);
       await upsertScriptRunJournalStep({
         runId: run.id,
         stepKey: parsed.body.stepKey,
@@ -787,6 +812,7 @@ export async function handleScriptRuns(
       let dispatched: StepDispatch;
       try {
         dispatched = await getStorage().transaction(async (): Promise<StepDispatch> => {
+          await assertDurableBrokerFence(req);
           const replayed = await getLatestScriptRunStepTaskByContextKey(contextKey);
           if (replayed) return { task: replayed };
 

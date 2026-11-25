@@ -61,7 +61,7 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * LangSmith, CircleCI, Google `AQ.`, HubSpot, New Relic and Sentry DSN
  * shapes; pass 4 redacts a PEM private key cut off before its END line.
  */
-export const SCRUBBER_RULES_VERSION = 16;
+export const SCRUBBER_RULES_VERSION = 17;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -570,6 +570,7 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; lits: string[]; re: RegExp }>
     lits: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"],
     re: new RegExp(String.raw`${TB}gh[pousr]_[A-Za-z0-9]{20,}\b`, "g"),
   },
+  { name: "script_runner_token", lits: ["assr_"], re: /assr_[A-Za-z0-9]{20,}\b/g },
   // ACP ephemeral session tokens (base62 payload)
   {
     name: "acp_session_token",

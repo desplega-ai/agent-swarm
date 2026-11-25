@@ -9,6 +9,7 @@ import {
   schedulePreflightInput,
 } from "@/be/automation-preflight";
 import {
+  getAgentById,
   getDueScheduledTasks,
   getLeadAgent,
   getScheduledTaskById,
@@ -90,6 +91,16 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
   }
 
   const agentId = schedule.createdByAgentId ?? "schedule";
+  if (schedule.createdByAgentId && !(await getAgentById(schedule.createdByAgentId))) {
+    throw new Error("Schedule executing agent does not exist");
+  }
+  const userId = schedule.createdByAgentId ? undefined : schedule.createdBy;
+  if (userId) {
+    const user = await getUserById(userId);
+    if (!user || user.status !== "active" || user.mergedIntoUserId) {
+      throw new Error("Schedule executing user is inactive");
+    }
+  }
   const args = schedule.scriptArgs ?? {};
   const record = {
     // Fixed before the run so rows the script creates can point at it.
@@ -107,7 +118,9 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
 
   let output: Awaited<ReturnType<typeof runScriptWithRunCredential>>;
   try {
-    const credentials = await buildScriptCredentialBindingsWithFailures({ agentId });
+    const credentials = userId
+      ? undefined
+      : await buildScriptCredentialBindingsWithFailures({ agentId });
     output = await runScriptWithRunCredential(
       {
         source: script.source,
@@ -115,14 +128,19 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
         fsMode: "none",
         executor: script.executor,
         agentId,
-        egressSecrets: credentials.egressSecrets,
-        userConfig: credentials.userConfig,
-        agentFs: credentials.agentFs,
-        apiConnections: await getScriptApiConnectionDescriptors({ agentId }),
-        mcpConnections: await getScriptMcpConnectionDescriptors({ agentId }),
+        egressSecrets: credentials?.egressSecrets,
+        userConfig: credentials?.userConfig,
+        agentFs: credentials?.agentFs,
+        apiConnections: userId ? undefined : await getScriptApiConnectionDescriptors({ agentId }),
+        mcpConnections: userId ? undefined : await getScriptMcpConnectionDescriptors({ agentId }),
         timeoutMs: 60_000,
       },
       { sourceScriptRunId: record.id },
+      userId
+        ? { kind: "user", userId }
+        : schedule.createdByAgentId
+          ? undefined
+          : { kind: "operator" },
     );
   } catch (err) {
     await recordScheduleScriptRun({
@@ -238,6 +256,14 @@ export async function dispatchScheduleTarget(
   // Params are safe and integrations are ready. Only now render values into
   // the complete target snapshot, before metadata lookup or dispatch.
   schedule = renderScheduledTaskParams(schedule);
+  if (
+    (schedule.targetType === "script" || schedule.targetType === "workflow") &&
+    !schedule.createdByAgentId &&
+    schedule.createdBy &&
+    !(await getUserById(schedule.createdBy))
+  ) {
+    throw new Error("Schedule executing user does not exist");
+  }
   schedule = await withoutDeletedRequester(schedule);
   switch (schedule.targetType) {
     case "workflow": {
@@ -262,8 +288,16 @@ export async function dispatchScheduleTarget(
       };
       const runId = await startWorkflowExecution(workflow, triggerData, registry, {
         triggerType: "schedule",
-        triggeredByAgentId: await scheduledWorkflowPrincipal(schedule, workflow),
+        triggeredByAgentId:
+          !schedule.createdByAgentId && schedule.createdBy
+            ? undefined
+            : await scheduledWorkflowPrincipal(schedule, workflow),
         requestedByUserId: schedule.createdBy,
+        executionPrincipal: schedule.createdByAgentId
+          ? { ok: true, agentId: schedule.createdByAgentId }
+          : schedule.createdBy
+            ? { ok: true, userId: schedule.createdBy }
+            : { ok: true, operator: true },
       });
       await throwIfWorkflowNeedsSetup(schedule.id, [runId]);
       console.log(

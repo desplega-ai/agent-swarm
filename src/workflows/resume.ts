@@ -31,6 +31,7 @@ import {
   getWorkflowRunTreeIds,
   workflowRunTreeHasOpenWork,
 } from "../be/db/workflow-runs";
+import { cancelWorkflowStepJobs } from "../be/script-runners/step-dispatch";
 import { getStorage } from "../be/storage";
 import {
   type RetryPolicy,
@@ -769,6 +770,7 @@ export async function cancelWorkflowRunRows(
         statusKind: "workflow",
       });
     }
+    for (const id of runIds) await cancelWorkflowStepJobs(id);
     await cancelOpenWorkflowTreeSteps(runIds, cancelReason, now);
     await disarmWorkflowTreeRetries(runIds, now);
     for (const id of runIds) await cancelPendingApprovalRequestsForRun(id, cancelReason);

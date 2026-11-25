@@ -46,6 +46,7 @@ import { snapshotAndUpdateWorkflow } from "../workflows/version";
 // resumed node to `a2` (or a renamed node) with A's config; B routes it to
 // `b2` with B's config. Every step after the edit must follow A.
 
+// Direct engine calls in this fixture represent authenticated server triggers.
 const TEST_DB_PATH = "./test-workflow-definition-pinning-recovery.sqlite";
 
 const deps: ExecutorDependencies = {
@@ -255,7 +256,9 @@ describe("child completion", () => {
     const child = await makeWorkflow(childA);
     const parent = await makeWorkflow(subWorkflowParent(child.id, "a2", "A"));
 
-    const runId = await startWorkflowExecution(parent, {}, registry);
+    const runId = await startWorkflowExecution(parent, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await childRunOf(child.id, "waiting");
 
     await editTo(parent.id, subWorkflowParent(child.id, "b2", "B"));
@@ -303,7 +306,9 @@ describe("foreach", () => {
     const workflow = await makeWorkflow(
       fanOut("fan", "A item", "a2", "A", { failurePolicy: "fail-fast" }),
     );
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await drainForeachDrives();
     const first = await taskOf(runId, "fan#a");
     const second = await taskOf(runId, "fan#b");
@@ -322,7 +327,9 @@ describe("foreach", () => {
 
   test("the driver dispatches queued items and joins on A after an edit", async () => {
     const workflow = await makeWorkflow(fanOut("fan", "A item", "a2", "A", { concurrency: 1 }));
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await drainForeachDrives();
     expect((await stepOf(runId, "fan#b")).status).toBe("pending");
 
@@ -366,7 +373,9 @@ describe("foreach", () => {
     workflowB.nodes.push(record("b2", "B"));
 
     const workflow = await makeWorkflow(terminal("A item"));
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await editTo(workflow.id, workflowB);
 
     // n1 + fan + 2 items = 4: allowed for a terminal foreach, refused with a successor.
@@ -430,7 +439,9 @@ describe("restart recovery", () => {
       return def;
     };
     const parent = await makeWorkflow(parked("a2", "A"));
-    const runId = await startWorkflowExecution(parent, {}, registry);
+    const runId = await startWorkflowExecution(parent, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await childRunOf(child.id, "waiting");
     const parentStep = await stepOf(runId, "child");
 
@@ -464,7 +475,9 @@ describe("restart recovery", () => {
       ],
     });
     const workflow = await makeWorkflow(def("a2", "A"));
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
     await withoutListener(async () => {
@@ -491,7 +504,9 @@ describe("restart recovery", () => {
       ],
     });
     const workflow = await makeWorkflow(def("a2", "A"));
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const requestId = approvalExecutor.lastRequestId!;
     expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
@@ -524,7 +539,9 @@ describe("restart recovery", () => {
       ],
     });
     const workflow = await makeWorkflow(def("fan", "A item", "a2", "A"));
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await drainForeachDrives();
     const first = await taskOf(runId, "fan#a");
     expect((await stepOf(runId, "fan#b")).status).toBe("pending");

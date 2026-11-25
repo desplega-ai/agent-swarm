@@ -3,6 +3,8 @@
  * engine name.
  */
 export type Capabilities = {
+  /** Remote script runners require PostgreSQL. */
+  readonly scriptRunners: boolean;
   /** Ranked full-text search (FTS5 on SQLite, tsvector on Postgres). */
   readonly fullTextSearch: boolean;
   /** Vector similarity search (sqlite-vec on SQLite, pgvector on Postgres). */

@@ -217,3 +217,13 @@ For a smaller copy without changing the active file, plan an offline `VACUUM INT
 ## Rollback
 
 Unset the affected retention key. The table stops sweeping on its next tick, and a pending catch-up tick finds nothing to do and cancels itself. Keep `DB_RETENTION_DRY_RUN=true` if you need to inspect candidates without deletion. Restoration of already-deleted rows requires an operator backup.
+
+## Execution bus (PostgreSQL only)
+
+The execution bus retains delivered events for seven days after delivery.
+A pass deletes at most 500 events and cascades their deliveries.
+A full batch keeps retention due for the next wake or 15-second sweep.
+After a partial batch, retention waits for the next hourly pass.
+The pass keeps every event with an undelivered group, including expired claims.
+Events without durable groups expire seven days after publication.
+This internal queue policy has no operator setting.

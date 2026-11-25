@@ -2593,6 +2593,11 @@
     }
   },
   "script_runs": {
+    "ownerId": { "exempt": "identifier" },
+    "leaseExpiresAt": { "exempt": "timestamp" },
+    "executionPrincipal": {
+      "exempt": "Server-recorded authority kind and identifiers"
+    },
     "sourceHash": {
       "exempt": "hash or digest"
     },
@@ -2958,6 +2963,9 @@
     }
   },
   "session_tokens": {
+    "brokerParentId": {
+      "exempt": "identifier"
+    },
     "runtimeId": {
       "exempt": "identifier"
     },
@@ -3765,6 +3773,9 @@
     }
   },
   "user_identity_events": {
+    "runProvenance": {
+      "exempt": "Server-recorded script run identifiers and nesting depth"
+    },
     "id": {
       "exempt": "identifier"
     },
@@ -3788,6 +3799,9 @@
     }
   },
   "user_tokens": {
+    "runProvenance": {
+      "exempt": "Server-recorded script run identifiers and nesting depth"
+    },
     "id": {
       "exempt": "identifier"
     },
@@ -4553,5 +4567,73 @@
     "updatedAt": { "exempt": "timestamp" },
     "created_by": { "exempt": "identifier" },
     "updated_by": { "exempt": "identifier" }
+  },
+  "script_runner_credentials": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "issuer_user_id": {
+      "exempt": "immutable user identifier"
+    },
+    "name": "scrubbed",
+    "token_hash": {
+      "exempt": "SHA-256 digest"
+    },
+    "expires_at": {
+      "exempt": "timestamp"
+    },
+    "revoked_at": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "workflow_step_jobs": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "run_id": {
+      "exempt": "identifier"
+    },
+    "step_id": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "owner_id": {
+      "exempt": "identifier"
+    },
+    "lease_expires_at": {
+      "exempt": "timestamp"
+    },
+    "error": {
+      "exempt": "scrubbed and capped error"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
   }
 }

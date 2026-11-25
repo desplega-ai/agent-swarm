@@ -68,6 +68,7 @@ import { realtimeBus } from "../realtime/bus";
 import { closeRooms, removeNamespaceRooms, sweepRooms } from "../realtime/rooms";
 import { attachRealtimeTransport } from "../realtime/transport";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
+import { assertScriptCapacityConfig } from "../scripts-runtime/dispatch/capacity-config";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { telemetry } from "../telemetry";
@@ -155,6 +156,7 @@ import { handleSavingsCalibration } from "./savings-calibration";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
+import { handleScriptRunners } from "./script-runners";
 import { handleScriptRuns } from "./script-runs";
 import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
@@ -437,6 +439,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
         () => handleModelProfiles(req, res, pathSegments, queryParams, myAgentId),
+        () => handleScriptRunners(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelGroups(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
@@ -517,6 +520,8 @@ const httpServer = createHttpServer(async (req, res) => {
 const detachRealtime = attachRealtimeTransport(httpServer);
 const { attachControllerTransport } = await import("./controllers-connect");
 const detachControllers = attachControllerTransport(httpServer);
+const { attachScriptRunnerTransport } = await import("./script-runners-connect");
+const detachScriptRunners = attachScriptRunnerTransport(httpServer);
 const stopWorkerNudges = startWorkerNudgeListener();
 const taskAutoTitles = startTaskAutoTitleListener();
 const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
@@ -527,6 +532,7 @@ const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namesp
 globalState.__closeRealtime = () => {
   detachRealtime();
   detachControllers();
+  detachScriptRunners();
   stopWorkerNudges();
   taskAutoTitles.stop();
   stopRoomDeletion();
@@ -690,6 +696,15 @@ startEventLoopLagProbe();
 // DATABASE_URL with a postgres:// scheme selects the Postgres engine (decision D1).
 // Its start is asynchronous, so it runs here, before the first database access.
 // The SQLite engine opens lazily on first use, as before.
+try {
+  assertScriptCapacityConfig(isPostgresEngine());
+} catch (error) {
+  console.error(
+    "[startup]",
+    error instanceof Error ? error.message : "Invalid script capacity settings",
+  );
+  process.exit(1);
+}
 if (isPostgresEngine()) {
   try {
     await startPostgres();
@@ -718,6 +733,7 @@ try {
 let startupConfigsInjected: string[] = [];
 try {
   startupConfigsInjected = await loadGlobalConfigsIntoEnv(true);
+  assertScriptCapacityConfig(isPostgresEngine());
 } catch (err) {
   console.error("[startup] Failed to load global swarm configs before listen:", err);
   process.exitCode = 1;

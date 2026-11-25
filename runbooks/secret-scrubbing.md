@@ -85,3 +85,7 @@ A new rule protects only rows written after it ships. `src/be/boot-scrub-sweep.t
 - A row whose scrub would turn valid JSON into invalid JSON is skipped and counted as `skipped_invalid_json`.
 - Log line per table (counts only): `boot-scrub-v<N>: <table> scanned=… changed=… skipped_invalid_json=…`.
 - To re-run a version by hand, delete its done row from `seed_state` and restart the API.
+
+Script-runner credentials use `assr_` tokens. Mint registers each token after commit.
+Revocation removes the volatile registration. Structural rules still scrub revoked tokens and tokens after an API restart.
+The generator includes local rules from `.gitleaks.toml` with the vendored rules.

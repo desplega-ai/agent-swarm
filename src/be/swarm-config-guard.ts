@@ -1,5 +1,9 @@
 import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
 import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemetry-ranking";
+import {
+  SCRIPT_CAPACITY_KEYS,
+  validateScriptCapacity,
+} from "../scripts-runtime/dispatch/capacity-config";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { SLACK_WORKFLOW_BOT_IDS_KEY, validateSlackWorkflowBotIds } from "../slack/workflow-bots";
@@ -27,6 +31,7 @@ import { CREDENTIAL_SELECTION_STRATEGIES } from "../utils/key-usage";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
+import { selectStorageEngine } from "./storage-engine";
 
 /**
  * Guards against storing reserved keys in the swarm_config table.
@@ -654,6 +659,11 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
   ...enumValidator("BOOT_SCRUB_MODE", ["backfill", "forward-only"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
+  SCRIPT_RUNNER_LONG_LANE_SHARE: (value) =>
+    validateScriptCapacity("SCRIPT_RUNNER_LONG_LANE_SHARE", value),
+  SCRIPT_EMBEDDED_RUNNER_SLOTS: (value) =>
+    validateScriptCapacity("SCRIPT_EMBEDDED_RUNNER_SLOTS", value),
+  SCRIPT_QUEUE_WAIT_SYNC_MS: (value) => validateScriptCapacity("SCRIPT_QUEUE_WAIT_SYNC_MS", value),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
   SCRIPT_EGRESS_ALLOWLIST: (value) =>
@@ -928,6 +938,10 @@ export function validateConfigEntry(entry: {
   if (entry.scope === "global" && entry.scopeId) return "Global scope must not have scopeId";
   if ((entry.scope === "agent" || entry.scope === "repo") && !entry.scopeId) {
     return "Agent/repo scope requires scopeId";
+  }
+  if (SCRIPT_CAPACITY_KEYS.includes(entry.key.toUpperCase())) {
+    if (selectStorageEngine() !== "postgres") return "script_runners_need_postgres";
+    if (entry.scope !== "global") return "Script runner capacity requires global scope";
   }
   const keyError = invalidConfigKeyError(entry.key);
   if (keyError) return keyError;

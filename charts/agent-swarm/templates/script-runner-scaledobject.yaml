@@ -1,0 +1,48 @@
+{{- if and .Values.scriptRunner.enabled .Values.scriptRunner.keda.enabled }}
+{{- $keda := .Values.scriptRunner.keda }}
+{{- range $name, $value := dict "minReplicaCount" $keda.minReplicaCount "maxReplicaCount" $keda.maxReplicaCount "pollingInterval" $keda.pollingInterval "cooldownPeriod" $keda.cooldownPeriod "targetValue" $keda.targetValue }}
+{{- if not (regexMatch "^[1-9][0-9]*$" (toString $value)) }}
+{{- fail (printf "scriptRunner.keda.%s must be a positive integer" $name) }}
+{{- end }}
+{{- end }}
+{{- if lt (int $keda.maxReplicaCount) (int $keda.minReplicaCount) }}
+{{- fail "scriptRunner.keda.maxReplicaCount must be at least minReplicaCount" }}
+{{- end }}
+{{- $secret := required "scriptRunner.keda.existingSecret is required (user token with script_runner.read)" $keda.existingSecret }}
+{{- if or (eq $secret (include "agent-swarm.authSecretName" .)) (eq $secret (include "agent-swarm.scriptRunnerSecretName" .)) }}
+{{- fail "KEDA requires a separate user token Secret" }}
+{{- end }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-script-runner
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretTargetRef:
+    - parameter: token
+      name: {{ $secret }}
+      key: token
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-script-runner
+  namespace: {{ .Release.Namespace }}
+spec:
+  scaleTargetRef:
+    name: {{ include "agent-swarm.fullname" . }}-script-runner
+  minReplicaCount: {{ $keda.minReplicaCount }}
+  maxReplicaCount: {{ $keda.maxReplicaCount }}
+  pollingInterval: {{ $keda.pollingInterval }}
+  cooldownPeriod: {{ $keda.cooldownPeriod }}
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: {{ printf "%s/api/script-runners" (include "agent-swarm.scriptRunnerApiUrl" .) | quote }}
+        format: json
+        valueLocation: lanes.sync.queued
+        targetValue: {{ $keda.targetValue | quote }}
+        authMode: bearer
+      authenticationRef:
+        name: {{ include "agent-swarm.fullname" . }}-script-runner
+{{- end }}

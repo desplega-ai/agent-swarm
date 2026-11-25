@@ -6,19 +6,25 @@ import {
 import { buildScriptCredentialBindingsWithFailures } from "../../be/script-credential-broker";
 import {
   getScript,
+  getScriptById,
   getScriptVersion,
   restoreScratchScriptLastUsedIfUnchanged,
   touchScratchScriptLastUsed,
 } from "../../be/scripts/db";
 import { runScriptWithRunCredential } from "../../be/scripts/run-credential";
+import { resolveScriptExecutorName } from "../../scripts-runtime/executors/registry";
 import {
   DEFAULT_SCRIPT_RESOURCES,
   MAX_SCRIPT_WALL_CLOCK_MS,
   MIN_SCRIPT_WALL_CLOCK_MS,
 } from "../../scripts-runtime/executors/types";
+import type { RunScriptOutput } from "../../scripts-runtime/loader";
 import type { ExecutorMeta } from "../../types";
+import { createValueScrubber } from "../../utils/secret-scrubber";
 import { findInterpolationTokens } from "../../utils/template";
 import { resolveWorkflowRunPrincipal } from "../run-principal";
+import { parkStepJob, shouldParkScriptNode } from "../step-jobs";
+import type { AsyncExecutorResult } from "./base";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 export const SWARM_SCRIPT_DEFAULT_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.wallClockMs;
@@ -80,7 +86,8 @@ export class SwarmScriptExecutor extends BaseExecutor<
     config: SwarmScriptConfig,
     _context: Readonly<Record<string, unknown>>,
     meta: ExecutorMeta,
-  ): Promise<ExecutorResult<SwarmScriptOutput>> {
+  ): Promise<ExecutorResult<SwarmScriptOutput> | AsyncExecutorResult<SwarmScriptOutput>> {
+    if (shouldParkScriptNode()) return parkStepJob("step-script", meta, _context);
     if (config.fsMode === "workspace-rw") {
       return {
         status: "failed",
@@ -124,9 +131,11 @@ export class SwarmScriptExecutor extends BaseExecutor<
       ? await touchScratchScriptLastUsed(resolved.script.id)
       : null;
 
-    const credentials = await buildScriptCredentialBindingsWithFailures({
-      agentId: agentId ?? undefined,
-    });
+    const credentials = principal.userId
+      ? undefined
+      : await buildScriptCredentialBindingsWithFailures({
+          agentId: agentId ?? undefined,
+        });
     const output = await runScriptWithRunCredential(
       {
         source: resolved.source,
@@ -134,12 +143,16 @@ export class SwarmScriptExecutor extends BaseExecutor<
         fsMode: "none",
         executor: resolved.script.executor,
         agentId: agentId ?? "workflow",
-        egressSecrets: credentials.egressSecrets,
-        failedBindings: credentials.failedBindings,
-        userConfig: credentials.userConfig,
-        agentFs: credentials.agentFs,
-        apiConnections: await getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
-        mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
+        egressSecrets: credentials?.egressSecrets,
+        failedBindings: credentials?.failedBindings,
+        userConfig: credentials?.userConfig,
+        agentFs: credentials?.agentFs,
+        apiConnections: principal.userId
+          ? undefined
+          : await getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
+        mcpConnections: principal.userId
+          ? undefined
+          : await getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
         timeoutMs: config.timeoutMs,
         // The step watchdog aborts this when the node budget runs out, which
         // kills the script process: a step reported as timed out must not go
@@ -148,50 +161,57 @@ export class SwarmScriptExecutor extends BaseExecutor<
       },
       // Rows the script creates through its token point back at this step.
       { sourceStepId: meta.stepId },
+      principal.userId
+        ? { kind: "user", userId: principal.userId }
+        : principal.operator
+          ? { kind: "operator" }
+          : undefined,
     );
-    if (output.exitCode === 0 && !output.error && !output.runtimeError) {
-      await touchScratchScriptLastUsed(resolved.script.id);
-    } else if (resolved.script.isScratch && runStartTouch) {
-      // Failed run — restore the pre-run timestamp so it doesn't buy the
-      // script another retention window, unless a concurrent run already
-      // touched it since.
-      await restoreScratchScriptLastUsedIfUnchanged(
-        resolved.script.id,
-        resolved.script.updatedAt,
-        runStartTouch,
-      );
-    }
+    return finishSwarmScriptOutput(output, resolved, runStartTouch);
+  }
+}
 
-    const workflowOutput = {
-      result: output.result,
-      stdout: output.stdout,
-      stderr: output.stderr,
-      truncated: output.truncated,
-      durationMs: output.durationMs,
-      exitCode: output.exitCode,
-      scriptName: resolved.script.name,
-      contentHash: resolved.contentHash,
-      version: resolved.version,
-    };
-
-    if (output.exitCode !== 0 || output.error) {
-      return {
+type ResolvedScript = {
+  script: Pick<
+    NonNullable<Awaited<ReturnType<typeof getScript>>>,
+    "id" | "name" | "updatedAt" | "isScratch"
+  >;
+  contentHash: string;
+  version: number;
+};
+async function finishSwarmScriptOutput(
+  output: RunScriptOutput,
+  resolved: ResolvedScript,
+  runStartTouch: string | null,
+): Promise<ExecutorResult<SwarmScriptOutput>> {
+  const failed = output.exitCode !== 0 || !!output.error || !!output.runtimeError;
+  if (!failed) await touchScratchScriptLastUsed(resolved.script.id);
+  else if (resolved.script.isScratch && runStartTouch)
+    await restoreScratchScriptLastUsedIfUnchanged(
+      resolved.script.id,
+      resolved.script.updatedAt,
+      runStartTouch,
+    );
+  const workflowOutput = {
+    result: output.result,
+    stdout: output.stdout,
+    stderr: output.stderr,
+    truncated: output.truncated,
+    durationMs: output.durationMs,
+    exitCode: output.exitCode,
+    scriptName: resolved.script.name,
+    contentHash: resolved.contentHash,
+    version: resolved.version,
+  };
+  return failed
+    ? {
         status: "failed",
         error:
           output.stderr ||
-          `swarm-script: script exited with code ${output.exitCode}${
-            output.error ? ` (${output.error})` : ""
-          }`,
+          `swarm-script: script exited with code ${output.exitCode}${output.error ? ` (${output.error})` : ""}`,
         output: workflowOutput,
-      };
-    }
-
-    return {
-      status: "success",
-      output: workflowOutput,
-      nextPort: "success",
-    };
-  }
+      }
+    : { status: "success", output: workflowOutput, nextPort: "success" };
 }
 
 async function resolveScriptSource(
@@ -257,5 +277,213 @@ async function resolveScriptSource(
     source: version.source,
     contentHash: version.contentHash,
     version: version.version,
+  };
+}
+
+type ScriptReference = {
+  scriptId: string;
+  scriptName: string;
+  contentHash: string;
+  version: number;
+  executor: "native" | "quickjs";
+  scratch?: { prior: string; touch: string };
+};
+
+export async function prepareSwarmScriptStepJob(
+  input: import("../step-job-kinds").StepJobBuildInput,
+) {
+  const { getWorkflowRunStep, getRunWorkflow } = await import("../../be/db");
+  const { getStorage } = await import("../../be/storage");
+  const config = SwarmScriptConfigSchema.parse(input.config);
+  const workflow = await getRunWorkflow({ id: input.job.runId, workflowId: input.meta.workflowId });
+  const principal = await resolveWorkflowRunPrincipal(workflow, input.job.runId);
+  if (!principal.ok) throw new Error(principal.error);
+  const reference = await getStorage().transaction(async () => {
+    const step = await getWorkflowRunStep(input.job.stepId);
+    if (!step || step.retryCount !== input.job.attempt)
+      throw new Error("Workflow job lost its step attempt");
+    const saved = (step.input ?? {}) as Record<string, unknown>;
+    const refs = (saved._stepJobReferences ?? {}) as Record<string, ScriptReference>;
+    const key = String(input.job.attempt);
+    if (refs[key]) return refs[key];
+    const resolved = await resolveScriptSource(config, principal.agentId);
+    if (!resolved.ok) throw new Error(resolved.error);
+    const ref: ScriptReference = {
+      scriptId: resolved.script.id,
+      scriptName: resolved.script.name,
+      contentHash: resolved.contentHash,
+      version: resolved.version,
+      executor: resolveScriptExecutorName(resolved.script.executor),
+    };
+    await getStorage().repos.workflows.updateStepColumns(step.id, {
+      input: JSON.stringify({ ...saved, _stepJobReferences: { ...refs, [key]: ref } }),
+    });
+    return ref;
+  });
+  return { ...input, config: { ...input.config, _scriptReference: reference } };
+}
+
+/** Rebuild credentials and source on the API, never from the job row. */
+export async function buildSwarmScriptStepJob(
+  input: import("../step-job-kinds").StepJobBuildInput,
+): Promise<import("../step-job-kinds").PreparedStepJob> {
+  const { getRunWorkflow } = await import("../../be/db");
+  const { acquireScriptApiCredential } = await import("../../be/scripts/run-credential");
+  const { getStorage } = await import("../../be/storage");
+  const { prepareScriptJob, finishScriptJob } = await import("../../scripts-runtime/loader");
+  const config = SwarmScriptConfigSchema.parse(input.config);
+  const workflow = await getRunWorkflow({ id: input.job.runId, workflowId: input.meta.workflowId });
+  const principal = await resolveWorkflowRunPrincipal(workflow, input.job.runId);
+  if (!principal.ok) throw new Error(principal.error);
+  input = await prepareSwarmScriptStepJob(input);
+  let reference = input.config._scriptReference as ScriptReference;
+  const script = await getScriptById(reference.scriptId);
+  const version = await getScriptVersion({
+    scriptId: reference.scriptId,
+    version: reference.version,
+  });
+  if (!script || !version || version.contentHash !== reference.contentHash)
+    throw new Error("Dispatched script version is unavailable");
+  const resolved = {
+    script: { ...script, name: reference.scriptName, executor: reference.executor },
+    source: version.source,
+    contentHash: reference.contentHash,
+    version: reference.version,
+  };
+  if (findWorkflowSourceTokens(resolved.source, input.meta.inputCtx).length)
+    throw new Error("Named script source contains unresolved workflow tokens");
+  const agentId = principal.userId ? "" : (principal.agentId ?? "workflow");
+  const credentials = principal.userId
+    ? undefined
+    : await buildScriptCredentialBindingsWithFailures({ agentId: principal.agentId });
+  const credential = await acquireScriptApiCredential(
+    agentId,
+    { sourceStepId: input.job.stepId },
+    principal.userId
+      ? { kind: "user", userId: principal.userId }
+      : principal.operator
+        ? { kind: "operator" }
+        : undefined,
+  );
+  try {
+    if (resolved.script.isScratch) {
+      reference = await getStorage().transaction(async () => {
+        const { getWorkflowRunStep } = await import("../../be/db");
+        const step = await getWorkflowRunStep(input.job.stepId);
+        const held = await getStorage().repos.workflowStepJobs.get(input.job.id);
+        if (!step || held?.ownerId !== input.job.ownerId || held?.status !== "running")
+          throw new Error("Workflow job lost its claim before preparation");
+        const touch = await touchScratchScriptLastUsed(script.id);
+        if (!touch) return reference;
+        const updated = { ...reference, scratch: { prior: script.updatedAt, touch } };
+        const saved = (step.input ?? {}) as Record<string, unknown>;
+        const refs = (saved._stepJobReferences ?? {}) as Record<string, ScriptReference>;
+        await getStorage().repos.workflows.updateStepColumns(step.id, {
+          input: JSON.stringify({
+            ...saved,
+            _stepJobReferences: { ...refs, [String(input.job.attempt)]: updated },
+          }),
+        });
+        return updated;
+      });
+    }
+    const prepared = await prepareScriptJob({
+      source: resolved.source,
+      args: config.args,
+      fsMode: config.fsMode,
+      executor: resolved.script.executor,
+      agentId,
+      apiKey: credential.apiKey,
+      dbDialect: getStorage().capabilities.dbQueryDialect,
+      egressSecrets: credentials?.egressSecrets ?? [],
+      failedBindings: credentials?.failedBindings ?? [],
+      userConfig: credentials?.userConfig ?? {},
+      agentFs: credentials?.agentFs,
+      apiConnections: principal.userId
+        ? []
+        : await getScriptApiConnectionDescriptors({ agentId: principal.agentId }),
+      mcpConnections: principal.userId
+        ? []
+        : await getScriptMcpConnectionDescriptors({ agentId: principal.agentId }),
+      timeoutMs: config.timeoutMs,
+    });
+    if (!("job" in prepared))
+      throw new Error(prepared.stderr || prepared.error || "Script preparation failed");
+    prepared.job.id = input.job.id;
+    prepared.job.kind = "step-script";
+
+    return {
+      job: prepared.job,
+      async release() {
+        await credential.release();
+        if (reference.scratch)
+          await restoreScratchScriptLastUsedIfUnchanged(
+            reference.scriptId,
+            reference.scratch.prior,
+            reference.scratch.touch,
+          );
+      },
+      async finish(raw) {
+        return finishSwarmScriptOutput(
+          finishScriptJob(raw, prepared.scrubber),
+          {
+            ...resolved,
+            script: {
+              ...resolved.script,
+              updatedAt: reference.scratch?.prior ?? resolved.script.updatedAt,
+            },
+          },
+          reference.scratch?.touch ?? null,
+        );
+      },
+    };
+  } catch (error) {
+    await credential.release();
+    if (reference.scratch)
+      await restoreScratchScriptLastUsedIfUnchanged(
+        reference.scriptId,
+        reference.scratch.prior,
+        reference.scratch.touch,
+      );
+    throw error;
+  }
+}
+
+/** Restore attribution without reading mutable source or minting another execution credential. */
+export async function restoreSwarmScriptStepJob(
+  input: import("../step-job-kinds").StepJobBuildInput,
+) {
+  const { getWorkflowRunStep } = await import("../../be/db");
+  const { finishScriptJob } = await import("../../scripts-runtime/loader");
+  const step = await getWorkflowRunStep(input.job.stepId);
+  const saved = step?.input as { _stepJobReferences?: Record<string, ScriptReference> } | undefined;
+  const ref = saved?._stepJobReferences?.[String(input.job.attempt)];
+  if (!ref) throw new Error("Workflow job has no dispatched script reference");
+  const resolved: ResolvedScript = {
+    script: {
+      id: ref.scriptId,
+      name: ref.scriptName,
+      updatedAt: ref.scratch?.prior ?? "",
+      isScratch: !!ref.scratch,
+    },
+    contentHash: ref.contentHash,
+    version: ref.version,
+  };
+  return {
+    async finish(raw: import("../../scripts-runtime/executors/types").ExecutorOutput) {
+      return finishSwarmScriptOutput(
+        finishScriptJob(raw, createValueScrubber([])),
+        resolved,
+        ref.scratch?.touch ?? null,
+      );
+    },
+    async release() {
+      if (ref.scratch)
+        await restoreScratchScriptLastUsedIfUnchanged(
+          ref.scriptId,
+          ref.scratch.prior,
+          ref.scratch.touch,
+        );
+    },
   };
 }

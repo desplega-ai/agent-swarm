@@ -14,7 +14,22 @@ import {
 } from "../be/db";
 import { getWorkflowRunParent } from "../be/db/workflow-runs";
 import type { Workflow, WorkflowDefinition, WorkflowRun } from "../types";
-import { startWorkflowExecution } from "../workflows/engine";
+import {
+  startWorkflowExecution as startTrustedWorkflow,
+  type WorkflowExecutionOptions,
+} from "../workflows/engine";
+
+const startWorkflowExecution: typeof startTrustedWorkflow = (
+  workflow,
+  data,
+  registry,
+  options: WorkflowExecutionOptions = {},
+) =>
+  startTrustedWorkflow(workflow, data, registry, {
+    executionPrincipal: { ok: true, operator: true },
+    ...options,
+  });
+
 import { workflowEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
@@ -391,7 +406,11 @@ describe("sub-workflow node", () => {
 async function parentStepRow(parent: Workflow): Promise<{ runId: string; stepId: string }> {
   const runId = crypto.randomUUID();
   const stepId = crypto.randomUUID();
-  await db.createWorkflowRun({ id: runId, workflowId: parent.id });
+  await db.createWorkflowRun({
+    id: runId,
+    workflowId: parent.id,
+    principal: JSON.stringify({ ok: true, operator: true }),
+  });
   await db.updateWorkflowRun(runId, { context: {} });
   await db.createWorkflowRunStep({
     id: stepId,

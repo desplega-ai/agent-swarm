@@ -6,7 +6,8 @@
 # API exclusively via HTTP.
 #
 # Worker-side paths:
-#   src/commands/  src/hooks/  src/providers/  src/prompts/  src/scripts-runtime/  src/cli.tsx  src/claude.ts
+#   src/commands/  src/hooks/  src/providers/  src/prompts/  src/scripts-runtime/
+#   src/script-runner/  src/cli.tsx  src/claude.ts
 #
 # Forbidden patterns:
 #   - import/from be/db (direct DB module)
@@ -21,6 +22,7 @@ WORKER_PATHS=(
   src/runtime-providers/
   src/prompts/
   src/scripts-runtime/
+  src/script-runner/
   src/utils/
   src/cli.tsx
   src/claude.ts

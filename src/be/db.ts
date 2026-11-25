@@ -6256,7 +6256,10 @@ export async function updateWorkflowRun(
   const [previousStatus, row] = endsRun
     ? await getStorage().transaction(async () => {
         const previous = (await workflows.getRunStatus(id)) as WorkflowRunStatus | null;
-        return [previous ?? undefined, await update()] as const;
+        const updated = await update();
+        const { cancelWorkflowStepJobs } = await import("./script-runners/step-dispatch");
+        await cancelWorkflowStepJobs(id);
+        return [previous ?? undefined, updated] as const;
       })
     : [undefined, await update()];
   if (!row) return null;

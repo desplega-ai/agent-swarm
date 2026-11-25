@@ -91,9 +91,14 @@ export function rowToWorkflowRunStep(
  * started (migration 247; null for webhook, event and older runs). Null
  * `principal` means a run from before migration 367.
  */
-export async function getWorkflowRunPrincipalRow(
-  runId: string,
-): Promise<{ principal: string | null; triggeredByAgentId: string | null } | null> {
+export async function getWorkflowRunPrincipalRow(runId: string): Promise<{
+  principal: string | null;
+  triggeredByAgentId: string | null;
+  triggerType: string;
+  startedAt: string;
+  parentStepId: string | null;
+  createdBy: string | null;
+} | null> {
   return workflowsRepo().getRunPrincipal(runId);
 }
 

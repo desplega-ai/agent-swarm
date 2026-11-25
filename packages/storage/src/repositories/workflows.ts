@@ -250,6 +250,7 @@ export type NewRunningWorkflowStep = {
 
 /** Columns a step update may set. `undefined` leaves a column unchanged. */
 export type WorkflowRunStepColumnUpdate = {
+  input?: string;
   status?: string;
   output?: string;
   output_replay?: string;
@@ -423,9 +424,14 @@ export interface WorkflowsRepository {
 
   // --- runs --------------------------------------------------------------
 
-  getRunPrincipal(
-    runId: string,
-  ): Promise<{ principal: string | null; triggeredByAgentId: string | null } | null>;
+  getRunPrincipal(runId: string): Promise<{
+    principal: string | null;
+    triggeredByAgentId: string | null;
+    triggerType: string;
+    startedAt: string;
+    parentStepId: string | null;
+    createdBy: string | null;
+  } | null>;
   /** The run without `context`. */
   getRunSummary(id: string): Promise<WorkflowRunRow | null>;
   /** Summary rows of the given runs, ordered by id. */
@@ -785,11 +791,23 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
 
   abstract listEnabledByEventName(eventName: string): Promise<WorkflowRow[]>;
 
-  getRunPrincipal(
-    runId: string,
-  ): Promise<{ principal: string | null; triggeredByAgentId: string | null } | null> {
-    return this.db.get<{ principal: string | null; triggeredByAgentId: string | null }>(
-      sql`SELECT principal, "triggeredByAgentId" FROM workflow_runs WHERE id = ${runId}`,
+  getRunPrincipal(runId: string): Promise<{
+    principal: string | null;
+    triggeredByAgentId: string | null;
+    triggerType: string;
+    startedAt: string;
+    parentStepId: string | null;
+    createdBy: string | null;
+  } | null> {
+    return this.db.get<{
+      principal: string | null;
+      triggeredByAgentId: string | null;
+      triggerType: string;
+      startedAt: string;
+      parentStepId: string | null;
+      createdBy: string | null;
+    }>(
+      sql`SELECT principal, "triggeredByAgentId", "triggerType", "startedAt", "parentStepId", created_by AS "createdBy" FROM workflow_runs WHERE id = ${runId}`,
     );
   }
 
@@ -1310,6 +1328,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
     u: WorkflowRunStepColumnUpdate,
   ): Promise<WorkflowRunStepRow | null> {
     const sets: SqlQuery[] = [];
+    if (u.input !== undefined) sets.push(sql`input = ${u.input}`);
     if (u.status !== undefined) sets.push(sql`status = ${u.status}`);
     if (u.output !== undefined) sets.push(sql`output = ${u.output}`);
     if (u.output_replay !== undefined) sets.push(sql`output_replay = ${u.output_replay}`);
