@@ -1,6 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createApp, deleteApp } from "../apps/store";
-import { closeDb, createWorkflow, deleteWorkflow, getDb, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createWorkflow,
+  deleteWorkflow,
+  getDb,
+  getDbClient,
+  initDb,
+} from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import { createScriptApi, getScript, insertScript, upsertScriptByName } from "../be/scripts/db";
 import { purgeExpiredScratchScripts } from "../be/scripts/retention";
@@ -42,6 +50,7 @@ describe("scratch script retention", () => {
     process.env.AGENT_SWARM_API_KEY = "example-scripts-retention-test-key";
     await clearDb();
     initDb(TEST_DB_PATH);
+    await createAgent({ id: "agent-1", name: "retention-fixture", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {

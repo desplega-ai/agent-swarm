@@ -5,9 +5,13 @@ import {
   updateScriptRun,
   updateScriptRunIfRunning,
 } from "../be/db";
+import {
+  acquireScriptApiCredential,
+  type ScriptExecutionPrincipal,
+} from "../be/scripts/run-credential";
+import { getStorage } from "../be/storage";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
 import type { ScriptRun } from "../types";
-import { getApiKey } from "../utils/api-key";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   localProcessScriptExecutor,
@@ -43,27 +47,38 @@ export function durableScriptRunsAllowed(): boolean {
   return isExecutorAllowedByDeployment("native");
 }
 
-export async function startScriptRunProcess(
-  run: ScriptRun,
-  baseUrl: string,
-  apiKeyOverride?: string,
-): Promise<void> {
+export async function startScriptRunProcess(run: ScriptRun, baseUrl: string): Promise<void> {
   if (supervisorDisabled()) return;
   if (managed.has(run.id)) return;
   // Also covers reconcile respawns of runs created before the setting changed.
   if (!durableScriptRunsAllowed()) throw new Error(DURABLE_RUNS_NATIVE_REFUSED);
-  const apiKey = apiKeyOverride ?? getApiKey();
-  if (!apiKey) throw new Error("AGENT_SWARM_API_KEY is required to spawn script runs");
-  if (process.env.SCRIPT_WORKFLOW_DEBUG === "true") {
-    console.error(
-      `[script-workflows] spawning ${run.id} auth override=${apiKeyOverride ? "yes" : "no"} len=${apiKey.length}`,
-    );
-  }
+  const row = await getStorage().repos.scripts.getScriptRunPrincipal(run.id);
+  // Historical runs have no trusted principal. Refuse replay instead of elevating them.
+  if (!row?.executionPrincipal) throw new Error("Script run has no stored execution principal");
+  const principal = JSON.parse(row.executionPrincipal) as ScriptExecutionPrincipal;
+  if (!["operator", "agent", "user"].includes(principal.kind))
+    throw new Error("Invalid script execution principal");
+  if (principal.kind === "agent" && principal.agentId !== run.agentId)
+    throw new Error("Script run agent does not match principal");
+  const credential = await acquireScriptApiCredential(
+    run.agentId,
+    { sourceScriptRunId: run.id },
+    principal,
+    scriptRunMaxWallMs() + 60_000,
+  );
+  const apiKey = credential.apiKey;
+  if (!apiKey) throw new Error("Script run credential is required");
 
   // `run.args` is the redacted view; launch with the exact sealed value.
-  const sealedArgs = await getScriptRunExecutionArgs(run.id);
-  const args = sealedArgs === undefined ? run.args : sealedArgs;
-  const execution = await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
+  let execution: ScriptExecutionHandle;
+  try {
+    const sealedArgs = await getScriptRunExecutionArgs(run.id);
+    const args = sealedArgs === undefined ? run.args : sealedArgs;
+    execution = await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
+  } catch (error) {
+    await credential.release();
+    throw error;
+  }
   managed.set(run.id, { execution });
   await updateScriptRun(run.id, {
     status: "running",
@@ -100,7 +115,11 @@ export async function startScriptRunProcess(
     })
     .finally(async () => {
       managed.delete(run.id);
-      await execution.cleanup();
+      try {
+        await execution.cleanup();
+      } finally {
+        await credential.release();
+      }
     });
 }
 

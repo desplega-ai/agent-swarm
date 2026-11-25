@@ -2270,6 +2270,10 @@
       "scriptRun": {
         "class": "boolean",
         "evidence": "src/be/users.ts:729 scriptRun ? 1 : 0; read row?.scriptRun === 1 (:688)"
+      },
+      "operatorRun": {
+        "class": "boolean",
+        "evidence": "377_script_run_operator_token.sql"
       }
     },
     "skill_files": {

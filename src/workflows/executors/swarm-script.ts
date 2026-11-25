@@ -148,6 +148,11 @@ export class SwarmScriptExecutor extends BaseExecutor<
       },
       // Rows the script creates through its token point back at this step.
       { sourceStepId: meta.stepId },
+      principal.userId
+        ? { kind: "user", userId: principal.userId }
+        : principal.operator
+          ? { kind: "operator" }
+          : undefined,
     );
     if (output.exitCode === 0 && !output.error && !output.runtimeError) {
       await touchScratchScriptLastUsed(resolved.script.id);

@@ -78,6 +78,7 @@ function maxIterations(): number {
 }
 
 export interface WorkflowExecutionOptions {
+  executionPrincipal?: import("./run-principal").WorkflowRunPrincipal;
   requestedByUserId?: string;
   /**
    * The agent that started the run, as the server authenticated it: the caller
@@ -370,7 +371,9 @@ async function createRunWithInitialState(
     const definitionHash = await pinWorkflowDefinition(pinSource);
     // Decided from the same read as the pin, so a re-save while the run is in
     // flight cannot lend the creator's identity to a definition another agent wrote.
-    const principal = await decideWorkflowRunPrincipal(pinSource, options.triggeredByAgentId);
+    const principal =
+      options.executionPrincipal ??
+      (await decideWorkflowRunPrincipal(pinSource, options.triggeredByAgentId));
     await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,

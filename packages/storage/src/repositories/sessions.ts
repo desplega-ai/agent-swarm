@@ -460,10 +460,12 @@ export type NewSessionToken = {
   controllerId: string | null;
   parentTokenId: string | null;
   scriptRun: boolean;
+  operatorRun?: boolean;
 };
 
 /** A session token by hash, with its controller's placement. */
 export type SessionTokenLookupRow = {
+  operatorRun: number;
   id: string;
   agentId: string;
   taskId: string | null;
@@ -1483,9 +1485,9 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   async insertSessionToken(t: NewSessionToken): Promise<void> {
     await this.db.run(sql`
       INSERT INTO session_tokens
-      (id, "tokenHash", "tokenPreview", "agentId", "taskId", "runtimeId", "parentRuntimeId", "expiresAt", "createdAt", "controllerId", "parentTokenId", "scriptRun")
+      (id, "tokenHash", "tokenPreview", "agentId", "taskId", "runtimeId", "parentRuntimeId", "expiresAt", "createdAt", "controllerId", "parentTokenId", "scriptRun", "operatorRun")
       VALUES (${t.id}, ${t.tokenHash}, ${t.tokenPreview}, ${t.agentId}, ${t.taskId}, ${t.runtimeId},
-        ${t.parentRuntimeId}, ${t.expiresAt}, ${t.createdAt}, ${t.controllerId}, ${t.parentTokenId}, ${t.scriptRun})`);
+        ${t.parentRuntimeId}, ${t.expiresAt}, ${t.createdAt}, ${t.controllerId}, ${t.parentTokenId}, ${t.scriptRun}, ${t.operatorRun ?? false})`);
   }
 
   async setSessionTokenProvenance(
@@ -1562,7 +1564,7 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
   findSessionTokenByHash(tokenHash: string): Promise<SessionTokenLookupRow | null> {
     return this.db.get<SessionTokenLookupRow>(sql`
       SELECT s.id, s."agentId", s."taskId", s."runtimeId", s."controllerId", s."expiresAt", s."revokedAt",
-      s."sourceStepId", s."sourceScriptRunId", s."objectChain", s.depth, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s."controllerId"
+      s."operatorRun", s."sourceStepId", s."sourceScriptRunId", s."objectChain", s.depth, c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s."controllerId"
       WHERE s."tokenHash" = ${tokenHash}`);
   }
 

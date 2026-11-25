@@ -498,6 +498,8 @@ export interface ScriptsRepository {
 
   // ---- script_runs, script_run_sources ----
   getScriptRunArgs(id: string): Promise<{ args: string } | null>;
+  getScriptRunPrincipal(id: string): Promise<{ executionPrincipal: string | null } | null>;
+  setScriptRunPrincipal(id: string, principal: string): Promise<void>;
   /** Null when the run has no row. */
   getScriptRunFollowUpGuard(id: string): Promise<{ followUpGuard: string | null } | null>;
   setScriptRunFollowUpGuard(id: string, decision: string): Promise<void>;
@@ -889,6 +891,16 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
   }
 
   // ---- script_runs, script_run_sources ----
+
+  getScriptRunPrincipal(id: string): Promise<{ executionPrincipal: string | null } | null> {
+    return this.db.get(sql`SELECT "executionPrincipal" FROM script_runs WHERE id = ${id}`);
+  }
+
+  async setScriptRunPrincipal(id: string, principal: string): Promise<void> {
+    await this.db.run(
+      sql`UPDATE script_runs SET "executionPrincipal" = ${principal} WHERE id = ${id}`,
+    );
+  }
 
   getScriptRunArgs(id: string): Promise<{ args: string } | null> {
     return this.db.get<{ args: string }>(sql`SELECT args FROM script_runs WHERE id = ${id}`);

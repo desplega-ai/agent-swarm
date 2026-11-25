@@ -11,7 +11,12 @@ export type ScriptRunProvenance = {
 };
 
 export type HttpRequestAuth = (
-  | { kind: "operator"; fingerprint: string }
+  | ({
+      kind: "operator";
+      fingerprint: string;
+      tokenId?: string;
+      expiresAt?: string;
+    } & ScriptRunProvenance)
   /**
    * `tokenId` is the `user_tokens` row the request authenticated with, unset
    * for a page session. Credential and identity writes recheck it in their
@@ -113,7 +118,7 @@ export function getCurrentRequestUserId(): string | undefined {
  */
 export function getCurrentRunProvenance(): ScriptRunProvenance | null {
   const auth = getCurrentRequestAuth();
-  if (auth?.kind !== "agent") return null;
+  if (auth?.kind !== "agent" && auth?.kind !== "operator") return null;
   const { sourceStepId, sourceScriptRunId, objectChain, depth } = auth;
   return sourceStepId || sourceScriptRunId || objectChain !== undefined || depth
     ? { sourceStepId, sourceScriptRunId, objectChain, depth }

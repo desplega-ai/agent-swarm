@@ -52,6 +52,7 @@ import {
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
 import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
@@ -432,12 +433,6 @@ function scriptRunConcurrencyCap(): number {
     : DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP;
 }
 
-function bearerToken(req: IncomingMessage): string | undefined {
-  const raw = req.headers.authorization;
-  const header = Array.isArray(raw) ? raw[0] : raw;
-  return header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -524,7 +519,7 @@ export async function handleScriptRuns(
       : undefined;
     const creation = await getStorage().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
-      return await createScriptRun({
+      const creation = await createScriptRun({
         id: crypto.randomUUID(),
         agentId: agent.id,
         source: parsed.body.source,
@@ -535,6 +530,22 @@ export async function handleScriptRuns(
         sourceTaskId,
         createdBy: requestedByUserId,
       });
+      if (!creation.existing) {
+        const auth = getRequestAuth(req);
+        if (!auth || (auth.kind !== "operator" && auth.kind !== "agent" && auth.kind !== "user"))
+          throw new Error("Script run requires an authenticated principal");
+        const principal =
+          auth.kind === "operator"
+            ? { kind: "operator" }
+            : auth.kind === "user"
+              ? { kind: "user", userId: auth.userId }
+              : { kind: "agent", agentId: auth.agentId };
+        await getStorage().repos.scripts.setScriptRunPrincipal(
+          creation.run.id,
+          JSON.stringify(principal),
+        );
+      }
+      return creation;
     });
     if (!creation) {
       json(res, { error: "script_run_concurrency_cap", cap }, 429);
@@ -543,7 +554,7 @@ export async function handleScriptRuns(
     const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, getScriptApiBaseUrl(), bearerToken(req)).catch(async (err) => {
+      startScriptRunProcess(run, getScriptApiBaseUrl()).catch(async (err) => {
         await updateScriptRun(run.id, {
           status: "failed",
           pid: null,

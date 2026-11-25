@@ -1,8 +1,11 @@
 import { getAgentById } from "../be/db/agents";
 import { getWorkflowRunPrincipalRow } from "../be/db/workflow-runs";
 import type { Workflow } from "../types";
+import { getCurrentRequestAuth } from "../utils/request-auth-context";
 
-export type WorkflowRunPrincipal = { ok: true; agentId?: string } | { ok: false; error: string };
+export type WorkflowRunPrincipal =
+  | { ok: true; agentId?: string; userId?: string; operator?: boolean }
+  | { ok: false; error: string };
 
 /**
  * The agent a run's `swarm-script` and `sub-workflow` nodes act as: the
@@ -17,8 +20,16 @@ export async function decideWorkflowRunPrincipal(
   workflow: Workflow | null,
   triggeredByAgentId: string | null | undefined,
 ): Promise<WorkflowRunPrincipal> {
+  const auth = getCurrentRequestAuth();
+  if (auth?.kind === "guest" || auth?.kind === "controller")
+    return { ok: false, error: "Workflow execution requires a trusted principal" };
+  if (auth?.kind === "user") return { ok: true, userId: auth.userId };
+  if (!triggeredByAgentId && auth?.kind === "agent") triggeredByAgentId = auth.agentId;
+  if (!triggeredByAgentId && !auth && workflow?.createdBy)
+    return { ok: true, userId: workflow.createdBy };
   const creator = workflow?.createdByAgentId;
-  if (!creator) return { ok: true, agentId: triggeredByAgentId ?? undefined };
+  if (!creator)
+    return { ok: true, agentId: triggeredByAgentId ?? undefined, operator: !triggeredByAgentId };
   const editor = workflow.updatedByAgentId;
   if (!editor || editor === creator || (await getAgentById(editor))?.isLead) {
     return { ok: true, agentId: creator };
@@ -40,7 +51,11 @@ export async function resolveWorkflowRunPrincipal(
   runId: string,
 ): Promise<WorkflowRunPrincipal> {
   const row = await getWorkflowRunPrincipalRow(runId);
-  if (!row?.principal) return decideWorkflowRunPrincipal(liveWorkflow, row?.triggeredByAgentId);
+  if (!row?.principal) {
+    if (!row?.triggeredByAgentId && !liveWorkflow?.createdByAgentId)
+      return { ok: false, error: "Historical workflow run has no trusted execution principal" };
+    return decideWorkflowRunPrincipal(liveWorkflow, row?.triggeredByAgentId);
+  }
   try {
     const stored = JSON.parse(row.principal) as WorkflowRunPrincipal;
     if (stored.ok === true || (stored.ok === false && typeof stored.error === "string")) {

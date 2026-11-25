@@ -123,6 +123,11 @@ export async function executeScheduleScript(schedule: ScheduledTask): Promise<vo
         timeoutMs: 60_000,
       },
       { sourceScriptRunId: record.id },
+      schedule.createdBy
+        ? { kind: "user", userId: schedule.createdBy }
+        : schedule.createdByAgentId
+          ? undefined
+          : { kind: "operator" },
     );
   } catch (err) {
     await recordScheduleScriptRun({
@@ -238,6 +243,13 @@ export async function dispatchScheduleTarget(
   // Params are safe and integrations are ready. Only now render values into
   // the complete target snapshot, before metadata lookup or dispatch.
   schedule = renderScheduledTaskParams(schedule);
+  if (
+    (schedule.targetType === "script" || schedule.targetType === "workflow") &&
+    schedule.createdBy &&
+    !(await getUserById(schedule.createdBy))
+  ) {
+    throw new Error("Schedule executing user does not exist");
+  }
   schedule = await withoutDeletedRequester(schedule);
   switch (schedule.targetType) {
     case "workflow": {
@@ -264,6 +276,9 @@ export async function dispatchScheduleTarget(
         triggerType: "schedule",
         triggeredByAgentId: await scheduledWorkflowPrincipal(schedule, workflow),
         requestedByUserId: schedule.createdBy,
+        executionPrincipal: schedule.createdBy
+          ? { ok: true, userId: schedule.createdBy }
+          : undefined,
       });
       await throwIfWorkflowNeedsSetup(schedule.id, [runId]);
       console.log(

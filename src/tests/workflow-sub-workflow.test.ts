@@ -391,7 +391,11 @@ describe("sub-workflow node", () => {
 async function parentStepRow(parent: Workflow): Promise<{ runId: string; stepId: string }> {
   const runId = crypto.randomUUID();
   const stepId = crypto.randomUUID();
-  await db.createWorkflowRun({ id: runId, workflowId: parent.id });
+  await db.createWorkflowRun({
+    id: runId,
+    workflowId: parent.id,
+    principal: JSON.stringify({ ok: true, operator: true }),
+  });
   await db.updateWorkflowRun(runId, { context: {} });
   await db.createWorkflowRunStep({
     id: stepId,

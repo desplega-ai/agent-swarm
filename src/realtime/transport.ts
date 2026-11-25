@@ -130,8 +130,11 @@ function identityFromHttpAuth(
       name: user ? user.name : (agentId ?? `Guest ${guestId.slice(-6)}`),
       kind: user ? "user" : agentId ? "agent" : "guest",
     } as Viewer,
-    expiresAt: auth.kind === "agent" ? Date.parse(auth.expiresAt) : undefined,
-    ...(auth.kind === "agent"
+    expiresAt:
+      (auth.kind === "agent" || auth.kind === "operator") && auth.expiresAt
+        ? Date.parse(auth.expiresAt)
+        : undefined,
+    ...((auth.kind === "agent" || auth.kind === "operator") && auth.tokenId
       ? {
           sessionToken: {
             tokenId: auth.tokenId,
@@ -139,7 +142,11 @@ function identityFromHttpAuth(
               const current = await resolveHttpRequestAuth(req, getApiKey(), {
                 touchSessionToken: false,
               });
-              if (current?.kind !== "agent" || current.tokenId !== auth.tokenId)
+              if (
+                current?.kind !== auth.kind ||
+                !("tokenId" in current) ||
+                current.tokenId !== auth.tokenId
+              )
                 throw new Error("Session token revoked or expired");
             },
           },

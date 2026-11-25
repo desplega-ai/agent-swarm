@@ -23,7 +23,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { IdentityEventRow, UserRow } from "@desplega/storage";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
-import type { ScriptRunProvenance } from "../utils/request-auth-context";
+import { getApiKey } from "../utils/api-key";
+import type { HttpRequestAuth, ScriptRunProvenance } from "../utils/request-auth-context";
 import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { randomChars } from "../utils/short-id";
@@ -678,6 +679,7 @@ export async function mintScriptRunToken(
   agentId: string,
   ttlMs: number,
   provenance: ScriptRunProvenance = {},
+  operatorRun = false,
 ): Promise<{ tokenId: string; plaintext: string }> {
   const token = await insertSessionToken(
     agentId,
@@ -689,6 +691,7 @@ export async function mintScriptRunToken(
     null,
     null,
     true,
+    operatorRun,
   );
   // Recorded before the plaintext leaves this function, so no request can
   // present the token without its provenance.
@@ -709,6 +712,14 @@ export async function mintScriptRunToken(
   return token;
 }
 
+export async function mintOperatorScriptRunToken(
+  label: string,
+  ttlMs: number,
+  provenance: ScriptRunProvenance = {},
+) {
+  return mintScriptRunToken(label, ttlMs, provenance, true);
+}
+
 /** Whether a session token was minted by `mintScriptRunToken`. */
 export async function isScriptRunToken(tokenId: string): Promise<boolean> {
   return (await sessionsRepo().findSessionTokenScriptRun(tokenId)) === 1;
@@ -724,6 +735,7 @@ export async function insertSessionToken(
   controllerId: string | null = null,
   parentTokenId: string | null = null,
   scriptRun = false,
+  operatorRun = false,
 ): Promise<{ tokenId: string; plaintext: string }> {
   const plaintext = `${SESSION_TOKEN_PREFIX}${randomChars(TOKEN_ALPHABET, 24)}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -747,6 +759,7 @@ export async function insertSessionToken(
     controllerId,
     parentTokenId,
     scriptRun,
+    operatorRun,
   });
 
   return { tokenId, plaintext };
@@ -930,7 +943,7 @@ export async function resolveBySessionToken(
   expiresAt: string;
 } | null> {
   const principal = await resolveSessionToken(plaintext, options);
-  if (!principal || principal.kind === "controller") return null;
+  if (!principal || principal.kind !== "agent") return null;
   const { kind: _, ...agent } = principal;
   return agent;
 }
@@ -938,19 +951,7 @@ export async function resolveBySessionToken(
 export async function resolveSessionToken(
   plaintext: string,
   options: { touch?: boolean } = {},
-): Promise<
-  | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
-  | ({
-      kind: "agent";
-      tokenId: string;
-      tokenKind: SessionTokenKind;
-      agentId: string;
-      taskId: string | null;
-      runtimeId: string | null;
-      expiresAt: string;
-    } & ScriptRunProvenance)
-  | null
-> {
+): Promise<Extract<HttpRequestAuth, { kind: "agent" | "operator" | "controller" }> | null> {
   if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const hash = sha256Hex(plaintext);
   const row = await sessionsRepo().findSessionTokenByHash(hash);
@@ -977,6 +978,23 @@ export async function resolveSessionToken(
     }
   }
 
+  const provenance = {
+    ...(row.sourceStepId ? { sourceStepId: row.sourceStepId } : {}),
+    ...(row.sourceScriptRunId ? { sourceScriptRunId: row.sourceScriptRunId } : {}),
+    ...(row.objectChain !== null ? { objectChain: JSON.parse(row.objectChain) as string[] } : {}),
+    depth: row.depth,
+  };
+  if (row.operatorRun) {
+    const key = getApiKey();
+    if (!key) return null;
+    return {
+      kind: "operator",
+      fingerprint: fingerprintApiKey(key),
+      tokenId: row.id,
+      expiresAt: row.expiresAt,
+      ...provenance,
+    };
+  }
   return {
     kind: "agent",
     tokenId: row.id,
