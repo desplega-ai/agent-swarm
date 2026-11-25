@@ -143,6 +143,7 @@
     "check:audit-columns": "bash scripts/check-audit-columns.sh",
     "check:bun-version": "bun scripts/check-bun-version.ts",
     "check:playwright-version": "bun scripts/check-playwright-version.ts",
+    "check:scenario-orders": "bun scripts/check-scenario-orders.ts --open-prs",
     "check:sandbox-spawn-skip-list": "bash scripts/check-sandbox-spawn-skip-list.sh",
     "lint:structure": "konsistent check",
     "prepare-release": "bun scripts/prepare-release.ts",

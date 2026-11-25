@@ -1942,6 +1942,38 @@ jobs:
           MIGRATION_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
         run: bash scripts/check-migration-conflicts.sh
 
+  # Run on every PR and merge queue group, so a scenario `order` that main or a
+  # queued PR already took fails here in about a minute, not as a queue kick.
+  scenario-order-check:
+    name: Scenario Order Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The check diffs the base commit against HEAD and origin/main.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check e2e scenario orders
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SCENARIO_ORDER_BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+        run: bun scripts/check-scenario-orders.ts ${{ github.event_name == 'pull_request' && '--open-prs' || '' }}
+
   # Run on every PR and merge queue group: any path can carry a secret, and the
   # scan takes seconds. Only commits the event adds are scanned, so
   # secret-shaped lines already on main never block anyone.
@@ -1997,7 +2029,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract-shard, e2e-contract, e2e-postgres-shard, e2e-postgres, storage-checks, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-e2e, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract-shard, e2e-contract, e2e-postgres-shard, e2e-postgres, storage-checks, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-e2e, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, scenario-order-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
     # No checkout. checks: read lets the last step read the PR Body check.
