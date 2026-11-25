@@ -1,9 +1,73 @@
-import { rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, resolve } from "node:path";
 import { WebSocket } from "ws";
 import { runWithCapacityRetry } from "../scripts-runtime/dispatch/capacity-retry";
 import type { ExecutorOutput, ScriptExecutorName } from "../scripts-runtime/executors/types";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { apiMessage, failedJob, MAX_FRAME_BYTES, SCRIPT_RUNNER_PATH } from "./protocol";
+import {
+  apiMessage,
+  encodeRunnerFrame,
+  failedJob,
+  MAX_FRAME_BYTES,
+  RUNNER_WATCHDOG_MS,
+  SCRIPT_RUNNER_PATH,
+} from "./protocol";
+
+export function runnerReadyFile(path?: string) {
+  if (!path) return { clear() {}, publish() {} };
+  const target = resolve(path);
+  const parent = dirname(target);
+  const validate = () => {
+    const stat = lstatSync(parent);
+    if (
+      !stat.isDirectory() ||
+      stat.uid !== process.geteuid?.() ||
+      (stat.mode & 0o077) !== 0 ||
+      realpathSync(parent) !== parent
+    )
+      throw new Error("Ready file requires a private directory owned by the runner");
+    try {
+      const file = lstatSync(target);
+      if (!file.isFile() || file.uid !== stat.uid) throw new Error("Invalid ready file");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  };
+  validate();
+  return {
+    clear() {
+      validate();
+      rmSync(target, { force: true });
+    },
+    publish() {
+      validate();
+      const temporary = `${target}.${crypto.randomUUID()}`;
+      const fd = openSync(
+        temporary,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+        0o600,
+      );
+      try {
+        if (!fstatSync(fd).isFile()) throw new Error("Invalid ready temporary file");
+        writeFileSync(fd, "ready\n");
+        renameSync(temporary, target);
+      } finally {
+        closeSync(fd);
+        rmSync(temporary, { force: true });
+      }
+    },
+  };
+}
 
 export function startScriptRunner(options: {
   apiUrl: string;
@@ -11,8 +75,10 @@ export function startScriptRunner(options: {
   slots: number;
   executors: ScriptExecutorName[];
   onRefused: () => void;
+  readyFile?: string;
 }) {
-  const clearReady = () => rmSync("/tmp/script-runner.ready", { force: true });
+  const ready = runnerReadyFile(options.readyFile);
+  const clearReady = () => ready.clear();
   clearReady();
   const instanceId = crypto.randomUUID();
   const url = new URL(SCRIPT_RUNNER_PATH, options.apiUrl);
@@ -40,18 +106,35 @@ export function startScriptRunner(options: {
     });
     const current = socket;
     let welcomed = false;
+    const send = (message: unknown) => {
+      try {
+        current.send(encodeRunnerFrame(message), (error) => {
+          if (error) current.terminate();
+        });
+      } catch {
+        current.terminate();
+      }
+    };
+    let watchdog: ReturnType<typeof setTimeout>;
+    const resetWatchdog = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        current.terminate();
+        void killJobs();
+      }, RUNNER_WATCHDOG_MS);
+    };
+    resetWatchdog();
+    current.on("ping", resetWatchdog);
     const welcomeTimeout = setTimeout(() => current.terminate(), 10000);
     current.on("open", () =>
-      current.send(
-        JSON.stringify({
-          type: "hello",
-          instanceId,
-          version: 1,
-          slots: options.slots,
-          executors: options.executors,
-          held: [],
-        }),
-      ),
+      send({
+        type: "hello",
+        instanceId,
+        version: 1,
+        slots: options.slots,
+        executors: options.executors,
+        held: [],
+      }),
     );
     current.on("message", (data, binary) => {
       try {
@@ -63,7 +146,7 @@ export function startScriptRunner(options: {
           clearTimeout(welcomeTimeout);
           attempt = 0;
           disconnectedAt = Date.now();
-          writeFileSync("/tmp/script-runner.ready", "ready\n", { mode: 0o600 });
+          ready.publish();
           log("connected");
         } else if (message.type === "job") {
           if (
@@ -88,8 +171,22 @@ export function startScriptRunner(options: {
               output = failedJob("executor_error");
             }
             jobs.delete(message.jobId);
-            if (current.readyState === WebSocket.OPEN)
-              current.send(JSON.stringify({ type: "result", jobId: message.jobId, output }));
+            if (current.readyState === WebSocket.OPEN) {
+              let frame: string;
+              try {
+                frame = encodeRunnerFrame({ type: "result", jobId: message.jobId, output });
+              } catch {
+                output = failedJob("executor_error");
+                frame = encodeRunnerFrame({ type: "result", jobId: message.jobId, output });
+              }
+              try {
+                current.send(frame, (error) => {
+                  if (error) current.terminate();
+                });
+              } catch {
+                current.terminate();
+              }
+            }
             log(`${message.jobId} ${output.error ?? "completed"}`);
           })();
           jobs.set(message.jobId, { controller, done });
@@ -98,7 +195,10 @@ export function startScriptRunner(options: {
         current.close(1008, "Invalid API message");
       }
     });
-    current.on("error", () => log("connection_error"));
+    current.on("error", () => {
+      log("connection_error");
+      current.terminate();
+    });
     current.on("unexpected-response", (_req, response) => {
       response.resume();
       if (response.statusCode === 401 || response.statusCode === 409) {
@@ -110,6 +210,7 @@ export function startScriptRunner(options: {
     current.on("close", (code) => {
       clearReady();
       clearTimeout(welcomeTimeout);
+      clearTimeout(watchdog);
       if (welcomed) disconnectedAt = Date.now();
       void killJobs().then(() => {
         if (code === 1008) {

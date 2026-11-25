@@ -1,5 +1,10 @@
 import { WebSocket } from "ws";
-import { apiMessage, failedJob } from "../../script-runner/protocol";
+import {
+  apiMessage,
+  encodeRunnerFrame,
+  failedJob,
+  RPC_CLEANUP_GRACE_MS,
+} from "../../script-runner/protocol";
 import type { ScriptJob, ScriptRunnerHandle } from "../../scripts-runtime/dispatch/types";
 import type { ExecutorOutput, ScriptExecutorName } from "../../scripts-runtime/executors/types";
 
@@ -15,38 +20,56 @@ export class RemoteScriptRunner implements ScriptRunnerHandle {
   ) {}
   run(job: ScriptJob, signal?: AbortSignal): Promise<ExecutorOutput> {
     if (signal?.aborted) return Promise.resolve(failedJob("killed"));
+    let frame: string;
+    try {
+      frame = encodeRunnerFrame(apiMessage.parse({ type: "job", jobId: job.id, ...job }));
+    } catch {
+      return Promise.resolve(failedJob("executor_error"));
+    }
     return new Promise((resolve) => {
+      let cleanup: ReturnType<typeof setTimeout> | undefined;
       const abort = () => {
-        if (this.socket.readyState === WebSocket.OPEN)
-          this.socket.send(JSON.stringify({ type: "cancel", jobId: job.id }));
+        if (cleanup) return;
+        cleanup = setTimeout(() => this.close(), RPC_CLEANUP_GRACE_MS);
+        this.send(encodeRunnerFrame({ type: "cancel", jobId: job.id }));
       };
+      const deadline = setTimeout(
+        () => this.close(),
+        job.input.resources.wallClockMs + RPC_CLEANUP_GRACE_MS,
+      );
       this.pending.set(job.id, {
         finish: (output) => {
+          clearTimeout(deadline);
+          clearTimeout(cleanup);
           this.pending.delete(job.id);
           signal?.removeEventListener("abort", abort);
           resolve(signal?.aborted ? failedJob("killed") : output);
         },
       });
       signal?.addEventListener("abort", abort, { once: true });
-      try {
-        const frame = JSON.stringify(apiMessage.parse({ type: "job", jobId: job.id, ...job }));
-        if (this.socket.readyState !== WebSocket.OPEN) throw new Error("closed");
-        this.socket.send(frame, (error) => {
-          if (error) this.close();
-        });
-      } catch {
-        this.pending.get(job.id)?.finish(failedJob("executor_error"));
-      }
+      this.send(frame);
     });
   }
+  private send(frame: string) {
+    try {
+      if (this.socket.readyState !== WebSocket.OPEN) throw new Error("closed");
+      this.socket.send(frame, (error) => {
+        if (error) this.close();
+      });
+    } catch {
+      this.close();
+    }
+  }
+
   result(jobId: string, output: ExecutorOutput) {
     const pending = this.pending.get(jobId);
     if (!pending) return;
     this.jobsCompleted++;
     pending.finish(output);
-    this.socket.send(JSON.stringify({ type: "ack", jobId }));
+    this.send(encodeRunnerFrame({ type: "ack", jobId }));
   }
   close() {
+    this.socket.terminate();
     for (const pending of this.pending.values()) pending.finish(failedJob("executor_error"));
   }
 }

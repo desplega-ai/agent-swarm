@@ -2,6 +2,9 @@ import { z } from "zod";
 import type { ExecutorInput, ExecutorOutput } from "../scripts-runtime/executors/types";
 
 export const SCRIPT_RUNNER_PATH = "/api/script-runners/connect";
+export const RPC_CLEANUP_GRACE_MS = 5000;
+export const API_PING_INTERVAL_MS = 15000;
+export const RUNNER_WATCHDOG_MS = 45000;
 export const MAX_FRAME_BYTES = 80 * 1024 * 1024;
 const id = z.uuid();
 const executor = z.enum(["native", "quickjs"]);
@@ -94,3 +97,11 @@ export const failedJob = (error: "executor_error" | "killed"): ExecutorOutput =>
   exitCode: 1,
   error,
 });
+
+/** Apply the byte limit before a frame reaches the shared socket. */
+export function encodeRunnerFrame(message: unknown): string {
+  const frame = JSON.stringify(message);
+  if (Buffer.byteLength(frame) > MAX_FRAME_BYTES)
+    throw new Error("Runner frame exceeds byte limit");
+  return frame;
+}

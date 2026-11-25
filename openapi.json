@@ -80165,6 +80165,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Runner credential lookup temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

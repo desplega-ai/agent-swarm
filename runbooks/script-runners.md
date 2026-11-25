@@ -20,11 +20,16 @@ agent-swarm-script-runner --api-url https://api.example.test
 The runner registers the token with the secret scrubber. Logs contain job IDs and outcome codes.
 Use TLS outside a trusted network. A remote plain HTTP URL produces a warning.
 The credential cannot authenticate ordinary HTTP or realtime requests.
-Revocation closes connected sockets after commit. The API also checks expiry every 15 seconds.
+Revocation closes connected sockets after commit. The API revalidates the bearer after registering the revoke handler.
+Every 15-second ping rechecks expiry and the issuer’s explicit `script_runner.write` grant.
+A database exception returns HTTP 503 before upgrade or closes with WebSocket 1011 after upgrade.
+Invalid credentials return HTTP 401. Revoked credentials receive policy close 1008.
 
-Native jobs require Linux, root and `setpriv` so children run as UID 65534.
+Native jobs require Linux, root and a successful startup probe with `setpriv` as UID 65534.
+The probe also checks that this UID cannot read `SCRIPT_RUNNER_TOKEN_FILE`. A readable token file stops startup.
 Otherwise the runner advertises QuickJS only. `--allow-shared-uid` permits native execution during local development and E2E.
-Do not enable that override in production. Mount no operator secrets in the runner container.
+The override prints a development warning. Startup rejects it when `NODE_ENV=production`.
+Mount no operator secrets in the runner container.
 The API sends a per-run bearer instead of its operator key. The dispatcher rejects the operator key before transmission.
 The API selects the executor and enforces its deployment ceiling. The runner never selects from `SCRIPT_EXECUTOR`.
 
@@ -36,10 +41,36 @@ Otherwise the embedded runner executes the job. This phase has no waiting queue.
 Access requires operator or user permission `script_runner.write`.
 
 Messages use shared Zod schemas. The transport caps frames at 80 MiB and sends pings every 15 seconds.
-An abort sends `cancel`. The slot stays occupied until the executor ends.
+Each outgoing job and result must fit the same byte limit. An oversized job fails before transmission.
+An oversized result becomes a small `executor_error` result. Neither case disconnects other jobs.
+An abort sends `cancel`. The slot stays occupied until the executor ends or the cleanup deadline expires.
+The API terminates the socket after an unanswered abort plus five seconds.
+Each RPC also has a deadline equal to its wall time plus five seconds.
+Termination fails every pending caller and releases its slot. Send errors also terminate the socket.
+The runner terminates a connection after 45 seconds without API pings and aborts its inline jobs.
 A socket close fails pending callers with `executor_error` and kills all inline children on the runner.
 The runner kills children before reconnecting. It retries every second for 30 seconds, then uses exponential delay with jitter.
 A policy close (1008) stops the process. Authentication and engine refusals also stop it.
+A duplicate instance ID receives retryable close 1011 until the old connection closes.
+Connections never replace another session or adopt its jobs, regardless of credential.
 
-After welcome, the runner creates `/tmp/script-runner.ready`. It removes the file before reconnect, on disconnect and during shutdown.
-Run one runner process per container. Health probes can test that file.
+Set `SCRIPT_RUNNER_READY_FILE=/run/agent-swarm-script-runner/ready` for packaged health probes.
+Create the parent directory first. It must belong to the runner UID and have mode 0700.
+The runner rejects symlink parents and symlink targets. It creates a unique regular file exclusively, then atomically renames it.
+After welcome, the runner publishes readiness. It removes readiness before reconnect, on disconnect and during shutdown.
+A source runner can omit this variable. It then creates no readiness file.
+Run one runner process per container.
+
+## Data visible to a runner
+
+The job contains script source, arguments, the selected executor, resource limits, filesystem mode and network policy.
+Its configuration contains system identity, the API URL and a short-lived bearer for that run.
+It also carries resolved user configuration, secret bindings, egress credentials and failed-binding descriptions when applicable.
+API and MCP connection descriptors, agent-fs descriptors, caller context and database dialect can accompany the job.
+The runner rewrites the SDK and MCP addresses to its configured API address.
+Results contain the return value, output streams, truncation flags, duration, exit status and optional runtime errors or durable state.
+
+Treat the runner host as trusted infrastructure. Its process receives these plaintext values inside the authenticated TLS connection.
+The dedicated runner credential authenticates only the runner connection. It differs from the per-run bearer inside a job.
+The native child receives configuration through stdin. The runner retains its own credential outside that child.
+QuickJS executes with host adapters in the runner process. Do not treat its process as separate from the runner's credentials.

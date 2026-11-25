@@ -96,3 +96,4 @@ src/tests/seed-script-time-windows.test.ts  # cutoff regressions need backdated 
 src/tests/script-api-credential.test.ts  # Server-only issuer and broker credentials have no mint endpoint. Verify lifetime and revocation without exposing bearers to guest code.
 
 src/script-runner/  # Worker protocol and process lifecycle have no database access.
+src/tests/script-runner.test.ts  # Worker transport tests need a synthetic API peer to omit pings, return transient failures and inspect oversized-result isolation. Public API calls cannot control those peer behaviors.

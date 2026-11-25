@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
-import { startScriptRunner } from "./client";
+import { runnerReadyFile, startScriptRunner } from "./client";
 
 export async function runScriptRunner(argv: string[]) {
   let options: Omit<Parameters<typeof startScriptRunner>[0], "onRefused">;
@@ -23,15 +23,43 @@ export async function runScriptRunner(argv: string[]) {
     const slots = Number(process.env.SCRIPT_RUNNER_SLOTS ?? 2);
     if (!Number.isInteger(slots) || slots < 1 || slots > 1024) throw new Error("slots");
     registerVolatileSecret(token, "script-runner-token");
-    const native =
-      values["allow-shared-uid"] ||
-      (process.platform === "linux" && process.geteuid?.() === 0 && Bun.which("setpriv") !== null);
+    if (values["allow-shared-uid"] && process.env.NODE_ENV === "production")
+      throw new Error("Shared UID is unavailable in production");
+    if (values["allow-shared-uid"])
+      console.warn(
+        scrubSecrets(
+          "[script-runner] development override: native children may share the runner UID",
+        ),
+      );
+    let native = false;
+    if (process.platform === "linux" && process.geteuid?.() === 0 && Bun.which("setpriv")) {
+      const probe = Bun.spawn(
+        [
+          "setpriv",
+          "--reuid=65534",
+          "--regid=65534",
+          "--clear-groups",
+          "--no-new-privs",
+          process.execPath,
+          "-e",
+          'const fs = require("node:fs"); if (process.getuid() !== 65534) process.exit(1); if (process.argv[1]) { try { fs.accessSync(process.argv[1], fs.constants.R_OK); process.exit(2); } catch {} }',
+          process.env.SCRIPT_RUNNER_TOKEN_FILE ?? "",
+        ],
+        { stdin: "ignore", stdout: "ignore", stderr: "ignore", timeout: 5000, env: {} },
+      );
+      const status = await probe.exited;
+      if (status === 2) throw new Error("Native child can read the runner token file");
+      native = status === 0;
+    }
+    native ||= !!values["allow-shared-uid"];
+    runnerReadyFile(process.env.SCRIPT_RUNNER_READY_FILE);
     if (!native)
       console.warn(scrubSecrets("[script-runner] native disabled: separate child UID unavailable"));
     options = {
       apiUrl: url.origin,
       token,
       slots,
+      readyFile: process.env.SCRIPT_RUNNER_READY_FILE,
       executors: native ? ["native", "quickjs"] : ["quickjs"],
     };
   } catch {

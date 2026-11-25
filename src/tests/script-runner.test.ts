@@ -114,3 +114,186 @@ test("remote dispatch refuses the operator key before transport", async () => {
     else process.env.AGENT_SWARM_API_KEY = previous;
   }
 });
+
+test("readiness requires a private directory and creates an atomic regular file", async () => {
+  const { mkdtempSync, chmodSync, lstatSync, readFileSync, rmSync, symlinkSync, realpathSync } =
+    await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { runnerReadyFile } = await import("../script-runner/client");
+  const directory = realpathSync(mkdtempSync(`${tmpdir()}/phase4-ready-`));
+  const path = `${directory}/ready`;
+  try {
+    chmodSync(directory, 0o700);
+    const ready = runnerReadyFile(path);
+    ready.publish();
+    expect(lstatSync(path).isFile()).toBe(true);
+    expect(lstatSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, "utf8")).toBe("ready\n");
+    ready.clear();
+    symlinkSync(`${directory}/missing`, path);
+    expect(() => runnerReadyFile(path)).toThrow("Invalid ready file");
+    rmSync(path);
+    chmodSync(directory, 0o755);
+    expect(() => runnerReadyFile(path)).toThrow("private directory");
+    runnerReadyFile().publish();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("outgoing frames enforce the byte limit before socket transmission", async () => {
+  const { encodeRunnerFrame, MAX_FRAME_BYTES } = await import("../script-runner/protocol");
+  expect(encodeRunnerFrame({ type: "cancel", jobId: "fixture" })).toContain("fixture");
+  expect(() => encodeRunnerFrame({ value: "a".repeat(MAX_FRAME_BYTES) })).toThrow("byte limit");
+});
+
+test("runner retries service failure and transient close without policy refusal", async () => {
+  const { createServer } = await import("node:http");
+  const { WebSocketServer } = await import("ws");
+  const { listenOnFreePort } = await import("./test-net");
+  const { startScriptRunner } = await import("../script-runner/client");
+  const server = createServer();
+  const wss = new WebSocketServer({ noServer: true });
+  let attempts = 0;
+  let refused = false;
+  let welcome = false;
+  server.on("upgrade", (req, socket, head) => {
+    if (++attempts === 1) {
+      socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.once("message", () => {
+        if (attempts === 2) ws.close(1011, "Temporary service failure");
+        else {
+          welcome = true;
+          ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
+        }
+      });
+    });
+  });
+  const port = await listenOnFreePort(server);
+  const runner = startScriptRunner({
+    apiUrl: `http://127.0.0.1:${port}`,
+    token: "fixture",
+    slots: 1,
+    executors: ["native"],
+    onRefused() {
+      refused = true;
+    },
+  });
+  try {
+    const end = Date.now() + 8000;
+    while (!welcome && Date.now() < end) await Bun.sleep(20);
+    expect(welcome).toBe(true);
+    expect(refused).toBe(false);
+    expect(attempts).toBe(3);
+  } finally {
+    await runner.stop();
+    for (const ws of wss.clients) ws.terminate();
+    wss.close();
+    server.close();
+  }
+}, 15000);
+
+test("silent API connection loss aborts the runner job through its watchdog", async () => {
+  const { createServer } = await import("node:http");
+  const { WebSocketServer } = await import("ws");
+  const { listenOnFreePort } = await import("./test-net");
+  const { startScriptRunner } = await import("../script-runner/client");
+  const server = createServer();
+  const wss = new WebSocketServer({ server });
+  let aborted = false;
+  const spy = spyOn(NativeScriptExecutor.prototype, "run").mockImplementation(
+    (input) =>
+      new Promise((resolve) => {
+        input.signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            resolve(failedJob("killed"));
+          },
+          { once: true },
+        );
+      }),
+  );
+  wss.on("connection", (ws) =>
+    ws.once("message", () => {
+      ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
+      const fixture = job();
+      ws.send(JSON.stringify({ type: "job", jobId: fixture.id, ...fixture }));
+    }),
+  );
+  const port = await listenOnFreePort(server);
+  const runner = startScriptRunner({
+    apiUrl: `http://127.0.0.1:${port}`,
+    token: "fixture",
+    slots: 1,
+    executors: ["native"],
+    onRefused() {},
+  });
+  try {
+    const end = Date.now() + 49000;
+    while (!aborted && Date.now() < end) await Bun.sleep(50);
+    expect(aborted).toBe(true);
+  } finally {
+    await runner.stop();
+    spy.mockRestore();
+    for (const ws of wss.clients) ws.terminate();
+    wss.close();
+    server.close();
+  }
+}, 55000);
+
+test("an oversized result fails its job and preserves the connection for another job", async () => {
+  const { createServer } = await import("node:http");
+  const { WebSocketServer } = await import("ws");
+  const { listenOnFreePort } = await import("./test-net");
+  const { startScriptRunner } = await import("../script-runner/client");
+  const { MAX_FRAME_BYTES } = await import("../script-runner/protocol");
+  const server = createServer();
+  const wss = new WebSocketServer({ server });
+  const outputs: Array<{ output: { error?: string; result?: number } }> = [];
+  let runs = 0;
+  const spy = spyOn(NativeScriptExecutor.prototype, "run").mockImplementation(async () => ({
+    ...failedJob("executor_error"),
+    error: undefined,
+    exitCode: 0,
+    result: ++runs === 1 ? "a".repeat(MAX_FRAME_BYTES) : 42,
+  }));
+  wss.on("connection", (ws) => {
+    ws.once("message", () => {
+      ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
+      const fixture = job();
+      ws.send(JSON.stringify({ type: "job", jobId: fixture.id, ...fixture }));
+      ws.on("message", (data) => {
+        outputs.push(JSON.parse(data.toString()));
+        if (outputs.length === 1) {
+          const second = job();
+          ws.send(JSON.stringify({ type: "job", jobId: second.id, ...second }));
+        }
+      });
+    });
+  });
+  const port = await listenOnFreePort(server);
+  const runner = startScriptRunner({
+    apiUrl: `http://127.0.0.1:${port}`,
+    token: "fixture",
+    slots: 1,
+    executors: ["native"],
+    onRefused() {},
+  });
+  try {
+    const end = Date.now() + 8000;
+    while (outputs.length < 2 && Date.now() < end) await Bun.sleep(20);
+    expect(outputs[0]?.output.error).toBe("executor_error");
+    expect(outputs[1]?.output.result).toBe(42);
+    expect(wss.clients.size).toBe(1);
+  } finally {
+    await runner.stop();
+    spy.mockRestore();
+    for (const ws of wss.clients) ws.terminate();
+    wss.close();
+    server.close();
+  }
+}, 15000);

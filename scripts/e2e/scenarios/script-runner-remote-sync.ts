@@ -53,6 +53,93 @@ export const scriptRunnerRemoteSync: Scenario = {
       ctx.log(
         `Embedded benchmark: ${JSON.stringify(await benchmarkScripts(ctx.baseUrl, ctx.apiKey))}`,
       );
+    // A synthetic runner verifies collisions and an ordinary missing response.
+    const instanceId = crypto.randomUUID();
+    const connectFixture = (credential: string, held: string[] = []) =>
+      new Promise<{ ws: WebSocket; code: number }>((resolve) => {
+        const ws = new WebSocket(ctx.baseUrl.replace(/^http/, "ws") + path, {
+          headers: { Authorization: `Bearer ${credential}` },
+        });
+        ws.on("error", () => {});
+        ws.on("open", () =>
+          ws.send(
+            JSON.stringify({
+              type: "hello",
+              instanceId,
+              version: 1,
+              slots: 1,
+              executors: ["native"],
+              held,
+            }),
+          ),
+        );
+        ws.once("message", () => resolve({ ws, code: 0 }));
+        ws.once("close", (code) => resolve({ ws, code }));
+      });
+    const fixture = await connectFixture(token);
+    expect(fixture.code === 0, "fixture runner welcomed");
+    const duplicate = await connectFixture(token);
+    expect(duplicate.code === 1011, "duplicate instance is retryable");
+    const secondCredential = await ctx.api("POST", "/api/script-runners/credentials", {
+      body: { name: `second-${ctx.nonce}` },
+    });
+    expectStatus(secondCredential, [201], "mint second credential");
+    const otherToken = asString(asRecord(secondCredential.json).token, "second token");
+    const otherDuplicate = await connectFixture(otherToken);
+    expect(otherDuplicate.code === 1011, "another credential cannot replace a live session");
+    const held = await connectFixture(otherToken, [crypto.randomUUID()]);
+    expect(held.code === 1008, "held jobs cannot be adopted");
+    try {
+      const started = performance.now();
+      const unanswered = await run("native");
+      expect(
+        asRecord(unanswered.json).error === "executor_error",
+        "missing result fails at RPC deadline",
+      );
+      expect(performance.now() - started < 40000, "RPC deadline bounds caller lifetime");
+      expect(
+        await pollUntil(async () => (await sessions()).length === 0, 3000, 50),
+        "deadline removes dead session",
+      );
+    } finally {
+      fixture.ws.terminate();
+    }
+    const replacement = await connectFixture(token);
+    expect(replacement.code === 0, "same instance reconnects after old session closes");
+    let jobReceived = false;
+    replacement.ws.once("message", () => {
+      jobReceived = true;
+    });
+    const requestAbort = new AbortController();
+    const ignoredAbort = fetch(`${ctx.baseUrl}/api/scripts/run`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ctx.apiKey}`,
+        "X-Agent-ID": agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ executor: "native", source: "export default () => 42" }),
+      signal: requestAbort.signal,
+    }).catch(() => null);
+    try {
+      expect(
+        await pollUntil(() => jobReceived, 10000, 50),
+        "synthetic runner received job before abort",
+      );
+      requestAbort.abort();
+      await ignoredAbort;
+      expect(
+        await pollUntil(async () => (await sessions()).length === 0, 8000, 50),
+        "unanswered abort terminates socket and releases pending call",
+      );
+    } finally {
+      requestAbort.abort();
+      replacement.ws.terminate();
+    }
+    expect(
+      await pollUntil(async () => (await sessions()).length === 0, 3000, 50),
+      "replacement closes",
+    );
     let runner = ctx.startScriptRunner(token);
     try {
       expect(

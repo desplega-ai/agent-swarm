@@ -7,7 +7,12 @@ import {
 } from "../be/script-runners/credentials";
 import { RemoteScriptRunner, scriptRunnerSessions } from "../be/script-runners/sessions";
 import { getStorage } from "../be/storage";
-import { MAX_FRAME_BYTES, runnerMessage, SCRIPT_RUNNER_PATH } from "../script-runner/protocol";
+import {
+  API_PING_INTERVAL_MS,
+  MAX_FRAME_BYTES,
+  runnerMessage,
+  SCRIPT_RUNNER_PATH,
+} from "../script-runner/protocol";
 import { setRemoteScriptRunnerPicker } from "../scripts-runtime/dispatch/dispatcher";
 import { registerSessionTokenConnection } from "../utils/session-token-connections";
 import { route } from "./route-def";
@@ -22,6 +27,7 @@ route({
     101: { description: "WebSocket upgrade" },
     401: { description: "Invalid runner credential" },
     409: { description: "script_runners_need_postgres" },
+    503: { description: "Runner credential lookup temporarily unavailable" },
   },
 });
 
@@ -61,10 +67,22 @@ export function attachScriptRunnerTransport(server: Server): () => void {
           const unregister = registerSessionTokenConnection(`script-runner:${credential.id}`, () =>
             ws.close(1008, "Credential revoked"),
           );
+          let helloTimeout = setTimeout(() => ws.close(1011, "Runner admission timed out"), 5000);
+          const admission = activeScriptRunnerCredential(hash)
+            .then((current) => {
+              clearTimeout(helloTimeout);
+              if (!current) ws.close(1008, "Credential expired or revoked");
+              else if (ws.readyState === WebSocket.OPEN)
+                helloTimeout = setTimeout(() => ws.close(1008, "Hello required"), 5000);
+              return !!current;
+            })
+            .catch(() => {
+              ws.close(1011, "Credential lookup unavailable");
+              return false;
+            });
           let runner: RemoteScriptRunner | undefined;
           let alive = true;
           let checking = false;
-          const helloTimeout = setTimeout(() => ws.close(1008, "Hello required"), 5000);
           const ping = setInterval(() => {
             if (checking) return;
             checking = true;
@@ -74,41 +92,54 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                 else if (!alive) ws.terminate();
                 else {
                   alive = false;
-                  ws.ping();
+                  ws.ping(undefined, undefined, (error) => {
+                    if (error) ws.terminate();
+                  });
                 }
               })
-              .catch(() => ws.close(1008, "Credential check failed"))
+              .catch(() => ws.close(1011, "Credential lookup unavailable"))
               .finally(() => {
                 checking = false;
               });
-          }, 15000);
+          }, API_PING_INTERVAL_MS);
           ws.on("pong", () => {
             alive = true;
           });
           ws.on("error", () => ws.terminate());
           ws.on("message", (data, binary) => {
-            try {
-              if (binary) throw new Error("binary");
-              const message = runnerMessage.parse(JSON.parse(data.toString()));
-              if (message.type === "hello") {
-                if (runner || scriptRunnerSessions.has(message.instanceId) || message.held.length)
-                  throw new Error("hello");
-                clearTimeout(helloTimeout);
-                runner = new RemoteScriptRunner(
-                  message.instanceId,
-                  message.slots,
-                  message.executors,
-                  ws,
-                );
-                scriptRunnerSessions.set(runner.id, runner);
-                ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
-              } else {
-                if (!runner) throw new Error("hello required");
-                runner.result(message.jobId, message.output);
+            void admission.then((authorized) => {
+              if (!authorized || ws.readyState !== WebSocket.OPEN) return;
+              try {
+                if (binary) throw new Error("binary");
+                const message = runnerMessage.parse(JSON.parse(data.toString()));
+                if (message.type === "hello") {
+                  if (runner || message.held.length) throw new Error("hello");
+                  if (scriptRunnerSessions.has(message.instanceId)) {
+                    ws.close(1011, "Runner instance is still connected");
+                    return;
+                  }
+                  clearTimeout(helloTimeout);
+                  runner = new RemoteScriptRunner(
+                    message.instanceId,
+                    message.slots,
+                    message.executors,
+                    ws,
+                  );
+                  scriptRunnerSessions.set(runner.id, runner);
+                  ws.send(
+                    JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }),
+                    (error) => {
+                      if (error) ws.terminate();
+                    },
+                  );
+                } else {
+                  if (!runner) throw new Error("hello required");
+                  runner.result(message.jobId, message.output);
+                }
+              } catch {
+                ws.close(1008, "Invalid runner message");
               }
-            } catch {
-              ws.close(1008, "Invalid runner message");
-            }
+            });
           });
           ws.on("close", () => {
             unregister();
@@ -116,12 +147,13 @@ export function attachScriptRunnerTransport(server: Server): () => void {
             clearInterval(ping);
             if (runner) {
               runner.close();
-              scriptRunnerSessions.delete(runner.id);
+              if (scriptRunnerSessions.get(runner.id) === runner)
+                scriptRunnerSessions.delete(runner.id);
             }
           });
         });
       })
-      .catch(() => reject(401, "Unauthorized"));
+      .catch(() => reject(503, "Service Unavailable"));
   };
   server.on("upgrade", upgrade);
   return () => {
