@@ -184,11 +184,19 @@ export function startScriptRunner(options: {
         held: [...durable.keys(), ...steps.keys()],
       }),
     );
-    current.on("message", (data, binary) => {
+    current.on("message", async (data, binary) => {
       if (current !== socket || stopped) return;
       try {
         if (binary) throw new Error("binary");
         const message = apiMessage.parse(JSON.parse(data.toString()));
+        if (message.type === "job" || message.type === "durable-job") {
+          // The API can reuse a cancelled slot before its guest finishes cleanup.
+          const cancelling = [...steps.values()].filter((step) => step.controller.signal.aborted);
+          if (cancelling.length) {
+            await Promise.all(cancelling.map((step) => step.done));
+            if (current !== socket || stopped) return;
+          }
+        }
         if (message.type === "welcome") {
           if (welcomed) throw new Error("duplicate welcome");
           welcomed = true;

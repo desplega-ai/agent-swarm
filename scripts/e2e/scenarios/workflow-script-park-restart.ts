@@ -149,7 +149,17 @@ export const workflowScriptParkRestart: Scenario = {
       released = false;
       const replayWorkflow = await make(["replay"]);
       const replay = await triggerWorkflow(ctx, replayWorkflow);
-      expect(await pollUntil(async () => counts.has("replay"), 20000), "replay fixture starts");
+      const replayStarted = await pollUntil(async () => counts.has("replay"), 20000);
+      if (!replayStarted)
+        console.log(
+          JSON.stringify({
+            fixture: "cancel-to-replay-diagnostic",
+            jobs: jobs(replay.runId),
+            cancelledJobs: jobs(cancelled.runId),
+            runnerLogs: runners[0]!.logs(),
+          }),
+        );
+      expect(replayStarted, "replay fixture starts");
       const firstOwner = jobs(replay.runId)[0]?.owner_id;
       await runners[0]!.stop("SIGKILL");
       runners.push(startScriptRunner(ctx.baseUrl, token, 1));

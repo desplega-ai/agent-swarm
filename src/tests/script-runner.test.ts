@@ -720,3 +720,67 @@ test("step guests stop when confirmed lease time expires", async () => {
     server.close();
   }
 }, 15000);
+
+test("step cancellation cleans the guest before replacement admission", async () => {
+  const { createServer } = await import("node:http");
+  const { WebSocketServer } = await import("ws");
+  const { listenOnFreePort } = await import("./test-net");
+  const { startScriptRunner } = await import("../script-runner/client");
+  let replace = () => {};
+  const server = createServer((_request, response) => {
+    response.end("started");
+    replace();
+  });
+  const wss = new WebSocketServer({ server });
+  const port = await listenOnFreePort(server);
+  const first = job();
+  first.input.source = `export default async () => {await fetch("http://127.0.0.1:${port}/started");await new Promise(r=>setTimeout(r,60000));return 42;}`;
+  const second = job();
+  const firstId = `${first.id}:${crypto.randomUUID()}`;
+  const secondId = `${second.id}:${crypto.randomUUID()}`;
+  let replacementOutput: Record<string, unknown> | undefined;
+  let cancelledResult = false;
+  wss.on("connection", (ws) => {
+    replace = () => {
+      ws.send(JSON.stringify({ type: "cancel", jobId: firstId }));
+      ws.send(JSON.stringify({ type: "job", ...second, jobId: secondId, kind: "step-script" }));
+    };
+    ws.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "hello") {
+        ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
+        ws.send(JSON.stringify({ type: "job", ...first, jobId: firstId, kind: "step-script" }));
+      } else if (message.type === "heartbeat") {
+        ws.send(
+          JSON.stringify({
+            type: "lease",
+            nonce: message.nonce,
+            jobs: message.jobs.map((jobId: string) => ({ jobId, leaseMs: 60000 })),
+          }),
+        );
+      } else if (message.type === "result") {
+        if (message.jobId === firstId) cancelledResult = true;
+        if (message.jobId === secondId) replacementOutput = message.output;
+        ws.send(JSON.stringify({ type: "ack", jobId: message.jobId }));
+      }
+    });
+  });
+  const runner = startScriptRunner({
+    apiUrl: `http://127.0.0.1:${port}`,
+    token: "fixture",
+    slots: 1,
+    executors: ["native"],
+    onRefused() {},
+  });
+  try {
+    const deadline = Date.now() + 10000;
+    while (!replacementOutput && Date.now() < deadline) await Bun.sleep(20);
+    expect(replacementOutput?.result).toBe(42);
+    expect(cancelledResult).toBe(true);
+  } finally {
+    await runner.stop();
+    for (const ws of wss.clients) ws.terminate();
+    wss.close();
+    server.close();
+  }
+}, 15000);
