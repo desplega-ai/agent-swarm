@@ -16,6 +16,7 @@ export const postgresDialect: Dialect = {
   nowIso: () => sql`statement_timestamp()`,
   nowText: () => sql`statement_timestamp()`,
   nowEpochMs: () => sql`(floor(extract(epoch FROM statement_timestamp()) * 1000))::bigint`,
+  epochMs: (column: SqlQuery) => sql`(floor(extract(epoch FROM ${column}) * 1000))::bigint`,
   // ILIKE folds ASCII only under LC_CTYPE C. Postgres LIKE escapes with a
   // backslash by default and SQLite has no default escape: ESCAPE '' turns
   // escaping off when the caller names no escape character.

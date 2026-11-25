@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { cleanupStack, putConfig, reloadConfig } from "./platform-helpers";
@@ -68,11 +69,34 @@ async function flushByRestart(ctx: ScenarioContext, waitMs: number): Promise<Sin
   return activityEvents(ctx)[before];
 }
 
+/** One past the 10,000-row cap the run cancel once read its pending approvals with. */
+const EXTRA_APPROVALS = 10_001;
+
+/** Create `EXTRA_APPROVALS` more pending approvals on the started HITL child's step. */
+async function addStepApprovals(ctx: ScenarioContext, approval: Record<string, unknown>) {
+  const body = {
+    title: "Extra",
+    questions: [{ id: "go", type: "approval", label: "Go?" }],
+    approvers: { policy: "any" },
+    workflowRunId: approval.workflowRunId,
+    workflowRunStepId: approval.workflowRunStepId,
+  };
+  const batch = 50;
+  for (let i = 0; i < EXTRA_APPROVALS; i += batch) {
+    const size = Math.min(batch, EXTRA_APPROVALS - i);
+    const created = await Promise.all(
+      Array.from({ length: size }, () => ctx.api("POST", "/api/approval-requests", { body })),
+    );
+    for (const response of created) expectStatus(response, [201], "create an extra approval");
+  }
+}
+
 /**
  * Only started workflow steps count: a three-item HITL fan-out at concurrency 1
  * starts one child, and cancelling the run leaves the two queued ones uncounted.
- * The run cancel settles the started child's approval as cancelled. A retried
- * script node counts once per attempt.
+ * The run cancel settles every pending approval of the started child's step as
+ * cancelled, past the old 10,000-row cap. A retried script node counts once per
+ * attempt.
  */
 async function produceStepStarts(ctx: ScenarioContext, agentId: string): Promise<void> {
   const fanOutId = await createWorkflow(
@@ -120,7 +144,7 @@ async function produceStepStarts(ctx: ScenarioContext, agentId: string): Promise
   );
   try {
     const { runId } = await triggerWorkflow(ctx, fanOutId, {}, { agentId });
-    await waitForApproval(ctx, runId);
+    await addStepApprovals(ctx, await waitForApproval(ctx, runId));
     const queued = (await getRunDetail(ctx, runId)).steps.filter(
       (step) => step.nodeType === "human-in-the-loop" && step.status === "pending",
     );
@@ -146,6 +170,7 @@ async function produceStepStarts(ctx: ScenarioContext, agentId: string): Promise
  * telemetry on, the rollup reaches the sink with the activity's counts and none of its
  * content; with telemetry off, nothing is counted or sent, and an opt-out drops what
  * the window held before it. Queued foreach children count only once they start.
+ * Turning telemetry on at runtime starts the hourly ticker.
  */
 export const platformTelemetryActivity: Scenario = {
   name: "platform-telemetry-activity",
@@ -158,10 +183,24 @@ export const platformTelemetryActivity: Scenario = {
       await reloadConfig(ctx);
     });
     try {
+      // Off at boot, on at runtime: the ticker starts. Its first org-domain
+      // recompute replaces a stale stored domain.
+      await putConfig(ctx, { key: "ANONYMIZED_TELEMETRY", value: "false" });
+      await reloadConfig(ctx);
+      const staleDomain = `stale-${ctx.nonce}.invalid`;
+      await putConfig(ctx, { key: "telemetry_org_domain", value: staleDomain });
       expectStatus(
         await ctx.api("POST", "/api/telemetry/enable", { body: { via: "settings" } }),
         [200],
         "turn telemetry on",
+      );
+      const storedDomain = () =>
+        ctx.db.get<{ value: string }>(
+          sql`SELECT value FROM swarm_config WHERE key = 'telemetry_org_domain' AND scope = 'global'`,
+        )?.value;
+      expect(
+        await pollUntil(() => storedDomain() !== staleDomain, 10_000, 100),
+        `turning telemetry on at runtime starts the ticker: ${storedDomain()}`,
       );
       const marker = `activity-${ctx.nonce}`;
       await produceActivity(ctx, agentId, marker);
@@ -232,11 +271,13 @@ export const platformTelemetryActivity: Scenario = {
       await produceStepStarts(ctx, agentId);
       const steps = asRecord((await flushByRestart(ctx, 15_000))?.properties);
       expect(
-        steps.workflow_steps_hitl === 1 &&
-          steps.workflow_steps_script === 2 &&
-          steps.hitl_requests_created === 1 &&
-          steps.hitl_requests_cancelled === 1,
-        `one started HITL child, cancelled with its run, and two script attempts: ${JSON.stringify(steps)}`,
+        steps.workflow_steps_hitl === 1 && steps.workflow_steps_script === 2,
+        `one started HITL child and two script attempts: ${JSON.stringify(steps)}`,
+      );
+      expect(
+        steps.hitl_requests_created === EXTRA_APPROVALS + 1 &&
+          steps.hitl_requests_cancelled === EXTRA_APPROVALS + 1,
+        `every approval of the cancelled HITL child counts as cancelled: ${JSON.stringify(steps)}`,
       );
 
       // Opt-out: with telemetry off nothing is counted, so the next shutdown sends nothing.

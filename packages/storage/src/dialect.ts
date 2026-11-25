@@ -20,6 +20,8 @@ export interface Dialect {
   nowText(): SqlQuery;
   /** Current time as integer epoch milliseconds. */
   nowEpochMs(): SqlQuery;
+  /** A timestamp column as integer epoch milliseconds. */
+  epochMs(column: SqlQuery): SqlQuery;
   /**
    * `column LIKE pattern` that folds ASCII case only, like SQLite's built-in
    * LIKE. `escapeChar` names the escape character when the pattern escapes `%`/`_`.
@@ -70,6 +72,11 @@ export function greatestStrict(a: SqlQuery, b: SqlQuery): DialectFragment {
 
 export function leastStrict(a: SqlQuery, b: SqlQuery): DialectFragment {
   return dialectFragment((d) => d.leastStrict(a, b));
+}
+
+/** `${epochMs(sql\`col\`)}` inside a `sql` template. */
+export function epochMs(column: SqlQuery): DialectFragment {
+  return dialectFragment((d) => d.epochMs(column));
 }
 
 /** `${isoTimestampText(sql\`col\`)}` inside a `sql` template. */

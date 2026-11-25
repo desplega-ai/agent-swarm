@@ -1,4 +1,4 @@
-import { jsonText, likeAsciiCi, nowIso } from "../dialect";
+import { epochMs, jsonText, likeAsciiCi, nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
 import { EMPTY, type SqlQuery, sql, sqlJoin, sqlList, sqlWhere } from "../sql";
 import type { AutomationPreflightRowText } from "./schedules";
@@ -344,6 +344,13 @@ export type ApprovalResolution = {
   now: string;
 };
 
+/** Count and wait aggregate of pending approval requests. Postgres returns bigint aggregates as text. */
+export type PendingApprovalSummaryRow = {
+  count: number | string;
+  waitMsTotal: number | string | null;
+  waitMsMax: number | string | null;
+};
+
 /** `listApprovals` filters. Newest first. */
 export type ApprovalListFilter = { status?: string; workflowRunId?: string; limit: number };
 
@@ -455,6 +462,15 @@ export interface WorkflowsRepository {
     error: string,
     finishedAt: string,
   ): Promise<void>;
+  /**
+   * Pending requests of the runs' open steps: the ones the step-cancel trigger
+   * closes when `cancelOpenStepsOfRuns` runs. Their count, and their summed and
+   * longest wait up to `nowMs` (null when there are none).
+   */
+  summarizePendingApprovalsOfOpenSteps(
+    runIds: readonly string[],
+    nowMs: number,
+  ): Promise<PendingApprovalSummaryRow>;
   /** Drops the queued retries of the failed steps of the runs. */
   disarmRetriesOfRuns(runIds: readonly string[], finishedAt: string): Promise<void>;
   /**
@@ -877,6 +893,20 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
       UPDATE workflow_run_steps
          SET status = 'cancelled', error = ${error}, "finishedAt" = ${finishedAt}
        WHERE "runId" IN (${sqlList(runIds)}) AND status IN ('pending', 'running', 'waiting')`);
+  }
+
+  async summarizePendingApprovalsOfOpenSteps(
+    runIds: readonly string[],
+    nowMs: number,
+  ): Promise<PendingApprovalSummaryRow> {
+    const wait = sql`(CAST(${nowMs} AS BIGINT) - ${epochMs(sql`a."createdAt"`)})`;
+    const row = await this.db.get<PendingApprovalSummaryRow>(sql`
+      SELECT COUNT(*) AS count, SUM(${wait}) AS "waitMsTotal", MAX(${wait}) AS "waitMsMax"
+        FROM approval_requests a
+        JOIN workflow_run_steps s ON s.id = a."workflowRunStepId"
+       WHERE s."runId" IN (${sqlList(runIds)}) AND s.status IN ('pending', 'running', 'waiting')
+         AND a.status = 'pending'`);
+    return row ?? { count: 0, waitMsTotal: null, waitMsMax: null };
   }
 
   async disarmRetriesOfRuns(runIds: readonly string[], finishedAt: string): Promise<void> {

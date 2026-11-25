@@ -120,6 +120,18 @@ export function recordHitlSettled(requests: readonly HitlRequest[]): void {
   }
 }
 
+/** Count `count` HITL requests cancelled together, from their summed and longest wait. */
+export function recordHitlCancelled(batch: {
+  count: number;
+  waitMsTotal: number;
+  waitMsMax: number;
+}): void {
+  if (!isTelemetryEnabled() || batch.count <= 0) return;
+  counters.hitl_requests_cancelled += batch.count;
+  counters.hitl_wait_ms_total += ms(batch.waitMsTotal);
+  counters.hitl_wait_ms_max = Math.max(counters.hitl_wait_ms_max, ms(batch.waitMsMax));
+}
+
 function reset(now: number): void {
   counters = zero();
   windowStart = now;

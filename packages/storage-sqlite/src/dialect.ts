@@ -6,6 +6,7 @@ export const sqliteDialect: Dialect = {
   nowIso: () => sql`strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
   nowText: () => sql`datetime('now')`,
   nowEpochMs: () => sql`CAST(unixepoch('subsec') * 1000 AS INTEGER)`,
+  epochMs: (column: SqlQuery) => sql`CAST(ROUND(unixepoch(${column}, 'subsec') * 1000) AS INTEGER)`,
   // SQLite's built-in LIKE already folds ASCII case only.
   likeAsciiCi: (column: SqlQuery, pattern: SqlQuery, escapeChar?: LikeEscape) =>
     escapeChar === undefined

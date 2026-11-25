@@ -12,7 +12,6 @@ import {
   getWorkflowRun,
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
-  listApprovalRequests,
   listCancelledApprovalRequestsForStep,
   resolveWaitState,
   updateWorkflowRun,
@@ -30,10 +29,11 @@ import {
   getTaskIdsWithDependents,
   getWorkflowRunStatus,
   getWorkflowRunTreeIds,
+  summarizeTreeStepPendingApprovals,
   workflowRunTreeHasOpenWork,
 } from "../be/db/workflow-runs";
 import { getStorage } from "../be/storage";
-import { recordHitlSettled } from "../telemetry-activity";
+import { recordHitlCancelled } from "../telemetry-activity";
 import {
   type RetryPolicy,
   RetryPolicySchema,
@@ -773,26 +773,15 @@ export async function cancelWorkflowRunRows(
     }
     // The step-cancel trigger (migration 140) closes a cancelled HITL step's
     // pending approval in SQL, past the settle hooks in db.ts, so the
-    // org.activity rollup counts those here. Every pending approval of the
-    // tree is cancelled below, by the trigger or by the run-level cancel.
-    const pendingApprovals: ApprovalRequest[] = [];
-    for (const id of runIds) {
-      pendingApprovals.push(
-        ...(await listApprovalRequests({ workflowRunId: id, status: "pending", limit: 10_000 })),
-      );
-    }
+    // org.activity rollup counts those here, in SQL before the step cancel.
+    // The run-level cancel below records the rest itself.
+    const triggerCancelled = await summarizeTreeStepPendingApprovals(runIds, Date.parse(now));
     await cancelOpenWorkflowTreeSteps(runIds, cancelReason, now);
     await disarmWorkflowTreeRetries(runIds, now);
-    const cancelledByRun = new Set<string>();
     for (const id of runIds) {
-      for (const approval of await cancelPendingApprovalRequestsForRun(id, cancelReason)) {
-        cancelledByRun.add(approval.id);
-      }
+      await cancelPendingApprovalRequestsForRun(id, cancelReason);
     }
-    const cancelledByTrigger = pendingApprovals
-      .filter((approval) => !cancelledByRun.has(approval.id))
-      .map((approval) => ({ ...approval, status: "cancelled" as const, resolvedAt: now }));
-    getStorage().afterCommit(() => recordHitlSettled(cancelledByTrigger));
+    getStorage().afterCommit(() => recordHitlCancelled(triggerCancelled));
     // Descendants' parent steps were just cancelled, so only the root's own
     // parent (when the root is a child) needs the child-finished wake-up.
     await cancelLiveWorkflowTreeRuns(runIds.slice(1), cancelReason, now);

@@ -331,6 +331,25 @@ export async function cancelOpenWorkflowTreeSteps(
 }
 
 /**
+ * Count and wait of the pending approval requests that `cancelOpenWorkflowTreeSteps`
+ * closes through the step-cancel trigger (migration 140). Counted in SQL, so
+ * a tree of any size reports every request. Call it before the step cancel.
+ */
+export async function summarizeTreeStepPendingApprovals(
+  runIds: string[],
+  nowMs: number,
+): Promise<{ count: number; waitMsTotal: number; waitMsMax: number }> {
+  const summary = { count: 0, waitMsTotal: 0, waitMsMax: 0 };
+  await forEachChunk(runIds, async (chunk) => {
+    const row = await workflowsRepo().summarizePendingApprovalsOfOpenSteps(chunk, nowMs);
+    summary.count += Number(row.count);
+    summary.waitMsTotal += Math.max(0, Number(row.waitMsTotal ?? 0));
+    summary.waitMsMax = Math.max(summary.waitMsMax, Number(row.waitMsMax ?? 0));
+  });
+  return summary;
+}
+
+/**
  * Drop the pending retries of the failed steps of the given runs. The step
  * keeps its status, error, output and retryCount; only the queued next
  * attempt goes.
