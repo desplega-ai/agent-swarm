@@ -62,11 +62,12 @@ function available(job: ScriptJob) {
 }
 
 export function drainScriptQueue() {
-  while (queue.length) {
-    const waiter = queue[0]!;
+  // Preserve arrival order among jobs that a free runner can execute.
+  for (let index = 0; index < queue.length; ) {
+    const waiter = queue[index]!;
     const runner = available(waiter.job);
-    if (!runner) return;
-    waiter.start(runner);
+    if (runner) waiter.start(runner);
+    else index++;
   }
 }
 

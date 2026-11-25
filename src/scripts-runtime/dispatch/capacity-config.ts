@@ -1,7 +1,7 @@
 export const SCRIPT_CAPACITY_KEYS = ["SCRIPT_EMBEDDED_RUNNER_SLOTS", "SCRIPT_QUEUE_WAIT_SYNC_MS"];
 
 export function validateScriptCapacity(key: string, value: unknown): string | null {
-  const max = key === "SCRIPT_QUEUE_WAIT_SYNC_MS" ? 599_999 : 1024;
+  const max = key === "SCRIPT_QUEUE_WAIT_SYNC_MS" ? 540_000 : 1024;
   return /^\d+$/.test(String(value)) && Number(value) <= max
     ? null
     : `${key} must be an integer from 0 to ${max}`;

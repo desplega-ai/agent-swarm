@@ -831,7 +831,7 @@ Global saves apply through automatic reload. Empty or whitespace-only deployment
 | Variable | Default | Engine | Meaning |
 | --- | --- | --- | --- |
 | `SCRIPT_EMBEDDED_RUNNER_SLOTS` | Unset (unlimited) | PostgreSQL only | Embedded slots, 0 to 1024. Zero disables embedded execution. |
-| `SCRIPT_QUEUE_WAIT_SYNC_MS` | `30000` | PostgreSQL only | FIFO queue wait limit, 0 to 599999 milliseconds. |
+| `SCRIPT_QUEUE_WAIT_SYNC_MS` | `30000` | PostgreSQL only | FIFO queue wait limit, 0 to 540000 milliseconds. |
 | `SCRIPT_RUNNER_SLOTS` | `2` | Runner environment | Advertised slots, 1 to 1024. Configure on the runner, outside Settings. |
 
 SQLite rejects both API capacity settings at boot and through configuration writes.

@@ -13,7 +13,10 @@ import {
   runnerMessage,
   SCRIPT_RUNNER_PATH,
 } from "../script-runner/protocol";
-import { drainScriptQueue, setRemoteScriptRunnerPicker } from "../scripts-runtime/dispatch/dispatcher";
+import {
+  drainScriptQueue,
+  setRemoteScriptRunnerPicker,
+} from "../scripts-runtime/dispatch/dispatcher";
 import { registerSessionTokenConnection } from "../utils/session-token-connections";
 import { route } from "./route-def";
 

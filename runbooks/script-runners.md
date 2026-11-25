@@ -77,7 +77,7 @@ QuickJS executes with host adapters in the runner process. Do not treat its proc
 
 ## Capacity
 
-PostgreSQL accepts `SCRIPT_EMBEDDED_RUNNER_SLOTS` (0 to 1024) and `SCRIPT_QUEUE_WAIT_SYNC_MS` (0 to 599999).
+PostgreSQL accepts `SCRIPT_EMBEDDED_RUNNER_SLOTS` (0 to 1024) and `SCRIPT_QUEUE_WAIT_SYNC_MS` (0 to 540000).
 SQLite refuses either key through configuration writes and at API boot.
 Unset embedded slots allow unlimited native runs. Zero disables the embedded runner.
 The QuickJS pool remains inside the executor. `SCRIPT_QUICKJS_POOL_SIZE` still controls that pool.
@@ -88,7 +88,9 @@ The API queues synchronous jobs in FIFO order when no matching slot is free.
 The default queue wait is 30000 milliseconds. Expiry returns `capacity_exceeded` and names the sync queue.
 A caller abort removes its queued job. An executing job retains its slot until its executor ends.
 Execution wall time starts when the executor receives the job. The caller signal bounds queue and execution together.
-The maximum queue wait plus the 300-second execution limit stays below the 15-minute credential lifetime.
+The maximum queue wait is nine minutes. A five-minute run then leaves a minute for preparation within the credential lifetime.
+A nested sync call needs a second compatible slot while its parent waits. If every compatible slot is busy, its queue deadline applies.
+A configuration change sets the deadline for new calls. Jobs already in the queue retain their deadline.
 Durable-object leases include queue wait, execution time and a 10-second commit allowance.
 
 `GET /api/script-runners` requires `script_runner.read` for users or the operator key.

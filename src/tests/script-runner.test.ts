@@ -115,6 +115,62 @@ test("remote dispatch refuses the operator key before transport", async () => {
   }
 });
 
+test("a waiting native job leaves a compatible slot available for QuickJS", async () => {
+  const previous = process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS;
+  process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS = "0";
+  const abort = new AbortController();
+  const output = { ...failedJob("killed"), error: undefined, exitCode: 0, result: 42 };
+  setRemoteScriptRunnerPicker((candidate) =>
+    candidate.executor === "quickjs"
+      ? { id: "fixture", kind: "remote", run: async () => output }
+      : undefined,
+  );
+  try {
+    const waiting = dispatchScriptJob(job(), { signal: abort.signal });
+    expect((await dispatchScriptJob({ ...job(), executor: "quickjs" })).result).toBe(42);
+    abort.abort();
+    expect((await waiting).error).toBe("killed");
+  } finally {
+    abort.abort();
+    setRemoteScriptRunnerPicker(undefined);
+    if (previous === undefined) delete process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS;
+    else process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS = previous;
+  }
+});
+
+test("a nested sync call reaches its queue deadline when its parent holds the only slot", async () => {
+  const slots = process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS;
+  const wait = process.env.SCRIPT_QUEUE_WAIT_SYNC_MS;
+  process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS = "0";
+  process.env.SCRIPT_QUEUE_WAIT_SYNC_MS = "25";
+  let busy = false;
+  setRemoteScriptRunnerPicker(() =>
+    busy
+      ? undefined
+      : {
+          id: "fixture",
+          kind: "remote",
+          run: async () => {
+            busy = true;
+            try {
+              return await dispatchScriptJob(job());
+            } finally {
+              busy = false;
+            }
+          },
+        },
+  );
+  try {
+    expect((await dispatchScriptJob(job())).error).toBe("capacity_exceeded");
+  } finally {
+    setRemoteScriptRunnerPicker(undefined);
+    if (slots === undefined) delete process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS;
+    else process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS = slots;
+    if (wait === undefined) delete process.env.SCRIPT_QUEUE_WAIT_SYNC_MS;
+    else process.env.SCRIPT_QUEUE_WAIT_SYNC_MS = wait;
+  }
+});
+
 test("readiness requires a private directory and creates an atomic regular file", async () => {
   const { mkdtempSync, chmodSync, lstatSync, readFileSync, rmSync, symlinkSync, realpathSync } =
     await import("node:fs");

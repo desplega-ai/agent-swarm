@@ -64,6 +64,7 @@ import {
   resolveSqliteVecExtensionPath,
 } from "./db/runtime";
 import { currentLoopPath, recordStatement } from "./event-loop-lag";
+import { selectStorageEngine } from "./storage-engine";
 
 export type { BusyRetryOptions };
 
@@ -232,19 +233,7 @@ export function createStorage(
 
 // ---- Engine selection (Postgres brief D1) ----
 
-export type StorageEngine = "sqlite" | "postgres";
-
-const POSTGRES_URL = /^postgres(ql)?:\/\//i;
-
-/**
- * `DATABASE_URL` with a `postgres://` or `postgresql://` scheme selects
- * Postgres. No `DATABASE_URL` (or another scheme) selects SQLite at
- * `DATABASE_PATH`. `DATABASE_URL` is a reserved key: only the deployment env sets it.
- */
-export function selectStorageEngine(env: NodeJS.ProcessEnv = process.env): StorageEngine {
-  const url = env.DATABASE_URL?.trim();
-  return url && POSTGRES_URL.test(url) ? "postgres" : "sqlite";
-}
+export { type StorageEngine, selectStorageEngine } from "./storage-engine";
 
 /**
  * The Postgres URL of `DATABASE_URL`, with `DATABASE_PASSWORD` (when set) as its
@@ -254,7 +243,7 @@ export function selectStorageEngine(env: NodeJS.ProcessEnv = process.env): Stora
 export function postgresUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string {
   const url = env.DATABASE_URL?.trim() ?? "";
   const password = env.DATABASE_PASSWORD;
-  if (!url || !password || !POSTGRES_URL.test(url)) return url;
+  if (!url || !password || selectStorageEngine(env) !== "postgres") return url;
   const parsed = new URL(url);
   parsed.password = encodeURIComponent(password);
   return parsed.toString();
@@ -263,7 +252,7 @@ export function postgresUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string
 /** A `DATABASE_URL` that is set but selects no engine (logged by the SQLite start). */
 export function ignoredDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string | null {
   const url = env.DATABASE_URL?.trim();
-  return url && !POSTGRES_URL.test(url) ? scrubSecrets(url) : null;
+  return url && selectStorageEngine(env) !== "postgres" ? scrubSecrets(url) : null;
 }
 
 // ---- Postgres start (the engine-specific part; src/be/db/runtime.ts runs the seeds) ----

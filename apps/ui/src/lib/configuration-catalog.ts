@@ -1983,17 +1983,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "PostgreSQL only. Unset allows unlimited embedded runs. Zero disables the embedded runner.",
         kind: "number",
         defaultValue: "",
-        docsUrl: `${DOCS}ui/configuration#script-executor`,
+        docsUrl: `${DOCS}ui/configuration#script-runner-capacity`,
       },
       {
         key: "SCRIPT_QUEUE_WAIT_SYNC_MS",
         label: "Sync script queue wait",
         description:
-          "PostgreSQL only. Maximum wait in the sync queue, from 0 to 599999 milliseconds.",
+          "PostgreSQL only. Maximum wait in the sync queue, from 0 to 540000 milliseconds.",
         kind: "number",
         defaultValue: "30000",
         unit: "ms",
-        docsUrl: `${DOCS}ui/configuration#script-executor`,
+        docsUrl: `${DOCS}ui/configuration#script-runner-capacity`,
       },
       {
         key: "SCRIPT_QUICKJS_POOL_SIZE",
