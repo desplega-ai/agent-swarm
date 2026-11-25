@@ -111,6 +111,13 @@ export function startScriptRunner(options: {
     deadline?: ReturnType<typeof setTimeout>;
   };
   const steps = new Map<string, HeldStep>();
+  const cleanup = new Map<string, Promise<void>>();
+  const trackCleanup = (id: string, done: Promise<void>) => {
+    if (cleanup.has(id)) return;
+    const tracked = done.finally(() => cleanup.delete(id));
+    cleanup.set(id, tracked);
+    void tracked.catch(() => {});
+  };
   const runtimes = availableShellRuntimes();
   const expireStep = (job: HeldStep) => {
     job.controller.abort();
@@ -151,6 +158,7 @@ export function startScriptRunner(options: {
     });
     const current = socket;
     let welcomed = false;
+    const pending = new Map<string, { cancelled: boolean; cancel(): void }>();
     const send = (message: unknown) => {
       try {
         current.send(encodeRunnerFrame(message), (error) => {
@@ -190,11 +198,57 @@ export function startScriptRunner(options: {
         if (binary) throw new Error("binary");
         const message = apiMessage.parse(JSON.parse(data.toString()));
         if (message.type === "job" || message.type === "durable-job") {
-          // The API can reuse a cancelled slot before its guest finishes cleanup.
-          const cancelling = [...steps.values()].filter((step) => step.controller.signal.aborted);
-          if (cancelling.length) {
-            await Promise.all(cancelling.map((step) => step.done));
-            if (current !== socket || stopped) return;
+          if (pending.has(message.jobId)) return;
+          if (cleanup.size) {
+            if (jobs.has(message.jobId) || steps.has(message.jobId) || durable.has(message.jobId))
+              return;
+            const reject = (cancelled: boolean) =>
+              send(
+                message.type === "durable-job"
+                  ? {
+                      type: "durable-result",
+                      jobId: message.jobId,
+                      exitCode: null,
+                      stderr: cancelled ? "Runner cancelled job" : "Runner rejected job",
+                      terminated: true,
+                    }
+                  : {
+                      type: "result",
+                      jobId: message.jobId,
+                      output: failedJob(cancelled ? "killed" : "executor_error"),
+                    },
+              );
+            const occupied = [...jobs.keys(), ...steps.keys(), ...durable.keys()].filter(
+              (id) => !cleanup.has(id),
+            ).length;
+            if (!welcomed || pending.size + occupied >= options.slots) {
+              reject(false);
+              return;
+            }
+            const admission = {
+              cancelled: false,
+              cancel() {
+                if (this.cancelled) return;
+                this.cancelled = true;
+                reject(true);
+              },
+            };
+            pending.set(message.jobId, admission);
+            try {
+              await Promise.all(cleanup.values());
+            } catch {
+              current.terminate();
+              return;
+            } finally {
+              pending.delete(message.jobId);
+            }
+            if (
+              admission.cancelled ||
+              current !== socket ||
+              stopped ||
+              current.readyState !== WebSocket.OPEN
+            )
+              return;
           }
         }
         if (message.type === "welcome") {
@@ -428,22 +482,35 @@ export function startScriptRunner(options: {
           if (!held) jobs.set(message.jobId, { controller, done });
           else sendHeartbeat();
         } else if (message.type === "cancel") {
-          jobs.get(message.jobId)?.controller.abort();
+          pending.get(message.jobId)?.cancel();
+          const inline = jobs.get(message.jobId);
+          if (inline) {
+            inline.controller.abort();
+            trackCleanup(message.jobId, inline.done);
+          }
           const step = steps.get(message.jobId);
           if (step) {
             clearTimeout(step.deadline);
             expireStep(step);
-            void step.done.then(() => steps.delete(message.jobId));
+            trackCleanup(
+              message.jobId,
+              step.done.then(() => {
+                steps.delete(message.jobId);
+              }),
+            );
           }
           const job = durable.get(message.jobId);
           if (job) {
             expire(job);
-            void (async () => {
-              if (!job.guest) await job.done;
-              await job.guest?.stop();
-              await job.done;
-              durable.delete(message.jobId);
-            })();
+            trackCleanup(
+              message.jobId,
+              (async () => {
+                if (!job.guest) await job.done;
+                await job.guest?.stop();
+                await job.done;
+                durable.delete(message.jobId);
+              })(),
+            );
           }
         }
       } catch {
@@ -463,6 +530,8 @@ export function startScriptRunner(options: {
       current.terminate();
     });
     current.on("close", (code) => {
+      for (const admission of pending.values()) admission.cancelled = true;
+      pending.clear();
       clearReady();
       clearTimeout(welcomeTimeout);
       clearTimeout(watchdog);

@@ -784,3 +784,114 @@ test("step cancellation cleans the guest before replacement admission", async ()
     server.close();
   }
 }, 15000);
+
+for (const firstKind of ["step", "durable", "disconnect"] as const) {
+  test(`pending ${firstKind} cleanup preserves ordered cancellation and bounded admission`, async () => {
+    const { createServer } = await import("node:http");
+    const { WebSocketServer } = await import("ws");
+    const { listenOnFreePort } = await import("./test-net");
+    const { startScriptRunner } = await import("../script-runner/client");
+    let replace = () => {};
+    let unexpectedStarts = 0;
+    let connections = 0;
+    const server = createServer((request, response) => {
+      response.end("started");
+      if (request.url === "/first") replace();
+      else unexpectedStarts++;
+    });
+    const wss = new WebSocketServer({ server });
+    const port = await listenOnFreePort(server);
+    const first = job();
+    first.input.source = `export default async () => {await fetch("http://127.0.0.1:${port}/first");await new Promise(r=>setTimeout(r,60000));return 42;}`;
+    const replacement = job();
+    replacement.input.source = `export default async () => {await fetch("http://127.0.0.1:${port}/unexpected");return 42;}`;
+    const overflow = job();
+    const probe = job();
+    const firstId = `${first.id}:${crypto.randomUUID()}`;
+    const outputs = new Map<string, Record<string, any>>();
+    const durableFrame = (id: string, source: string) => ({
+      type: "durable-job",
+      jobId: id,
+      run: {
+        id: id.split(":")[0],
+        agentId: crypto.randomUUID(),
+        kind: "workflow",
+        status: "running",
+        startedAt: new Date().toISOString(),
+        source,
+        args: {},
+      },
+    });
+    wss.on("connection", (ws) => {
+      replace = () => {
+        ws.send(JSON.stringify({ type: "cancel", jobId: firstId }));
+        ws.send(
+          JSON.stringify(
+            firstKind !== "durable"
+              ? { type: "job", ...replacement, jobId: replacement.id }
+              : durableFrame(replacement.id, replacement.input.source),
+          ),
+        );
+        if (firstKind === "disconnect") {
+          ws.close(1011);
+          return;
+        }
+        ws.send(JSON.stringify({ type: "cancel", jobId: replacement.id }));
+        ws.send(JSON.stringify({ type: "job", ...overflow, jobId: overflow.id }));
+      };
+      ws.on("message", (data) => {
+        const message = JSON.parse(data.toString());
+        if (message.type === "hello") {
+          ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
+          if (++connections === 1)
+            ws.send(
+              JSON.stringify(
+                firstKind !== "durable"
+                  ? { type: "job", ...first, jobId: firstId, kind: "step-script" }
+                  : durableFrame(firstId, first.input.source),
+              ),
+            );
+          else ws.send(JSON.stringify({ type: "job", ...probe, jobId: probe.id }));
+        } else if (message.type === "heartbeat") {
+          ws.send(
+            JSON.stringify({
+              type: "lease",
+              nonce: message.nonce,
+              jobs: message.jobs.map((jobId: string) => ({ jobId, leaseMs: 60000 })),
+            }),
+          );
+        } else if (message.type === "result" || message.type === "durable-result") {
+          outputs.set(message.jobId, message);
+          ws.send(JSON.stringify({ type: "ack", jobId: message.jobId }));
+          if (message.jobId === firstId && firstKind !== "disconnect")
+            ws.send(JSON.stringify({ type: "job", ...probe, jobId: probe.id }));
+        }
+      });
+    });
+    const runner = startScriptRunner({
+      apiUrl: `http://127.0.0.1:${port}`,
+      token: "fixture",
+      slots: 1,
+      executors: ["native"],
+      onRefused() {},
+    });
+    try {
+      const deadline = Date.now() + 10000;
+      while (!outputs.has(probe.id) && Date.now() < deadline) await Bun.sleep(20);
+      const cancelled = outputs.get(replacement.id);
+      if (firstKind !== "disconnect") {
+        expect(cancelled?.type).toBe(firstKind !== "durable" ? "result" : "durable-result");
+        if (firstKind !== "durable") expect(cancelled?.output.error).toBe("killed");
+        else expect(cancelled?.terminated).toBe(true);
+        expect(outputs.get(overflow.id)?.output.error).toBe("executor_error");
+      }
+      expect(outputs.get(probe.id)?.output.result).toBe(42);
+      expect(unexpectedStarts).toBe(0);
+    } finally {
+      await runner.stop();
+      for (const ws of wss.clients) ws.terminate();
+      wss.close();
+      server.close();
+    }
+  }, 15000);
+}
