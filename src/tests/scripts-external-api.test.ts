@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { __resetEncryptionKeyForTests } from "../be/crypto";
 import { closeDb, createAgent, createMcpServer, getDbClient, initDb } from "../be/db";
+import { invalidateScriptConnectionCatalog } from "../be/script-connection-catalog";
 import {
   createScriptApi,
   getScriptApiById,
@@ -317,6 +318,8 @@ describe("public execution route", () => {
        VALUES (?, ?, 'mcp', 'global', '[]', ?, ?)`,
       [runtimeDescriptor.connectionId, "xmcp", mcpServer.id, JSON.stringify(runtimeDescriptor)],
     );
+    // Raw INSERT skips the write helpers that drop the cached connection catalog.
+    invalidateScriptConnectionCatalog();
 
     const script = await insertScript({
       name: `mcp-keys-${crypto.randomUUID().slice(0, 8)}`,

@@ -260,6 +260,7 @@ import {
   createContextVersion,
   getLatestContextVersion,
 } from "./db/context-versions";
+import { decodeKvRow, encodeKvValue, type KvRow } from "./db/kv";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageFilter } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
@@ -316,6 +317,7 @@ import {
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
 import { rowToWorkflow, type WorkflowRow } from "./db/workflows/read";
+import { invalidateScriptConnectionCatalog } from "./script-connection-catalog";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -8581,6 +8583,7 @@ export async function deleteMcpServer(id: string): Promise<DeleteMcpServerResult
 
   return await storage.transaction(async () => {
     const deleted = await storage.repos.mcpServers.deleteMcpServerCascade(id);
+    if (deleted.scriptConnections > 0) invalidateScriptConnectionCatalog();
     return {
       deleted: deleted.servers > 0,
       deletedScriptConnectionCount: deleted.scriptConnections,
@@ -10337,65 +10340,6 @@ export async function hasFirstCompletedTask(): Promise<boolean> {
 //     migration's DEFAULTs — using JS `Date.now()` for the few helpers that
 //     need to mention an explicit timestamp keeps the math identical at ms
 //     resolution.
-
-interface KvRow {
-  namespace: string;
-  key: string;
-  value: string;
-  value_type: KvValueType;
-  expires_at: number | null;
-  created_at: number;
-  updated_at: number;
-}
-
-function decodeKvRow(row: KvRow): KvEntry {
-  let value: unknown;
-  if (row.value_type === "json") {
-    try {
-      value = JSON.parse(row.value);
-    } catch {
-      // Stored JSON is corrupt — surface as raw string rather than throwing
-      // on read; the row is still recoverable by the caller.
-      value = row.value;
-    }
-  } else if (row.value_type === "integer") {
-    value = Number(row.value);
-  } else {
-    value = row.value;
-  }
-  return {
-    namespace: row.namespace,
-    key: row.key,
-    value,
-    valueType: row.value_type,
-    expiresAt: row.expires_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function encodeKvValue(value: unknown, valueType: KvValueType): string {
-  if (valueType === "json") {
-    return JSON.stringify(value);
-  }
-  if (valueType === "integer") {
-    if (typeof value === "number") {
-      if (!Number.isInteger(value) || !Number.isSafeInteger(value)) {
-        throw new Error("integer value must be a JS-safe integer");
-      }
-      return String(value);
-    }
-    if (typeof value === "string" && /^-?\d+$/.test(value)) {
-      return value;
-    }
-    throw new Error("integer value must be a JS-safe integer");
-  }
-  // 'string'
-  if (typeof value !== "string") {
-    throw new Error("string value must be a string");
-  }
-  return value;
-}
 
 /**
  * Get a single KV entry. Returns null if missing OR expired; expired rows are

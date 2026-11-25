@@ -225,7 +225,7 @@
   ],
   "flows": {
     "storage-engine-parity": {
-      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
+      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention, db-query denial and db-query JSON params.",
       "scenarios": [
         "upgrade-base-db",
         "tasks-historical-values",
@@ -248,6 +248,7 @@
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
+        "divergence-db-query-json-params",
         "divergence-list-order",
         "divergence-timestamps",
         "divergence-values",
@@ -315,6 +316,7 @@
         "knowledge-apps",
         "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
+        "knowledge-apps-catalog",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
         "knowledge-apps-log-stream",

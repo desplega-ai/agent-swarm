@@ -15,6 +15,7 @@ import { isSlackLeaveThreadDisabled } from "./slack/left-threads";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
 import { registerAppActionRunTool } from "./tools/app-action-run";
 import { registerAppActionStatusTool } from "./tools/app-action-status";
+import { registerAppCatalogTool } from "./tools/app-catalog";
 import { registerAppDiffTool } from "./tools/app-diff";
 import { registerAppGetTool } from "./tools/app-get";
 import { registerAppHistoryTool } from "./tools/app-history";
@@ -693,6 +694,7 @@ export async function createServer(
     registerAppDiffTool(server);
     registerAppListTool(server);
     registerAppPatchTool(server);
+    registerAppCatalogTool(server);
     registerAppQueryTool(server);
     registerAppRollbackTool(server);
     registerAppSyncTool(server);
