@@ -166,6 +166,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Approval: ["onResolved"],
   Files: ["onSelect"],
   Timeline: ["onSelect"],
+  LogStream: ["onTrace"],
   SessionThread: ["onDispatch"],
 };
 

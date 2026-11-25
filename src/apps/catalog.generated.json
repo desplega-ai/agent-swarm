@@ -48,6 +48,7 @@
     "ObjectEmbed",
     "DateRange",
     "Timeline",
+    "LogStream",
     "SchemaForm",
     "SessionThread",
     "PageFrame",
@@ -3760,6 +3761,91 @@
           }
         },
         "required": ["timeField", "titleField"],
+        "additionalProperties": false
+      }
+    },
+    "LogStream": {
+      "description": "A log tail, not a table: one dense monospace line per entry, newest first, with the time (HH:mm:ss.SSS), a severity colour bar (OTel text or number), the service and the one-line body. Click a line to expand the full body, `attributesField` and `resourceField` as key/value lists, and a trace link that runs `onTrace` with `$row`. Virtualized and memoized, so tens of thousands of rows scroll smoothly; past `maxRows` (default 10,000) the oldest entries are dropped with a notice. `follow: true` keeps the newest entry in view; once the viewer scrolls down, a refresh that adds entries on top shows an \"N new\" pill. 480 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. Feed it from a query or an action result, and refresh with `OnEnter.everyMs` for a live tail.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "loading": {
+            "type": "boolean"
+          },
+          "timeField": {
+            "type": "string"
+          },
+          "bodyField": {
+            "type": "string"
+          },
+          "severityField": {
+            "type": "string"
+          },
+          "serviceField": {
+            "type": "string"
+          },
+          "attributesField": {
+            "type": "string"
+          },
+          "resourceField": {
+            "type": "string"
+          },
+          "traceField": {
+            "type": "string"
+          },
+          "keyField": {
+            "type": "string"
+          },
+          "follow": {
+            "type": "boolean"
+          },
+          "maxRows": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 100000
+          },
+          "height": {
+            "type": "string"
+          },
+          "fill": {
+            "type": "boolean"
+          },
+          "emptyMessage": {
+            "type": "string"
+          },
+          "onTrace": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["timeField", "bodyField"],
         "additionalProperties": false
       }
     },
