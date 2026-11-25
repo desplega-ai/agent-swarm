@@ -4565,5 +4565,32 @@
     "updatedAt": { "exempt": "timestamp" },
     "created_by": { "exempt": "identifier" },
     "updated_by": { "exempt": "identifier" }
+  },
+  "script_runner_credentials": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": "scrubbed",
+    "token_hash": {
+      "exempt": "SHA-256 digest"
+    },
+    "expires_at": {
+      "exempt": "timestamp"
+    },
+    "revoked_at": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
   }
 }

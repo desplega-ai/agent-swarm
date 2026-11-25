@@ -22,6 +22,7 @@ import { retentionContract } from "./retention";
 import { runtimePoolsContract } from "./runtime-pools";
 import { savingsContract } from "./savings";
 import { schedulesContract } from "./schedules";
+import { scriptRunnersContract } from "./script-runners";
 import { scriptsContract } from "./scripts";
 import { sessionsContract } from "./sessions";
 import { skillsContract } from "./skills";
@@ -36,6 +37,7 @@ export type { ContractEngine } from "./env";
 
 /** The repository contract suite. Every engine runs all of it. */
 export function runStorageContract(engine: ContractEngine): void {
+  scriptRunnersContract(engine);
   clientContract(engine);
   extensionsContract(engine);
   modelsContract(engine);

@@ -201,3 +201,17 @@ These assertion groups stay, with the reason:
 | `db-copy: cannot store <table>.<column> (rowid N): ...` | Fix that value in the SQLite file, then copy again. Nothing was written. |
 
 Sources: decision records in `thoughts/taras/brainstorms/2026-11-20-postgres-storage-engine-goal-prompt.md` (D1 to D18) and the ledger `thoughts/taras/plans/2026-11-20-postgres-storage-engine-ledger.md`.
+
+## Script-runner credentials
+
+PostgreSQL supports minting independent script-runner credentials. SQLite refuses minting with HTTP 409 and `script_runners_need_postgres`.
+
+All three routes require an operator or user principal with `script_runner.write`:
+
+- `POST /api/script-runners/credentials` accepts `name` and a future `expiresAt` ISO timestamp.
+- `GET /api/script-runners/credentials` returns metadata without token material.
+- `DELETE /api/script-runners/credentials/{id}` revokes a credential.
+
+Mint returns an `assr_` token once. Storage retains only its SHA-256 hash.
+The credential cannot authenticate ordinary HTTP requests. Only the future runner link can use it.
+The credential lookup rejects expired and revoked credentials.

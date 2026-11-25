@@ -31,6 +31,7 @@ import { SqliteRetentionRepository } from "./repositories/retention";
 import { SqliteRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { SqliteSavingsRepository } from "./repositories/savings";
 import { SqliteSchedulesRepository } from "./repositories/schedules";
+import { SqliteScriptRunnersRepository } from "./repositories/script-runners";
 import { SqliteScriptsRepository } from "./repositories/scripts";
 import { SqliteSessionsRepository } from "./repositories/sessions";
 import { SqliteSkillsRepository } from "./repositories/skills";
@@ -71,6 +72,7 @@ function noRawHandle(): Database {
 export function createSqliteStorage(client: DbClient, options: SqliteStorageOptions): Storage {
   const executor = new SqlExecutor(client, sqliteDialect);
   const capabilities: Capabilities = {
+    scriptRunners: false,
     fullTextSearch: true,
     vectorSearch: options.vectorSearch,
     dbQuery: true,
@@ -89,6 +91,7 @@ export function createSqliteStorage(client: DbClient, options: SqliteStorageOpti
     repos: {
       extensions: new SqliteExtensionsRepository(executor),
       models: new SqliteModelsRepository(executor),
+      scriptRunners: new SqliteScriptRunnersRepository(executor),
       runtimePools: new SqliteRuntimePoolsRepository(executor),
       config: new SqliteConfigRepository(executor),
       agents: new SqliteAgentsRepository(executor),

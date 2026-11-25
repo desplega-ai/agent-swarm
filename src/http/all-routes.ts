@@ -72,6 +72,7 @@ import "./skills";
 import "./slack-events";
 import "./slack-inbound";
 import "./scripts";
+import "./script-runners";
 import "./mcp-bridge";
 import "./mcp-oauth";
 import "./mcp-servers";

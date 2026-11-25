@@ -155,6 +155,7 @@ import { handleSavingsCalibration } from "./savings-calibration";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
+import { handleScriptRunners } from "./script-runners";
 import { handleScriptRuns } from "./script-runs";
 import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
@@ -437,6 +438,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
         () => handleModelProfiles(req, res, pathSegments, queryParams, myAgentId),
+        () => handleScriptRunners(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelGroups(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),

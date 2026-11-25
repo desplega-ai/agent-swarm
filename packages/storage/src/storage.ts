@@ -26,6 +26,7 @@ import type { RetentionRepository } from "./repositories/retention";
 import type { RuntimePoolsRepository } from "./repositories/runtime-pools";
 import type { SavingsRepository } from "./repositories/savings";
 import type { SchedulesRepository } from "./repositories/schedules";
+import type { ScriptRunnersRepository } from "./repositories/script-runners";
 import type { ScriptsRepository } from "./repositories/scripts";
 import type { SessionsRepository } from "./repositories/sessions";
 import type { SkillsRepository } from "./repositories/skills";
@@ -37,6 +38,7 @@ import type { WorkflowsRepository } from "./repositories/workflows";
 
 /** Every domain repository, by domain name. */
 export type Repositories = {
+  scriptRunners: ScriptRunnersRepository;
   extensions: ExtensionsRepository;
   models: ModelsRepository;
   runtimePools: RuntimePoolsRepository;

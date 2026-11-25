@@ -30,6 +30,7 @@ import { PostgresRetentionRepository } from "./repositories/retention";
 import { PostgresRuntimePoolsRepository } from "./repositories/runtime-pools";
 import { PostgresSavingsRepository } from "./repositories/savings";
 import { PostgresSchedulesRepository } from "./repositories/schedules";
+import { PostgresScriptRunnersRepository } from "./repositories/script-runners";
 import { PostgresScriptsRepository } from "./repositories/scripts";
 import { PostgresSessionsRepository } from "./repositories/sessions";
 import { PostgresSkillsRepository } from "./repositories/skills";
@@ -50,6 +51,7 @@ export type PostgresStorageOptions = {
 export function createPostgresStorage(client: DbClient, options: PostgresStorageOptions): Storage {
   const executor = new SqlExecutor(client, postgresDialect);
   const capabilities: Capabilities = {
+    scriptRunners: true,
     fullTextSearch: true,
     vectorSearch: options.vectorSearch,
     dbQuery: options.queryReader !== null,
@@ -66,6 +68,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
     repos: {
       extensions: new PostgresExtensionsRepository(executor),
       models: new PostgresModelsRepository(executor),
+      scriptRunners: new PostgresScriptRunnersRepository(executor),
       runtimePools: new PostgresRuntimePoolsRepository(executor),
       config: new PostgresConfigRepository(executor),
       agents: new PostgresAgentsRepository(executor),

@@ -3065,6 +3065,28 @@
         "class": "jsonb",
         "evidence": "src/be/db.ts:7402,7540 JSON.stringify(triggers ?? []); DEFAULT '[]'"
       }
+    },
+    "script_runner_credentials": {
+      "expires_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      },
+      "revoked_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      },
+      "created_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      },
+      "updated_at": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "credentials.ts writes ISO timestamps"
+      }
     }
   }
 }

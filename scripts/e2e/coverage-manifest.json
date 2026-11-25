@@ -224,6 +224,12 @@
     }
   ],
   "flows": {
+    "script-runner-credentials": {
+      "description": "Human credential management and HTTP isolation",
+      "scenarios": [
+        "script-runner-credentials"
+      ]
+    },
     "execution-tier-baseline": {
       "description": "Script schedule principals, synchronous workflow scripts, sequential foreach bodies and nested durable execution.",
       "scenarios": ["script-schedule-fire", "workflow-script-sync-baseline"]

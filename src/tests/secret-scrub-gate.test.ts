@@ -23,6 +23,7 @@ function extraStructuralTexts(): string[] {
   const tok = (n: number) => randomToken(n);
   return [
     `aseph_${tok(24)}`,
+    `assr_${tok(64)}`,
     `${tok(76)}AZDO${tok(4)}`,
     `sk-or-v1-${tok(40)}`,
     `sk-${tok(32)}`,

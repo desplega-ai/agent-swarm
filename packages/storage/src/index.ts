@@ -59,6 +59,7 @@ export {
   QueryReaderTimeoutError,
 } from "./query-reader";
 export * from "./repositories";
+export * from "./repositories/script-runners";
 export {
   type DialectFragment,
   dialectFragment,
