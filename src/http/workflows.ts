@@ -359,10 +359,8 @@ const triggerWorkflowRoute = route({
     409: { description: "Idempotency-Key was already used for a different request" },
     410: { description: "The workflow triggered under this Idempotency-Key was deleted" },
   },
-  rbac: {
-    ungated:
-      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
-  },
+  // Agents and the operator key pass (legacy policy); a user role needs the verb at admission.
+  rbac: { permission: "workflow.trigger" },
 });
 
 const validateTriggerRoute = route({

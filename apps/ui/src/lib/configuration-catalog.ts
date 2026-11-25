@@ -1997,6 +1997,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "10",
       },
       {
+        key: "SCRIPT_RUN_USER_ALLOWLIST",
+        label: "User durable script allowlist",
+        description:
+          "Comma-separated global script names a user token may launch as durable runs. Each run executes as the script's owning agent. Empty means a user token launches none; agents are unaffected.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "obs-lite-alert-intake",
+        docsUrl: `${DOCS}ui/configuration#user-durable-script-allowlist`,
+      },
+      {
         key: "SEED_AUTOMATIONS_ENABLED",
         label: "Auto-enable zero-config seeded automations",
         description:

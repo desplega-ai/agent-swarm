@@ -24,9 +24,11 @@ import {
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { getUserGrant } from "../be/rbac-roles";
+import { getScript } from "../be/scripts/db";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import { getStorage } from "../be/storage";
-import { can } from "../rbac";
+import { can, isRbacEnabled } from "../rbac";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
 import {
@@ -52,12 +54,14 @@ import {
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
 import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
+import { authUser, getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
   RawLlmConfigSchema,
   RawLlmOutputSchema,
 } from "../workflows/executors/raw-llm";
+import { resolveConfigValue } from "./config-values";
 import { bodyTask, route } from "./route-def";
 import { resolveTaskRequester } from "./task-requester";
 import { json, jsonError } from "./utils";
@@ -72,7 +76,15 @@ const stepParamsSchema = z.object({
 });
 
 const createScriptRunBodySchema = z.object({
-  source: z.string().min(1),
+  source: z.string().min(1).optional().describe("Inline TypeScript source. Pass this or `name`."),
+  name: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      "A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent.",
+    ),
   args: z.unknown().optional(),
   background: z.boolean().default(true),
   idempotencyKey: z.string().min(1).max(200).optional(),
@@ -160,19 +172,19 @@ const createScriptRunRoute = route({
     400: { description: "Validation or label-lint failure" },
     // Idempotency conflict returns the EXISTING run's pointer, not the
     // standard error envelope — declare it so the fallback doesn't lie.
-    409: { description: "Existing idempotent run returned", schema: scriptRunCreatedSchema },
+    409: {
+      description:
+        "Existing idempotent run returned. A key another caller used answers 409 with an error and no run.",
+      schema: scriptRunCreatedSchema,
+    },
+    403: { description: "A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST" },
+    404: { description: "Global script not found" },
     429: { description: "Script run concurrency cap reached" },
   },
-  // Matches the inline `POST /api/scripts/run` route and the `launch-script-run`
-  // MCP tool (src/tools/script-runs.ts, UNGATED_TOOL_FILES pin): open to every
-  // authenticated agent by design, not a permission gate. Execution safety comes
-  // from the shared sandbox (ulimits, clean env, brokered capabilities — see
-  // buildSandboxedCommand / LocalProcessScriptExecutor.start), not from
-  // restricting who may launch a run.
-  rbac: {
-    ungated:
-      "matches POST /api/scripts/run — open to all authenticated agents; constrained by the script execution sandbox, not a permission gate",
-  },
+  // Open to every agent and the operator key (legacy policy), like the inline
+  // `POST /api/scripts/run` route: execution safety comes from the script
+  // sandbox. A user role needs the verb at admission.
+  rbac: { permission: "script.run.durable" },
 });
 
 const listScriptRunsRoute = route({
@@ -221,12 +233,11 @@ const deleteScriptRunRoute = route({
   params: idParamsSchema,
   responses: {
     204: { description: "Script run cancelled, or already terminal" },
+    403: { description: "A scoped user may cancel only the runs it launched" },
     404: { description: "Script run not found" },
   },
-  rbac: {
-    ungated:
-      "script workflow runs: open to agents like the script tools; no verb covers cancel, so user roles need admin",
-  },
+  // Agents and the operator key pass; a user role needs the verb, and a scoped user cancels only its own runs.
+  rbac: { permission: "script.run.cancel" },
 });
 
 const getInternalStepRoute = route({
@@ -432,6 +443,17 @@ function scriptRunConcurrencyCap(): number {
     : DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP;
 }
 
+/** Global script names a user token may launch as durable runs. Unset or empty: none. */
+async function userDurableScriptAllowlist(): Promise<Set<string>> {
+  const raw = (await resolveConfigValue("SCRIPT_RUN_USER_ALLOWLIST")) ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
+}
+
 function bearerToken(req: IncomingMessage): string | undefined {
   const raw = req.headers.authorization;
   const header = Array.isArray(raw) ? raw[0] : raw;
@@ -474,7 +496,55 @@ export async function handleScriptRuns(
   if (createScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await createScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = await requireAgent(res, agentId);
+    if (!parsed.body.name === !parsed.body.source) {
+      jsonError(res, "Pass exactly one of name or source", 400);
+      return true;
+    }
+    // A user token sends no X-Agent-ID (session-access refuses it), so it has no agent.
+    const user = authUser(getRequestAuth(req));
+    // User keys are stored as `user:<id>:<key>`: an agent key in that namespace could block or
+    // claim a user's launch.
+    if (!user && parsed.body.idempotencyKey?.startsWith("user:")) {
+      jsonError(res, 'idempotencyKey prefix "user:" is reserved for user-token launches', 400);
+      return true;
+    }
+    let source = parsed.body.source ?? "";
+    let scriptName = parsed.body.scriptName;
+    let runAsAgentId = agentId;
+    if (parsed.body.name) {
+      // The run executes as the script's owner, so a user may launch only the scripts an
+      // operator listed. Checked before the lookup: an unlisted name answers the same 403
+      // whether or not it exists.
+      if (user && !(await userDurableScriptAllowlist()).has(parsed.body.name)) {
+        jsonError(
+          res,
+          `Forbidden: global script "${parsed.body.name}" is not in SCRIPT_RUN_USER_ALLOWLIST`,
+          403,
+        );
+        return true;
+      }
+      const script = await getScript({ name: parsed.body.name, scope: "global" });
+      if (!script) {
+        jsonError(res, `Global script "${parsed.body.name}" not found`, 404);
+        return true;
+      }
+      source = script.source;
+      scriptName = script.name;
+      // Same rule as an external script endpoint: run as the script's owning agent.
+      if (user) runAsAgentId = script.scopeId ?? script.createdByAgentId ?? undefined;
+      if (user && !runAsAgentId) {
+        jsonError(res, "This script has no owning agent to run as", 400);
+        return true;
+      }
+    } else if (user) {
+      jsonError(
+        res,
+        "A user token must pass a global script name: inline source has no agent to run as",
+        400,
+      );
+      return true;
+    }
+    const agent = await requireAgent(res, runAsAgentId);
     if (!agent) return true;
 
     if (!durableScriptRunsAllowed()) {
@@ -482,13 +552,13 @@ export async function handleScriptRuns(
       return true;
     }
 
-    const secretRefusal = refuseSourceWithSecrets(parsed.body.source);
+    const secretRefusal = refuseSourceWithSecrets(source);
     if (secretRefusal) {
       json(res, secretRefusal, 400);
       return true;
     }
 
-    const lint = lintWorkflowLabels(parsed.body.source);
+    const lint = lintWorkflowLabels(source);
     if (!lint.ok) {
       json(
         res,
@@ -502,9 +572,30 @@ export async function handleScriptRuns(
       return true;
     }
 
-    if (parsed.body.idempotencyKey) {
-      const existingRun = await getScriptRunByIdempotencyKey(parsed.body.idempotencyKey);
+    // The key column is unique swarm-wide: a user's keys get their own namespace, and a
+    // key another caller holds answers 409 without that caller's run.
+    const idempotencyKey =
+      parsed.body.idempotencyKey && user
+        ? `user:${user.id}:${parsed.body.idempotencyKey}`
+        : parsed.body.idempotencyKey;
+    const ownsRun = (run: { agentId: string; requestedByUserId?: string }) =>
+      user ? run.requestedByUserId === user.id : run.agentId === agent.id;
+    const foreignKey = () =>
+      json(
+        res,
+        {
+          error: "idempotency_key_in_use",
+          message: "Another caller already used this idempotencyKey",
+        },
+        409,
+      );
+    if (idempotencyKey) {
+      const existingRun = await getScriptRunByIdempotencyKey(idempotencyKey);
       if (existingRun) {
+        if (!ownsRun(existingRun)) {
+          foreignKey();
+          return true;
+        }
         json(
           res,
           { id: existingRun.id, status: existingRun.status, url: scriptRunUrl(existingRun.id) },
@@ -517,20 +608,22 @@ export async function handleScriptRuns(
     // Cap check and insert commit together: N concurrent POSTs otherwise all
     // read cap-1 active runs and all insert, exceeding the cap.
     const cap = scriptRunConcurrencyCap();
-    const sourceTaskId = await resolveRunSourceTaskId(req, agent.id);
+    const sourceTaskId = user ? undefined : await resolveRunSourceTaskId(req, agent.id);
     // Same rules as POST /api/tasks: a non-lead agent cannot name another user.
-    const requestedByUserId = parsed.body.requestedByUserId
-      ? await resolveTaskRequester(req, agent.id, parsed.body.requestedByUserId)
-      : undefined;
+    const requestedByUserId = user
+      ? user.id
+      : parsed.body.requestedByUserId
+        ? await resolveTaskRequester(req, agent.id, parsed.body.requestedByUserId)
+        : undefined;
     const creation = await getStorage().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
         id: crypto.randomUUID(),
         agentId: agent.id,
-        source: parsed.body.source,
+        source,
         args: parsed.body.args ?? null,
-        scriptName: parsed.body.scriptName,
-        idempotencyKey: parsed.body.idempotencyKey,
+        scriptName,
+        idempotencyKey,
         requestedByUserId,
         sourceTaskId,
         createdBy: requestedByUserId,
@@ -541,16 +634,23 @@ export async function handleScriptRuns(
       return true;
     }
     const { run, existing } = creation;
+    if (existing && !ownsRun(run)) {
+      foreignKey();
+      return true;
+    }
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, getScriptApiBaseUrl(), bearerToken(req)).catch(async (err) => {
-        await updateScriptRun(run.id, {
-          status: "failed",
-          pid: null,
-          finishedAt: new Date().toISOString(),
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      // A user token cannot act as the run's agent: spawn on the server key, as a reconcile respawn does.
+      startScriptRunProcess(run, getScriptApiBaseUrl(), user ? undefined : bearerToken(req)).catch(
+        async (err) => {
+          await updateScriptRun(run.id, {
+            status: "failed",
+            pid: null,
+            finishedAt: new Date().toISOString(),
+            error: err instanceof Error ? err.message : String(err),
+          });
+        },
+      );
     }
 
     if (existing) {
@@ -609,6 +709,14 @@ export async function handleScriptRuns(
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
+    }
+    const canceller = authUser(getRequestAuth(req));
+    if (canceller && run.requestedByUserId !== canceller.id && isRbacEnabled()) {
+      // Admission already required `script.run.cancel`; only a grant-all role crosses owners.
+      if (!(await getUserGrant(canceller.id)).grantsAll) {
+        jsonError(res, "Forbidden: a scoped user may cancel only the runs it launched", 403);
+        return true;
+      }
     }
     if (TERMINAL_SCRIPT_RUN_STATUSES.some((status) => status === run.status)) {
       res.writeHead(204);
