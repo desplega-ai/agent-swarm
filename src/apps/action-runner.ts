@@ -1,10 +1,10 @@
 import { normalizeAssetKey } from "../assets/key";
-import { getLeadAgent } from "../be/db";
+import { getLeadAgent, recordInlineScriptRun } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { resolveTemplate } from "../prompts/resolver";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { scrubObject } from "../utils/secret-scrubber";
+import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import type { AppActionCaller } from "./action-caller";
 import type { AppRecord } from "./store";
 import { runAppSync } from "./sync";
@@ -85,10 +85,17 @@ export async function runAppAction({
       };
     }
 
+    // The run id is fixed up front and stamped on the run's token, so every
+    // run the script launches or calls records it as parent: the run tree
+    // `app-action-status` waits on.
+    const runId = crypto.randomUUID();
+    const startedAt = new Date().toISOString();
+    const scriptInput = { ...action.args, ...input, app: { id: app.id }, caller };
     const output = await runSavedScriptAsAgent({
       script,
-      input: { ...action.args, ...input, app: { id: app.id }, caller },
+      input: scriptInput,
       agentId: runAsAgentId,
+      provenance: { sourceScriptRunId: runId },
     });
     const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
     const error = ok
@@ -96,6 +103,25 @@ export async function runAppAction({
       : output.runtimeError
         ? `${output.runtimeError.name}: ${output.runtimeError.message}`
         : (output.error ?? `Script exited with code ${output.exitCode}`);
+    let recorded = false;
+    try {
+      // `args.app.id` is what ties the run to this app for app-action-status.
+      await recordInlineScriptRun({
+        id: runId,
+        agentId: runAsAgentId,
+        source: script.source,
+        args: scrubObject(scriptInput),
+        scriptName: script.name,
+        status: ok ? "completed" : "failed",
+        output: scrubObject(output.result),
+        ...(error === undefined ? {} : { error: scrubSecrets(error) }),
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+      recorded = true;
+    } catch {
+      // swallow: the action already ran; the row is observability and the wait handle.
+    }
     return {
       status: 200 as const,
       body: scrubObject({
@@ -104,6 +130,7 @@ export async function runAppAction({
         stdout: output.stdout,
         ...(error === undefined ? {} : { error }),
         durationMs: output.durationMs,
+        ...(recorded ? { run: { id: runId } } : {}),
       }),
     };
   }
@@ -165,6 +192,6 @@ export async function runAppAction({
   );
   return {
     status: 200 as const,
-    body: { ok: true as const, taskId: task.id, status: task.status },
+    body: { ok: true as const, taskId: task.id, status: task.status, run: { id: task.id } },
   };
 }

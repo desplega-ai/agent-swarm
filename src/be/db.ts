@@ -10760,6 +10760,7 @@ export async function createScriptRun(data: {
   sourceTaskId?: string;
   createdBy?: string;
   updatedBy?: string;
+  parentScriptRunId?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
   const storage = getStorage();
   return storage.transaction(async () => {
@@ -10787,6 +10788,9 @@ export async function createScriptRun(data: {
       updated_by: data.updatedBy ?? data.createdBy ?? null,
       // ISO like finishedAt and the inline path, not the column's datetime('now') default.
       startedAt: new Date().toISOString(),
+      // A run launched through another run's token joins that run's tree.
+      parentScriptRunId:
+        getCurrentRunProvenance()?.sourceScriptRunId ?? data.parentScriptRunId ?? null,
     });
     if (!row) throw new Error("Failed to create script run");
     return { run: rowToScriptRun({ ...row, storedSource: data.source }), existing: false };
@@ -10849,6 +10853,11 @@ export async function recordInlineScriptRun(data: {
     if (!row) throw new Error("Failed to record inline script run");
     return rowToScriptRun({ ...row, storedSource: data.source });
   });
+}
+
+/** A run and its descendants over `parentScriptRunId`, root first (`[]` when it does not exist). */
+export async function listScriptRunTree(rootId: string, limit: number) {
+  return await getStorage().repos.scripts.listScriptRunTree(rootId, limit);
 }
 
 export async function getScriptRun(id: string): Promise<ScriptRun | null> {

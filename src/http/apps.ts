@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as z from "zod";
 import type { AppActionCaller } from "../apps/action-caller";
+import {
+  ActionRunStateSchema,
+  MAX_ACTION_RUN_WAIT_SECONDS,
+  resolveActionRunState,
+} from "../apps/action-run-status";
 import { runAppAction } from "../apps/action-runner";
 import {
   type AppDefinition,
@@ -614,11 +619,15 @@ const runActionScriptResultSchema = z.object({
   stdout: z.string(),
   error: z.string().optional(),
   durationMs: z.number(),
+  /** The action's script run: read or wait on it with GET /api/apps/{id}/action-runs/{runId}. */
+  run: z.object({ id: z.string() }).optional(),
 });
 const runActionTaskResultSchema = z.object({
   ok: z.literal(true),
   taskId: z.string(),
   status: AgentTaskStatusSchema,
+  /** `run.id` is the task id, for GET /api/apps/{id}/action-runs/{runId}. */
+  run: z.object({ id: z.string() }),
 });
 /**
  * Sync actions deliberately reuse the SCRIPT-action shape minus `stdout`/
@@ -692,6 +701,26 @@ const runActionRoute = route({
     403: { description: "Permission denied" },
     409: { description: "App definition needs repair" },
     404: { description: "App, action, or parent task not found" },
+  },
+  rbac: { permission: "app.use" },
+});
+
+const getActionRunRoute = route({
+  method: "get",
+  path: "/api/apps/{id}/action-runs/{runId}",
+  pattern: ["api", "apps", null, "action-runs", null],
+  summary: "Read or wait on an app action run",
+  description:
+    "`runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.",
+  tags: ["Apps"],
+  params: z.object({ id: z.string().min(1), runId: z.string().min(1) }),
+  query: z.object({
+    waitSeconds: z.coerce.number().min(0).max(MAX_ACTION_RUN_WAIT_SECONDS).optional(),
+  }),
+  responses: {
+    200: { description: "Action run state", schema: ActionRunStateSchema },
+    403: { description: "Permission denied" },
+    404: { description: "App or action run not found" },
   },
   rbac: { permission: "app.use" },
 });
@@ -1533,6 +1562,23 @@ export async function handleApps(
     });
     if (output.status === 200) runActionRoute.respond(res, 200, output.body);
     else json(res, output.body, output.status);
+    return true;
+  }
+
+  if (getActionRunRoute.match(req.method, pathSegments)) {
+    const parsed = await getActionRunRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const state = await resolveActionRunState(
+      parsed.params.id,
+      parsed.params.runId,
+      parsed.query.waitSeconds,
+    );
+    if (!state) {
+      jsonError(res, "app action run not found", 404);
+      return true;
+    }
+    getActionRunRoute.respond(res, 200, state);
     return true;
   }
 

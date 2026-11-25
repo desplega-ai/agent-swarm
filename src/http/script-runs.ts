@@ -78,6 +78,12 @@ const createScriptRunBodySchema = z.object({
   idempotencyKey: z.string().min(1).max(200).optional(),
   scriptName: z.string().min(1).max(200).optional(),
   requestedByUserId: z.string().optional(),
+  /**
+   * The run this one works for, so it joins that run's tree (an app action's
+   * `app-action-status`). `launch-script-run` sets it from the calling run's
+   * token; a run token's own provenance wins over this field.
+   */
+  parentScriptRunId: z.string().min(1).optional(),
 });
 
 const listScriptRunsQuerySchema = z.object({
@@ -534,6 +540,7 @@ export async function handleScriptRuns(
         requestedByUserId,
         sourceTaskId,
         createdBy: requestedByUserId,
+        parentScriptRunId: parsed.body.parentScriptRunId,
       });
     });
     if (!creation) {

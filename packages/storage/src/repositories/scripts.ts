@@ -349,6 +349,17 @@ export type NewScriptRunRow = {
   created_by: string | null;
   updated_by: string | null;
   startedAt: string;
+  parentScriptRunId: string | null;
+};
+
+/** One run of a run tree (`listScriptRunTree`). */
+export type ScriptRunTreeRow = {
+  id: string;
+  scriptName: string | null;
+  status: string;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
 };
 
 export type NewInlineScriptRunRow = {
@@ -567,6 +578,11 @@ export interface ScriptsRepository {
   findScriptRunByIdempotencyKey(idempotencyKey: string): Promise<ScriptRunRow | null>;
   insertScriptRun(row: NewScriptRunRow): Promise<ScriptRunRow | null>;
   insertInlineScriptRun(row: NewInlineScriptRunRow): Promise<ScriptRunRow | null>;
+  /**
+   * The run and every descendant over `parentScriptRunId`, at most `limit`
+   * rows, root first. Empty when the root does not exist.
+   */
+  listScriptRunTree(rootId: string, limit: number): Promise<ScriptRunTreeRow[]>;
   /** Newest `startedAt` first, then insertion order (newest first). */
   listScriptRuns(
     f: ScriptRunListFilter,
@@ -1097,11 +1113,26 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
     return this.db.get<ScriptRunRow>(sql`
       INSERT INTO script_runs
         (id, "agentId", "scriptName", source, "sourceHash", args, "idempotencyKey",
-         "requestedByUserId", "sourceTaskId", created_by, updated_by, "startedAt")
+         "requestedByUserId", "sourceTaskId", created_by, updated_by, "startedAt",
+         "parentScriptRunId")
       VALUES (${r.id}, ${r.agentId}, ${r.scriptName}, '', ${r.sourceHash}, ${r.args},
         ${r.idempotencyKey}, ${r.requestedByUserId}, ${r.sourceTaskId}, ${r.created_by},
-        ${r.updated_by}, ${r.startedAt})
+        ${r.updated_by}, ${r.startedAt}, ${r.parentScriptRunId})
       RETURNING *`);
+  }
+
+  listScriptRunTree(rootId: string, limit: number): Promise<ScriptRunTreeRow[]> {
+    // UNION (not UNION ALL) drops revisited ids, so a parent cycle still terminates.
+    return this.db.query<ScriptRunTreeRow>(sql`
+      WITH RECURSIVE tree(id) AS (
+        SELECT id FROM script_runs WHERE id = ${rootId}
+        UNION
+        SELECT r.id FROM script_runs r JOIN tree t ON r."parentScriptRunId" = t.id
+      )
+      SELECT r.id, r."scriptName", r.status, r.error, r."startedAt", r."finishedAt"
+      FROM script_runs r JOIN tree t ON r.id = t.id
+      ORDER BY CASE WHEN r.id = ${rootId} THEN 0 ELSE 1 END, r."startedAt"
+      LIMIT ${limit}`);
   }
 
   insertInlineScriptRun(r: NewInlineScriptRunRow): Promise<ScriptRunRow | null> {

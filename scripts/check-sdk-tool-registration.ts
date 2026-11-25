@@ -17,6 +17,7 @@ import { ALL_TOOLS } from "../src/tools/tool-config";
 // Each entry must have a reason — reviewers will check.
 const EXCLUDED_TOOLS: Record<string, string> = {
   "app-action-run": "action recursion: scripts must not run app actions",
+  "app-action-status": "pairs with app-action-run, which scripts cannot call; a script reads its own runs with get-script-run",
   "accept-steer":
     "agent-only acknowledgement of a steering message delivered into a live session; scripts never run inside a steered session.",
   "create-channel": "channel management — admin lifecycle, not script-relevant",

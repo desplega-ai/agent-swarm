@@ -311,6 +311,7 @@
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
       "scenarios": [
         "knowledge-apps",
+        "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",

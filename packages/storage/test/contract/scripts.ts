@@ -500,10 +500,11 @@ export function scriptsContract(engine: ContractEngine): void {
         created_by: null,
         updated_by: null,
         startedAt: T0,
+        parentScriptRunId: null,
       };
       const r1 = await repo.insertScriptRun({ ...base, id: "r1", idempotencyKey: "k1" });
       expect(r1).toMatchObject({ id: "r1", source: "", status: "running", kind: "workflow" });
-      await repo.insertScriptRun({ ...base, id: "r2" });
+      await repo.insertScriptRun({ ...base, id: "r2", parentScriptRunId: "r1" });
       await repo.insertInlineScriptRun({
         id: "r3",
         agentId: "ag",
@@ -520,12 +521,20 @@ export function scriptsContract(engine: ContractEngine): void {
         updated_by: null,
         apiEndpointId: null,
         sourceStepId: null,
-        parentScriptRunId: null,
+        parentScriptRunId: "r2",
         objectScriptId: null,
         objectId: null,
         objectMethod: null,
       });
       expect((await repo.findScriptRun("r1"))?.storedSource).toBe("console.log(1)");
+      expect((await repo.listScriptRunTree("r1", 10)).map((r) => [r.id, r.status])).toEqual([
+        ["r1", "running"],
+        ["r2", "running"],
+        ["r3", "completed"],
+      ]);
+      expect((await repo.listScriptRunTree("r2", 10)).map((r) => r.id)).toEqual(["r2", "r3"]);
+      expect((await repo.listScriptRunTree("r1", 2)).length).toBe(2);
+      expect(await repo.listScriptRunTree("missing", 10)).toEqual([]);
       expect((await repo.findScriptRunByIdempotencyKey("k1"))?.id).toBe("r1");
       expect((await repo.listScriptRuns({}, 10, 0)).map((r) => r.id)).toEqual(["r3", "r2", "r1"]);
       expect((await repo.listScriptRuns({ scriptName: "s" }, 1, 1)).map((r) => r.id)).toEqual([
@@ -565,6 +574,7 @@ export function scriptsContract(engine: ContractEngine): void {
         created_by: null,
         updated_by: null,
         startedAt: T0,
+        parentScriptRunId: null,
       });
       const step = (id: string, stepKey: string, stepType: string) => ({
         id,

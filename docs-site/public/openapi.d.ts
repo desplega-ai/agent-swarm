@@ -2237,12 +2237,18 @@ export interface paths {
                             stdout: string;
                             error?: string;
                             durationMs: number;
+                            run?: {
+                                id: string;
+                            };
                         } | {
                             /** @enum {boolean} */
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
                             status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                            run: {
+                                id: string;
+                            };
                         } | {
                             ok: boolean;
                             result: {
@@ -2311,6 +2317,89 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apps/{id}/action-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read or wait on an app action run
+         * @description `runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    waitSeconds?: number | null;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                    runId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Action run state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            taskId?: string;
+                            /** @enum {string} */
+                            state: "running" | "succeeded" | "failed";
+                            settled: boolean;
+                            runs?: {
+                                total: number;
+                                running: number;
+                                completed: number;
+                                failed: number;
+                                truncated: boolean;
+                            };
+                            failures?: {
+                                id: string;
+                                scriptName: string | null;
+                                error: string | null;
+                            }[];
+                            status?: string;
+                            elapsedMs: number;
+                            next?: string;
+                        };
+                    };
+                };
+                /** @description Permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description App or action run not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -37267,6 +37356,7 @@ export interface operations {
                     idempotencyKey?: string;
                     scriptName?: string;
                     requestedByUserId?: string;
+                    parentScriptRunId?: string;
                 };
             };
         };

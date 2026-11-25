@@ -28,6 +28,7 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | `app-row-delete` | Delete a row by `rowId`. Returns `{ ok: true }`. |
 | `app-rows-delete` | Delete matching rows with a non-empty `equals` filter. Returns `{ deleted }`. |
 | `app-action-run` | Run a declared script, task, or sync action with `{ appId, action, input? }`. Agents can invoke it through MCP only. |
+| `app-action-status` | Read or wait on the run an action returned: `{ appId, runId, waitSeconds? }`. A script run settles when it and every run its script launched have finished. |
 | `app-history` | List definition snapshots and their compact model/column digests before choosing a restore point. |
 | `app-diff` | Show a unified definition diff; defaults to newest snapshot → CURRENT. |
 | `app-rollback` | Restore a snapshot through the normal schema-migration engine. |
@@ -1424,3 +1425,11 @@ Equality filters accept declared columns and system columns. Filter values must 
 
 `app-action-run` returns the REST action body under `data`. Script actions run with the script owner's identity and receive the verified invoking agent as `caller`.
 Scripts and extensions cannot invoke `app-action-run`.
+
+#### Async refresh: wait on the run, not on rows
+
+A script or task action returns `run: { id, state, settled, runs, failures?, next? }`. For a script action, the run tree is the action's own run plus every run its script launched with `ctx.swarm.script_launchRun` or called with `ctx.swarm.script_run`. The tree settles when none of them is running; `state` is `failed` when any of them failed, and `failures` names the first three. Runs that a launched background run starts itself are not in the tree: keep them nested (`script_run`) so the background run stays running until they finish, and let it fail when they fail.
+
+- Launch background work from the action script itself, before it returns, so the launched run joins the tree.
+- Wait with `app-action-run { waitSeconds: 25 }`. While `run.settled` is false, call `app-action-status { appId, runId: run.id, waitSeconds: 25 }` (REST: `GET /api/apps/<id>/action-runs/<runId>?waitSeconds=25`).
+- Never write sleep loops against a progress `meta` row: the run tree is the done signal.
