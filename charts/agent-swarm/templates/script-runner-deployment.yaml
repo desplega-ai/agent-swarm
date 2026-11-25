@@ -1,0 +1,78 @@
+{{- if .Values.scriptRunner.enabled }}
+{{- if not (include "agent-swarm.postgres" .) }}
+{{- fail "script runners need PostgreSQL: set database.url or database.existingSecret" }}
+{{- end }}
+{{- range $name, $value := dict "replicas" .Values.scriptRunner.replicas "slots" .Values.scriptRunner.slots "terminationGracePeriodSeconds" .Values.scriptRunner.terminationGracePeriodSeconds }}
+{{- if not (regexMatch "^[1-9][0-9]*$" (toString $value)) }}
+{{- fail (printf "scriptRunner.%s must be a positive integer" $name) }}
+{{- end }}
+{{- end }}
+{{- if eq (include "agent-swarm.scriptRunnerSecretName" .) (include "agent-swarm.authSecretName" .) }}
+{{- fail "scriptRunner.existingSecret must be separate from the API auth Secret" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-swarm.fullname" . }}-script-runner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: script-runner
+spec:
+  {{- if not .Values.scriptRunner.keda.enabled }}
+  replicas: {{ .Values.scriptRunner.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "agent-swarm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: script-runner
+  template:
+    metadata:
+      {{- if not .Values.scriptRunner.existingSecret }}
+      annotations:
+        checksum/token: {{ include (print $.Template.BasePath "/script-runner-secret.yaml") . | sha256sum }}
+      {{- end }}
+      labels:
+        {{- include "agent-swarm.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: script-runner
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.scriptRunner.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      containers:
+        - name: script-runner
+          image: {{ include "agent-swarm.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/script-runner-entrypoint.sh"]
+          env:
+            - name: SCRIPT_RUNNER_API_URL
+              value: {{ include "agent-swarm.scriptRunnerApiUrl" . | quote }}
+            - name: SCRIPT_RUNNER_TOKEN_FILE
+              value: /run/secrets/script-runner/SCRIPT_RUNNER_TOKEN
+            - name: SCRIPT_RUNNER_SLOTS
+              value: {{ .Values.scriptRunner.slots | quote }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "test -f /tmp/script-runner.ready"]
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.scriptRunner.resources | nindent 12 }}
+          volumeMounts:
+            - name: token
+              mountPath: /run/secrets/script-runner
+              readOnly: true
+      volumes:
+        - name: token
+          secret:
+            secretName: {{ include "agent-swarm.scriptRunnerSecretName" . }}
+            defaultMode: 0400
+            items:
+              - key: SCRIPT_RUNNER_TOKEN
+                path: SCRIPT_RUNNER_TOKEN
+{{- end }}

@@ -131,3 +131,110 @@ Use journal steps for work that needs replay protection.
 SIGTERM stops admission, allows inline work five seconds, and stops durable guests.
 The runner then closes with code 1000. The API releases its held rows immediately.
 Pause, cancel and limits stop the remote guest through its owner session.
+
+## Container contract
+
+The API image includes `/usr/local/bin/agent-swarm-script-runner`.
+`/script-runner-entrypoint.sh` executes this binary with `--api-url "$SCRIPT_RUNNER_API_URL"`.
+The CLI also exposes `agent-swarm script-runner --api-url <url>`.
+
+| Setting | Meaning |
+|---|---|
+| `SCRIPT_RUNNER_API_URL` | API base URL for the container entrypoint |
+| `SCRIPT_RUNNER_TOKEN_FILE` | File with a minted runner credential |
+| `SCRIPT_RUNNER_TOKEN` | Alternative token for development |
+| `SCRIPT_RUNNER_SLOTS` | Concurrent job slots, chart default 4 |
+
+The image runs as root. Native children run as uid 65534 and gid 65534 (`nobody:nogroup`).
+The image build checks `bash`, `python3`, `bun`, and `setpriv`.
+It checks Bun execution and harness readability under the sandbox identity.
+The runner shares the API image's bundled harnesses, libraries, and QuickJS worker entry.
+Do not use `--allow-shared-uid` in a deployment.
+
+The client creates `/tmp/script-runner.ready` while connected and removes it after disconnection.
+The chart and Compose use a file probe. They do not require `pgrep`.
+SIGTERM starts drain. The chart and Compose allow 60 seconds before forced termination.
+Durable runs replay their journal after ownership moves to another runner.
+After an API restart, guest code outside journaled steps can execute again.
+
+## Helm
+
+Set `scriptRunner.enabled=true` and select PostgreSQL with `database.url` or `database.existingSecret`.
+Create a Secret with key `SCRIPT_RUNNER_TOKEN` from a minted runner credential.
+Set `scriptRunner.existingSecret` to its name. Inline `scriptRunner.token` is also supported.
+The chart refuses missing PostgreSQL, missing credentials, zero replicas, zero slots, and a zero grace period.
+
+```bash
+helm upgrade --install swarm charts/agent-swarm \
+  --reuse-values --set database.existingSecret=swarm-db \
+  --set scriptRunner.enabled=true --set scriptRunner.existingSecret=swarm-runner \
+  --set scriptRunner.replicas=2
+```
+
+`scriptRunner.apiUrl` overrides the internal API URL, including for KEDA.
+Use it for an HTTPS endpoint outside a trusted network.
+Enabling runners sets API `SCRIPT_EMBEDDED_RUNNER_SLOTS=0` unless `config.extraEnv` supplies a value.
+A `swarm_config` row wins over this environment value. Check Settings, Configuration before rollout.
+With embedded slots at zero and no connected runner, scripts wait and then fail.
+This includes the heartbeat script probe.
+
+### Optional KEDA
+
+Install KEDA CRDs before enabling `scriptRunner.keda.enabled`.
+Use a separate Secret with key `token` containing a user token with `script_runner.read`.
+Set `scriptRunner.keda.existingSecret` to this Secret. Never use the operator key or the runner credential.
+The chart rejects reuse of the auth Secret or runner Secret name.
+The chart cannot inspect the contents of an existing Secret or verify its permissions.
+
+The [metrics-api scaler](https://keda.sh/docs/2.18/scalers/metrics-api/) reads `lanes.sync.queued` from `GET /api/script-runners`.
+The defaults target four queued jobs per replica, with one minimum replica and ten maximum replicas.
+The chart requires positive bounds and rejects a maximum below the minimum.
+KEDA owns the Deployment replica count when enabled.
+This metric covers only the sync queue. It does not measure durable jobs or total CPU use.
+Keep at least one replica to avoid a queue with no executor.
+
+## Compose
+
+Use the PostgreSQL overlay and the optional `script-runners` profile.
+Store a minted runner credential in `./script_runner_token`, or set `SCRIPT_RUNNER_TOKEN_PATH`.
+The service mounts this file through Compose secrets.
+Local Compose can retain source permissions instead of applying the requested secret mode.
+The entrypoint refuses token files readable by sandbox uid 65534. Keep the source file mode at `0600`.
+Some Docker Desktop bind mounts allow reads despite the displayed file mode. The entrypoint refuses those mounts too.
+It receives no API key or database credentials.
+
+```bash
+chmod 600 ./script_runner_token
+docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml \
+  --profile script-runners config -q
+docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml \
+  --profile script-runners up -d --scale script-runner=2
+```
+
+Compose preserves the API's embedded capacity unless the operator explicitly disables it.
+To require remote execution, set API `SCRIPT_EMBEDDED_RUNNER_SLOTS=0` through Configuration after runners connect.
+A Compose profile does not change environment values on another service.
+
+## Packaging checks
+
+```bash
+helm lint charts/agent-swarm --set auth.apiKey=check
+bash scripts/check-chart-postgres.sh
+bun run check-chart-version
+bun run check:agents-md-size
+```
+
+After integrating the runner runtime, build the API image with `bun run docker:build:api`.
+Do not build on this Mac with less than 20 GB free disk.
+Use CI or an approved build host when space is insufficient.
+
+```bash
+docker run --rm --entrypoint sh agent-swarm-api:latest \
+  -c 'command -v bash python3 bun setpriv agent-swarm-script-runner'
+docker run --rm --entrypoint setpriv agent-swarm-api:latest \
+  --reuid=65534 --regid=65534 --clear-groups bun --version
+```
+
+Integrated QA must prove native and QuickJS execution from the built image.
+Verify native uid 65534, two registered runner sessions, durable replay after pod deletion, and SIGTERM drain.
+Use a disposable local cluster with its own kubeconfig. Never use a shared cluster for these checks.

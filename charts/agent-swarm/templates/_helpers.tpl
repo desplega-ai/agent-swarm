@@ -250,3 +250,12 @@ Pass dict {ingress, secretName}.
   secretName: {{ .secretName }}
 {{- end }}
 {{- end }}
+
+{{/* Runner credentials and the link URL are separate from API authentication. */}}
+{{- define "agent-swarm.scriptRunnerSecretName" -}}
+{{- default (printf "%s-script-runner" (include "agent-swarm.fullname" .)) .Values.scriptRunner.existingSecret -}}
+{{- end -}}
+
+{{- define "agent-swarm.scriptRunnerApiUrl" -}}
+{{- default (printf "http://%s-api:%v" (include "agent-swarm.fullname" .) .Values.api.port) .Values.scriptRunner.apiUrl | trimSuffix "/" -}}
+{{- end -}}

@@ -210,3 +210,17 @@ docker compose -f docker-compose.local.yml up --build
 ```
 
 See [ci.md](./ci.md) for the full Docker CI flow, and the docs-site "Published Artifacts" page for the consumer-facing inventory.
+
+## Script-runner entrypoint
+
+The API image also compiles `src/script-runner/main.ts` with the QuickJS worker entry.
+It installs the binary as `/usr/local/bin/agent-swarm-script-runner`.
+`/script-runner-entrypoint.sh` runs it with `SCRIPT_RUNNER_API_URL` and a token file.
+The image includes the same native and durable harness bundles for both entrypoints.
+The build checks Bun execution and harness access as uid 65534 and gid 65534.
+Keep this identity aligned with `UNPRIVILEGED_SANDBOX_IDENTITY`.
+Containers start as root so native guests can drop privileges through `setpriv`.
+
+Do not build the API image on a Mac with less than 20 GB free disk.
+Use CI or an approved build host instead.
+Deployment, probes, token isolation, and integrated QA: [script-runners.md](./script-runners.md).

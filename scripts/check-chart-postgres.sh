@@ -52,6 +52,57 @@ if render --set api.replicas=2 --set database.url=postgres://db/swarm >/dev/null
   fail "api.replicas=2 renders on Postgres"
 fi
 
+# Runner packaging is opt-in and requires PostgreSQL and its own credentials.
+RUNNER=(--set scriptRunner.enabled=true --set scriptRunner.token=runner-ci)
+DB=(--set database.url=postgres://swarm:pw@db:5432/swarm)
+runner=$(render "${DB[@]}" "${RUNNER[@]}" --show-only templates/script-runner-deployment.yaml)
+grep -q -e '-auth' -e 'API_KEY' -e 'DATABASE_URL' -e 'envFrom:' <<<"$runner" && fail "runner receives API credentials"
+grep -q 'runAsUser: 0' <<<"$runner" || fail "runner cannot drop native child uid"
+grep -q '/tmp/script-runner.ready' <<<"$runner" || fail "runner lacks file readiness probe"
+grep -q 'SCRIPT_RUNNER_TOKEN_FILE' <<<"$runner" || fail "runner lacks token file"
+grep -q 'defaultMode: 256' <<<"$runner" || grep -q 'defaultMode: 0400' <<<"$runner" || fail "runner token is not root-only"
+config=$(render "${DB[@]}" "${RUNNER[@]}" --show-only templates/configmap.yaml)
+grep -q 'SCRIPT_EMBEDDED_RUNNER_SLOTS: "0"' <<<"$config" || fail "runner does not disable embedded slots"
+override=$(render "${DB[@]}" "${RUNNER[@]}" --set config.extraEnv.SCRIPT_EMBEDDED_RUNNER_SLOTS=2 --show-only templates/configmap.yaml)
+grep -q 'SCRIPT_EMBEDDED_RUNNER_SLOTS: "2"' <<<"$override" || fail "embedded slots override lost"
+[ "$(grep -c 'SCRIPT_EMBEDDED_RUNNER_SLOTS:' <<<"$override")" -eq 1 ] || fail "duplicate embedded slots key"
+grep -q 'script-runner' <<<"$sqlite" && fail "default render includes script runners"
+if render "${RUNNER[@]}" >/dev/null 2>&1; then fail "runner renders without PostgreSQL"; fi
+if render "${DB[@]}" --set scriptRunner.enabled=true >/dev/null 2>&1; then fail "runner renders without token"; fi
+for field in replicas slots terminationGracePeriodSeconds; do
+  for invalid in 0 -1 1.5; do
+    if render "${DB[@]}" "${RUNNER[@]}" --set "scriptRunner.$field=$invalid" >/dev/null 2>&1; then
+      fail "runner accepts $field=$invalid"
+    fi
+  done
+done
+existingRunner=$(render --set database.existingSecret=my-db --set scriptRunner.enabled=true --set scriptRunner.existingSecret=my-runner)
+grep -q 'secretName: my-runner' <<<"$existingRunner" || fail "existing runner Secret ignored"
+grep -q 'SCRIPT_RUNNER_TOKEN: ' <<<"$existingRunner" && fail "existing runner Secret still creates a token"
+if render "${DB[@]}" "${RUNNER[@]}" --set scriptRunner.existingSecret=release-agent-swarm-auth >/dev/null 2>&1; then
+  fail "runner accepts API auth Secret"
+fi
+https=$(render "${DB[@]}" "${RUNNER[@]}" --set scriptRunner.apiUrl=https://api.example.test/ --show-only templates/script-runner-deployment.yaml)
+grep -q 'value: "https://api.example.test"' <<<"$https" || fail "HTTPS override ignored"
+KEDA=(--set scriptRunner.keda.enabled=true --set scriptRunner.keda.existingSecret=metrics-user)
+keda=$(render "${DB[@]}" "${RUNNER[@]}" "${KEDA[@]}" --show-only templates/script-runner-scaledobject.yaml)
+for expected in 'kind: ScaledObject' 'kind: TriggerAuthentication' 'minReplicaCount: 1' 'maxReplicaCount: 10' 'valueLocation: lanes.sync.queued' 'authMode: bearer' 'name: metrics-user'; do
+  grep -q "$expected" <<<"$keda" || fail "KEDA missing $expected"
+done
+for field in minReplicaCount maxReplicaCount targetValue pollingInterval cooldownPeriod; do
+  if render "${DB[@]}" "${RUNNER[@]}" "${KEDA[@]}" --set "scriptRunner.keda.$field=0" >/dev/null 2>&1; then
+    fail "KEDA accepts $field=0"
+  fi
+done
+if render "${DB[@]}" "${RUNNER[@]}" "${KEDA[@]}" --set scriptRunner.keda.minReplicaCount=11 >/dev/null 2>&1; then
+  fail "KEDA accepts max below min"
+fi
+for invalid in release-agent-swarm-auth release-agent-swarm-script-runner ''; do
+  if render "${DB[@]}" "${RUNNER[@]}" "${KEDA[@]}" --set "scriptRunner.keda.existingSecret=$invalid" >/dev/null 2>&1; then
+    fail "KEDA accepts missing or shared credentials"
+  fi
+done
+
 if [ "$FAILURES" -gt 0 ]; then
   echo "check-chart-postgres: $FAILURES failure(s)"
   exit 1

@@ -22,6 +22,33 @@ services:
       postgres:
         condition: service_healthy
 
+  # Opt in with --profile script-runners. No API auth or database credentials.
+  script-runner:
+    image: "ghcr.io/desplega-ai/agent-swarm:${AGENT_SWARM_VERSION:-latest}"
+    profiles: [script-runners]
+    entrypoint: ["/script-runner-entrypoint.sh"]
+    user: "0:0"
+    environment:
+      SCRIPT_RUNNER_API_URL: ${SCRIPT_RUNNER_API_URL:-http://api:3013}
+      SCRIPT_RUNNER_TOKEN_FILE: /run/secrets/script_runner_token
+      SCRIPT_RUNNER_SLOTS: ${SCRIPT_RUNNER_SLOTS:-4}
+    secrets:
+      - source: script_runner_token
+        target: script_runner_token
+        uid: "0"
+        gid: "0"
+        mode: 0400
+    stop_grace_period: 60s
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/script-runner.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
   postgres:
     # Postgres 16 with pgvector (memory vector search).
     image: pgvector/pgvector:pg16
@@ -42,3 +69,7 @@ services:
 
 volumes:
   swarm_postgres:
+
+secrets:
+  script_runner_token:
+    file: ${SCRIPT_RUNNER_TOKEN_PATH:-./script_runner_token}

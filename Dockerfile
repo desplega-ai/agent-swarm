@@ -115,6 +115,10 @@ RUN bun build ./src/api-entry.ts ./src/scripts-runtime/executors/quickjs-worker.
       ./src/be/primitives/sheets/engine-worker.ts \
       --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 
+# The runner shares the real filesystem harness bundles and QuickJS worker entry.
+RUN bun build ./src/script-runner/main.ts ./src/scripts-runtime/executors/quickjs-worker.ts \
+      --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-script-runner
+
 # Stage 2: Minimal runtime image
 FROM debian:bookworm-slim
 
@@ -125,7 +129,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     jq \
-    python3 \
+    python3 bash util-linux \
     fuse3 libfuse2 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -139,6 +143,7 @@ WORKDIR /app
 # Copy compiled binary from builder.
 # --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
 COPY --from=builder --chmod=755 /build/agent-swarm-api /usr/local/bin/agent-swarm-api
+COPY --from=builder --chmod=755 /build/agent-swarm-script-runner /usr/local/bin/agent-swarm-script-runner
 
 # Copy package.json for version info
 COPY package.json ./
@@ -181,6 +186,14 @@ COPY --from=builder /build/script-types/ /app/script-types/
 # Create data directory for SQLite (WAL mode needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
 RUN mkdir -p /app/data /workspace/shared
 
+# Keep the sandbox identity aligned with UNPRIVILEGED_SANDBOX_IDENTITY.
+# Verify access as the child uid, including every parent directory.
+RUN command -v bash python3 bun setpriv agent-swarm-script-runner \
+    && test "$(id -u nobody)" = 65534 && test "$(id -g nobody)" = 65534 \
+    && setpriv --reuid=65534 --regid=65534 --clear-groups bun --version \
+    && setpriv --reuid=65534 --regid=65534 --clear-groups sh -c \
+      'test -r /app/scripts-runtime/eval-harness.bundle.js && test -r /app/script-workflows-runtime/harness.bundle.js'
+
 ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
 ENV MIGRATIONS_DIR=/app/migrations
@@ -199,5 +212,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:3013/health || exit 1
 
 COPY --chmod=755 api-entrypoint.sh /api-entrypoint.sh
+COPY --chmod=755 script-runner-entrypoint.sh /script-runner-entrypoint.sh
 
 ENTRYPOINT ["/api-entrypoint.sh"]

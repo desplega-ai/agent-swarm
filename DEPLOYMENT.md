@@ -951,3 +951,20 @@ Defaults: `https://*.agent-swarm.dev,https://*.agent-swarm.cloud,http://localhos
 For intentional compatibility only, `CORS_ALLOW_ANY_ORIGIN=true` allows any origin for non-credentialed requests only. Bearer-token clients from unlisted origins must use `credentials: "omit"`. Cookie-authenticated responses, including page JSON and `/@swarm/api/*`, always require an allowlisted origin for credentialed CORS. The API warns once per process when enabled, at startup or first request. Denied-origin logs name the rejected origin and the allowlist setting. Only CORS_ALLOWED_ORIGINS is reloadable through Settings → Configuration. CORS_ALLOW_ANY_ORIGIN is deployment-only: set it in the API environment and restart. Runtime config writes reject it, and legacy stored values are ignored at startup and reload.
 
 See the [Kubernetes CORS guide](https://docs.agent-swarm.dev/docs/guides/kubernetes#cors) for ingress and preflight diagnostics. CORS limits browser response access; authentication and CSRF protections remain necessary.
+
+## Optional script runners (PostgreSQL)
+
+The PostgreSQL overlay includes a `script-runner` service behind the `script-runners` profile.
+It uses the API image's second entrypoint and a separate token file.
+Create `./script_runner_token` from a minted runner credential before starting the service.
+
+```bash
+docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml \
+  --profile script-runners up -d --scale script-runner=2
+```
+
+The link carries run secrets. Use `SCRIPT_RUNNER_API_URL=https://...` outside a trusted network.
+Compose retains embedded capacity by default. Helm disables embedded capacity when runners are enabled.
+A `swarm_config` row overrides environment values.
+With embedded slots disabled and no runner, scripts wait and then fail, including the heartbeat script probe.
+See [script runners](./runbooks/script-runners.md) for credentials, KEDA, probes, drain, and verification.

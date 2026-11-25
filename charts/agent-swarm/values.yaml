@@ -448,3 +448,31 @@ litestream:
     # -- Pre-existing Secret with keys LITESTREAM_ACCESS_KEY_ID and
     # LITESTREAM_SECRET_ACCESS_KEY. When set, inline values are ignored.
     existingSecret: ""
+
+# PostgreSQL execution tier. No resources render until enabled.
+scriptRunner:
+  enabled: false
+  replicas: 1
+  # API image and its script-runner entrypoint. Root permits the native uid drop.
+  slots: 4
+  apiUrl: ""
+  terminationGracePeriodSeconds: 60
+  # Prefer an existing Secret with key SCRIPT_RUNNER_TOKEN.
+  existingSecret: ""
+  token: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 2Gi
+  keda:
+    enabled: false
+    minReplicaCount: 1
+    maxReplicaCount: 10
+    pollingInterval: 15
+    cooldownPeriod: 60
+    targetValue: 4
+    # A separate Secret with key token: a user token with script_runner.read.
+    # Never use the operator key or the runner credential.
+    existingSecret: ""
