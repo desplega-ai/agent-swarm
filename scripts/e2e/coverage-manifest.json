@@ -237,12 +237,14 @@
         "divergence-vector-search",
         "divergence-like-case",
         "divergence-seeded-schedule-sql",
+        "upgrade-seeded-schedule-operator-fields",
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
         "stress-task-finish",
         "stress-task-create",
         "stress-token-touch",
+        "ping-serialization-retry",
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
@@ -311,8 +313,11 @@
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
       "scenarios": [
         "knowledge-apps",
+        "knowledge-apps-action-runs",
+        "knowledge-apps-app-context",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
+        "knowledge-apps-log-stream",
         "knowledge-apps-primitives",
         "knowledge-apps-session-thread-files"
       ]
@@ -540,6 +545,10 @@
       "description": "room reset/change/decode over HTTP, MCP, WebSocket and workflow wait",
       "scenarios": ["realtime-rooms", "knowledge-rooms"]
     },
+    "realtime-apps": {
+      "description": "App row writes push refresh events to page rooms, presence rooms admit only declared pages and are purged on app delete",
+      "scenarios": ["realtime-apps", "realtime-apps-guards"]
+    },
     "repo-registry": {
       "description": "Register, update, gate allowMerge and the mergePolicy record, list and delete repo records over HTTP and MCP",
       "scenarios": ["platformb-repos", "platformb-repo-merge-policy"]
@@ -572,6 +581,10 @@
       "description": "Inline (args, ctx) runs return their results, auto-save a scratch script only on success, record each run, and persist idempotent output to KV. Concurrent runs of the same new source share one scratch script and one initial version.",
       "scenarios": ["script-inline-run", "script-parallel-inline-runs"]
     },
+    "script-db-dialect": {
+      "description": "ctx.db.dialect equals the storage engine at run start (no probe query); ctx.db.query returns portable rows as objects, runs only the active dialect's text from a per-dialect object, and fails with the db_query error. Native and quickjs executors.",
+      "scenarios": ["script-db-dialect"]
+    },
     "script-tool-usage": {
       "description": "The seeded tool-usage script counts tool_use lines from session_logs, filters by the task owner's agent, and binds every argument as a SQL parameter.",
       "scenarios": ["script-tool-usage"]
@@ -596,6 +609,10 @@
     "script-runs-durable": {
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
       "scenarios": ["script-runs-durable", "script-run-storage", "script-runs-executor-setting"]
+    },
+    "rbac-integration-role": {
+      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events and durable script runs, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
+      "scenarios": ["rbac-integration-role"]
     },
     "script-sandbox-identity": {
       "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
@@ -695,6 +712,8 @@
         "slack-delegation-failed-child",
         "slack-delegation-late-child",
         "slack-delegation-band-entry",
+        "slack-delegation-band-entry-knowledge",
+        "slack-delegation-band-entry-storage",
         "slack-quiet-lead-threads"
       ]
     },

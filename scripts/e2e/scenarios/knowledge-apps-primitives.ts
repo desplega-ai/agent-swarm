@@ -26,11 +26,15 @@ export const knowledgeAppsPrimitives: Scenario = {
   async run(ctx) {
     const otp = await skillExample("6-cell code input");
     const gantt = await skillExample("Gantt timeline");
+    const enter = await skillExample("Load on enter");
+    const shared = await skillExample("Shared window and action-fed chart");
     const created: string[] = [];
     try {
       for (const [label, definition] of [
         ["otp", otp],
         ["gantt", gantt],
+        ["enter", enter],
+        ["shared", shared],
       ] as const) {
         const response = await ctx.api("POST", "/api/apps", {
           body: { name: `E2E primitives ${label} ${ctx.nonce}`, definition },
@@ -41,6 +45,8 @@ export const knowledgeAppsPrimitives: Scenario = {
 
       const otpCell = (def: Json) => def.pages.verify.elements.cell.props;
       const ganttEl = (def: Json) => def.pages.plan.elements;
+      const enterEl = (def: Json) => def.pages.trace.elements;
+      const sharedEl = (def: Json) => def.pages.overview.elements;
       const cases: [string, Json, (def: Json) => void, string, RegExp][] = [
         [
           "Svg attrs are allowlisted",
@@ -129,6 +135,27 @@ export const knowledgeAppsPrimitives: Scenario = {
           /2 operand/,
         ],
         [
+          "comparison operand counts",
+          enter,
+          (d) => (enterEl(d).busy.props.content.$if[0] = { $eq: ["a"] }),
+          "pages.trace.elements.busy.props.content.$if.0.$eq",
+          /2 operand/,
+        ],
+        [
+          "OnEnter chains name declared actions",
+          enter,
+          (d) => (enterEl(d).enter.on.enter[1].params.name = "nope"),
+          "pages.trace.elements.enter.on.enter.1.params.name",
+          /./,
+        ],
+        [
+          "app state must be declared",
+          shared,
+          (d) => (sharedEl(d).load.props.deps = { $state: "/app/nope" }),
+          "pages.overview.elements.load.props.deps",
+          /undeclared app state "nope"/,
+        ],
+        [
           "key events are allowlisted",
           otp,
           (d) => (otpCell(d)["onKeyDown:F5"] = []),
@@ -168,6 +195,104 @@ export const knowledgeAppsPrimitives: Scenario = {
           issues.some((found) => found.path === path && message.test(String(found.message))),
           `${label}: expected ${path} ${message}, got ${JSON.stringify(issues).slice(0, 400)}`,
         );
+      }
+
+      // A borrowed element must receive app-wide state explicitly through props.
+      // Its action runs in the defining app, but /app belongs to the consumer.
+      const provider = structuredClone(shared);
+      provider.elements = {
+        report: {
+          mode: "bound",
+          export: true,
+          props: { window: { kind: "string", required: true } },
+          root: "load",
+          elements: {
+            load: {
+              type: "OnEnter",
+              props: { deps: { $state: "/props/window" } },
+              on: {
+                enter: [
+                  {
+                    action: "app.action",
+                    params: { name: "red", input: { window: { $state: "/props/window" } } },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      };
+      const supplied = await ctx.api("POST", "/api/apps", {
+        body: { name: `E2E state provider ${ctx.nonce}`, definition: provider },
+      });
+      expectStatus(supplied, [201], "bound element accepts explicit app-state props");
+      const providerId = String(asRecord(asRecord(supplied.json).app).id);
+      created.push(providerId);
+      const borrowed = await ctx.api("POST", "/api/apps", {
+        body: {
+          name: `E2E state consumer ${ctx.nonce}`,
+          definition: {
+            models: {},
+            state: { window: "consumer-private" },
+            defaultPage: "main",
+            pages: {
+              main: {
+                root: "borrowed",
+                elements: {
+                  borrowed: {
+                    type: "ElementRef",
+                    props: {
+                      app: providerId,
+                      element: "report",
+                      props: { window: { $state: "/app/window" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      expectStatus(borrowed, [201], "consumer explicitly passes its own app-wide state");
+      created.push(String(asRecord(asRecord(borrowed.json).app).id));
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: $template interpolation syntax under test
+      const appTemplate = "w=${/app/window}";
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: $template interpolation syntax under test
+      const bareAppTemplate = "w=${app/window}";
+      for (const exported of [true, false]) {
+        for (const [binding, read] of [
+          ["deps", { $state: "/app/window" }],
+          ["input", { $state: "/app/window" }],
+          ["deps", { $template: appTemplate }],
+          ["input", { $template: appTemplate }],
+          ["deps", { $template: bareAppTemplate }],
+          ["input", { $template: bareAppTemplate }],
+        ] as const) {
+          const definition = structuredClone(provider);
+          const report = definition.elements.report;
+          report.export = exported;
+          const load = report.elements.load;
+          if (binding === "deps") load.props.deps = read;
+          else load.on.enter[0].params.input.window = read;
+          const rejected = await ctx.api("PUT", `/api/apps/${providerId}`, {
+            body: { definition },
+          });
+          expectStatus(
+            rejected,
+            [400],
+            `${exported ? "exported" : "private"} ${binding} read ${JSON.stringify(read)}`,
+          );
+          const field = binding === "deps" ? "props.deps" : "on.enter.0.params.input.window";
+          const suffix = "$template" in read ? `${field}.$template` : field;
+          expect(
+            asRecords(rejected.json, "issues").some(
+              (found) =>
+                found.path === `elements.report.elements.load.${suffix}` &&
+                String(found.message).includes("elements cannot read /app state"),
+            ),
+            `borrowed elements cannot implicitly read consumer state through ${binding} ${JSON.stringify(read)}`,
+          );
+        }
       }
     } finally {
       for (const id of created) await ctx.api("DELETE", `/api/apps/${id}`);

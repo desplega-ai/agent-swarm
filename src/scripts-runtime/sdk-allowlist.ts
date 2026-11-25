@@ -294,6 +294,7 @@ export const RESERVED_CTX_KEYS: readonly string[] = [
   "mcp",
   "fs",
   "sh",
+  "db",
   "stdlib",
   "logger",
   "run",

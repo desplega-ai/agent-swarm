@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { basename } from "node:path";
 import {
+  createMigratedPostgresDatabase,
   createPostgresDatabase,
   type DbFixture,
   type DbTarget,
@@ -253,6 +254,11 @@ export async function startSut(
   engine: Engine = "sqlite",
   /** Runs after the SUT state paths exist and before the API process starts. */
   prepare?: (sut: Sut) => Promise<void>,
+  /**
+   * Postgres only. `migrated` clones a template that holds the migration chain.
+   * `empty` makes a database with no tables, for a `prepare` that needs one (db-copy).
+   */
+  postgresDatabase: "migrated" | "empty" = "migrated",
 ): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await reservedPort();
@@ -266,7 +272,12 @@ export async function startSut(
   const chatSdkRocketchatPort = await reservedPort();
   const apiKey = randomBytes(16).toString("hex");
   const dbPath = `/tmp/e2e-${stamp}.sqlite`;
-  const databaseUrl = engine === "postgres" ? await createPostgresDatabase(stamp) : undefined;
+  const databaseUrl =
+    engine !== "postgres"
+      ? undefined
+      : postgresDatabase === "empty"
+        ? await createPostgresDatabase(stamp)
+        : await createMigratedPostgresDatabase(stamp);
   const logPath = `/tmp/e2e-api-${stamp}.log`;
   const fsDir = `/tmp/e2e-fs-${stamp}`;
   const secretsDir = `/tmp/e2e-secrets-${stamp}`;
@@ -348,9 +359,13 @@ export async function startSut(
   };
   await prepare?.(sut);
   // After prepare: db-copy needs a database with no tables, and the reader role
-  // needs the tables (it applies the chain when nothing else did).
+  // needs the tables (it applies the chain when nothing else did; a migrated clone
+  // has it already).
   if (databaseUrl) {
-    const databaseQueryUrl = await preparePostgresQueryReader(databaseUrl);
+    const databaseQueryUrl = await preparePostgresQueryReader(
+      databaseUrl,
+      sut.env.E2E_POSTGRES_SEED_SQL,
+    );
     sut.env = { ...sut.env, DATABASE_QUERY_URL: databaseQueryUrl };
   }
   await launch(sut, keep);
@@ -414,6 +429,8 @@ export async function startFixtureSut(
           );
         }
       },
+      // db-copy refuses a target that has tables.
+      "empty",
     );
     return { sut, fixture };
   } finally {

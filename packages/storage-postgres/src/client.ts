@@ -104,6 +104,8 @@ export type TransactionEndInfo = {
   attempts: number;
   retries: string[];
   outcome: "commit" | "error" | "exhausted";
+  /** The transaction was opened `read only`. */
+  readOnly: boolean;
 };
 
 type TxContext = {
@@ -264,7 +266,13 @@ export class PostgresClient implements DbClient {
     const stack = this.options.onTransactionEnd ? (new Error().stack ?? "") : "";
     const retries: string[] = [];
     const end = (attempts: number, outcome: TransactionEndInfo["outcome"]) => {
-      this.options.onTransactionEnd?.({ stack, retries, attempts, outcome });
+      this.options.onTransactionEnd?.({
+        stack,
+        retries,
+        attempts,
+        outcome,
+        readOnly: opts.readOnly === true,
+      });
       this.options.observer?.onTransaction?.({
         attempts,
         retries,

@@ -21,6 +21,7 @@ import {
 } from "./executors/types";
 import { HOST_VALIDATED_ARGS } from "./host-validated-args";
 import { validateScriptImports } from "./import-allowlist";
+import type { ScriptDbDialect } from "./script-db";
 
 /**
  * `capacity_exceeded` (see `ScriptExecutorError`) means the sandboxed process
@@ -82,6 +83,11 @@ export type RunScriptInput = {
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
   agentFs?: ScriptAgentFsDescriptor;
+  /**
+   * SQL dialect of the swarm database, read by the api-side caller from the
+   * storage capability. It becomes `ctx.db.dialect`.
+   */
+  dbDialect?: ScriptDbDialect;
 };
 
 export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr"> & {
@@ -130,6 +136,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
     apiConnections: input.apiConnections ?? [],
     mcpConnections: input.mcpConnections ?? [],
     ...(input.agentFs ? { agentFs: input.agentFs } : {}),
+    ...(input.dbDialect ? { db: { dialect: input.dbDialect } } : {}),
   };
 }
 

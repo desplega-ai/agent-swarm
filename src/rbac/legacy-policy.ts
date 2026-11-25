@@ -368,6 +368,11 @@ export const LEGACY_POLICY = {
   "script.global.delete": leadOnly,
   "script.search": anyAuthenticated,
   "script.run": anyAuthenticated,
+  // These routes were open to every agent and the operator; user roles gate them at admission.
+  "script.run.durable": anyAuthenticated,
+  "script.run.cancel": anyAuthenticated,
+  "workflow.trigger": anyAuthenticated,
+  "workflow.run.event": anyAuthenticated,
   "script.api.read.secrets": leadOnly,
   "script.api.create": leadOnly,
   "script.api.update": leadOnly,

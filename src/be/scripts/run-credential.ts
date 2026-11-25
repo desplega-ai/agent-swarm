@@ -1,6 +1,7 @@
 import { type RunScriptInput, type RunScriptOutput, runScript } from "../../scripts-runtime/loader";
 import type { ScriptRunProvenance } from "../../utils/request-auth-context";
 import { getAgentById } from "../db";
+import { getStorage } from "../storage";
 import {
   mintScriptRunToken,
   mintUserScriptRunToken,
@@ -63,6 +64,11 @@ export async function acquireScriptApiCredential(
   };
 }
 
+/** `ctx.db.dialect` of a run: the active storage engine's `db_query` dialect. */
+function scriptDbDialect(): RunScriptInput["dbDialect"] {
+  return getStorage().capabilities.dbQueryDialect;
+}
+
 /**
  * Run a script with a per-run credential bound to its executing agent, and
  * revoke that credential when the run ends: on success, a thrown error, a
@@ -72,12 +78,12 @@ export async function acquireScriptApiCredential(
  * bearer.
  */
 export async function runScriptWithRunCredential(
-  input: Omit<RunScriptInput, "apiKey">,
+  input: Omit<RunScriptInput, "apiKey" | "dbDialect">,
   provenance: ScriptRunProvenance = {},
 ): Promise<RunScriptOutput> {
   const credential = await acquireScriptApiCredential(input.agentId, provenance);
   try {
-    return await runScript({ ...input, apiKey: credential.apiKey });
+    return await runScript({ ...input, apiKey: credential.apiKey, dbDialect: scriptDbDialect() });
   } finally {
     await credential.release();
   }
@@ -93,6 +99,7 @@ export async function runScriptAsUserWithRunCredential(
   input: Omit<
     RunScriptInput,
     | "apiKey"
+    | "dbDialect"
     | "agentId"
     | "egressSecrets"
     | "failedBindings"
@@ -108,6 +115,7 @@ export async function runScriptAsUserWithRunCredential(
     return await runScript({
       ...input,
       apiKey: token.plaintext,
+      dbDialect: scriptDbDialect(),
       // Empty: the SDK then sends no X-Agent-ID, which the api refuses on a user token.
       agentId: "",
       // Explicit empties: omitted, the loader falls back to deployment-wide bindings.

@@ -495,6 +495,7 @@ export const AgentTaskSourceSchema = z.enum([
   "jira",
   "comb",
   "chat",
+  "alert",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 

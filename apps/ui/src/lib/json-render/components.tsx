@@ -201,6 +201,7 @@ import type {
   FormField,
   GridColumns,
   KanbanColumn,
+  LogStreamProps,
   MetricTrend,
   SelectOption,
   SpacingToken,
@@ -228,6 +229,7 @@ import {
   linkCell,
   tipText,
 } from "./link-cell-model";
+import { LogStreamView } from "./log-stream";
 import { parseNumberInputValue } from "./number-input-value";
 import { PageFrameComponent } from "./page-frame";
 import {
@@ -1098,6 +1100,13 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   setRef.current = set;
   // Set while the slot holds the empty seed written before a bound `defaultValue` loaded.
   const awaitingDefaultRef = useRef(false);
+  // `/ui/<id>/search`: the typed text, debounced, so a `watch` can load options on type.
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(searchTimerRef.current), []);
+  const onSearchChange = (text: string) => {
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setRef.current(`/ui/${props.id}/search`, text), 250);
+  };
   useEffect(() => {
     const current = getRef.current(path);
     const seed = props.defaultValue;
@@ -1146,6 +1155,7 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
       searchPlaceholder: props.searchPlaceholder,
       searchable,
       contentAttrs: themeAttr,
+      onSearchChange,
       triggerClassName: cn(
         "w-full min-w-0",
         hasValue && clearable ? "[&>span:first-child]:mr-7" : undefined,
@@ -2852,6 +2862,42 @@ function FormComponent({ props }: { props: FormProps }) {
   // — `app.mutate` sets `/forms/<id>` to `{}` after a create — re-renders.
   const readField = (name: string): unknown => getByPath(state, `${basePath}/${name}`);
 
+  const initialValues = props.initialValues as Record<string, unknown> | undefined;
+  const initialSignature = initialValues ? JSON.stringify(initialValues) : "";
+  const resetKey = props.resetKey as string | number | undefined;
+  // The value each field was last seeded with, for one form path and reset
+  // key. A field whose current value differs from it holds an unsaved edit.
+  const seededRef = useRef<{ scope: string; values: Record<string, unknown> }>({
+    scope: "",
+    values: {},
+  });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-seed only when the prefill or its row changes by value, not on every poll re-render
+  useEffect(() => {
+    if (!initialValues) return;
+    // A new `resetKey` (the form now edits another row) forgets every seed, so
+    // each field re-seeds and drops the previous row's edits.
+    const scope = JSON.stringify([basePath, resetKey ?? null]);
+    if (seededRef.current.scope !== scope) seededRef.current = { scope, values: {} };
+    const seeded = seededRef.current.values;
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    for (const field of fields) {
+      if (!Object.hasOwn(initialValues, field.name)) continue;
+      const next = initialValues[field.name];
+      // A binding with no value yet (an `app.action` result clears while the
+      // action re-runs) is not a new prefill: skip it, or every refresh would
+      // blank the field and then re-seed it over the edit.
+      if (next === undefined) continue;
+      const path = `${basePath}/${field.name}`;
+      // Same row: a refresh re-seeds only untouched fields, so an edit survives
+      // even when the server value of that field changed.
+      const untouched = !Object.hasOwn(seeded, field.name) || same(get(path), seeded[field.name]);
+      if (untouched) {
+        set(path, next);
+        seeded[field.name] = next;
+      }
+    }
+  }, [initialSignature, basePath, resetKey]);
+
   // Mutate failures scoped to THIS form: the `app.mutate` handler writes them
   // to `/forms/<id>/$error` (keyed by the injected `formId`) instead of the
   // page-level banner. `$` keeps the slot out of the field-value namespace.
@@ -3468,6 +3514,21 @@ function TimelineComponent({ props }: { props: TimelineProps }) {
       renderStatus={(value, tones) => (
         <StatusCell value={value} tones={tones as Record<string, BadgeTone> | undefined} />
       )}
+    />
+  );
+}
+
+/** `LogStream` with its `onTrace` chain run with `$row` / `$rowIndex`. */
+function LogStreamComponent({ props }: { props: LogStreamProps }) {
+  const runChain = useRowActionRunner();
+  return (
+    <LogStreamView
+      props={props}
+      onTrace={
+        props.onTrace
+          ? (row, index) => void runChain(props.onTrace as ActionChain | undefined, row, index)
+          : undefined
+      }
     />
   );
 }
@@ -4391,6 +4452,9 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
     </span>
   ),
   Skeleton: ({ props }) => <SkeletonComponent props={props} />,
+  OnEnter: ({ props, emit }) => (
+    <OnEnterRunner deps={props.deps} everyMs={props.everyMs} emit={emit} />
+  ),
   Spinner: ({ props }) => (
     // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a busy indicator
     <span role="status" className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -4425,7 +4489,55 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   ObjectEmbed: ({ props }) => <ObjectEmbedComponent props={props} />,
   DateRange: ({ props }) => <DateRangeComponent props={props} />,
   Timeline: ({ props }) => <TimelineComponent props={props} />,
+  LogStream: ({ props }) => <LogStreamComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
   SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
-  PageFrame: ({ props }) => <PageFrameComponent props={props} />,
+  PageFrame: ({ props, emit }) => <PageFrameComponent props={props} emit={emit} />,
 };
+
+/**
+ * `OnEnter`: emits `enter` on mount and whenever `deps` changes by value.
+ * `emit` runs the chain without the cancel flag `watch` has, so a state write
+ * by one step never stops the next.
+ */
+function OnEnterRunner({
+  deps,
+  everyMs,
+  emit,
+}: {
+  deps: unknown;
+  everyMs?: number;
+  emit: (event: string) => void | Promise<void>;
+}) {
+  const signature = JSON.stringify(deps ?? null);
+  const emitRef = useRef(emit);
+  emitRef.current = emit;
+  // Runs still pending. A count, not a flag: a deps change can start a run
+  // while an older one is pending, and the older one settling must not open
+  // the tick gate while the newer one still runs.
+  const pendingRef = useRef(0);
+  const run = useCallback(async (tick: boolean) => {
+    // An interval tick never stacks behind a slow chain; a deps change always runs.
+    if (tick && pendingRef.current > 0) return;
+    pendingRef.current += 1;
+    try {
+      await emitRef.current("enter");
+    } finally {
+      pendingRef.current -= 1;
+    }
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger; emit is read live through the ref
+  useEffect(() => {
+    void run(false);
+  }, [signature]);
+  useEffect(() => {
+    // `everyMs` may be an expression: anything but a finite number >= 1000
+    // starts no timer (a string would make setInterval fire every ~0 ms).
+    if (typeof everyMs !== "number" || !Number.isFinite(everyMs) || everyMs < 1000) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void run(true);
+    }, everyMs);
+    return () => clearInterval(timer);
+  }, [everyMs, run]);
+  return null;
+}

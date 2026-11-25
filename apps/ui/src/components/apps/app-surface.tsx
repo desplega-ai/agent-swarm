@@ -110,6 +110,7 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useAppRealtime } from "@/hooks/use-app-realtime";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
@@ -772,6 +773,11 @@ export function AppSurface({
   // by `getPageStoreView`): never clobbered, so typed values survive navigation
   // like forms do. Every page is seeded on the first render, before the
   // renderer subscribes, so navigating later writes nothing mid-render.
+  // App-wide state (`state` → `/app/<name>`): one slot shared by every page, seeded the same way.
+  for (const [name, initial] of Object.entries(definition.state ?? {})) {
+    if (store.get(`/app/${name}`) === undefined)
+      store.set(`/app/${name}`, structuredClone(initial));
+  }
   for (const [page, { state }] of Object.entries(pages)) {
     if (!state) continue;
     const view = getPageStoreView(app.id, page);
@@ -955,6 +961,22 @@ export function AppSurface({
     if (JSON.stringify(store.get("/user") ?? null) === userConfigSignature) return;
     store.set("/user", mirrorValues);
   }, [userConfigSignature, mirrorValues, store]);
+
+  // ── App realtime ───────────────────────────────────────────────────────────
+  // A `rows` event refetches the queries over that model now (polling stays as
+  // the fallback); `/presence/peers` lists the other viewers of this page.
+  const { peers } = useAppRealtime({
+    appId: app.id,
+    page: activePageName,
+    onRowsChanged: (model) => {
+      void refetchModel(app.id, model).catch(() => {});
+    },
+  });
+  const peersSignature = JSON.stringify(peers);
+  useEffect(() => {
+    if (JSON.stringify(store.get("/presence/peers") ?? []) === peersSignature) return;
+    store.set("/presence", { peers, names: peers.map((p) => p.name), count: peers.length });
+  }, [peersSignature, peers, store]);
 
   // App-scope theme preset. A PRESENT viewer override (`$theme`) always wins
   // over the definition's `theme` — even when this build doesn't know the
@@ -1191,7 +1213,8 @@ export function AppSurface({
               } satisfies ActionSlot);
               // A script action can touch any model of any app on the surface.
               await ctx.refetchAll();
-              report({ status: "ok" });
+              // The result rides along for a caller that reads it (a page's `appContext.action`).
+              report({ status: "ok", result: response.result });
               return;
             }
 

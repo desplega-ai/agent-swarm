@@ -36,6 +36,25 @@ interface StateRef {
   value: string;
   /** A write target (`$bindState`, `ui.set`): only page-local `/local/<name>` state. */
   write?: boolean;
+  /** A `${/path}` read inside a `$template` string: checked only by the element-mode bans. */
+  template?: boolean;
+}
+
+/**
+ * `${path}` reads inside a `{ "$template": "..." }` object, as state refs. json-render resolves a
+ * bare `${app/x}` as `/app/x`, so a missing leading slash is added before the bans see it.
+ */
+function templateStateRefs(value: unknown, path: string): StateRef[] {
+  if (!isPlainObject(value) || typeof value.$template !== "string") return [];
+  const templatePath = appendPath(path, "$template");
+  return [...value.$template.matchAll(/\$\{([^}]+)\}/g)].map((match) => {
+    const read = match[1]!;
+    return {
+      path: templatePath,
+      value: read.startsWith("/") ? read : `/${read}`,
+      template: true,
+    };
+  });
 }
 
 export const ELEMENT_KEYS = new Set([
@@ -52,6 +71,7 @@ export const ELEMENT_KEYS = new Set([
 // namespaces these ids per instance; `apps-element-assembly.test.ts` keeps the
 // two lists equal.
 const UI_STATE_COMPONENTS = new Set([
+  "PageFrame",
   "SearchInput",
   "Select",
   "NumberInput",
@@ -146,6 +166,7 @@ const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
   Approval: ["onResolved"],
   Files: ["onSelect"],
   Timeline: ["onSelect"],
+  LogStream: ["onTrace"],
   SessionThread: ["onDispatch"],
 };
 
@@ -313,6 +334,10 @@ const EXPRESSION_ARITY: Record<string, readonly [number, number]> = {
   $split: [1, 3],
   $join: [1, 2],
   $length: [1, 1],
+  $eq: [2, 2],
+  $neq: [2, 2],
+  $not: [1, 1],
+  $if: [2, 3],
 };
 
 /** The operator of a `{ "$op": [...] }` expression object, or null. */
@@ -481,7 +506,7 @@ function validateSchema(
     return { issues: [issue(path, `must be ${types.join(" or ")}`)], stateRefs: [] };
   }
 
-  const result: SchemaValidationResult = { issues: [], stateRefs: [] };
+  const result: SchemaValidationResult = { issues: [], stateRefs: templateStateRefs(value, path) };
   if (isPlainObject(value)) {
     const properties = schema.properties ?? {};
     for (const required of schema.required ?? []) {
@@ -709,7 +734,10 @@ function actionParams(
       });
     } else if (!expressionOp(params.path)) {
       result.issues.push(
-        issue(appendPath(paramsPath, "path"), "must be a /local/<name> path or an expression"),
+        issue(
+          appendPath(paramsPath, "path"),
+          "must be a /local/<name> or /app/<name> path, or an expression",
+        ),
       );
     }
   } else if (step.action === "ui.toast") {
@@ -785,6 +813,18 @@ function validateStateRef(
   pageParams: Record<string, unknown>,
   pageState: Record<string, unknown>,
 ): AppValidationIssue | null {
+  const appMatch = /^\/app\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+  if (appMatch) {
+    if (!Object.hasOwn(definition.state ?? {}, appMatch[1]!)) {
+      return issue(
+        ref.path,
+        `state reference targets undeclared app state "${appMatch[1]}"; declare it in the definition's \`state\``,
+      );
+    }
+    return ref.value.split("/").some((segment) => RESERVED_UI_IDS.has(segment))
+      ? issue(ref.path, `invalid state reference "${ref.value}"`)
+      : null;
+  }
   const localMatch = /^\/local\/([^/]+)(?:\/.*)?$/.exec(ref.value);
   if (localMatch) {
     const name = localMatch[1]!;
@@ -799,9 +839,18 @@ function validateStateRef(
       : null;
   }
   if (ref.write) {
-    return issue(ref.path, `only page-local /local/<name> state is writable (got "${ref.value}")`);
+    return issue(
+      ref.path,
+      `only page-local /local/<name> or app-wide /app/<name> state is writable (got "${ref.value}")`,
+    );
   }
-  if (ref.value === "/route/page") return null;
+  // The whole route (`{ page, params }`) or params object: `OnEnter.deps` re-runs on any change.
+  if (ref.value === "/route/page" || ref.value === "/route" || ref.value === "/route/params") {
+    return null;
+  }
+  // App realtime: the other viewers of this page (`[{ id, name, avatar? }]`), their names
+  // (for `AvatarStack.users`) and their count.
+  if (["/presence/peers", "/presence/names", "/presence/count"].includes(ref.value)) return null;
   const routeParam = /^\/route\/params\/([^/]+)$/.exec(ref.value);
   if (routeParam) {
     const name = routeParam[1]!;
@@ -918,6 +967,7 @@ function collectStateRefs(value: unknown, path: string, refs: StateRef[]): void 
   if (isStateBinding(value) || isStateCondition(value)) {
     refs.push({ path, value: value.$state });
   }
+  refs.push(...templateStateRefs(value, path));
   if (Array.isArray(value)) {
     for (const [index, child] of value.entries()) {
       collectStateRefs(child, appendPath(path, index), refs);
@@ -1750,6 +1800,78 @@ function agentFsPropIssues(
   return issues;
 }
 
+/**
+ * The `appContext` allowlists on a PageFrame: `actions` must be declared script
+ * actions (a task action would create tasks from page code), `on.message` needs
+ * an `id` to root `/ui/<id>/message`. `expose` paths are checked as state reads
+ * by the caller as state reads. Both lists must be literal string arrays: an
+ * expression resolves at runtime past every check here. A pure element's frame
+ * gets no `actions`, the same rule as its `on` steps.
+ */
+function pageFrameBridgeIssues(
+  definition: AppDefinition,
+  element: Record<string, unknown>,
+  elementPath: string,
+  elementMode?: "pure" | "bound",
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const props = isPlainObject(element.props) ? element.props : {};
+  for (const key of ["actions", "expose"] as const) {
+    const list = props[key];
+    if (!isPlainObject(list)) continue;
+    issues.push(
+      issue(`${elementPath}.props.${key}`, "must be a literal array of strings, not an expression"),
+    );
+  }
+  if (Array.isArray(props.expose)) {
+    for (const [index, path] of props.expose.entries()) {
+      if (typeof path !== "string") {
+        issues.push(issue(`${elementPath}.props.expose.${index}`, "must be a literal state path"));
+      }
+    }
+  }
+  if (elementMode === "pure" && Array.isArray(props.actions) && props.actions.length > 0) {
+    issues.push(
+      issue(
+        `${elementPath}.props.actions`,
+        "pure elements cannot invoke actions — use a bound element",
+      ),
+    );
+  } else if (Array.isArray(props.actions)) {
+    for (const [index, name] of props.actions.entries()) {
+      const action =
+        typeof name === "string" && definition.actions && Object.hasOwn(definition.actions, name)
+          ? definition.actions[name]
+          : undefined;
+      if (!action) {
+        issues.push(
+          issue(`${elementPath}.props.actions.${index}`, `unknown app action "${String(name)}"`),
+        );
+      } else if (action.kind !== "script") {
+        issues.push(
+          issue(
+            `${elementPath}.props.actions.${index}`,
+            `only script actions can be called from a page (${String(name)} is ${action.kind})`,
+          ),
+        );
+      }
+    }
+  }
+  if (
+    isPlainObject(element.on) &&
+    Object.hasOwn(element.on, "message") &&
+    typeof props.id !== "string"
+  ) {
+    issues.push(
+      issue(
+        `${elementPath}.props.id`,
+        "is required with on.message: the message is stored at /ui/<id>/message",
+      ),
+    );
+  }
+  return issues;
+}
+
 /** `PageFrame.pageId` literal: a page id as the `/pages/:id` route takes it (no slugs). */
 const PAGE_FRAME_ID = /^[a-f0-9]{32}$/i;
 
@@ -2013,6 +2135,19 @@ export function validatePage(
         !PAGE_FRAME_ID.test(rawElement.props.pageId)
       ) {
         issues.push(issue(`${elementPath}.props.pageId`, "must be a page id (32 hex characters)"));
+      }
+      if (type === "PageFrame") {
+        issues.push(
+          ...pageFrameBridgeIssues(definition, rawElement, elementPath, options?.elementMode),
+        );
+        const expose = isPlainObject(rawElement.props) ? rawElement.props.expose : undefined;
+        if (Array.isArray(expose)) {
+          for (const [index, statePath] of expose.entries()) {
+            if (typeof statePath === "string") {
+              stateRefs.push({ path: `${elementPath}.props.expose.${index}`, value: statePath });
+            }
+          }
+        }
       }
       if (type === "Form") issues.push(...formFileFieldIssues(rawElement.props, elementPath));
       if (type === "DateRange") issues.push(...dateRangePropIssues(rawElement.props, elementPath));
@@ -2473,8 +2608,13 @@ export function validatePage(
   for (const ref of stateRefs) {
     const propMatch = /^\/props\/([^/]+)(?:\/.*)?$/.exec(ref.value);
     const userConfigRef = ref.value === "/user" || ref.value.startsWith("/user/");
+    const appRef = ref.value === "/app" || ref.value.startsWith("/app/");
     let stateIssue: AppValidationIssue | null;
-    if (options?.elementMode && ref.write) {
+    if (ref.template && !(options?.elementMode && (userConfigRef || appRef))) {
+      // shortcut: template reads skip full path validation (pages never checked them); only the
+      // element-mode /user and /app bans apply. Widen if templates need path checks too.
+      stateIssue = null;
+    } else if (options?.elementMode && ref.write) {
       stateIssue = issue(
         ref.path,
         `${options.elementMode} elements cannot write state; bind page-local state at page level`,
@@ -2483,6 +2623,11 @@ export function validatePage(
       stateIssue = issue(
         ref.path,
         `${options.elementMode} elements cannot read /user state; read userConfig via a prop or bind it at page level`,
+      );
+    } else if (options?.elementMode && appRef) {
+      stateIssue = issue(
+        ref.path,
+        `${options.elementMode} elements cannot read /app state; pass app-wide state via a declared prop from the consuming page`,
       );
     } else if (options?.elementMode && propMatch) {
       stateIssue = Object.hasOwn(options.elementProps ?? {}, propMatch[1]!)
