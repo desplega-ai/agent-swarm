@@ -24,6 +24,7 @@ import {
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { assertDurableBrokerFence } from "../be/script-runners/broker-fence";
 import { publishDurableRunRequested } from "../be/script-runners/durable-launch-bus";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import { getStorage } from "../be/storage";
@@ -685,6 +686,7 @@ export async function handleScriptRuns(
     // land before any of them counts, and every one of them would see (and be
     // refused by) the post-write total.
     const limit = await getStorage().transaction(async () => {
+      await assertDurableBrokerFence(req);
       await upsertScriptRunJournalStep({
         runId: run.id,
         stepKey: parsed.body.stepKey,
@@ -809,6 +811,7 @@ export async function handleScriptRuns(
       let dispatched: StepDispatch;
       try {
         dispatched = await getStorage().transaction(async (): Promise<StepDispatch> => {
+          await assertDurableBrokerFence(req);
           const replayed = await getLatestScriptRunStepTaskByContextKey(contextKey);
           if (replayed) return { task: replayed };
 

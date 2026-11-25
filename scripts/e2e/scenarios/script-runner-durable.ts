@@ -174,6 +174,42 @@ export const scriptRunnerDurable: Scenario = {
         asRecord(sync.json).result === 42 && Date.now() - since < 2000,
         "sync work completes within two seconds",
       );
+      for (const id of queuedIds) await ctx.api("DELETE", `/api/script-runs/${id}`);
+      const restartRun = await ctx.api("POST", "/api/script-runs", {
+        agentId,
+        body: {
+          source: `export default async (_, ctx) => {
+        await ctx.step.swarmScript("before-restart", { source: "export default () => 41" });
+        await new Promise(resolve => setTimeout(resolve, 20000));
+        return await ctx.step.swarmScript("after-restart", { source: "export default () => 42" });
+      }`,
+        },
+      });
+      const restartId = asString(asRecord(restartRun.json).id, "restart run ID");
+      expect(
+        await pollUntil(
+          async () =>
+            asRecords(
+              asRecord((await ctx.api("GET", `/api/script-runs/${restartId}`)).json),
+              "journal",
+            ).length === 1,
+          20000,
+        ),
+        "journal records the first step before API restart",
+      );
+      await ctx.restartSut({ env: { SCRIPT_EMBEDDED_RUNNER_SLOTS: "0" } });
+      let restarted: Record<string, unknown> = {};
+      expect(
+        await pollUntil(async () => {
+          restarted = asRecord((await ctx.api("GET", `/api/script-runs/${restartId}`)).json);
+          return asRecord(restarted.run).status === "completed";
+        }, 70000),
+        "durable run replays after API restart",
+      );
+      expect(
+        asRecords(restarted, "journal").length === 2,
+        "API restart preserves each journal step once",
+      );
     } finally {
       for (const id of queuedIds) await ctx.api("DELETE", `/api/script-runs/${id}`);
       await shared.stop("SIGKILL");

@@ -14,6 +14,7 @@ import type { ShellRuntime } from "../../scripts-runtime/shell-job";
 export class RemoteScriptRunner implements ScriptRunnerHandle {
   readonly kind = "remote";
   jobsCompleted = 0;
+  draining = false;
   readonly pending = new Map<string, { finish: (output: ExecutorOutput) => void }>();
   constructor(
     readonly id: string,

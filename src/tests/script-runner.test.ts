@@ -391,6 +391,14 @@ test("durable results remain held until acknowledgement across reconnect", async
               },
             }),
           );
+      } else if (message.type === "heartbeat") {
+        ws.send(
+          JSON.stringify({
+            type: "lease",
+            nonce: message.nonce,
+            jobs: message.jobs.map((jobId: string) => ({ jobId, leaseMs: 60000 })),
+          }),
+        );
       } else if (message.type === "durable-result") {
         expect(message.output).toBe(42);
         if (generation === 1) ws.terminate();
@@ -416,6 +424,155 @@ test("durable results remain held until acknowledgement across reconnect", async
     expect(heldAfterReconnect).toBe(true);
   } finally {
     await runner.stop();
+    for (const ws of wss.clients) ws.terminate();
+    wss.close();
+    server.close();
+  }
+}, 15000);
+
+test("capability replay does not consume admission and queued calls recheck ownership", async () => {
+  const { createCapabilitySession, MAX_ACTIVE_CAPABILITY_DISPATCHES } = await import(
+    "../script-workflows/capability-session"
+  );
+  const { SDK_ALLOWLIST } = await import("../scripts-runtime/sdk-allowlist");
+  const method = SDK_ALLOWLIST[0]!;
+  let authorized = true;
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const run = {
+    id: crypto.randomUUID(),
+    agentId: crypto.randomUUID(),
+    kind: "workflow" as const,
+    status: "running" as const,
+    startedAt: new Date().toISOString(),
+    source: "",
+    args: {},
+  };
+  const session = createCapabilitySession(
+    {
+      run,
+      baseUrl: "http://localhost",
+      apiKey: "fixture",
+      authorizeCapability: async () => authorized,
+    },
+    "fixture",
+    true,
+  );
+  session.authenticate(JSON.stringify({ type: "hello", token: "fixture" }));
+  session.built.ctx.swarm = {
+    [method]: async () => {
+      calls++;
+      await gate;
+      return 42;
+    },
+  };
+  const replies: string[] = [];
+  const send = async (frame: string) => {
+    replies.push(frame);
+  };
+  const frame = (id: string) =>
+    JSON.stringify({ type: "invoke", id, path: `swarm.${method}`, argsJson: "{}" });
+  const requests = Array.from({ length: MAX_ACTIVE_CAPABILITY_DISPATCHES + 1 }, (_, id) =>
+    session.receive(frame(String(id)), send),
+  );
+  for (let index = 0; index < 30 && calls < MAX_ACTIVE_CAPABILITY_DISPATCHES; index++)
+    await Bun.sleep(1);
+  expect(calls).toBe(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+  const duplicate = session.receive(frame("0"), send);
+  authorized = false;
+  release();
+  try {
+    await Promise.all([...requests, duplicate]);
+    expect(calls).toBe(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+    expect(replies.some((reply) => reply.includes("ownership expired"))).toBe(true);
+    session.confirmResponse("0");
+    await session.receive(frame("0"), send);
+    expect(replies.at(-1)).toContain("ownership expired");
+  } finally {
+    session.close();
+  }
+});
+
+test("unconfirmed heartbeats do not extend a durable guest lease", async () => {
+  const { createServer } = await import("node:http");
+  const { WebSocketServer } = await import("ws");
+  const { listenOnFreePort } = await import("./test-net");
+  const { startScriptRunner } = await import("../script-runner/client");
+  const { LocalProcessScriptExecutor } = await import("../script-workflows/executor");
+  const original = LocalProcessScriptExecutor.prototype.start;
+  let pid: number | null = null;
+  const spy = spyOn(LocalProcessScriptExecutor.prototype, "start").mockImplementation(
+    async function (input) {
+      const handle = await original.call(this, input);
+      pid = handle.pid;
+      return handle;
+    },
+  );
+  const server = createServer();
+  const wss = new WebSocketServer({ server });
+  const id = crypto.randomUUID();
+  let confirmed = false;
+  let stopped = false;
+  let draining = false;
+  wss.on("connection", (ws) =>
+    ws.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "hello") {
+        ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
+        ws.send(
+          JSON.stringify({
+            type: "durable-job",
+            jobId: id,
+            run: {
+              id,
+              agentId: crypto.randomUUID(),
+              kind: "workflow",
+              status: "running",
+              startedAt: new Date().toISOString(),
+              source:
+                "export default async () => { await new Promise(resolve => setTimeout(resolve, 60000)); return 42; }",
+              args: {},
+            },
+          }),
+        );
+      } else if (message.type === "heartbeat" && !confirmed) {
+        confirmed = true;
+        ws.send(
+          JSON.stringify({
+            type: "lease",
+            nonce: message.nonce,
+            jobs: [{ jobId: id, leaseMs: 1000 }],
+          }),
+        );
+      } else if (message.type === "durable-result") {
+        stopped = message.terminated === true;
+        ws.send(JSON.stringify({ type: "ack", jobId: id }));
+      } else if (message.type === "draining") draining = true;
+    }),
+  );
+  const port = await listenOnFreePort(server);
+  const runner = startScriptRunner({
+    apiUrl: `http://127.0.0.1:${port}`,
+    token: "fixture",
+    slots: 1,
+    executors: ["native"],
+    onRefused() {},
+  });
+  try {
+    const deadline = Date.now() + 8000;
+    while (!stopped && Date.now() < deadline) await Bun.sleep(20);
+    expect(stopped).toBe(true);
+    expect(pid).not.toBeNull();
+    expect(() => process.kill(pid!, 0)).toThrow();
+    await runner.stop();
+    await Bun.sleep(20);
+    expect(draining).toBe(true);
+  } finally {
+    await runner.stop();
+    spy.mockRestore();
     for (const ws of wss.clients) ws.terminate();
     wss.close();
     server.close();

@@ -74,6 +74,7 @@ const output = z
   })
   .transform((value): ExecutorOutput => ({ ...value, result: value.result }));
 export const runnerMessage = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("draining") }),
   z.object({
     type: z.literal("hello"),
     instanceId: id,
@@ -88,7 +89,11 @@ export const runnerMessage = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("result"), jobId: id, output }),
   z.object({ type: z.literal("cap"), jobId: id, frame: z.string().max(64 * 1024 * 1024) }),
-  z.object({ type: z.literal("heartbeat"), jobs: z.array(id).max(1024) }),
+  z.object({
+    type: z.literal("heartbeat"),
+    nonce: z.string().optional(),
+    jobs: z.array(id).max(1024),
+  }),
   z.object({
     type: z.literal("durable-result"),
     jobId: id,
@@ -110,6 +115,11 @@ export const apiMessage = z.discriminatedUnion("type", [
       input: ShellJobConfigSchema.omit({ cwd: true }),
     }),
   ]),
+  z.object({
+    type: z.literal("lease"),
+    nonce: z.string(),
+    jobs: z.array(z.object({ jobId: id, leaseMs: z.number().positive().max(60000) })).max(1024),
+  }),
   z.object({ type: z.literal("durable-job"), jobId: id, run: ScriptRunSchema }),
   z.object({ type: z.literal("cap"), jobId: id, frame: z.string().max(64 * 1024 * 1024) }),
   z.object({ type: z.literal("cancel"), jobId: id }),

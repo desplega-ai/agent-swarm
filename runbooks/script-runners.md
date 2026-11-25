@@ -132,6 +132,26 @@ SIGTERM stops admission, allows inline work five seconds, and stops durable gues
 The runner then closes with code 1000. The API releases its held rows immediately.
 Pause, cancel and limits stop the remote guest through its owner session.
 
+The runner starts a durable guest only after the API confirms a lease renewal.
+It measures the deadline from the heartbeat send time with a monotonic clock.
+Sending a heartbeat never extends that deadline. Lease expiry stops the guest process group.
+The API confirms renewals only after the guarded row update succeeds.
+
+During drain, the runner announces `draining` before refusing new work.
+Both placement pickers exclude draining sessions. An individual admission rejection fails only that job.
+Cancellation retains the reservation until guest cleanup produces a result.
+After five seconds without confirmation, the API removes that session from admission before releasing the reservation.
+
+Capability replies remain cached only until the runner confirms local delivery.
+Duplicate pending requests reuse their original promise before admission counters change.
+The API rechecks ownership after a capability waits for dispatch capacity.
+Journal writes and agent-task creation also lock and check the owner inside their mutation transactions.
+An external side effect that began before lease loss cannot be rolled back.
+
+When embedded capacity is unset, embedded fallback remains unlimited.
+A long run that cannot acquire a remote slot can therefore start locally.
+Set `SCRIPT_EMBEDDED_RUNNER_SLOTS=0` to require remote placement and retain queued rows.
+
 ## Container contract
 
 The API image includes `/usr/local/bin/agent-swarm-script-runner`.

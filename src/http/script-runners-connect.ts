@@ -33,6 +33,7 @@ import {
   heldScriptSlots,
   setHeldScriptRunnerPicker,
 } from "../scripts-runtime/dispatch/held-reservations";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { registerSessionTokenConnection } from "../utils/session-token-connections";
 import { route } from "./route-def";
 
@@ -59,6 +60,7 @@ export function attachScriptRunnerTransport(server: Server): () => void {
     (job) =>
       [...scriptRunnerSessions.values()].find(
         (runner) =>
+          !runner.draining &&
           runner.socket.readyState === WebSocket.OPEN &&
           runner.pending.size + heldScriptSlots(runner.id) < runner.slots &&
           runner.executors.includes(job.executor) &&
@@ -141,6 +143,19 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                   const priorCredential = instanceCredentials.get(message.instanceId);
                   if (priorCredential && priorCredential !== credential.id)
                     throw new Error("Runner instance credential changed");
+                  if (
+                    instanceCredentials.size >= 4096 &&
+                    !instanceCredentials.has(message.instanceId)
+                  ) {
+                    for (const id of instanceCredentials.keys()) {
+                      if (!scriptRunnerSessions.has(id) && heldScriptSlots(id) === 0)
+                        instanceCredentials.delete(id);
+                    }
+                    if (instanceCredentials.size >= 4096) {
+                      ws.close(1013, "Runner admission full");
+                      return;
+                    }
+                  }
                   instanceCredentials.set(message.instanceId, credential.id);
                   if (scriptRunnerSessions.has(message.instanceId)) {
                     ws.close(1011, "Runner instance is still connected");
@@ -168,11 +183,20 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                   drainScriptQueue();
                 } else {
                   if (!runner) throw new Error("hello required");
-                  if (message.type === "heartbeat") {
+                  if (message.type === "draining") runner.draining = true;
+                  else if (message.type === "heartbeat") {
                     const unhandled = [];
                     for (const id of message.jobs)
                       if (!(await heldStepHooks()?.heartbeat(runner, id))) unhandled.push(id);
-                    await durableHeartbeat(runner, unhandled);
+                    const renewed = await durableHeartbeat(runner, unhandled);
+                    if (message.nonce)
+                      ws.send(
+                        JSON.stringify({
+                          type: "lease",
+                          nonce: message.nonce,
+                          jobs: renewed.map((jobId) => ({ jobId, leaseMs: 60000 })),
+                        }),
+                      );
                   } else if (message.type === "cap")
                     await durableCapability(runner, message.jobId, message.frame);
                   else if (message.type === "durable-result")
@@ -190,7 +214,10 @@ export function attachScriptRunnerTransport(server: Server): () => void {
             clearTimeout(helloTimeout);
             clearInterval(ping);
             if (runner) {
-              if (code === 1000 || code === 1008) void releaseDurableOwner(runner.id);
+              if (code === 1000 || code === 1008)
+                void releaseDurableOwner(runner.id).catch((error) =>
+                  console.error(scrubSecrets(String(error))),
+                );
               runner.close();
               if (scriptRunnerSessions.get(runner.id) === runner)
                 scriptRunnerSessions.delete(runner.id);

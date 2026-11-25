@@ -38,7 +38,10 @@ export async function startDurableGuest(run: ScriptRun, send: (frame: string) =>
       const request = pending.get(response.id);
       if (!request) return;
       pending.delete(response.id);
-      void request.send(frame).catch(request.reject);
+      void request
+        .send(frame)
+        .then(() => send(JSON.stringify({ type: "ack", id: response.id })))
+        .catch(request.reject);
     },
     async stop() {
       for (const request of pending.values()) request.reject(new Error("Guest stopped"));

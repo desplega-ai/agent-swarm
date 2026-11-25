@@ -199,9 +199,13 @@ export function buildWorkflowCtx(input: {
   args: unknown;
   runStartedAt?: string;
   runMaxWallMs?: number;
+  ownerId?: string;
 }): BuiltWorkflowCtx {
   const baseUrl = input.baseUrl.replace(/\/$/, "");
-  const authHeaders = headers(input.apiKey, input.agentId);
+  const authHeaders = {
+    ...headers(input.apiKey, input.agentId),
+    ...(input.ownerId ? { "X-Script-Owner": input.ownerId } : {}),
+  };
   const abortController = new AbortController();
 
   async function fetchJson(path: string, init: RequestInit = {}): Promise<unknown> {

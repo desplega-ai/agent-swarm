@@ -567,6 +567,7 @@ export interface ScriptsRepository {
   deferForeignKeys(): Promise<void>;
   // ---- script_runs ----
   /** The run with its stored source. */
+  guardScriptRunOwner(id: string, ownerId: string, now: string): Promise<boolean>;
   claimScriptRun(id: string, ownerId: string, leaseExpiresAt: string | null): Promise<boolean>;
   renewScriptRunLease(
     id: string,
@@ -1203,6 +1204,12 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
       sql`UPDATE script_runs SET ${sqlJoin(sets, sql`, `)} WHERE id = ${id}${guardSql}`,
     );
     return result.changes;
+  }
+
+  async guardScriptRunOwner(id: string, ownerId: string, now: string): Promise<boolean> {
+    const result = await this.db.run(sql`UPDATE script_runs SET "ownerId" = "ownerId"
+      WHERE id = ${id} AND status = 'running' AND "ownerId" = ${ownerId} AND "leaseExpiresAt" > ${now}`);
+    return result.changes === 1;
   }
 
   async claimScriptRun(

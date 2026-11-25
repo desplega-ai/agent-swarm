@@ -210,6 +210,9 @@ export async function terminateScriptRunProcess(runId: string): Promise<boolean>
   if (managedRun) {
     await managedRun.execution.terminate("SIGTERM");
     managed.delete(runId);
+    const owner = await getStorage().repos.scripts.findScriptRun(runId);
+    if (owner?.ownerId)
+      await getStorage().repos.scripts.releaseScriptRunOwner(runId, owner.ownerId);
     return true;
   }
   if (run?.pid && scriptExecutor.isRunning(run.pid)) {

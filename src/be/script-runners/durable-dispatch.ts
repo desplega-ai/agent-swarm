@@ -8,6 +8,7 @@ import type {
 import { heldScriptSlots } from "../../scripts-runtime/dispatch/held-reservations";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { getStorage } from "../storage";
+import { registerDurableBrokerFence } from "./broker-fence";
 import { type RemoteScriptRunner, scriptRunnerSessions } from "./sessions";
 
 export const DURABLE_LEASE_MS = 60000;
@@ -35,6 +36,7 @@ export function pickDurableRunner(
   const share = Number(process.env.SCRIPT_RUNNER_LONG_LANE_SHARE ?? 0.5);
   return [...scriptRunnerSessions.values()].find(
     (runner) =>
+      !runner.draining &&
       runner.socket.readyState === 1 &&
       (options.eligible ? options.eligible(runner) : runner.executors.includes("native")) &&
       runner.pending.size + heldScriptSlots(runner.id) < runner.slots &&
@@ -47,8 +49,13 @@ export async function startRemoteDurable(
   input: StartScriptExecutionInput,
   runner: RemoteScriptRunner,
 ): Promise<ScriptExecutionHandle> {
+  const unregisterFence = registerDurableBrokerFence(input.apiKey, input.run.id, runner.id);
   const token = crypto.randomUUID();
-  const session = createCapabilitySession(input, token, true);
+  const session = createCapabilitySession(
+    { ...input, ownerId: runner.id, authorizeCapability: () => owns(input.run.id, runner.id) },
+    token,
+    true,
+  );
   session.authenticate(JSON.stringify({ type: "hello", token }));
   let finish!: (result: ScriptExecutionResult) => void;
   const exited = new Promise<ScriptExecutionResult>((resolve) => {
@@ -58,6 +65,7 @@ export async function startRemoteDurable(
   try {
     await send(runner, { type: "durable-job", jobId: input.run.id, run: input.run });
   } catch (error) {
+    unregisterFence();
     held.delete(input.run.id);
     session.close();
     throw error;
@@ -69,10 +77,20 @@ export async function startRemoteDurable(
     exited,
     async terminate() {
       session.close();
-      await send(runner, { type: "cancel", jobId: input.run.id }).catch(() => {});
-      finish({ exitCode: null, stderr: "", terminated: true });
+      const current = scriptRunnerSessions.get(runner.id) ?? runner;
+      await send(current, { type: "cancel", jobId: input.run.id }).catch(() => {});
+      const deadline = setTimeout(() => {
+        (scriptRunnerSessions.get(runner.id) ?? runner).close();
+        finish({ exitCode: null, stderr: "", terminated: true });
+      }, 5000);
+      try {
+        await exited;
+      } finally {
+        clearTimeout(deadline);
+      }
     },
     async cleanup() {
+      unregisterFence();
       session.close();
       if (held.get(input.run.id)?.session === session) held.delete(input.run.id);
     },
@@ -88,6 +106,7 @@ async function owns(jobId: string, ownerId: string): Promise<boolean> {
   );
 }
 export async function durableHeartbeat(runner: RemoteScriptRunner, jobs: string[]) {
+  const renewed: string[] = [];
   const now = new Date().toISOString();
   for (const id of jobs) {
     if (
@@ -99,11 +118,18 @@ export async function durableHeartbeat(runner: RemoteScriptRunner, jobs: string[
       ))
     )
       await send(runner, { type: "cancel", jobId: id });
+    else renewed.push(id);
   }
+  return renewed;
 }
 export async function durableCapability(runner: RemoteScriptRunner, id: string, frame: string) {
   const job = held.get(id);
   if (!job || job.ownerId !== runner.id || !(await owns(id, runner.id))) return;
+  const parsed = JSON.parse(frame);
+  if (parsed.type === "ack" && typeof parsed.id === "string") {
+    job.session.confirmResponse(parsed.id);
+    return;
+  }
   try {
     await job.session.receive(frame, async (response) => {
       if (await owns(id, runner.id)) {

@@ -550,6 +550,9 @@ export function scriptsContract(engine: ContractEngine): void {
       await repo.updateScriptRun("r2", { status: "running" });
       expect(await repo.claimScriptRun("r2", "runner-a", T1)).toBe(true);
       expect(await repo.claimScriptRun("r2", "runner-b", T1)).toBe(false);
+      expect(await repo.guardScriptRunOwner("r2", "runner-a", T0)).toBe(true);
+      expect(await repo.guardScriptRunOwner("r2", "runner-b", T0)).toBe(false);
+      expect(await repo.guardScriptRunOwner("r2", "runner-a", T1)).toBe(false);
       expect(await repo.renewScriptRunLease("r2", "runner-b", T0, T1)).toBe(false);
       expect(await repo.settleOwnedScriptRun("r2", "runner-b", T0, "completed", "42", null)).toBe(
         false,

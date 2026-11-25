@@ -93,24 +93,33 @@ export function startScriptRunner(options: {
   let disconnectedAt = Date.now();
   let reconnect: ReturnType<typeof setTimeout> | undefined;
   let socket: WebSocket;
-  const durable = new Map<
-    string,
-    {
-      cancelled?: boolean;
-      guest?: DurableGuest;
-      done: Promise<void>;
-      result?: ScriptExecutionResult;
-    }
-  >();
+  type HeldGuest = {
+    cancelled?: boolean;
+    guest?: DurableGuest;
+    done: Promise<void>;
+    result?: ScriptExecutionResult;
+    confirm(): void;
+    deadline?: ReturnType<typeof setTimeout>;
+  };
+  const durable = new Map<string, HeldGuest>();
   let sendCurrent: (message: unknown) => void = () => {};
-  const heartbeat = setInterval(
-    () => sendCurrent({ type: "heartbeat", jobs: [...durable.keys(), ...steps.keys()] }),
-    10000,
-  );
   const steps = new Map<
     string,
     { controller: AbortController; done: Promise<void>; result?: ExecutorOutput }
   >();
+  let heartbeatNonce = "";
+  let heartbeatSentAt = 0;
+  const sendHeartbeat = () => {
+    heartbeatNonce = crypto.randomUUID();
+    heartbeatSentAt = performance.now();
+    sendCurrent({ type: "heartbeat", nonce: heartbeatNonce, jobs: [...durable.keys(), ...steps.keys()] });
+  };
+  const expire = (job: HeldGuest) => {
+    job.cancelled = true;
+    job.confirm();
+    void job.guest?.stop();
+  };
+  const heartbeat = setInterval(sendHeartbeat, 10000);
   const jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
   const log = (message: string) => console.log(scrubSecrets(`[script-runner] ${message}`));
   const killJobs = async () => {
@@ -183,17 +192,28 @@ export function startScriptRunner(options: {
             durable.has(message.jobId) ||
             jobs.size + durable.size + steps.size >= options.slots ||
             !options.executors.includes("native")
-          )
-            throw new Error("Invalid durable job");
-          const job: {
-            cancelled?: boolean;
-            guest?: DurableGuest;
-            done: Promise<void>;
-            result?: ScriptExecutionResult;
-          } = { done: Promise.resolve() };
+          ) {
+            if (!durable.has(message.jobId))
+              sendCurrent({
+                type: "durable-result",
+                jobId: message.jobId,
+                exitCode: null,
+                stderr: "Runner rejected job",
+                terminated: true,
+              });
+            return;
+          }
+          let confirm!: () => void;
+          const confirmed = new Promise<void>((resolve) => {
+            confirm = resolve;
+          });
+          const job: HeldGuest = { done: Promise.resolve(), confirm };
+          job.deadline = setTimeout(() => expire(job), 15000);
           durable.set(message.jobId, job);
           job.done = (async () => {
             try {
+              await confirmed;
+              if (job.cancelled) throw new Error("Guest lease expired before start");
               job.guest = await startDurableGuest(message.run, (frame) =>
                 sendCurrent({ type: "cap", jobId: message.jobId, frame }),
               );
@@ -201,18 +221,38 @@ export function startScriptRunner(options: {
               job.result = await job.guest.execution.exited;
               await job.guest.execution.cleanup();
             } catch {
-              job.result = { exitCode: 1, stderr: "Durable guest failed" };
+              job.result = {
+                exitCode: 1,
+                stderr: "Durable guest failed",
+                ...(job.cancelled ? { terminated: true } : {}),
+              };
             }
             try {
               encodeRunnerFrame({ type: "durable-result", jobId: message.jobId, ...job.result });
             } catch {
               job.result = { exitCode: 1, stderr: "Durable result exceeds byte limit" };
             }
+            clearTimeout(job.deadline);
             sendCurrent({ type: "durable-result", jobId: message.jobId, ...job.result });
           })();
+          sendHeartbeat();
+        } else if (message.type === "lease") {
+          if (message.nonce !== heartbeatNonce) return;
+          for (const renewed of message.jobs) {
+            const job = durable.get(renewed.jobId);
+            if (!job || job.result || job.cancelled) continue;
+            clearTimeout(job.deadline);
+            const remaining = heartbeatSentAt + renewed.leaseMs - performance.now();
+            if (remaining <= 0) expire(job);
+            else {
+              job.deadline = setTimeout(() => expire(job), remaining);
+              job.confirm();
+            }
+          }
         } else if (message.type === "cap") {
           durable.get(message.jobId)?.guest?.receive(message.frame);
         } else if (message.type === "ack") {
+          clearTimeout(durable.get(message.jobId)?.deadline);
           durable.delete(message.jobId);
           steps.delete(message.jobId);
         } else if (message.type === "job") {
@@ -223,8 +263,15 @@ export function startScriptRunner(options: {
             steps.has(message.jobId) ||
             jobs.size + durable.size + steps.size >= options.slots ||
             !options.executors.includes(message.executor)
-          )
-            throw new Error("invalid job");
+          ) {
+            if (!jobs.has(message.jobId))
+              sendCurrent({
+                type: "result",
+                jobId: message.jobId,
+                output: failedJob("executor_error"),
+              });
+            return;
+          }
           const controller = new AbortController();
           const held = message.kind !== "inline";
           const record = {
@@ -292,7 +339,7 @@ export function startScriptRunner(options: {
           steps.get(message.jobId)?.controller.abort();
           const job = durable.get(message.jobId);
           if (job) {
-            job.cancelled = true;
+            expire(job);
             void (async () => {
               if (!job.guest) await job.done;
               await job.guest?.stop();
@@ -339,6 +386,7 @@ export function startScriptRunner(options: {
   connect();
   return {
     async stop() {
+      sendCurrent({ type: "draining" });
       stopped = true;
       clearInterval(heartbeat);
       clearReady();
@@ -357,7 +405,8 @@ export function startScriptRunner(options: {
       steps.clear();
       await Promise.all(
         [...durable.values()].map(async (job) => {
-          job.cancelled = true;
+          clearTimeout(job.deadline);
+          expire(job);
           await job.guest?.stop();
           await job.done;
         }),

@@ -68,6 +68,7 @@ export function createCapabilitySession(
 ) {
   const { run, apiKey, baseUrl } = input;
   const built = buildWorkflowCtx({
+    ownerId: input.ownerId,
     runId: run.id,
     agentId: run.agentId,
     apiKey,
@@ -83,15 +84,22 @@ export function createCapabilitySession(
   let closed = false;
   const responses = new Map<string, Promise<string>>();
   let retainedBytes = 0;
+  const responseSizes = new Map<string, number>();
   const waiters: Array<() => void> = [];
   const dispatch = async (path: string, args: string) => {
     if (closed) throw new Error("Capability session closed");
-    if (!path.startsWith("swarm.")) return dispatchCapability(built, path, args);
+    if (!path.startsWith("swarm.")) {
+      if (input.authorizeCapability && !(await input.authorizeCapability()))
+        throw new Error("Durable ownership expired");
+      return dispatchCapability(built, path, args);
+    }
     if (active >= MAX_ACTIVE_CAPABILITY_DISPATCHES)
       await new Promise<void>((resolve) => waiters.push(resolve));
     else active++;
     try {
       if (closed) throw new Error("Capability session closed");
+      if (input.authorizeCapability && !(await input.authorizeCapability()))
+        throw new Error("Durable ownership expired");
       return await dispatchCapability(built, path, args);
     } finally {
       const next = waiters.shift();
@@ -111,33 +119,18 @@ export function createCapabilitySession(
       }
       return authenticated;
     },
+    confirmResponse(id: string) {
+      const bytes = responseSizes.get(id);
+      if (bytes === undefined) return;
+      retainedBytes -= bytes;
+      responseSizes.delete(id);
+      responses.delete(id);
+    },
     async receive(frame: string, send: (response: string) => Promise<void>) {
       if (closed || !authenticated) throw new Error("Capability session is not authenticated");
       if (Buffer.byteLength(frame) > SCRIPT_SDK_RESPONSE_LIMIT_BYTES)
         throw new Error("Capability request exceeds limit");
-      if (pending >= MAX_PENDING_CAPABILITY_CALLS)
-        throw new Error("Capability pending call limit exceeded");
-      pending++;
-      try {
-        let result: Promise<string>;
-        const request = JSON.parse(frame);
-        const id = request.id;
-        if (replayResponses && typeof id !== "string")
-          throw new Error("Invalid capability request ID");
-        const previous = replayResponses ? responses.get(id) : undefined;
-        if (previous) result = previous;
-        else {
-          result = handleCapabilityRequest(frame, dispatch).then((response) => {
-            if (replayResponses) {
-              retainedBytes += Buffer.byteLength(response);
-              if (retainedBytes > SCRIPT_SDK_RESPONSE_LIMIT_BYTES)
-                throw new Error("Capability replay cache exceeds limit");
-            }
-            return response;
-          });
-          if (replayResponses) responses.set(id, result);
-        }
-        const response = await result;
+      const write = async (response: string) => {
         const bytes = Buffer.byteLength(response) + 1;
         if (closed) return;
         if (queuedBytes + bytes > SCRIPT_SDK_RESPONSE_LIMIT_BYTES)
@@ -148,6 +141,43 @@ export function createCapabilitySession(
         } finally {
           queuedBytes -= bytes;
         }
+      };
+      const request = JSON.parse(frame);
+      const id = request.id;
+      if (replayResponses && typeof id !== "string")
+        throw new Error("Invalid capability request ID");
+      const previous = replayResponses ? responses.get(id) : undefined;
+      if (previous) {
+        await write(await previous);
+        return;
+      }
+      if (
+        pending >= MAX_PENDING_CAPABILITY_CALLS ||
+        (replayResponses && responses.size >= MAX_PENDING_CAPABILITY_CALLS)
+      ) {
+        await write(
+          await handleCapabilityRequest(frame, async () => {
+            throw new Error(
+              `Capability pending call limit of ${MAX_PENDING_CAPABILITY_CALLS} exceeded`,
+            );
+          }),
+        );
+        return;
+      }
+      pending++;
+      try {
+        const result = handleCapabilityRequest(frame, dispatch).then((response) => {
+          if (replayResponses) {
+            const bytes = Buffer.byteLength(response);
+            if (retainedBytes + bytes > SCRIPT_SDK_RESPONSE_LIMIT_BYTES)
+              throw new Error("Capability replay cache exceeds limit");
+            retainedBytes += bytes;
+            responseSizes.set(id, bytes);
+          }
+          return response;
+        });
+        if (replayResponses) responses.set(id, result);
+        await write(await result);
       } finally {
         pending--;
       }
@@ -155,6 +185,7 @@ export function createCapabilitySession(
     close() {
       closed = true;
       responses.clear();
+      responseSizes.clear();
       built.abortInFlightSteps();
       for (const resume of waiters.splice(0)) resume();
     },

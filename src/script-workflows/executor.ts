@@ -48,6 +48,8 @@ export type StartScriptExecutionInput = {
   run: ScriptRun;
   baseUrl: string;
   apiKey: string;
+  ownerId?: string;
+  authorizeCapability?: () => Promise<boolean>;
   capabilityRelay?: (frame: string, send: (response: string) => Promise<void>) => Promise<void>;
 };
 
@@ -169,13 +171,11 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       });
       socket.on("error", fail);
       socket.setEncoding("utf8");
-      socket.on("data", (chunk) => {
-        buffered += chunk;
-        if (Buffer.byteLength(buffered) > SCRIPT_SDK_RESPONSE_LIMIT_BYTES) {
-          fail(new Error("Workflow capability request exceeded the 64 MiB limit"));
-          return;
-        }
-        while (buffered.includes("\n")) {
+      let processingScheduled = false;
+      const processBuffered = () => {
+        if (socket.destroyed) return;
+        let processed = 0;
+        while (buffered.includes("\n") && processed < 4) {
           const newline = buffered.indexOf("\n");
           const frame = buffered.slice(0, newline);
           buffered = buffered.slice(newline + 1);
@@ -189,6 +189,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
             capabilitySocket = socket;
             clearTimeout(timeout);
           } else {
+            processed++;
             void session
               .receive(
                 frame,
@@ -200,6 +201,21 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
               .catch(fail);
           }
         }
+        if (buffered.includes("\n") && !processingScheduled) {
+          processingScheduled = true;
+          queueMicrotask(() => {
+            processingScheduled = false;
+            processBuffered();
+          });
+        }
+      };
+      socket.on("data", (chunk) => {
+        buffered += chunk;
+        if (Buffer.byteLength(buffered) > SCRIPT_SDK_RESPONSE_LIMIT_BYTES) {
+          fail(new Error("Workflow capability request exceeded the 64 MiB limit"));
+          return;
+        }
+        processBuffered();
       });
     });
 
