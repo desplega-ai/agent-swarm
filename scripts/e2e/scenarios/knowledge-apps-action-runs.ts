@@ -24,7 +24,7 @@ const ORCHESTRATOR = `export default async function (args: { fail?: boolean }, c
 
 // The `refresh` action script: one inline nested run, then launch the orchestrator and return.
 // `holdMs` keeps the action itself running after its nested run, so a probe can read it mid-flight.
-const REFRESH = `export default async function (args: { fail?: boolean; holdMs?: number }, ctx: any) {
+const REFRESH = `export default async function (args: { fail?: boolean; holdMs?: number; note?: string }, ctx: any) {
   await ctx.swarm.script_run({ source: "export default async function () { return 0; }" });
   if (args.holdMs) await new Promise((r) => setTimeout(r, args.holdMs));
   const launched = await ctx.swarm.script_launchRun({
@@ -32,7 +32,7 @@ const REFRESH = `export default async function (args: { fail?: boolean; holdMs?:
     args: { fail: args.fail === true },
     scriptName: "e2e-app-orchestrator",
   });
-  return { launched: (launched?.data ?? launched)?.id ?? null };
+  return { launched: (launched?.data ?? launched)?.id ?? null, note: args.note ?? null };
 }`;
 
 function runOf(result: unknown): Record<string, unknown> {
@@ -178,8 +178,9 @@ export const knowledgeAppsActionRuns: Scenario = {
             .query<{ id: string }>(sql`SELECT id FROM script_runs WHERE "agentId" = ${owner}`)
             .map((r) => r.id),
         );
+        const note = `caller-private-${ctx.nonce}`;
         const inFlight = ctx.api("POST", `/api/apps/${appId}/actions/refresh`, {
-          body: { input: { holdMs: 2500 } },
+          body: { input: { holdMs: 2500, note } },
         });
         let liveRoot: string | undefined;
         for (const deadline = Date.now() + 10_000; !liveRoot && Date.now() < deadline; ) {
@@ -209,6 +210,26 @@ export const knowledgeAppsActionRuns: Scenario = {
         expect(
           asRecord(asRecord(response.json).run).id === liveRoot,
           "the response names the same run",
+        );
+        expect(
+          asRecord(asRecord(response.json).result).note === note,
+          "the caller gets its result back",
+        );
+        // script_runs reads are open to every authenticated principal: the action's row
+        // must not carry the caller's input, identity or result.
+        response = await ctx.api("GET", `/api/script-runs/${liveRoot}`, { agentId: outsider });
+        expectStatus(response, [200], "another agent reads the action's script run");
+        const exposed = asRecord(asRecord(response.json).run);
+        expect(
+          !JSON.stringify(exposed).includes(note) &&
+            asRecord(exposed.args).caller === undefined &&
+            exposed.output == null,
+          `the row holds no caller payload: ${JSON.stringify({ args: exposed.args, output: exposed.output })}`,
+        );
+        response = await ctx.api("GET", `/api/script-runs?agentId=${owner}`, { agentId: outsider });
+        expect(
+          !JSON.stringify(response.json).includes(note),
+          "the run list holds no caller payload",
         );
         result = await callToolOk(mcp, "app-action-status", {
           appId,
