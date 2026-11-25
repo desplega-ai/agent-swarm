@@ -202,6 +202,7 @@ export const DEFERRED_TOOLS = new Set([
   "app-row-delete",
   "app-rows-delete",
   "app-action-run",
+  "app-action-status",
   "app-sync",
   "app-upsert",
   "app-history",

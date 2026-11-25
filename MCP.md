@@ -151,6 +151,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-row-delete](#app-row-delete)
   - [app-rows-delete](#app-rows-delete)
   - [app-action-run](#app-action-run)
+  - [app-action-status](#app-action-status)
   - [app-history](#app-history)
   - [app-diff](#app-diff)
   - [app-list](#app-list)
@@ -476,8 +477,6 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 ### db-query
 
 **Execute database query**
-
-Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents. Queries that read credential tables (OAuth authorizations, apps and pending flows, user and session tokens, script API bearers, Codex device-login state) are rejected, and secret-shaped values in results are redacted. Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1905,13 +1904,26 @@ Delete matching app rows. Supply at least one equality filter.
 
 **Run an app action**
 
-Run a declared app action as an agent. Scripts and extensions cannot invoke this tool.
+Run a declared app action as an agent. A script or task action returns `run` with `settled`; pass `waitSeconds` (up to 25) to wait for every run the action's script launched or called, then `app-action-status` while `run.settled` is false. Scripts and extensions cannot invoke this tool.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `appId` | `string` | Yes | - | - |
 | `action` | `unknown` | Yes | - | - |
 | `input` | `object` | No | - | - |
+| `waitSeconds` | `number` | No | - | Hold the call up to this many seconds (max 25) until the action's run settles. Default 0: return at once. |
+
+### app-action-status
+
+**Read or wait on an app action run**
+
+Read the run an `app-action-run` call returned (`run.id`). A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (up to 25) holds the call until the run settles. Use it instead of sleep loops on app rows.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `runId` | `string` | Yes | - | The `run.id` from app-action-run. |
+| `waitSeconds` | `number` | No | - | Hold the call up to this many seconds (max 25) until the run settles. |
 
 ### app-history
 

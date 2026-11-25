@@ -11975,6 +11975,17 @@
                         },
                         "durationMs": {
                           "type": "number"
+                        },
+                        "run": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ]
                         }
                       },
                       "required": [
@@ -12012,12 +12023,24 @@
                             "superseded",
                             "skipped"
                           ]
+                        },
+                        "run": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ]
                         }
                       },
                       "required": [
                         "ok",
                         "taskId",
-                        "status"
+                        "status",
+                        "run"
                       ]
                     },
                     {
@@ -12166,6 +12189,174 @@
           },
           "409": {
             "description": "App definition needs repair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/{id}/action-runs/{runId}": {
+      "get": {
+        "summary": "Read or wait on an app action run",
+        "description": "`runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 25
+            },
+            "required": false,
+            "name": "waitSeconds",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Action run state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "succeeded",
+                        "failed"
+                      ]
+                    },
+                    "settled": {
+                      "type": "boolean"
+                    },
+                    "runs": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "running": {
+                          "type": "number"
+                        },
+                        "completed": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "running",
+                        "completed",
+                        "failed",
+                        "truncated"
+                      ]
+                    },
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "scriptName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "scriptName",
+                          "error"
+                        ]
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "elapsedMs": {
+                      "type": "number"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state",
+                    "settled",
+                    "elapsedMs"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "App or action run not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -55879,6 +56070,10 @@
                   },
                   "requestedByUserId": {
                     "type": "string"
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 }
               }
@@ -55942,7 +56137,7 @@
             }
           },
           "404": {
-            "description": "Global script not found",
+            "description": "Global script not found, or parentScriptRunId names no running run of the calling agent",
             "content": {
               "application/json": {
                 "schema": {

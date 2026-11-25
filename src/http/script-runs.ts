@@ -54,7 +54,7 @@ import {
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
 import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
-import { authUser, getRequestAuth } from "../utils/request-auth-context";
+import { authUser, getCurrentRunProvenance, getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
@@ -90,6 +90,13 @@ const createScriptRunBodySchema = z.object({
   idempotencyKey: z.string().min(1).max(200).optional(),
   scriptName: z.string().min(1).max(200).optional(),
   requestedByUserId: z.string().optional(),
+  /**
+   * The run this one works for, so it joins that run's tree (an app action's
+   * `app-action-status`). `launch-script-run` sets it from the calling run's
+   * token; a run token's own provenance wins over this field. It must name a
+   * running run of the calling agent (404 otherwise).
+   */
+  parentScriptRunId: z.string().min(1).optional(),
 });
 
 const listScriptRunsQuerySchema = z.object({
@@ -178,7 +185,10 @@ const createScriptRunRoute = route({
       schema: scriptRunCreatedSchema,
     },
     403: { description: "A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST" },
-    404: { description: "Global script not found" },
+    404: {
+      description:
+        "Global script not found, or parentScriptRunId names no running run of the calling agent",
+    },
     429: { description: "Script run concurrency cap reached" },
   },
   // Open to every agent and the operator key (legacy policy), like the inline
@@ -615,6 +625,23 @@ export async function handleScriptRuns(
       : parsed.body.requestedByUserId
         ? await resolveTaskRequester(req, agent.id, parsed.body.requestedByUserId)
         : undefined;
+    // A body-named parent is trusted only as the caller's own live run (the MCP
+    // launch proxy names its calling run here): another agent must not graft a
+    // run into, and so change the state of, someone else's run tree. A run
+    // token's provenance wins in createScriptRun and needs no check. A user
+    // token has no calling run, and `agent` is then the script's owner, so its
+    // body-named parent is ignored.
+    const parentScriptRunId =
+      user || getCurrentRunProvenance()?.sourceScriptRunId
+        ? undefined
+        : parsed.body.parentScriptRunId;
+    if (parentScriptRunId) {
+      const parent = await getScriptRun(parentScriptRunId);
+      if (parent?.agentId !== agent.id || parent.status !== "running") {
+        jsonError(res, "parentScriptRunId does not name a running run of this agent", 404);
+        return true;
+      }
+    }
     const creation = await getStorage().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
@@ -627,6 +654,7 @@ export async function handleScriptRuns(
         requestedByUserId,
         sourceTaskId,
         createdBy: requestedByUserId,
+        parentScriptRunId,
       });
     });
     if (!creation) {
