@@ -1249,3 +1249,9 @@ Two valid patterns:
 ### Multi-instance limitation
 
 `workflowEventBus` is an in-process `EventEmitter` (`src/workflows/event-bus.ts`). With multiple API replicas, a signal emitted on instance A will not reach a wait paused on instance B. Single-instance only for v1; cross-instance fan-out (Redis pub/sub, etc.) is a separate plan.
+
+## Inline script runtime
+
+The `script` executor uses `src/scripts-runtime/shell-job.ts` for bash, TypeScript and Python.
+The shared runtime preserves sandbox limits, process group cleanup, output caps and JSON output fields.
+An explicit `cwd` refers to a directory on the API host.
