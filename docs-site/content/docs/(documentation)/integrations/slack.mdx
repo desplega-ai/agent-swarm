@@ -249,7 +249,7 @@ Set `SLACK_REPLY_FOOTER_ENABLED=false` to hide the task details footer from outc
 
 Set `SLACK_FEEDBACK_BUTTONS=true`, or turn on **Slack answer feedback** in **Settings → Configuration**, to put Slack's native 👍/👎 buttons under each final outcome card. It is off by default and applies without a restart. Deferral (⏳) cards and timed-out conclusions get no buttons. If Slack refuses the buttons, the card posts without them.
 
-A click from an allowed person in the task's channel stores one row in the reserved KV namespace `slack-feedback`, at key `<taskId>/<slackUserId>`, so a person's later click on the same answer replaces their vote. The row holds `vote` (`up` or `down`), `votedAt`, and the task's `agentId`, `profile`, `model` and `modelTier`. Read the votes with `GET /api/kv/_/slack-feedback` (add `?prefix=<taskId>/` for one task), or `kv_list` on that namespace from a script. Agents cannot write the namespace.
+A click from an allowed person in the task's channel stores one row in the reserved KV namespace `slack-feedback`, at key `<taskId>/<slackUserId>`, so a person's later click on the same answer replaces their vote. The row holds `vote` (`up` or `down`), `votedAt`, and the task's `agentId`, `profile`, `model` and `modelTier`. A row also names the voter's Slack user ID and the task's channel and thread, so only a Lead agent can read the namespace: `GET /api/kv/_/slack-feedback` with the Lead's `X-Agent-ID` (add `?prefix=<taskId>/` for one task), or `kv_list` on that namespace as the Lead. Other agents and calls with no agent get 403, and no agent can write the namespace.
 
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 

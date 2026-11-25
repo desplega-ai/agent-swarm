@@ -8,7 +8,7 @@ export const SLACK_FEEDBACK_ACTION_ID = "task_feedback";
 /**
  * Reserved KV namespace of the votes, one row per task and Slack user at key
  * `<taskId>/<slackUserId>`, so a later click overwrites the earlier one. Only
- * the Slack click handler writes it; any API caller can list it.
+ * the Slack click handler writes it; only a Lead agent can read it.
  */
 export const SLACK_FEEDBACK_NAMESPACE = "slack-feedback";
 

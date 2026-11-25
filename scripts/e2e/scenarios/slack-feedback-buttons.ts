@@ -6,6 +6,7 @@ import {
   enableSlackRenderV2Only,
   findSlackTask,
   registerLead,
+  registerWorker,
   waitForEyes,
   waitForOutcome,
   waitForReaction,
@@ -55,8 +56,11 @@ async function answer(ctx: ScenarioContext, label: string, uiSpec?: Record<strin
   return { taskId, leadId, cardTs: outcome.ts, blocks };
 }
 
-async function votesOf(ctx: ScenarioContext, taskId: string) {
-  const response = await ctx.api("GET", `/api/kv/_/${NAMESPACE}?prefix=${taskId}/`);
+/** The stored votes of `taskId`, read as the Lead: only a Lead agent may read the namespace. */
+async function votesOf(ctx: ScenarioContext, taskId: string, leadId: string) {
+  const response = await ctx.api("GET", `/api/kv/_/${NAMESPACE}?prefix=${taskId}/`, {
+    headers: { "X-Agent-ID": leadId },
+  });
   expectStatus(response, [200], `list the votes of task ${taskId}`);
   const entries = asRecord(response.json).entries;
   return (Array.isArray(entries) ? entries : []).map((entry) => {
@@ -68,7 +72,7 @@ async function votesOf(ctx: ScenarioContext, taskId: string) {
 /** Clicks 👍 or 👎 as `user` and waits until the vote is stored. */
 async function vote(
   ctx: ScenarioContext,
-  card: { taskId: string; cardTs: string },
+  card: { taskId: string; cardTs: string; leadId: string },
   choice: "up" | "down",
   user: string,
 ) {
@@ -82,7 +86,8 @@ async function vote(
   });
   expect(ack.attempts === 1, `The ${choice} click needed ${ack.attempts} delivery attempts`);
   const stored = await pollUntil(
-    async () => (await votesOf(ctx, card.taskId)).some((row) => row.value.vote === choice),
+    async () =>
+      (await votesOf(ctx, card.taskId, card.leadId)).some((row) => row.value.vote === choice),
     15_000,
   );
   expect(stored, `The ${choice} vote on task ${card.taskId} was not stored`);
@@ -115,7 +120,7 @@ export const slackFeedbackButtons: Scenario = {
       );
 
       await vote(ctx, card, "up", "alice");
-      const [first] = await votesOf(ctx, card.taskId);
+      const [first] = await votesOf(ctx, card.taskId, card.leadId);
       expect(
         first?.value.taskId === card.taskId &&
           first.value.agentId === card.leadId &&
@@ -127,13 +132,13 @@ export const slackFeedbackButtons: Scenario = {
 
       // The same person changes their mind: one row, now down. Another person adds a row.
       await vote(ctx, card, "down", "alice");
-      const changed = await votesOf(ctx, card.taskId);
+      const changed = await votesOf(ctx, card.taskId, card.leadId);
       expect(
         changed.length === 1 && changed[0]?.value.vote === "down",
         `A second click by the same person did not replace the vote: ${JSON.stringify(changed)}`,
       );
       await vote(ctx, card, "up", "bob");
-      const both = await votesOf(ctx, card.taskId);
+      const both = await votesOf(ctx, card.taskId, card.leadId);
       expect(
         both.length === 2 && both.filter((row) => row.value.vote === "up").length === 1,
         `Two people should hold one vote each: ${JSON.stringify(both)}`,
@@ -147,7 +152,7 @@ export const slackFeedbackButtons: Scenario = {
         value: "up:00000000-0000-4000-8000-000000000000",
         user: "alice",
       });
-      const stray = await votesOf(ctx, "00000000-0000-4000-8000-000000000000");
+      const stray = await votesOf(ctx, "00000000-0000-4000-8000-000000000000", card.leadId);
       expect(
         stray.length === 0,
         `A click for an unknown task stored a vote: ${JSON.stringify(stray)}`,
@@ -159,6 +164,40 @@ export const slackFeedbackButtons: Scenario = {
         headers: { "X-Agent-ID": leadId },
       });
       expectStatus(forged, [403], "an agent write to the slack-feedback namespace");
+
+      // Votes name the voter and the task's channel: a worker, or a call with no agent, reads nothing.
+      const workerId = await registerWorker(ctx, `e2e-worker-feedback-${ctx.nonce}`);
+      for (const [label, headers] of [
+        ["a worker", { "X-Agent-ID": workerId }],
+        ["a call with no agent", {}],
+      ] as const) {
+        const list = await ctx.api("GET", `/api/kv/_/${NAMESPACE}`, { headers });
+        expectStatus(list, [403], `${label} listing the slack-feedback namespace`);
+        const get = await ctx.api(
+          "GET",
+          `/api/kv/_/${NAMESPACE}/${encodeURIComponent(String(both[0]?.key))}`,
+          { headers },
+        );
+        expectStatus(get, [403], `${label} reading a slack-feedback vote`);
+      }
+      const leadGet = await ctx.api(
+        "GET",
+        `/api/kv/_/${NAMESPACE}/${encodeURIComponent(String(both[0]?.key))}`,
+        {
+          headers: { "X-Agent-ID": leadId },
+        },
+      );
+      expectStatus(leadGet, [200], "the Lead reading a slack-feedback vote");
+      const mcp = await ctx.connectMcp(workerId);
+      try {
+        const listed = await callTool(mcp, "kv-list", { namespace: NAMESPACE });
+        expect(
+          listed.isError === true && listed.text.includes("readable only by a Lead agent"),
+          `A worker's kv_list read the slack-feedback votes: ${JSON.stringify(listed)}`,
+        );
+      } finally {
+        await mcp.close();
+      }
 
       // Slack refuses the blocks once: the buttons go first, so the task's card and footer stay.
       ctx.slack.injectFault({ method: "chat.stopStream", error: "invalid_blocks" });
