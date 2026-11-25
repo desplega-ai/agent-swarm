@@ -1,7 +1,15 @@
-import { deleteKv, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import {
+  deleteKv,
+  getKv,
+  kvPrefixUpperBound,
+  listKv,
+  literalPrefixPattern,
+  upsertKv,
+} from "../be/db";
 import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
 import { getStorage } from "../be/storage";
+import { removeNamespaceFamilyRooms } from "../realtime/rooms";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -12,6 +20,7 @@ import {
   type ModelDef,
 } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
+import { publishAppRowsChanged } from "./realtime-events";
 
 export type AppRow = {
   id: string;
@@ -221,7 +230,14 @@ export function withMutationLock<T>(
 ): Promise<T> {
   const lockKey = `${appId}:${model}`;
   const previous = mutationChains.get(lockKey) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
+  // Every row write runs under this lock: tell open app surfaces once it lands.
+  const current = previous
+    .catch(() => undefined)
+    .then(operation)
+    .then((result) => {
+      if (model !== "*") publishAppRowsChanged(appId, model);
+      return result;
+    });
   mutationChains.set(lockKey, current);
   return current.finally(() => {
     if (mutationChains.get(lockKey) === current) mutationChains.delete(lockKey);
@@ -652,6 +668,26 @@ async function purgeNamespace(appId: string): Promise<void> {
   const namespace = appsNamespace(appId);
   while (true) {
     const changes = await getStorage().repos.kv.deleteNamespaceBatch(namespace, PURGE_BATCH_SIZE);
+    if (changes === 0) return;
+    await yieldToEventLoop();
+  }
+}
+
+/**
+ * Drops the app's page presence rooms (`presence:app:<appId>:<page>`): the
+ * live rooms first, so no pending flush writes a row back, then every
+ * persisted room row. Run it after the app row is gone, so no new join passes
+ * the app check.
+ */
+export async function purgeAppPresenceRooms(appId: string): Promise<void> {
+  const prefix = `presence:app:${appId}:`;
+  removeNamespaceFamilyRooms(prefix);
+  const pattern = literalPrefixPattern(prefix);
+  while (true) {
+    const changes = await getStorage().repos.kv.deleteNamespacesLikeBatch(
+      pattern,
+      PURGE_BATCH_SIZE,
+    );
     if (changes === 0) return;
     await yieldToEventLoop();
   }

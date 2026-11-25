@@ -26,6 +26,7 @@ import {
   getAppRow,
   listAppRows,
   patchAppRow,
+  purgeAppPresenceRooms,
   purgeAppRows,
 } from "../apps/row-store";
 import {
@@ -1783,6 +1784,7 @@ export async function handleApps(
       jsonError(res, "app not found", 404);
       return true;
     }
+    await purgeAppPresenceRooms(app.id);
     deleteAppRoute.respond(res, 200, { ok: true });
     return true;
   }

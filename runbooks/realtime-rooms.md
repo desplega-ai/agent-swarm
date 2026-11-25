@@ -106,6 +106,14 @@ The server accepts only `join`, `leave`, and `presence` for this namespace.
 It rejects `update`, `change`, `reset`, `publish`, `subscribe`, and `unsubscribe`.
 Presence keeps the existing 8 KiB payload limit and never writes room state to the database.
 
+## App realtime
+
+An open app page uses the same dashboard ticket (`app.use` is enough to get one) and one socket.
+- `presence:app:<appId>:<page>`, room `default`: who has the page open. Only `join`, `leave` and `presence`.
+- `app:<appId>`, channel `rows`: the server publishes `{ model }` about 250 ms after rows of that model change (coalesced per app and model, from `withMutationLock` in `src/apps/row-store.ts`). Sockets may only `subscribe` and `unsubscribe`; nobody publishes over the socket.
+Both need an operator or active-user dashboard principal with `app.use`, and the app must exist. Agents and page sessions get neither.
+The event carries no row data: the client refetches through the normal query route. One API replica, like the rest of the bus.
+
 ## Development and verification
 
 Regenerate the browser module after changing the browser SDK or shared document operations:
