@@ -133,6 +133,11 @@ Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the unt
 
 What the copy does, step by step: opens the SQLite file read-only; skips the two tables that Litestream adds to a replicated database (`_litestream_seq`, `_litestream_lock`); refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table; after COMMIT, runs `VACUUM (ANALYZE)` so the API starts with planner statistics (a `WARNING` line says so when this step fails: run it by hand before you start the API).
 
+The PostgreSQL-only tables `bus_events` and `bus_deliveries` start empty. The copy verifies their emptiness before copying and before COMMIT, and lists them under `rebuilt` in the report.
+SQLite has no durable bus rows to transfer. The supervisor recovers unfinished script runs from their copied run rows when the target API starts.
+The copy still refuses every target that already holds tables, including targets with pending bus work. Unknown table differences still refuse the copy.
+Later API releases apply only appended migrations and preserve existing bus rows. Never use `db-copy` to append source rows into an existing target.
+
 Refused rows: one run lists every row the target cannot store. The copy first reads the orphan rows from SQLite (`PRAGMA foreign_key_check`: a row whose parent row is gone), then checks every value. After the first refused row it writes no more rows, so a refused run takes minutes, not the time of a full copy. Each line names the table, the column and the rowid.
 
 `db-copy --repair` fixes the kinds below during the copy. It lists each fix (`[db-copy] repaired <table>.<column> (rowid N): <what>`, and `repairs` in the `--json` report), compares the repaired values on both sides, and does not change the SQLite file. Without `--repair` the copy changes no value.

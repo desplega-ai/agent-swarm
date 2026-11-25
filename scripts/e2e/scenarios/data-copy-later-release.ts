@@ -276,6 +276,15 @@ export const dataCopyLaterRelease: Scenario = {
         cli.exitCode === 0 && cli.stdout.includes("every count and checksum equal"),
         `db-copy exited ${cli.exitCode}: ${cli.stderr.slice(-2000)}${cli.stdout.slice(-1000)}`,
       );
+      const assertEmptyBus = () => {
+        for (const table of ["bus_events", "bus_deliveries"]) {
+          expect(
+            targetDb.get<{ n: number }>(sql`SELECT count(*) AS n FROM ${sqlIdent(table)}`)?.n === 0,
+            `${table} must start empty and remain available after an upgrade`,
+          );
+        }
+      };
+      assertEmptyBus();
       const applying = (log: string) =>
         [...log.matchAll(/\[pg-migrations\] Applying: (\S+)/g)].map((match) => match[1] as string);
       const firstLog = await targetLog();
@@ -355,6 +364,7 @@ export const dataCopyLaterRelease: Scenario = {
       // --- A later release boots on the copy (boot 2).
       const laterEnv = { POSTGRES_MIGRATIONS_DIR: later.dir };
       await restartTarget(laterEnv);
+      assertEmptyBus();
       const secondLog = await targetLog();
       expect(
         JSON.stringify(applying(secondLog)) === JSON.stringify(later.added),
@@ -482,6 +492,7 @@ export const dataCopyLaterRelease: Scenario = {
 
       // --- The later release starts again (boot 3): nothing to apply, nothing reset.
       await restartTarget(laterEnv);
+      assertEmptyBus();
       const thirdLog = await targetLog();
       expect(
         applying(thirdLog).length === 0 && !thirdLog.includes("[pg-migrations] WARNING"),
