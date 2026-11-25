@@ -590,6 +590,7 @@ export class CursorAdapter implements ProviderAdapter {
         "X-Source-Task-Id": config.taskId,
         ...(config.contextKey ? { "X-Context-Key": config.contextKey } : {}),
         ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
+        ...config.traceHeaders,
       },
     };
     // Per-session JSONL store: no conversation state outlives the task.
