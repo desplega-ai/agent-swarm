@@ -10855,11 +10855,6 @@ export async function recordInlineScriptRun(data: {
   });
 }
 
-/** A run and its descendants over `parentScriptRunId`, root first (`[]` when it does not exist). */
-export async function listScriptRunTree(rootId: string, limit: number) {
-  return await getStorage().repos.scripts.listScriptRunTree(rootId, limit);
-}
-
 export async function getScriptRun(id: string): Promise<ScriptRun | null> {
   const row = await getStorage().repos.scripts.findScriptRun(id);
   return row ? rowToScriptRun(row) : null;

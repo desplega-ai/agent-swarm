@@ -1,5 +1,6 @@
 import * as z from "zod";
-import { getScriptRun, listScriptRunTree } from "../be/db";
+import { getScriptRun } from "../be/db";
+import { listScriptRunTree } from "../be/db/script-runs";
 import { getTaskById } from "../be/db/tasks/read";
 import { TERMINAL_SCRIPT_RUN_STATUSES } from "../types";
 import { scrubObject } from "../utils/secret-scrubber";
