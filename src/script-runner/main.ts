@@ -12,7 +12,14 @@ export async function runScriptRunner(argv: string[]) {
     });
     if (!values["api-url"]) throw new Error("url");
     const url = new URL(values["api-url"]);
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    )
       throw new Error("url");
     const token = (
       process.env.SCRIPT_RUNNER_TOKEN_FILE
@@ -40,9 +47,10 @@ export async function runScriptRunner(argv: string[]) {
           "--regid=65534",
           "--clear-groups",
           "--no-new-privs",
-          process.execPath,
-          "-e",
-          'const fs = require("node:fs"); if (process.getuid() !== 65534) process.exit(1); if (process.argv[1]) { try { fs.accessSync(process.argv[1], fs.constants.R_OK); process.exit(2); } catch {} }',
+          "/bin/sh",
+          "-c",
+          'test "$(id -u)" = 65534 || exit 1; if test -n "$1" && test -r "$1"; then exit 2; fi',
+          "runner-uid-check",
           process.env.SCRIPT_RUNNER_TOKEN_FILE ?? "",
         ],
         { stdin: "ignore", stdout: "ignore", stderr: "ignore", timeout: 5000, env: {} },
