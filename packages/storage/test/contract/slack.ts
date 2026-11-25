@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { type NewSlackInboundReceipt, type SlackRepository, type Storage, sql } from "../../src";
 import type { ContractEngine } from "./env";
 import { seedTask } from "./tasks";
@@ -275,6 +275,65 @@ export function slackContract(engine: ContractEngine): void {
       expect(await repo.findMergedIntoId("nope")).toBeNull();
       expect(await repo.findOutcomeHost("m1")).toBeNull();
       expect((await repo.findOutcomeHost("h1"))?.id).toBe("h1");
+    });
+
+    test("activation reads share one query, including concurrent and missing-row reads", async () => {
+      const read = spyOn(storage.executor, "get");
+      try {
+        expect(await Promise.all([repo.getRenderV2State(), repo.getRenderV2State()])).toEqual([
+          null,
+          null,
+        ]);
+        expect(read).toHaveBeenCalledTimes(1);
+        await repo.ensureRenderV2Activation(T0);
+        read.mockClear();
+        expect(await repo.getRenderV2State()).toEqual({
+          activated_at: T0,
+          delegation_activated_at: null,
+        });
+        await repo.getRenderV2State();
+        expect(read).toHaveBeenCalledTimes(1);
+        await repo.ensureDelegationActivation(T1);
+        expect(await repo.getRenderV2State()).toEqual({
+          activated_at: T0,
+          delegation_activated_at: T1,
+        });
+      } finally {
+        read.mockRestore();
+      }
+    });
+
+    test("activation cache expires after an external write", async () => {
+      await repo.ensureRenderV2Activation(T0);
+      await repo.getRenderV2State();
+      await storage.executor.run(sql`UPDATE slack_render_v2_state
+        SET delegation_activated_at = ${T1} WHERE id = 1`);
+      expect((await repo.getRenderV2State())?.delegation_activated_at).toBeNull();
+      const now = Date.now();
+      const clock = spyOn(Date, "now").mockReturnValue(now + 30_001);
+      try {
+        expect((await repo.getRenderV2State())?.delegation_activated_at).toBe(T1);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    test("transaction reads bypass the cache and rollback does not leak activation", async () => {
+      await repo.ensureRenderV2Activation(T0);
+      await repo.getRenderV2State();
+      await expect(
+        storage.executor.client.transaction(async () => {
+          await repo.ensureDelegationActivation(T1);
+          expect((await repo.getRenderV2State())?.delegation_activated_at).toBe(T1);
+          throw new Error("rollback activation");
+        }),
+      ).rejects.toThrow("rollback activation");
+      expect((await repo.getRenderV2State())?.delegation_activated_at).toBeNull();
+      await storage.executor.client.transaction(async () => {
+        await repo.ensureDelegationActivation(T2);
+        expect((await repo.getRenderV2State())?.delegation_activated_at).toBe(T2);
+      });
+      expect((await repo.getRenderV2State())?.delegation_activated_at).toBe(T2);
     });
 
     test("render state: visibility transitions and reconcile cursors", async () => {

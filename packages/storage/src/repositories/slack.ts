@@ -324,6 +324,21 @@ export interface SlackRepository {
 export abstract class BaseSlackRepository implements SlackRepository {
   constructor(protected readonly db: SqlExecutor) {}
 
+  private renderV2StateCache?: {
+    expiresAt: number;
+    value: ReturnType<SlackRepository["getRenderV2State"]>;
+  };
+
+  private invalidateRenderV2State(): void {
+    this.renderV2StateCache = undefined;
+    // A concurrent read before COMMIT must not survive the committed write.
+    if (this.db.client.inTransaction()) {
+      this.db.client.afterCommit(() => {
+        this.renderV2StateCache = undefined;
+      });
+    }
+  }
+
   touchInboundDuplicate(dedupKey: string, now: string): Promise<SlackInboundReceiptRow | null> {
     return this.db.get<SlackInboundReceiptRow>(sql`
       UPDATE slack_inbound_receipts
@@ -554,6 +569,7 @@ export abstract class BaseSlackRepository implements SlackRepository {
         task_tree_enabled_at = ${enabledAt},
         task_tree_enabled = ${enabled}
       WHERE id = 1 RETURNING task_tree_enabled_at`);
+    this.invalidateRenderV2State();
     return row?.task_tree_enabled_at ?? null;
   }
 
@@ -568,6 +584,7 @@ export abstract class BaseSlackRepository implements SlackRepository {
     await this.db.run(
       sql`UPDATE slack_render_v2_state SET reconcile_cursors = ${jsonText(cursors)} WHERE id = 1`,
     );
+    this.invalidateRenderV2State();
   }
 
   abstract pageReconcileCandidates(
@@ -629,14 +646,30 @@ export abstract class BaseSlackRepository implements SlackRepository {
     activated_at: string;
     delegation_activated_at: string | null;
   } | null> {
-    return this.db.get(sql`
+    // Transactional reads must see their own writes and never publish uncommitted state.
+    if (this.db.client.inTransaction()) {
+      return this.db.get(sql`
+        SELECT activated_at, delegation_activated_at FROM slack_render_v2_state WHERE id = 1`);
+    }
+    if (this.renderV2StateCache && this.renderV2StateCache.expiresAt > Date.now()) {
+      return this.renderV2StateCache.value;
+    }
+    const value = this.db.get<{ activated_at: string; delegation_activated_at: string | null }>(sql`
       SELECT activated_at, delegation_activated_at FROM slack_render_v2_state WHERE id = 1`);
+    // Other API processes can activate the singleton: refresh at least every 30 seconds.
+    const entry = { expiresAt: Date.now() + 30_000, value };
+    this.renderV2StateCache = entry;
+    void value.catch(() => {
+      if (this.renderV2StateCache === entry) this.renderV2StateCache = undefined;
+    });
+    return value;
   }
 
   async ensureRenderV2Activation(activatedAt: string): Promise<void> {
     await this.db.run(sql`
       INSERT INTO slack_render_v2_state (id, activated_at) VALUES (1, ${activatedAt})
       ON CONFLICT(id) DO NOTHING`);
+    this.invalidateRenderV2State();
   }
 
   async ensureDelegationActivation(activatedAt: string): Promise<void> {
@@ -646,6 +679,7 @@ export abstract class BaseSlackRepository implements SlackRepository {
       ON CONFLICT(id) DO UPDATE SET
         delegation_activated_at = COALESCE(slack_render_v2_state.delegation_activated_at,
           excluded.delegation_activated_at)`);
+    this.invalidateRenderV2State();
   }
 
   // ---- slack_messages ----
