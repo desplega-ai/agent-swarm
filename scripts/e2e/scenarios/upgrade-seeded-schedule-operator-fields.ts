@@ -1,5 +1,4 @@
-import { Database } from "bun:sqlite";
-import { type DbFixture, loadDbFixture } from "../db";
+import { type DbFixture, editDbFixture, loadDbFixture } from "../db";
 import { type ApiClient, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -81,70 +80,67 @@ async function upgradeFixture(
   nonce: string,
   template: { cronExpression: string; timezone: string },
 ): Promise<{ fixture: DbFixture; toggledOn: boolean; currentOn: boolean }> {
-  const fixture = await loadDbFixture("base-db");
-  const db = Database.deserialize(fixture.file);
-  try {
-    const read = (name: string) => {
-      const row = db.query("SELECT * FROM scheduled_tasks WHERE name = ?").get(name) as Row | null;
-      expect(row?.targetType === "agent-task", `base fixture: ${name} is not a seeded prompt`);
-      return row as Row;
-    };
-    const setRow = (name: string, fields: Record<string, string | number>) => {
-      const keys = Object.keys(fields);
-      db.run(
-        `UPDATE scheduled_tasks SET ${keys.map((key) => `${key} = ?`).join(", ")} WHERE name = ?`,
-        [...Object.values(fields), name],
-      );
-    };
-    const setSeededHash = (name: string, seededHash: string) => {
-      const changed = db.run(
-        "UPDATE seed_state SET seededHash = ? WHERE kind = 'schedule' AND key = ?",
-        [seededHash, name],
-      );
-      expect(changed.changes === 1, `base fixture: no seed_state row for ${name}`);
-    };
+  const edited = editDbFixture(
+    await loadDbFixture("base-db"),
+    "seeded-schedule-operator-fields",
+    (db) => {
+      const read = (name: string) => {
+        const row = db.get<Row>("SELECT * FROM scheduled_tasks WHERE name = ?", [name]);
+        expect(row?.targetType === "agent-task", `base fixture: ${name} is not a seeded prompt`);
+        return row as Row;
+      };
+      const setRow = (name: string, fields: Record<string, string | number>) => {
+        const keys = Object.keys(fields);
+        db.run(
+          `UPDATE scheduled_tasks SET ${keys.map((key) => `${key} = ?`).join(", ")} WHERE name = ?`,
+          [...Object.values(fields), name],
+        );
+      };
+      const setSeededHash = (name: string, seededHash: string) => {
+        const changed = db.run(
+          "UPDATE seed_state SET seededHash = ? WHERE kind = 'schedule' AND key = ?",
+          [seededHash, name],
+        );
+        expect(changed === 1, `base fixture: no seed_state row for ${name}`);
+      };
 
-    const toggled = read(TOGGLED);
-    const toggledOn = toggled.enabled !== 1;
-    const oldToggled = `Older ${TOGGLED} prompt ${nonce}`;
-    setSeededHash(TOGGLED, hash(seedView(toggled, { taskTemplate: oldToggled, ...template })));
-    setRow(TOGGLED, {
-      taskTemplate: oldToggled,
-      enabled: toggledOn ? 1 : 0,
-      cronExpression: OPERATOR_CRON,
-      timezone: OPERATOR_TIMEZONE,
-    });
+      const toggled = read(TOGGLED);
+      const toggledOn = toggled.enabled !== 1;
+      const oldToggled = `Older ${TOGGLED} prompt ${nonce}`;
+      setSeededHash(TOGGLED, hash(seedView(toggled, { taskTemplate: oldToggled, ...template })));
+      setRow(TOGGLED, {
+        taskTemplate: oldToggled,
+        enabled: toggledOn ? 1 : 0,
+        cronExpression: OPERATOR_CRON,
+        timezone: OPERATOR_TIMEZONE,
+      });
 
-    const control = read(CONTROL);
-    const oldControl = `Older ${CONTROL} prompt ${nonce}`;
-    setSeededHash(CONTROL, hash(seedView(control, { taskTemplate: oldControl })));
-    setRow(CONTROL, { taskTemplate: oldControl });
+      const control = read(CONTROL);
+      const oldControl = `Older ${CONTROL} prompt ${nonce}`;
+      setSeededHash(CONTROL, hash(seedView(control, { taskTemplate: oldControl })));
+      setRow(CONTROL, { taskTemplate: oldControl });
 
-    read(EDITED);
-    setRow(EDITED, { taskTemplate: `Operator prompt ${nonce}` });
+      read(EDITED);
+      setRow(EDITED, { taskTemplate: `Operator prompt ${nonce}` });
 
-    const current = read(CURRENT);
-    const currentOn = current.enabled !== 1;
-    const oldCurrent = `Older ${CURRENT} prompt ${nonce}`;
-    const {
-      enabled: _e,
-      cronExpression: _c,
-      timezone: _t,
-      ...currentView
-    } = seedView(current, {
-      taskTemplate: oldCurrent,
-    });
-    setSeededHash(CURRENT, hash(currentView));
-    setRow(CURRENT, { taskTemplate: oldCurrent, enabled: currentOn ? 1 : 0 });
+      const current = read(CURRENT);
+      const currentOn = current.enabled !== 1;
+      const oldCurrent = `Older ${CURRENT} prompt ${nonce}`;
+      const {
+        enabled: _e,
+        cronExpression: _c,
+        timezone: _t,
+        ...currentView
+      } = seedView(current, {
+        taskTemplate: oldCurrent,
+      });
+      setSeededHash(CURRENT, hash(currentView));
+      setRow(CURRENT, { taskTemplate: oldCurrent, enabled: currentOn ? 1 : 0 });
 
-    return {
-      fixture: { ...fixture, name: "seeded-schedule-operator-fields", file: db.serialize() },
-      toggledOn,
-      currentOn,
-    };
-  } finally {
-    db.close();
-  }
+      return { toggledOn, currentOn };
+    },
+  );
+  return { fixture: edited.fixture, ...edited.result };
 }
 
 export const upgradeSeededScheduleOperatorFields: Scenario = {
