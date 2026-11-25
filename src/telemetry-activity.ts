@@ -144,7 +144,10 @@ export function flushOrgActivity(now = Date.now()): boolean {
   return true;
 }
 
-/** Test-only: drop the counters and start a fresh window. */
-export function _resetOrgActivityForTests(now = Date.now()): void {
+/**
+ * Drop the counters and start a fresh window. Called on every telemetry on/off
+ * transition, so an opt-out never ships what was counted before it.
+ */
+export function discardOrgActivity(now = Date.now()): void {
   reset(now);
 }

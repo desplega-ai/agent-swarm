@@ -5,6 +5,7 @@ import { expectRunOk, registerAgent, runScript } from "./script-helpers";
 import {
   createWorkflow,
   deleteWorkflowQuietly,
+  getRunDetail,
   respondApproval,
   triggerWorkflow,
   waitForApproval,
@@ -59,11 +60,92 @@ async function produceActivity(ctx: ScenarioContext, agentId: string, marker: st
   }
 }
 
+/** Restart the SUT (the shutdown flush) and return the org.activity it sent within `waitMs`. */
+async function flushByRestart(ctx: ScenarioContext, waitMs: number): Promise<SinkBody | undefined> {
+  const before = activityEvents(ctx).length;
+  await ctx.restartSut();
+  await pollUntil(() => activityEvents(ctx).length > before, waitMs, 100);
+  return activityEvents(ctx)[before];
+}
+
+/**
+ * Only started workflow steps count: a three-item HITL fan-out at concurrency 1
+ * starts one child, and cancelling the run leaves the two queued ones uncounted.
+ * The run cancel settles the started child's approval as cancelled. A retried
+ * script node counts once per attempt.
+ */
+async function produceStepStarts(ctx: ScenarioContext, agentId: string): Promise<void> {
+  const fanOutId = await createWorkflow(
+    ctx,
+    "telemetry-activity-queued",
+    {
+      nodes: [
+        {
+          id: "each",
+          type: "foreach",
+          config: {
+            over: [{ key: "a" }, { key: "b" }, { key: "c" }],
+            itemKey: "key",
+            concurrency: 1,
+            body: {
+              type: "human-in-the-loop",
+              config: {
+                title: "Wait",
+                questions: [{ id: "go", type: "approval", label: "Go?" }],
+                approvers: { policy: "any" },
+              },
+            },
+          },
+        },
+      ],
+    },
+    {},
+    agentId,
+  );
+  const retryId = await createWorkflow(
+    ctx,
+    "telemetry-activity-retry",
+    {
+      nodes: [
+        {
+          id: "flaky",
+          type: "script",
+          config: { runtime: "bash", script: "exit 1" },
+          retry: { strategy: "static", maxRetries: 1, baseDelayMs: 1 },
+        },
+      ],
+    },
+    {},
+    agentId,
+  );
+  try {
+    const { runId } = await triggerWorkflow(ctx, fanOutId, {}, { agentId });
+    await waitForApproval(ctx, runId);
+    const queued = (await getRunDetail(ctx, runId)).steps.filter(
+      (step) => step.nodeType === "human-in-the-loop" && step.status === "pending",
+    );
+    expect(queued.length === 2, `two HITL children stay queued: ${queued.length}`);
+    expectStatus(
+      await ctx.api("POST", `/api/workflow-runs/${runId}/cancel`, {
+        body: { reason: "stop before the queued children start" },
+      }),
+      [200],
+      "cancel the fan-out run",
+    );
+    const retried = await triggerWorkflow(ctx, retryId, {}, { agentId });
+    await waitForRun(ctx, retried.runId, "failed");
+  } finally {
+    await deleteWorkflowQuietly(ctx, fanOutId);
+    await deleteWorkflowQuietly(ctx, retryId);
+  }
+}
+
 /**
  * The hourly `org.activity` rollup counts script runs, HITL requests and workflow steps in
  * memory and flushes on the ticker and at shutdown. A restart is the shutdown flush: with
  * telemetry on, the rollup reaches the sink with the activity's counts and none of its
- * content; with telemetry off, nothing is counted or sent.
+ * content; with telemetry off, nothing is counted or sent, and an opt-out drops what
+ * the window held before it. Queued foreach children count only once they start.
  */
 export const platformTelemetryActivity: Scenario = {
   name: "platform-telemetry-activity",
@@ -92,7 +174,10 @@ export const platformTelemetryActivity: Scenario = {
       const body = activityEvents(ctx)[before] ?? {};
       const props = asRecord(body.properties);
       const count = (key: string) => Number(props[key] ?? -1);
-      expect(body.source === "api-server", `org.activity comes from the api-server: ${body.source}`);
+      expect(
+        body.source === "api-server",
+        `org.activity comes from the api-server: ${body.source}`,
+      );
       expect(
         count("script_runs") >= 1 &&
           count("script_runs_completed") >= 1 &&
@@ -122,6 +207,36 @@ export const platformTelemetryActivity: Scenario = {
       expect(
         !JSON.stringify(body).includes(marker),
         "the rollup carries no script source, args, output or request content",
+      );
+
+      // Opt-out drops the open window: count a run, turn telemetry off and on again with no
+      // tick or restart in between, and the next shutdown sends nothing.
+      expectRunOk(
+        await runScript(ctx, agentId, { source: "export default async () => 1;\n" }),
+        "script run before the opt-out",
+      );
+      await putConfig(ctx, { key: "ANONYMIZED_TELEMETRY", value: "false" });
+      await reloadConfig(ctx);
+      expectStatus(
+        await ctx.api("POST", "/api/telemetry/enable", { body: { via: "settings" } }),
+        [200],
+        "turn telemetry back on",
+      );
+      const afterOptIn = await flushByRestart(ctx, 500);
+      expect(
+        afterOptIn === undefined,
+        `an opt-out discards the earlier window: ${JSON.stringify(afterOptIn?.properties)}`,
+      );
+
+      // Started steps only, once per attempt.
+      await produceStepStarts(ctx, agentId);
+      const steps = asRecord((await flushByRestart(ctx, 15_000))?.properties);
+      expect(
+        steps.workflow_steps_hitl === 1 &&
+          steps.workflow_steps_script === 2 &&
+          steps.hitl_requests_created === 1 &&
+          steps.hitl_requests_cancelled === 1,
+        `one started HITL child, cancelled with its run, and two script attempts: ${JSON.stringify(steps)}`,
       );
 
       // Opt-out: with telemetry off nothing is counted, so the next shutdown sends nothing.

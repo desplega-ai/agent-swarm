@@ -7,6 +7,7 @@ import {
 } from "../be/db";
 import { disarmWorkflowTreeRetries, getRunLineageBlock } from "../be/db/workflow-runs";
 import { getStorage } from "../be/storage";
+import { recordWorkflowStep } from "../telemetry-activity";
 import type { RetryPolicy } from "../types";
 import {
   adoptStoredContext,
@@ -86,6 +87,9 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           // the run were read outside it: a cancel committing in between must
           // win, or the step re-executes inside a cancelled run.
           if (!(await claimRetry(run.id, step.id))) continue;
+          // The committed claim starts a new attempt of the same row: count it as
+          // a workflow step, as a first run is counted at its step insert.
+          recordWorkflowStep(node.type);
           // Every result write below is fenced on this claim, so a cancel or
           // another settle that commits while the executor runs wins.
           const fence = { retryCount: step.retryCount };

@@ -1,5 +1,4 @@
 import type { WorkflowRunRow, WorkflowRunStepRow } from "@desplega/storage";
-import { recordWorkflowStep } from "../../telemetry-activity";
 import {
   TERMINAL_TASK_STATUSES,
   type WorkflowRun,
@@ -542,7 +541,6 @@ export async function createForeachChildSteps(
       });
       existingNodeIds.add(row.nodeId);
       created++;
-      getStorage().afterCommit(() => recordWorkflowStep(row.nodeType));
     }
     return created;
   });
@@ -577,10 +575,7 @@ export async function createForeachAttemptSteps(
         input: scrubJsonValue({ itemKey: row.itemKey, index: row.index, attempt }),
         idempotencyKey: `${runId}:${row.nodeId}:${attempt}`,
       });
-      if (inserted) {
-        created++;
-        getStorage().afterCommit(() => recordWorkflowStep(row.nodeType));
-      }
+      if (inserted) created++;
     }
     return created;
   });

@@ -9,6 +9,7 @@
  * transition sends `telemetry.enabled` once.
  */
 import { initTelemetry, isTelemetryEnabled, setTelemetryIngestObserver, track } from "../telemetry";
+import { discardOrgActivity } from "../telemetry-activity";
 import { telemetryIngestRecorder } from "./telemetry-ingest-anchor";
 
 type GetConfig = (key: string) => Promise<string | undefined>;
@@ -51,6 +52,9 @@ export async function syncTelemetryEnabled(via: TelemetryEnabledVia): Promise<bo
   const enabled = isTelemetryEnabled();
   const wasEnabled = lastEnabled;
   lastEnabled = enabled;
+  // An opt-out discards the buffered org.activity window, even with no hourly
+  // tick or restart before a later opt-in.
+  if (enabled !== wasEnabled) discardOrgActivity();
   if (!enabled || wasEnabled || !accessors) return false;
   await initTelemetry("api-server", accessors.getConfig, accessors.setConfig, {
     generateIfMissing: true,
