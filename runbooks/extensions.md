@@ -287,6 +287,20 @@ flowchart TD
 
 ## Dispatch contract
 
+With OpenTelemetry enabled, a dispatch with at least one matching handler emits an
+`extension.dispatch <event>` span under its active parent (for example
+`mcp.tool <name>` for MCP tool hooks). It covers the whole chain: handlers, result
+validation, and run-log writes. Attributes are `extension.event`,
+`extension.handlers` (matching handlers), and, for pre events, `extension.outcome`
+(`ok`, `modified`, or `blocked`) plus `extension.blocked_by` (extension id); post
+events set `extension.failed_handlers`. Dispatch fails open, so this span keeps OK
+status. A dispatch with no matching handler emits no span.
+
+Each handler emits a child `extension <event>` span with `extension.id`,
+`extension.name`, `extension.event`, and `extension.outcome` (`ok`, `blocked`,
+`error`, or `timeout`). Throws and timeouts record the exception and set error
+status.
+
 `src/extensions/contract.ts` defines every event payload and modification shape.
 `src/extensions/dispatcher.ts` owns ordering, handler limits, result handling, and run records.
 Each run record stores the event, action, duration, message, the acting agent id when the event carries one, and a short secret-scrubbed subject (tool name, task origin and description snippet, Slack channel, or task id). Full payloads are never stored.

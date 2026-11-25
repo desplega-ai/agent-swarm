@@ -158,7 +158,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.6.0
+ARG PI_CODING_AGENT_VERSION=1.6.1
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -579,9 +579,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795579235-g370682
-ARG AMP_SHA512_AMD64=c64bac95f0147c80a74e12387362a82ca574fca254b7303fbd14aaaedc4f534b83bb97516fba004a327d539e024318276964eabaaa2e65ab937d84743c9d5c73
-ARG AMP_SHA512_ARM64=fe4eb70ad5fa4401979fc6f4ba21c415631aac7d0a911614a721a6afa84b488e222b9f57096ca09aa61e705d11561a20c89409dead642da53a857576e38c0d3e
+ARG AMP_VERSION=0.0.1795608053-gcec25c
+ARG AMP_SHA512_AMD64=02e695249fd1c0c59c2d3f422f4ab7e91093cf14d9d6d0045e5b90fafdeff8c9783dfa5479eaf2940b1258d2009b442db0ccef1a6c3f6b6a54184db2157d0ba8
+ARG AMP_SHA512_ARM64=8056109872088789e47a11e968fa2e93bf20e9acc437e70167ecd26c637aaf6a0ac80ea4a344baedb584483c4ba1a2146abe3c0e9bd8a865d1483983ef075ae7
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \

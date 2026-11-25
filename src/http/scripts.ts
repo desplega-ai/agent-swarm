@@ -11,6 +11,7 @@ import {
   getScriptApiTypes,
   getScriptMcpConnectionDescriptors,
   getScriptMcpTypes,
+  loadScriptConnectionCatalog,
 } from "../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import {
@@ -931,6 +932,7 @@ export async function handleScripts(
       sourceScriptRunId: runId,
     };
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
+    const connectionCatalog = await loadScriptConnectionCatalog();
     const runContext = {
       agentId: agent.id,
       runtimeInstanceId,
@@ -939,8 +941,14 @@ export async function handleScripts(
       failedBindings: credentials.failedBindings,
       userConfig: credentials.userConfig,
       agentFs: credentials.agentFs,
-      apiConnections: await getScriptApiConnectionDescriptors({ agentId: agent.id }),
-      mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+      apiConnections: await getScriptApiConnectionDescriptors(
+        { agentId: agent.id },
+        connectionCatalog,
+      ),
+      mcpConnections: await getScriptMcpConnectionDescriptors(
+        { agentId: agent.id },
+        connectionCatalog,
+      ),
     };
     let output: RunScriptOutput;
     let object: { id: string; stateVersion: number; destroyed: boolean } | undefined;

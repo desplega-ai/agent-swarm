@@ -181,7 +181,7 @@ export const registerKvGetTool = (server: McpServer) => {
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
-      const authErr = kvReadAuthError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = await kvReadAuthError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
         return toolErr(authErr, {
           data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },

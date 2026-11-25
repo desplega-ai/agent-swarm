@@ -203,6 +203,7 @@ export const SDK_TOOL_NAME_MAP = {
   mcpServer_uninstall: "mcp-server-uninstall", // destructive
 
   // ── pages & metrics ──
+  app_catalog: "app-catalog",
   app_get: "app-get",
   app_history: "app-history",
   app_diff: "app-diff",

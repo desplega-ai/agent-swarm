@@ -18,6 +18,7 @@ import {
 } from "./definition";
 import {
   type AppRow,
+  appExists,
   appsNamespace,
   createAppRowUnlocked,
   listAllAppRowsForMigrationUnlocked,
@@ -616,9 +617,10 @@ interface ChunkState {
 }
 
 async function writeInChunks<T>(
+  appId: string,
   items: readonly T[],
   counts: ReconcileCounts,
-  write: (item: T, tally: ReconcileTally) => Promise<void>,
+  write: (item: T, tally: ReconcileTally, appPresent: boolean) => Promise<void>,
   state?: ChunkState,
 ): Promise<void> {
   for (let start = 0; start < items.length; start += RECONCILE_CHUNK_SIZE) {
@@ -632,7 +634,9 @@ async function writeInChunks<T>(
         unchanged: 0,
         markedStale: 0,
       };
-      for (const item of chunk) await write(item, chunkTally);
+      // One app check per chunk transaction, not one per row write.
+      const appPresent = await appExists(appId);
+      for (const item of chunk) await write(item, chunkTally, appPresent);
       return chunkTally;
     });
     state?.committed();
@@ -726,9 +730,10 @@ function reconcile(args: {
     };
 
     await writeInChunks(
+      appId,
       pull.records,
       counts,
-      async (record, tally) => {
+      async (record, tally, appPresent) => {
         if (seen.has(record.key)) {
           warn(warnings, `source returned duplicate key "${record.key}"; the last record wins`);
         }
@@ -738,11 +743,14 @@ function reconcile(args: {
         const existing = mine.get(record.key);
         if (!existing) {
           // No adoption: a row with no source of its own is not ours to take.
-          const created = await createAppRowUnlocked(appId, model, modelDef, values, {
-            allowSourceManaged: true,
-            envelope,
-            actor,
-          });
+          const created = await createAppRowUnlocked(
+            appId,
+            model,
+            modelDef,
+            values,
+            { allowSourceManaged: true, envelope, actor },
+            appPresent,
+          );
           setMine(record.key, created);
           tally.created += 1;
           return;
@@ -750,14 +758,22 @@ function reconcile(args: {
         const differs = Object.entries(values).some(
           ([name, value]) => !sameValue(modelDef.columns[name], existing[name], value),
         );
-        const updated = await patchAppRowUnlocked(appId, model, modelDef, existing.id, values, {
-          allowSourceManaged: true,
-          envelope,
-          actor,
-          // Freshness must be meaningful: syncedAt advances on every confirmed
-          // row, updatedAt only when projected data actually moved.
-          ...(differs ? {} : { skipUpdatedAt: true }),
-        });
+        const updated = await patchAppRowUnlocked(
+          appId,
+          model,
+          modelDef,
+          existing.id,
+          values,
+          {
+            allowSourceManaged: true,
+            envelope,
+            actor,
+            // Freshness must be meaningful: syncedAt advances on every confirmed
+            // row, updatedAt only when projected data actually moved.
+            ...(differs ? {} : { skipUpdatedAt: true }),
+          },
+          appPresent,
+        );
         if (!updated) {
           warn(warnings, `row "${existing.id}" vanished before it could be updated`);
           return;
@@ -779,7 +795,7 @@ function reconcile(args: {
       warn(warnings, "pull reported an incomplete window; stale sweep skipped");
       return;
     }
-    await writeInChunks(unseen, counts, async (row, tally) => {
+    await writeInChunks(appId, unseen, counts, async (row, tally, appPresent) => {
       if (row.stale === true) {
         tally.unchanged += 1;
         return;
@@ -800,6 +816,7 @@ function reconcile(args: {
             stale: true,
           },
         },
+        appPresent,
       );
       tally.markedStale += 1;
     });

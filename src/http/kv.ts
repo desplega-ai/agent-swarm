@@ -421,7 +421,8 @@ function authorizeRead(
   ctx: AuthCtx,
 ): { status: number; message: string } | null {
   const readErr =
-    privateNamespaceError(namespace) ?? mcpOverflowAuthError(namespace, ctx.callerAgentId);
+    privateNamespaceError(namespace, { isLead: ctx.isLead }) ??
+    mcpOverflowAuthError(namespace, ctx.callerAgentId);
   return readErr ? { status: 403, message: readErr } : null;
 }
 
