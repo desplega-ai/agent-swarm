@@ -14,8 +14,8 @@ import {
 const CHANNEL = "C0GENERAL0";
 const NAMESPACE = "slack-feedback";
 
-/** Ask, complete the task, and return its outcome card. */
-async function answer(ctx: ScenarioContext, label: string) {
+/** Ask, complete the task (with `uiSpec` as its card, when given), and return its outcome card. */
+async function answer(ctx: ScenarioContext, label: string, uiSpec?: Record<string, unknown>) {
   const ask = await ctx.slack.postMessage({
     channel: "general",
     user: "bob",
@@ -31,7 +31,12 @@ async function answer(ctx: ScenarioContext, label: string) {
   const mcp = await ctx.connectMcp(leadId);
   try {
     expectToolOk(
-      await callTool(mcp, "store-progress", { taskId, status: "completed", output: summary }),
+      await callTool(mcp, "store-progress", {
+        taskId,
+        status: "completed",
+        output: summary,
+        ...(uiSpec ? { uiSpec } : {}),
+      }),
       "Complete the Slack task",
     );
   } finally {
@@ -95,7 +100,7 @@ export const slackFeedbackButtons: Scenario = {
   groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
-    await ctx.restartSut({ env: { SLACK_FEEDBACK_BUTTONS: "true" } });
+    await ctx.restartSut({ env: { SLACK_FEEDBACK_BUTTONS: "true", UI_SPEC_ENABLED: "true" } });
     try {
       const leadId = await registerLead(ctx, `e2e-lead-feedback-${ctx.nonce}`);
       const card = await answer(ctx, "feedback-on");
@@ -155,13 +160,24 @@ export const slackFeedbackButtons: Scenario = {
       });
       expectStatus(forged, [403], "an agent write to the slack-feedback namespace");
 
-      // Slack refuses the blocks once: the card still posts, without the buttons.
+      // Slack refuses the blocks once: the buttons go first, so the task's card and footer stay.
       ctx.slack.injectFault({ method: "chat.stopStream", error: "invalid_blocks" });
-      const rejected = await answer(ctx, "feedback-rejected");
+      const rejected = await answer(ctx, "feedback-rejected", {
+        spec: {
+          root: "card",
+          elements: {
+            card: { type: "Card", props: { title: "Preserve this card" }, children: ["text"] },
+            text: { type: "Text", props: { content: "Valuable structured answer" }, children: [] },
+          },
+        },
+      });
+      const kept = JSON.stringify(rejected.blocks);
       expect(
-        !JSON.stringify(rejected.blocks).includes("feedback_buttons") &&
-          JSON.stringify(rejected.blocks).includes(rejected.taskId.slice(0, 8)),
-        `The card after a block rejection should keep its footer and drop the buttons: ${JSON.stringify(rejected.blocks)}`,
+        !kept.includes("feedback_buttons") &&
+          kept.includes("Preserve this card") &&
+          kept.includes("Valuable structured answer") &&
+          kept.includes(rejected.taskId.slice(0, 8)),
+        `The card after a block rejection should keep its uiSpec card and footer and drop the buttons: ${kept}`,
       );
     } finally {
       await ctx.restartSut();

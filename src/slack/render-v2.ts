@@ -1618,8 +1618,9 @@ function outcomeFeedbackBlocks(task: AgentTask, conclusionKind?: SlackConclusion
 }
 
 /**
- * `send` with the feedback buttons and the task's card, dropping the buttons
- * first, then the card, each time Slack refuses the blocks.
+ * `send` with the feedback buttons and the task's card. Each time Slack refuses
+ * the blocks it drops the buttons first, and only then the card: the card is
+ * the outer fallback, so a refusal never costs the card while the buttons stay.
  */
 async function withOutcomeBlockFallback<T>(
   uiSpec: OutcomeUiSpec | null,
@@ -1627,11 +1628,12 @@ async function withOutcomeBlockFallback<T>(
   taskId: string,
   send: (withCard: boolean, withFeedback: boolean) => Promise<T>,
 ): Promise<T> {
-  return await withBlockRejectionFallback(
-    feedback.length > 0,
-    `the feedback buttons of task ${taskId}; retrying without them`,
-    (withFeedback) =>
-      withUiSpecBlockFallback(uiSpec, taskId, (withCard) => send(withCard, withFeedback)),
+  return await withUiSpecBlockFallback(uiSpec, taskId, (withCard) =>
+    withBlockRejectionFallback(
+      feedback.length > 0,
+      `the feedback buttons of task ${taskId}; retrying without them`,
+      (withFeedback) => send(withCard, withFeedback),
+    ),
   );
 }
 
