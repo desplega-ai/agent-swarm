@@ -387,6 +387,34 @@ export async function dropPostgresRole(role: string): Promise<void> {
   }
 }
 
+/** Raw SQL on a private fixture copy before boot (SQLite text, `?` placeholders). */
+export type FixtureEditor = {
+  get: <T>(text: string, params?: SQLQueryBindings[]) => T | null;
+  run: (text: string, params?: SQLQueryBindings[]) => number;
+};
+
+/**
+ * Edit a private copy of a fixture before the SUT boots on it. `edit` gets a
+ * read-write handle; the result is the edited fixture under `name` plus what `edit` returned.
+ */
+export function editDbFixture<T>(
+  fixture: DbFixture,
+  name: string,
+  edit: (db: FixtureEditor) => T,
+): { fixture: DbFixture; result: T } {
+  const db = Database.deserialize(fixture.file);
+  try {
+    const result = edit({
+      get: <R>(text: string, params: SQLQueryBindings[] = []) =>
+        db.query(text).get(...params) as R | null,
+      run: (text, params = []) => db.run(text, params).changes,
+    });
+    return { fixture: { ...fixture, name, file: db.serialize() }, result };
+  } finally {
+    db.close();
+  }
+}
+
 /** Prepare historical tasks in a private copy of the base fixture before either API starts. */
 export async function loadMetricRangeFixture(
   agentId: string,

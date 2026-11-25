@@ -237,6 +237,7 @@
         "divergence-vector-search",
         "divergence-like-case",
         "divergence-seeded-schedule-sql",
+        "upgrade-seeded-schedule-operator-fields",
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
