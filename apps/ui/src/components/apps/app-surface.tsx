@@ -1196,7 +1196,8 @@ export function AppSurface({
               } satisfies ActionSlot);
               // A script action can touch any model of any app on the surface.
               await ctx.refetchAll();
-              report({ status: "ok" });
+              // The result rides along for a caller that reads it (a page's `appContext.action`).
+              report({ status: "ok", result: response.result });
               return;
             }
 

@@ -20,6 +20,8 @@
 //                      side to the page's own `task:page:<id>` — no namespace
 //                      argument is exposed)
 //
+// Also sets `window.appContext` (null outside an app PageFrame).
+//
 // Full HTTP API reference: https://docs.agent-swarm.dev/docs/api-reference
 export const BROWSER_SDK_JS = `
 class SwarmSDK {
@@ -151,6 +153,93 @@ class SwarmSDK {
 // directly without instantiating.
 window.SwarmSDK = SwarmSDK;
 window.swarmSdk = new SwarmSDK();
+
+// window.appContext: the bridge to the app embedding this page in a PageFrame
+// (apps skill, "Pages inside an app"). null unless the frame URL carries
+// __swarm_app. The app answers a hello from its own iframe on the API origin
+// with a MessageChannel port; requests travel on that port only, and the app
+// checks each one against the PageFrame allowlists and the viewer's access.
+(function () {
+  var appId = null;
+  try { appId = new URLSearchParams(location.search).get('__swarm_app'); } catch (e) { appId = null; }
+  if (!appId || window.parent === window) { window.appContext = null; return; }
+  var port = null;
+  var nextId = 0;
+  var pending = {};
+  var listeners = { change: [], state: [], route: [], theme: [], params: [] };
+  var ctx = {
+    app: { id: appId },
+    route: null,
+    params: {},
+    theme: null,
+    state: {},
+  };
+  var fire = function (name, value) {
+    (listeners[name] || []).slice().forEach(function (fn) { try { fn(value); } catch (e) { console.error(e); } });
+  };
+  var same = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+  var apply = function (snap) {
+    if (!snap || typeof snap !== 'object') return;
+    var before = { route: ctx.route, params: ctx.params, theme: ctx.theme, state: ctx.state };
+    ctx.app = snap.app || ctx.app;
+    ctx.route = snap.route === undefined ? null : snap.route;
+    ctx.params = snap.params || {};
+    ctx.theme = snap.theme || null;
+    ctx.state = snap.state || {};
+    ['route', 'params', 'theme', 'state'].forEach(function (key) {
+      if (!same(before[key], ctx[key])) fire(key, ctx[key]);
+    });
+    fire('change', ctx);
+  };
+  var send = function (message) {
+    if (!port) throw new Error('appContext: not connected yet, await appContext.ready');
+    port.postMessage(message);
+  };
+  ctx.on = function (name, fn) {
+    if (!listeners[name]) throw new Error('appContext.on: unknown event ' + name);
+    listeners[name].push(fn);
+    return function () { listeners[name] = listeners[name].filter(function (f) { return f !== fn; }); };
+  };
+  ctx.action = function (name, input) {
+    return new Promise(function (resolve) {
+      nextId += 1;
+      pending[nextId] = resolve;
+      send({ type: 'swarm-app:action', id: nextId, name: name, input: input === undefined ? null : input });
+    });
+  };
+  ctx.navigate = function (page, params) { send({ type: 'swarm-app:navigate', page: page, params: params || {} }); };
+  ctx.emit = function (name, data) { send({ type: 'swarm-app:emit', name: name, data: data === undefined ? null : data }); };
+  ctx.ready = new Promise(function (resolve, reject) {
+    var timer = setTimeout(function () {
+      window.removeEventListener('message', onInit);
+      if (window.appContext === ctx) window.appContext = null;
+      reject(new Error('appContext: the app did not answer'));
+    }, 5000);
+    function onInit(event) {
+      if (event.source !== window.parent) return;
+      var data = event.data;
+      if (!data || data.type !== 'swarm-app:init' || !event.ports || !event.ports[0]) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onInit);
+      port = event.ports[0];
+      port.onmessage = function (e) {
+        var msg = e.data || {};
+        if (msg.type === 'swarm-app:update') apply(msg.snapshot);
+        else if (msg.type === 'swarm-app:result' && pending[msg.id]) {
+          var done = pending[msg.id];
+          delete pending[msg.id];
+          done(msg.result);
+        }
+      };
+      apply(data.snapshot);
+      resolve(ctx);
+    }
+    window.addEventListener('message', onInit);
+    window.parent.postMessage({ type: 'swarm-app:hello', appId: appId }, '*');
+  });
+  ctx.ready.catch(function () {});
+  window.appContext = ctx;
+})();
 `;
 
 // ─── UI primitives ──────────────────────────────────────────────────────────

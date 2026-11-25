@@ -508,14 +508,18 @@ export function PagePreviewBody({
   frameQuery,
   className,
   revision,
+  themePreset,
 }: {
   id: string;
   frameQuery: string;
   className?: string;
   /** A new value reloads the HTML frame (the app `PageFrame` passes the page's `updatedAt`). */
   revision?: string;
+  /** An app's own theme preset: the page follows the app, not the dashboard (the app `PageFrame` passes it). */
+  themePreset?: string | null;
 }) {
-  const viewer = useTheme();
+  const dashboard = useTheme();
+  const viewer = themePreset ? { ...dashboard, preset: themePreset } : dashboard;
   const { data, error, isLoading } = useQuery({
     queryKey: ["page-metadata", id],
     queryFn: () => fetchPageMetadataWithLaunchRetry(id),

@@ -4474,7 +4474,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Timeline: ({ props }) => <TimelineComponent props={props} />,
   SchemaForm: ({ props }) => <SchemaFormComponent props={props} />,
   SessionThread: ({ props }) => <SessionThreadComponent props={props} />,
-  PageFrame: ({ props }) => <PageFrameComponent props={props} />,
+  PageFrame: ({ props, emit }) => <PageFrameComponent props={props} emit={emit} />,
 };
 
 /**
