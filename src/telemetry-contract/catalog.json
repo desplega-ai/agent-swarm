@@ -120,6 +120,14 @@
       "has_notification_channel": {
         "type": "boolean",
         "description": "A notification channel is configured."
+      },
+      "db_engine": {
+        "type": "string",
+        "description": "Storage engine of the API server. API-server events only.",
+        "enum": [
+          "sqlite",
+          "postgres"
+        ]
       }
     }
   },
@@ -1067,6 +1075,183 @@
         },
         "method": {
           "type": "string"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "org.activity",
+      "description": "Hourly per-install counts of script runs, human-in-the-loop requests and workflow steps, by kind and status. Counts and durations only: no names, sources, arguments, content or IDs.",
+      "since": "2026-11-25",
+      "source": "api-server",
+      "properties": {
+        "window_minutes": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Minutes this rollup covers, ending at occurred_at. About 60; shorter for the window that ends at shutdown."
+        },
+        "script_runs": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions that finished in the window."
+        },
+        "script_runs_completed": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions that exited cleanly."
+        },
+        "script_runs_failed": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions that failed for a reason other than a timeout."
+        },
+        "script_runs_timeout": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions that hit their wall-clock limit."
+        },
+        "script_runs_task": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions an agent started from a task."
+        },
+        "script_runs_workflow_node": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions a workflow swarm-script node started."
+        },
+        "script_runs_schedule": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions a schedule started."
+        },
+        "script_runs_inline": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions started outside a task, workflow or schedule (API, MCP, dashboard)."
+        },
+        "script_runs_other": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions started by an app action, an API endpoint, a durable object or a task gate."
+        },
+        "script_runs_native": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions on the native executor."
+        },
+        "script_runs_quickjs": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Script executions on the quickjs executor."
+        },
+        "script_runs_duration_ms_total": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Summed wall-clock duration of the window's script executions."
+        },
+        "script_runs_duration_ms_max": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Longest script execution in the window."
+        },
+        "hitl_requests_created": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Human-in-the-loop requests (approvals and agent human-input requests) created."
+        },
+        "hitl_requests_from_workflow": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Created requests that belong to a workflow run."
+        },
+        "hitl_requests_from_task": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Created requests an agent raised from a task, outside a workflow."
+        },
+        "hitl_requests_approved": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Requests resolved as approved."
+        },
+        "hitl_requests_rejected": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Requests resolved as rejected."
+        },
+        "hitl_requests_timeout": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Requests that timed out."
+        },
+        "hitl_requests_cancelled": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Requests cancelled before a human answered."
+        },
+        "hitl_wait_ms_total": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Summed wait, created to resolved, of the requests settled in the window."
+        },
+        "hitl_wait_ms_max": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Longest wait of a request settled in the window."
+        },
+        "workflow_steps": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Workflow node runs (steps) started."
+        },
+        "workflow_steps_agent_task": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Steps of agent-task nodes."
+        },
+        "workflow_steps_hitl": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Steps of human-in-the-loop nodes."
+        },
+        "workflow_steps_script": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Steps of swarm-script and script nodes."
+        },
+        "workflow_steps_other": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Steps of every other node type (LLM, routing, notify, wait, VCS, sub-workflow, foreach)."
         }
       }
     },

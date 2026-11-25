@@ -40,6 +40,7 @@ import { startSavingsRollup, stopSavingsRollup } from "../be/savings/rollup";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { getStorage } from "../be/storage";
 import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
@@ -71,7 +72,7 @@ import { attachRealtimeTransport } from "../realtime/transport";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
-import { telemetry } from "../telemetry";
+import { setTelemetryDbEngine, telemetry } from "../telemetry";
 import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
@@ -890,6 +891,8 @@ httpServer
     const telemetrySetConfig = async (key: string, value: string) => {
       await upsertSwarmConfig({ scope: "global", key, value });
     };
+    // Every event of this process carries the storage engine (`db_engine`).
+    setTelemetryDbEngine(getStorage().capabilities.dbQueryDialect);
     // Also keeps the accessors so turning telemetry on at runtime re-inits it.
     await initApiTelemetry(telemetryGetConfig, telemetrySetConfig);
     telemetry.server("started", { port });
