@@ -34,6 +34,9 @@ sheet. A plan, diagram or map to think through is a board. Both are editable
 agent-fs files; see the `boards-and-sheets` skill. To show one inside a page,
 embed it with `<swarm-object>` (section below).
 
+Data from CSV, Parquet or xlsx files on the drive: query it with `data-query`
+(the `data` skill), save the result with `sheet: {path}`, then embed that sheet.
+
 Do **not** use pages for:
 
 - In-flight progress notes: use `store-progress.progress`

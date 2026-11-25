@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "data",
+  "displayName": "Data",
+  "slug": "data",
+  "title": "Data: SQL over drive files",
+  "description": "Answer questions from CSV, Parquet, JSON and xlsx files on your agent-fs drive with read-only SQL (`data-query`, `ctx.data.query`) instead of reading the file into context. Covers when to use it, query shapes, turning a result into a card or a sheet, limits and the common errors.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["data", "sql", "duckdb", "csv", "agent-fs"]
+}

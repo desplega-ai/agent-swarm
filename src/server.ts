@@ -47,6 +47,7 @@ import { registerCreateChannelTool } from "./tools/create-channel";
 import { registerCreateMetricTool } from "./tools/create-metric";
 import { registerCreatePageTool } from "./tools/create-page";
 import { registerCredentialBindingsTool } from "./tools/credential-bindings";
+import { registerDataQueryTool } from "./tools/data";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeferTaskTool } from "./tools/defer-task";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
@@ -544,6 +545,9 @@ export async function createServer(
     // are scrubbed; get-oauth-access-token returns tokens by design.
     registerDbQueryTool(server);
     registerGetOauthAccessTokenTool(server);
+
+    // SQL over the agent's own agent-fs drive files; refuses at call time without an agent-fs key.
+    registerDataQueryTool(server);
 
     // Steering acknowledgement must ship with core: steering delivery works on
     // directly-assigned tasks (no task-pool capability required), and without
