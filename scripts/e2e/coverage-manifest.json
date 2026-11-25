@@ -637,8 +637,8 @@
       "scenarios": ["core-session-followup-turns"]
     },
     "data": {
-      "description": "data-query and ctx.data.query as the agent's own key over an agent-fs stub: rows, a card table, a sheet with literal '=' text, sqlite/duckdb and missing-path refusals, agent-fs error text and code, the MCP and script row caps, one data.query event per call without the SQL text",
-      "scenarios": ["data-query"]
+      "description": "data-query and ctx.data.query as the agent's own key over an agent-fs stub: rows, a card table, a sheet with literal '=' text, sqlite/duckdb and missing-path refusals, agent-fs error text and code, the MCP and script row caps, one data.query event per call without the SQL text, and with OTLP on no SQL literal or result row in the exported tool span",
+      "scenarios": ["data-query", "data-query-otel"]
     },
     "sheets": {
       "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab/import-xlsx/export-xlsx as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, an xlsx round trip with its refusals, ctx.sheets in both executors",

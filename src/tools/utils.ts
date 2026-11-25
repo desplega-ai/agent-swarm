@@ -34,6 +34,11 @@ import {
   type ProviderName,
 } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import {
+  TELEMETRY_OMITTED,
+  telemetryOmitsToolResult,
+  telemetryToolArgs,
+} from "../utils/tool-telemetry-redaction";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -140,15 +145,17 @@ function toolRequestAttributes(name: string, requestInfo: RequestInfo, args?: un
     "mcp.session.id": requestInfo.sessionId,
     "agent.id": requestInfo.agentId,
     "agentswarm.task.id": requestInfo.sourceTaskId,
-    "agentswarm.tool.args_preview": previewValue(args),
+    "agentswarm.tool.args_preview": previewValue(telemetryToolArgs(name, args)),
   };
 }
 
-function toolResultAttributes(result: CallToolResult) {
+function toolResultAttributes(name: string, result: CallToolResult) {
   return {
     "mcp.tool.result_content_count": Array.isArray(result.content) ? result.content.length : 0,
     "mcp.tool.is_error": result.isError ?? false,
-    "agentswarm.tool.result_preview": previewValue(result.content),
+    "agentswarm.tool.result_preview": telemetryOmitsToolResult(name)
+      ? TELEMETRY_OMITTED
+      : previewValue(result.content),
   };
 }
 
@@ -1247,7 +1254,7 @@ export const createToolRegistrar = (server: McpServer) => {
             }
             const result = await finalizeSwarmToolResult(name, outcome, requestInfo);
             dispatchPostToolCall(pre.dispatcher, name, {}, outcome, requestInfo, durationMs);
-            span.setAttributes(toolResultAttributes(result));
+            span.setAttributes(toolResultAttributes(name, result));
             return result;
           },
           toolRequestAttributes(name, requestInfo),
@@ -1297,7 +1304,7 @@ export const createToolRegistrar = (server: McpServer) => {
             requestInfo,
             durationMs,
           );
-          span.setAttributes(toolResultAttributes(result));
+          span.setAttributes(toolResultAttributes(name, result));
           return result;
         },
         toolRequestAttributes(name, requestInfo, args),

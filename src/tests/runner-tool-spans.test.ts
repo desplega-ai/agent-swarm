@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { type ActiveToolSpanEntry, implicitCloseActiveToolSpans } from "../commands/runner";
+import {
+  type ActiveToolSpanEntry,
+  implicitCloseActiveToolSpans,
+  workerToolArgsPreview,
+  workerToolResultPreview,
+} from "../commands/runner";
 import type { Attributes, AttributeValue, SwarmSpan } from "../otel";
 
 /**
@@ -264,5 +269,28 @@ describe("end-to-end boundary semantics (helper integration)", () => {
     expect(span.attrs["agentswarm.tool.unclosed"]).toBe(true);
     expect(span.attrs["agentswarm.tool.implicit_close"]).toBeUndefined();
     expect(span.attrs["agentswarm.tool.duration_ms"]).toBe(4_000);
+  });
+});
+
+describe("worker tool span previews keep data-query payloads out of telemetry", () => {
+  const sentinel = "Private Customer Sentinel";
+  const args = { sql: `SELECT '${sentinel}' AS c`, tables: { t: "/shared/x.csv" } };
+  const result = [{ type: "text", text: `| c |\n| ${sentinel} |` }];
+
+  test("data-query SQL and result rows never reach a span preview", () => {
+    const argsPreview = String(workerToolArgsPreview("data-query", args));
+    expect(argsPreview).not.toContain(sentinel);
+    expect(argsPreview).toContain("[omitted]");
+    expect(argsPreview).toContain("/shared/x.csv");
+    expect(workerToolResultPreview("data-query", result)).toBe("[omitted]");
+    expect(String(workerToolArgsPreview("data-query", JSON.stringify(args)))).not.toContain(
+      sentinel,
+    );
+  });
+
+  test("control: other tools keep their args and result previews", () => {
+    expect(String(workerToolArgsPreview("db-query", args))).toContain(sentinel);
+    expect(String(workerToolResultPreview("db-query", result))).toContain(sentinel);
+    expect(String(workerToolArgsPreview(undefined, args))).toContain(sentinel);
   });
 });
