@@ -14,6 +14,7 @@ import { WebSocket } from "ws";
 import type { ScriptExecutionResult } from "../script-workflows/executor";
 import { runWithCapacityRetry } from "../scripts-runtime/dispatch/capacity-retry";
 import type { ExecutorOutput, ScriptExecutorName } from "../scripts-runtime/executors/types";
+import { availableShellRuntimes } from "../scripts-runtime/shell-job";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { type DurableGuest, startDurableGuest } from "./durable-job";
 import {
@@ -154,6 +155,7 @@ export function startScriptRunner(options: {
         version: 1,
         slots: options.slots,
         executors: options.executors,
+        runtimes: availableShellRuntimes(),
         held: [...durable.keys(), ...steps.keys()],
       }),
     );
@@ -226,14 +228,33 @@ export function startScriptRunner(options: {
             result: undefined as ExecutorOutput | undefined,
           };
           if (held) steps.set(message.jobId, record);
-          const input = message.input;
-          input.configPayload.system.sdkBaseUrl = { value: options.apiUrl, isSecret: false };
-          input.configPayload.system.mcpBaseUrl = { value: options.apiUrl, isSecret: false };
+          if (message.kind !== "step-shell") {
+            message.input.configPayload.system.sdkBaseUrl = {
+              value: options.apiUrl,
+              isSecret: false,
+            };
+            message.input.configPayload.system.mcpBaseUrl = {
+              value: options.apiUrl,
+              isSecret: false,
+            };
+          }
           const done = (async () => {
             let output: ExecutorOutput;
             try {
               output = await runWithCapacityRetry(
-                { id: message.jobId, kind: message.kind, executor: message.executor, input },
+                message.kind === "step-shell"
+                  ? {
+                      id: message.jobId,
+                      kind: "step-shell",
+                      executor: "native",
+                      input: message.input,
+                    }
+                  : {
+                      id: message.jobId,
+                      kind: message.kind,
+                      executor: message.executor,
+                      input: message.input,
+                    },
                 controller.signal,
               );
             } catch {

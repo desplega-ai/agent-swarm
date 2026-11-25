@@ -1,17 +1,22 @@
+import type { ShellJobConfig, ShellRuntime } from "../shell-job";
 import type {
   ScriptExecutionHandle,
   StartScriptExecutionInput,
 } from "../../script-workflows/executor";
 import type { ExecutorInput, ExecutorOutput, ScriptExecutorName } from "../executors/types";
 
-export type ScriptJob = {
+export type InlineScriptJob = {
   id: string;
   kind: "inline" | "step-script";
   executor: ScriptExecutorName;
   input: Omit<ExecutorInput, "signal">;
 };
 
+export type ShellScriptJob = { id:string; kind:"step-shell"; executor:"native"; input:ShellJobConfig };
+export type ScriptJob = InlineScriptJob | ShellScriptJob;
+
 export type ScriptRunnerHandle = {
+  runtimes?: readonly ShellRuntime[];
   id: string;
   kind: "embedded" | "remote";
   startHeld(input: StartScriptExecutionInput): Promise<ScriptExecutionHandle>;

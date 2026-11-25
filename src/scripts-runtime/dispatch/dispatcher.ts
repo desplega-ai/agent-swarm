@@ -107,7 +107,7 @@ export function dispatchScriptJob(
           try {
             if (runner.kind === "remote") {
               assertSerializableJob(job);
-              if (job.input.configPayload.system.apiKey.value === getApiKey())
+              if (job.kind !== "step-shell" && job.input.configPayload.system.apiKey.value === getApiKey())
                 throw new Error("Script job cannot send the operator key to a runner");
             }
             resolve(await runner.run(job, signal));

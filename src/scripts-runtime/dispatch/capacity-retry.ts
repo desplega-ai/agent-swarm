@@ -1,3 +1,4 @@
+import { executeShellJobOutput } from "../shell-job-output";
 import { getScriptExecutor } from "../executors/registry";
 import type { ExecutorOutput } from "../executors/types";
 import type { ScriptJob } from "./types";
@@ -10,6 +11,7 @@ export async function runWithCapacityRetry(
   job: ScriptJob,
   signal?: AbortSignal,
 ): Promise<ExecutorOutput> {
+  if (job.kind === "step-shell") return executeShellJobOutput(job.input, signal);
   const input = { ...job.input, signal };
   let output = await getScriptExecutor(job.executor).run(input);
   for (const delayMs of CAPACITY_EXCEEDED_RETRY_DELAYS_MS) {

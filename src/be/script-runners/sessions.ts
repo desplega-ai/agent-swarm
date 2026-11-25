@@ -1,3 +1,4 @@
+import type { ShellRuntime } from "../../scripts-runtime/shell-job";
 import { WebSocket } from "ws";
 import {
   apiMessage,
@@ -19,6 +20,7 @@ export class RemoteScriptRunner implements ScriptRunnerHandle {
     readonly slots: number,
     readonly executors: ScriptExecutorName[],
     readonly socket: WebSocket,
+    readonly runtimes: ShellRuntime[] = [],
   ) {}
   async startHeld(input: StartScriptExecutionInput) {
     const { startRemoteDurable } = await import("./durable-dispatch");
@@ -41,7 +43,7 @@ export class RemoteScriptRunner implements ScriptRunnerHandle {
       };
       const deadline = setTimeout(
         () => this.close(),
-        job.input.resources.wallClockMs + RPC_CLEANUP_GRACE_MS,
+        (job.kind === "step-shell" ? job.input.timeout ?? 30_000 : job.input.resources.wallClockMs) + RPC_CLEANUP_GRACE_MS,
       );
       this.pending.set(job.id, {
         finish: (output) => {

@@ -61,7 +61,8 @@ export function attachScriptRunnerTransport(server: Server): () => void {
         (runner) =>
           runner.socket.readyState === WebSocket.OPEN &&
           runner.pending.size + heldScriptSlots(runner.id) < runner.slots &&
-          runner.executors.includes(job.executor),
+          runner.executors.includes(job.executor) &&
+          (job.kind !== "step-shell" || runner.runtimes.includes(job.input.runtime)),
       ),
     () => [...scriptRunnerSessions.values()].reduce((sum, runner) => sum + runner.slots, 0),
   );
@@ -151,6 +152,7 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                     message.slots,
                     message.executors,
                     ws,
+                    message.runtimes,
                   );
                   scriptRunnerSessions.set(runner.id, runner);
                   ws.send(

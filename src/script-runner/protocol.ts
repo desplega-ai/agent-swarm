@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorInput, ExecutorOutput } from "../scripts-runtime/executors/types";
+import { ShellJobConfigSchema } from "../scripts-runtime/shell-job";
 import { ScriptRunSchema } from "../types";
 
 export const SCRIPT_RUNNER_PATH = "/api/script-runners/connect";
@@ -79,6 +80,10 @@ export const runnerMessage = z.discriminatedUnion("type", [
     version: z.literal(1),
     slots: z.number().int().min(1).max(1024),
     executors: z.array(executor).max(2),
+    runtimes: z
+      .array(z.enum(["bash", "ts", "python"]))
+      .max(3)
+      .default([]),
     held: z.array(id).max(1024),
   }),
   z.object({ type: z.literal("result"), jobId: id, output }),
@@ -95,13 +100,16 @@ export const runnerMessage = z.discriminatedUnion("type", [
 ]);
 export const apiMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("welcome"), sessionId: id }),
-  z.object({
-    type: z.literal("job"),
-    jobId: id,
-    kind: z.enum(["inline", "step-script"]),
-    executor,
-    input,
-  }),
+  z.discriminatedUnion("kind", [
+    z.object({ type: z.literal("job"), jobId: id, kind: z.enum(["inline", "step-script"]), executor, input }),
+    z.object({
+      type: z.literal("job"),
+      jobId: id,
+      kind: z.literal("step-shell"),
+      executor: z.literal("native"),
+      input: ShellJobConfigSchema.omit({ cwd: true }),
+    }),
+  ]),
   z.object({ type: z.literal("durable-job"), jobId: id, run: ScriptRunSchema }),
   z.object({ type: z.literal("cap"), jobId: id, frame: z.string().max(64 * 1024 * 1024) }),
   z.object({ type: z.literal("cancel"), jobId: id }),
