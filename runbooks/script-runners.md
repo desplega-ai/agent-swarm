@@ -57,6 +57,9 @@ A connection cannot replace a live session with the same instance ID.
 Reconnects can retain durable guests and workflow jobs under their stored ownership and lease.
 After an API restart, durable guests stop and replay their journals because their broker lived in the API.
 Owned workflow jobs survive the restart and return their result to the new API.
+Runners advertise held-job support and their available shell runtimes during the handshake.
+The API places a `step-shell` job only on a runner that supports its runtime and native execution.
+A workflow shell node with a working directory requires the embedded runner.
 The SDK retries refused connections during the restart. Calls with uncertain side effects retain their normal retry policy.
 
 Set `SCRIPT_RUNNER_READY_FILE=/run/agent-swarm-script-runner/ready` for packaged health probes.

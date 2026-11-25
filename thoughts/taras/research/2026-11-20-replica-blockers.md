@@ -15,7 +15,7 @@ One API process owns each database. PostgreSQL enforces this boundary with a ses
 The Helm chart also refuses several API replicas.
 The execution tier adds script runners while the API retains database and workflow ownership.
 
-The seven categories contain 133 findings: buses 13, locks 46, caches 15, timers 33, connections 13, local resources 7, and other 6.
+The seven categories contain 134 findings: buses 14, locks 46, caches 15, timers 33, connections 13, local resources 7, and other 6.
 The cache section separately identifies 21 safe caches. The timer section separately identifies 11 loops intended for each replica.
 
 One fact lowers the risk of many loops. The Postgres pool runs every transaction as SERIALIZABLE with retry (`packages/storage-postgres/src/client.ts:20`, `:400`). So a read-then-write claim inside one transaction (scheduler occurrence, retry claim, wait resume) is safe when two replicas run it. Two sites opt down to READ COMMITTED with explicit row locks (decision D7): the poll write pass (`src/http/poll.ts`) and task finish (`src/http/tasks.ts`); their locks hold across processes too. The dangerous code is the code that decides with process memory, not with a row: "is this run active in this process", "did this process already send this", "is this PID alive here", "was this claimed before my boot".
@@ -30,8 +30,9 @@ Replacement patterns used below:
 
 ## 1. Realtime and event buses
 
-- `packages/storage-postgres/src/bus/table-backend.ts:19`, `:39`: execution-bus subscriptions remain in process memory. Durable delivery rows survive restarts, but wake-up callbacks reach only local subscribers. Register durable groups on each consumer process and relay wake-ups between replicas.
+- `packages/storage-postgres/src/bus/table-backend.ts:21`, `:62`: execution-bus subscriptions remain in process memory. Durable delivery rows survive restarts, but wake-up callbacks reach only local subscribers. Register durable groups on each consumer process and relay wake-ups between replicas.
 - `src/be/script-runners/durable-launch-bus.ts:8`, `:15`: the durable launch subscription and its boot identity belong to one API process. Another API cannot wake this process's dispatcher directly. Preserve the row scan and route delivery to the owner.
+- `src/be/script-runners/step-dispatch.ts:60`: workflow job subscriptions wake the local dispatcher and workflow engine. Route completion events to the replica that owns the workflow.
 - `src/realtime/bus.ts:6`, `:31-33`: `InProcessBus` wraps one Node `EventEmitter`, stored on `globalThis.__realtimeBus`. A publish on replica B never reaches a subscriber on replica A (lost event). Replace with NOTIFY behind the same `publish`/`subscribe` interface, with a replica id to skip echo.
 - `src/workflows/event-bus.ts:19-20`, `:71`: `workflowEventBus` sits on `realtimeBus` and keeps prefix handlers in a local `Map`. Each event fires only on the replica that committed it. Subscribers that only read the DB stay correct. The ones below do not. Replace as for the realtime bus, or keep local delivery and fix each subscriber.
 - `src/workflows/resume.ts:1276-1277`, `:1340`: `waitsByEvent` and `listenersByEvent` hold event-mode workflow waits. A wait is registered only on the replica that created it (or that scanned it at boot, `:1288`). An event on the other replica does not resolve it, so it waits until its timeout (lost event). Replace with a fixed listener per event name that queries pending `wait_states` rows, as `src/scheduler/deferred-task-waits.ts` already does.
@@ -50,7 +51,7 @@ Replacement patterns used below:
 
 - `src/scripts-runtime/dispatch/dispatcher.ts:10`, `:18`, `:84`: the FIFO sync queue, slot counters, caller waiters and queue deadlines belong to one API process. Another replica cannot serve a queued caller or enforce the same capacity. Route sync requests to the owning dispatcher or share placement through owner-addressed requests.
 - `src/scripts-runtime/dispatch/held-reservations.ts:4`: held slot reservations cover durable runs and parked workflow jobs in one API process. A second replica can reserve the same runner capacity independently. Give each runner one admission owner and route reservations to it.
-- `src/be/script-runners/step-dispatch.ts:30`, `:31`: active job preparations, adopted reservations, release callbacks and the drain guard remain local. Job leases fence database settlement but cannot share these handles. Route cancellation and dispatch to the owner before enabling another API.
+- `src/be/script-runners/step-dispatch.ts:45`, `:55`, `:56`: active job preparations, adopted reservations, release callbacks and the drain guard remain local. Job leases fence database settlement but cannot share these handles. Route cancellation and dispatch to the owner before enabling another API.
 - `src/workflows/step-jobs.ts:8`: `shouldParkScriptNode` reads the local runner registry and embedded capacity. Replicas can choose different execution modes for the same deployment. Derive placement from shared runner presence or route workflow walks to one owner.
 - `src/be/script-runners/broker-fence.ts:5`: broker bearer attribution uses a local map. A broker request on another replica cannot find its ownership fence. Persist the attribution or route every broker request to its issuing API.
 
@@ -139,9 +140,9 @@ None of these loops has leader election. Each replica starts all of them from th
 
 ### Execution tier loops
 
-- `src/script-workflows/supervisor.ts:37`, `:285`: the durable reconciliation timer uses local launch and process handles. Remote row leases protect remote claims, but embedded ownership still assumes one API. Add replica leases before another API runs this sweep.
-- `src/be/script-runners/step-dispatch.ts:33`, `:364`: a timer scans queued jobs and expired leases every 15 seconds. The local drain guard cannot serialize two dispatchers. Preserve fenced claims and coordinate runner admission across API owners.
-- `packages/storage-postgres/src/bus/table-backend.ts:21`, `:96`: the delivery timer and active pump belong to one process. Database claim tokens fence durable acknowledgements, but they do not distribute wake-up subscribers. Keep durable consumers registered and recover lost wakes with row scans.
+- `src/script-workflows/supervisor.ts:37`, `:292`: the durable reconciliation timer uses local launch and process handles. Remote row leases protect remote claims, but embedded ownership still assumes one API. Add replica leases before another API runs this sweep.
+- `src/be/script-runners/step-dispatch.ts:59`, `:570`: a timer scans queued jobs and expired leases every 15 seconds. The local drain guard cannot serialize two dispatchers. Preserve fenced claims and coordinate runner admission across API owners.
+- `packages/storage-postgres/src/bus/table-backend.ts:23`, `:112`: the delivery timer and active pump belong to one process. Database claim tokens fence durable acknowledgements, but they do not distribute wake-up subscribers. Keep durable consumers registered and recover lost wakes with row scans.
 
 ### Double run with real damage
 
@@ -183,11 +184,11 @@ Per-replica by design (keep one per replica, no change): 11 loops. `src/http/ind
 
 ## 5. Single-owner connections
 
-- `src/be/script-runners/sessions.ts:16`, `:82`: the runner registry, sockets and pending sync results belong to the API that accepted the connection. Another API cannot dispatch through that socket or resolve its callers. Route requests to the connection owner.
-- `src/http/script-runners-connect.ts:57`, `:93`, `:109`: instance credential bindings, handshake deadlines, ping timers and revocation callbacks remain local. A second API cannot inspect or revoke those sockets directly. Publish revocation to every connection owner and track instance ownership centrally.
-- `src/be/script-runners/durable-dispatch.ts:14`: held durable jobs retain their capability session and completion callback in one API. A different replica cannot adopt that broker after an API restart. Keep cancel-and-replay recovery or implement a persisted broker protocol before distributing API ownership.
-- `src/script-workflows/capability-session.ts:84`: capability calls retain responses and dispatch limits inside their broker session. A reconnect can reuse responses only while that API process survives. Route capabilities to that process or persist the deduplication state.
-- `src/script-runner/client.ts:93`, `:95`, `:109`, `:113`: guest handles, retained results and reconnect timers belong to one runner process. Inline children stop on disconnect, while owned durable and step jobs can survive a short disconnect. Preserve instance and lease fencing when routing a reconnect to another API.
+- `src/be/script-runners/sessions.ts:21`, `:94`: the runner registry, sockets and pending sync results belong to the API that accepted the connection. Another API cannot dispatch through that socket or resolve its callers. Route requests to the connection owner.
+- `src/http/script-runners-connect.ts:58`, `:100`, `:116`: instance credential bindings, handshake deadlines, ping timers and revocation callbacks remain local. A second API cannot inspect or revoke those sockets directly. Publish revocation to every connection owner and track instance ownership centrally.
+- `src/be/script-runners/durable-dispatch.ts:15`: held durable jobs retain their capability session and completion callback in one API. A different replica cannot adopt that broker after an API restart. Keep cancel-and-replay recovery or implement a persisted broker protocol before distributing API ownership.
+- `src/script-workflows/capability-session.ts:85`: capability calls retain responses and dispatch limits inside their broker session. A reconnect can reuse responses only while that API process survives. Route capabilities to that process or persist the deduplication state.
+- `src/script-runner/client.ts:94`, `:104`, `:113`, `:136`: guest handles, retained results and reconnect timers belong to one runner process. Inline children stop on disconnect, while owned durable and step jobs can survive a short disconnect. Preserve instance and lease fencing when routing a reconnect to another API.
 - `src/slack/app.ts:34`, `:385`, `:489`: in Socket Mode each replica opens its own socket. Slack spreads events across open connections, so dedup, thread buffers and watcher state split between replicas, and each runs its own watchdog. HTTP mode (`:36`) suits replicas better. Replace with a socket-owner leader (others serve HTTP only), or require `SLACK_MODE=http` for more than one replica.
 - `src/slack/app.ts:454`, `src/slack/inbound-dispatch.ts:627-628`, `src/be/db-queries/slack-inbound.ts:349`: at Slack start each replica marks every `processing` inbound receipt `uncertain`, assuming its owner died. A second replica's start strands the first replica's live receipts (lost replies). Replace with an owner and lease on receipts.
 - `src/integrations/chat-sdk/schema.ts:89`, `src/integrations/chat-sdk/adapters.ts:200`: the Chat SDK Slack adapter can run in socket mode too. Same split as Bolt Socket Mode. Same fix.
@@ -202,14 +203,14 @@ Per-replica by design (keep one per replica, no change): 11 loops. `src/http/ind
 - `src/be/crypto/key-bootstrap.ts:109`, `:129`, `src/be/db/runtime.ts:401`: without `SECRETS_ENCRYPTION_KEY`, the key lives in `<data dir>/.encryption-key` and is generated when no encrypted rows exist. The StatefulSet gives each replica its own volume (`charts/agent-swarm/templates/api-statefulset.yaml:136`, `:162`). Two fresh replicas generate two keys, and each later fails to decrypt the other's secrets. Replace with a required shared key (env or Kubernetes Secret) for more than one replica.
 - `src/utils/page-session.ts:41`, `:113`: the page-session signing secret is generated into the data dir. A cookie signed on A fails on B (forced re-login, broken public pages). Same fix: a shared secret.
 - `src/fs/local-fs-provider.ts:17`, `:28`: without agent-fs, files go to `./data/fs` (or `AGENT_FS_LOCAL_DIR`) on the local volume. A file uploaded through A is missing on B. Replace with a required shared provider (agent-fs or object storage) for replicas.
-- `src/script-workflows/supervisor.ts:36`, `src/script-workflows/executor.ts:145`: embedded durable runs retain local child handles and capability sockets. Remote runs retain a capability broker in the API and a guest on the runner. Another API cannot access these handles. Route stop, pause and abort commands to the API owner.
+- `src/script-workflows/supervisor.ts:36`, `src/script-workflows/executor.ts:153`: embedded durable runs retain local child handles and capability sockets. Remote runs retain a capability broker in the API and a guest on the runner. Another API cannot access these handles. Route stop, pause and abort commands to the API owner.
 - `src/script-workflows/supervisor.ts` tracks launches in `starting`. This prevents duplicate local launches. Other API replicas need the durable ownership lease.
 - `src/be/scripts/legacy-journal-credential.ts` keeps historical replay grants in API memory. Route their journal requests to the issuing API for the lifetime of the replay.
 - `src/utils/process-group.ts:10-11`: `liveProcessGroups` and `terminations` track sandboxed child groups locally. Cleanup and kill run only on the owning replica. Fixed with the owner routing above.
 
 ## 7. Other
 
-- `src/script-workflows/supervisor.ts:34`: the embedded owner ID is unique to this API boot and has no expiring lease. Another API cannot distinguish its live embedded execution from an interrupted boot. Introduce replica liveness before recovering embedded owners across APIs.
+- `src/script-workflows/supervisor.ts:34`: the embedded owner ID (`embedded:<bootId>`) is unique to this API boot and has no expiring lease. Another API cannot distinguish its live embedded execution from an interrupted boot. Introduce replica liveness before recovering embedded owners across APIs.
 - `src/scripts-runtime/dispatch/dispatcher.ts:27`, `src/http/script-runners.ts:150`: sync queue metrics read local waiters and slot counters. A second API exposes an incomplete deployment total. Label metrics by owner and aggregate them across dispatchers.
 - `src/be/api-drain.ts:11`, `:33`: drain state is per process, and a draining API marks responses `X-Swarm-Draining: 1`. When one replica drains on a rolling deploy, its workers supersede their in-flight tasks although the other replica keeps serving. Replace with a drain that applies only when the last replica stops, or drop the worker reaction when other replicas are live.
 - `src/http/index.ts:662-663`: the boot id `run_<ms>` feeds the heartbeat boot epoch and the business-use `api` flow run id. With replicas, "the API boot" is no longer one moment (see the reboot sweep). Replace with a per-replica id plus a replica registry table (id, started at, last seen).
