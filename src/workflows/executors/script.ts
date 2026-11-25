@@ -1,10 +1,14 @@
+import "../shell-step-job";
 import { z } from "zod";
+import { scriptRunnerSessions } from "../../be/script-runners/sessions";
 import { isExecutorAllowedByDeployment } from "../../scripts-runtime/executors/registry";
 import {
   executeShellJob,
   ShellJobConfigSchema as ScriptConfigSchema,
 } from "../../scripts-runtime/shell-job";
 import type { ExecutorMeta } from "../../types";
+import { scrubJson } from "../../utils/secret-scrubber";
+import { parkStepJob, shouldParkScriptNode } from "../step-jobs";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 // ─── Schemas ────────────────────────────────────────────────
@@ -44,6 +48,26 @@ export class ScriptExecutor extends BaseExecutor<
       };
     }
 
-    return executeShellJob(config);
+    const embeddedDisabled = process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS === "0";
+    const matchingRunner = [...scriptRunnerSessions.values()].some(
+      (runner) => runner.executors.includes("native") && runner.runtimes.includes(config.runtime),
+    );
+    if (config.cwd !== undefined && embeddedDisabled) {
+      const error = "A workflow script with cwd requires the embedded runner";
+      return { status: "failed", error, output: { exitCode: -1, stdout: "", stderr: error } };
+    }
+    if (
+      !config.cwd &&
+      shouldParkScriptNode() &&
+      (matchingRunner || scriptRunnerSessions.size === 0)
+    ) {
+      return parkStepJob("step-shell", _meta, _context);
+    }
+    if (embeddedDisabled) {
+      const error = `Script runtime '${config.runtime}' is unavailable on connected script runners`;
+      return { status: "failed", error, output: { exitCode: -1, stdout: "", stderr: error } };
+    }
+    const result = await executeShellJob(config);
+    return scrubJson(result);
   }
 }

@@ -21,6 +21,7 @@ export type ShellScriptJob = {
 export type ScriptJob = InlineScriptJob | ShellScriptJob;
 
 export type ScriptRunnerHandle = {
+  executors?: readonly ScriptExecutorName[];
   runtimes?: readonly ShellRuntime[];
   id: string;
   kind: "embedded" | "remote";

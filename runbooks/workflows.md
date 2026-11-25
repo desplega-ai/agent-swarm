@@ -1255,3 +1255,10 @@ Two valid patterns:
 The `script` executor uses `src/scripts-runtime/shell-job.ts` for bash, TypeScript and Python.
 The shared runtime preserves sandbox limits, process group cleanup, output caps and JSON output fields.
 An explicit `cwd` refers to a directory on the API host.
+
+With PostgreSQL, an inline script without `cwd` can park as a `step-shell` job.
+The API selects a runner that advertises the requested bash, TypeScript or Python runtime.
+The shared step dispatcher owns claims, leases, acknowledgments and checkpoint settlement.
+The API scrubs shell results before a step checkpoint stores them.
+A node with `cwd` uses the embedded runner because that directory belongs to the API host.
+If embedded slots are zero, a node with `cwd` fails with an explicit error.

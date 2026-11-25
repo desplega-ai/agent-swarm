@@ -31,6 +31,7 @@ export function assertSerializableJob(job: ScriptJob): void {
 
 export const embeddedScriptRunner: ScriptRunnerHandle = {
   id: "embedded",
+  executors: ["native", "quickjs"],
   get runtimes() {
     return availableShellRuntimes();
   },
