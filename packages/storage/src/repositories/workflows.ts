@@ -1190,6 +1190,7 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
     if (u.definition !== undefined) sets.push(sql`definition = ${u.definition}`);
     if (u.triggers !== undefined) sets.push(sql`triggers = ${jsonText(u.triggers)}`);
     if (u.cooldown !== undefined) sets.push(sql`cooldown = ${u.cooldown}`);
+    if (u.input !== undefined) sets.push(sql`input = ${u.input}`);
     if (u.triggerSchema !== undefined)
       sets.push(sql`"triggerSchema" = ${jsonText(u.triggerSchema)}`);
     if (u.params !== undefined) sets.push(sql`params = ${jsonText(u.params)}`);
