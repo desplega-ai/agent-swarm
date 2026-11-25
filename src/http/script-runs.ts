@@ -502,6 +502,12 @@ export async function handleScriptRuns(
     }
     // A user token sends no X-Agent-ID (session-access refuses it), so it has no agent.
     const user = authUser(getRequestAuth(req));
+    // User keys are stored as `user:<id>:<key>`: an agent key in that namespace could block or
+    // claim a user's launch.
+    if (!user && parsed.body.idempotencyKey?.startsWith("user:")) {
+      jsonError(res, 'idempotencyKey prefix "user:" is reserved for user-token launches', 400);
+      return true;
+    }
     let source = parsed.body.source ?? "";
     let scriptName = parsed.body.scriptName;
     let runAsAgentId = agentId;

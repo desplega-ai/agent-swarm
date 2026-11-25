@@ -1,5 +1,6 @@
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
+import { cancelTask, createPinnedTask } from "./knowledge-helpers";
 import { getLead, registerAgent, upsertScript } from "./script-helpers";
 import { createWorkflow, triggerWorkflow, waitForRun } from "./workflow-helpers";
 
@@ -214,6 +215,60 @@ export const rbacIntegrationRole: Scenario = {
     expect(run.agentId === leadId, `the run executes as the owning agent: ${String(run.agentId)}`);
     expect(run.requestedByUserId === user.userId, "the run is attributed to the user");
     expect(run.scriptName === scriptName, "the run records the script name");
+
+    // The `user:` key prefix is reserved: no agent can plant a key in a user's namespace,
+    // neither to block the user's launch nor, as a lead naming the user, to hand it a run.
+    const plants: [string, Record<string, unknown>, string][] = [
+      [launcherId, {}, `plant-a-${ctx.nonce}`],
+      [leadId, { requestedByUserId: user.userId }, `plant-b-${ctx.nonce}`],
+    ];
+    for (const [plantAgentId, extra, key] of plants) {
+      expectStatus(
+        await ctx.api("POST", "/api/script-runs", {
+          agentId: plantAgentId,
+          body: { source: NOOP, idempotencyKey: `user:${user.userId}:${key}`, ...extra },
+        }),
+        [400],
+        `an agent cannot plant a user-namespace key (${key})`,
+      );
+      expectStatus(
+        await ctx.api("POST", "/api/script-runs", {
+          ...asUser,
+          body: { name: scriptName, idempotencyKey: key },
+        }),
+        [201],
+        `the user's launch with ${key} is a fresh run`,
+      );
+    }
+
+    // A user token cannot route its run into an agent task's thread via X-Source-Task-Id.
+    const leadTaskId = await createPinnedTask(ctx, leadId, "obs-int-source");
+    const sourceHeader = { headers: { "X-Source-Task-Id": leadTaskId } };
+    const readSourceTask = async (response: { json: unknown }) => {
+      const id = asString(asRecord(response.json).id, "source-task run id");
+      const read = await ctx.api("GET", `/api/script-runs/${id}`);
+      expectStatus(read, [200], "read the source-task run");
+      return asRecord(asRecord(read.json).run).sourceTaskId;
+    };
+    const leadLaunch = await ctx.api("POST", "/api/script-runs", {
+      agentId: leadId,
+      ...sourceHeader,
+      body: { name: scriptName },
+    });
+    expectStatus(leadLaunch, [201], "the lead launches with its own task as source");
+    expect(
+      (await readSourceTask(leadLaunch)) === leadTaskId,
+      "control: an agent's own task is recorded as the run's source task",
+    );
+    const userLaunch = await ctx.api("POST", "/api/script-runs", {
+      ...asUser,
+      ...sourceHeader,
+      body: { name: scriptName },
+    });
+    expectStatus(userLaunch, [201], "the user launches with an owner-agent task header");
+    const userSourceTask = await readSourceTask(userLaunch);
+    expect(!userSourceTask, `a user run records no source task: ${String(userSourceTask)}`);
+    await cancelTask(ctx, leadTaskId);
 
     // An agent reusing the agent key still gets its own run, not the user's.
     const agentReplay = await ctx.api("POST", "/api/script-runs", {
