@@ -18,6 +18,7 @@ export async function settleStepResult(input: {
   registry: ExecutorRegistry;
   fence: StepFence;
   retryCount: number;
+  markRunFailed?: boolean;
 }): Promise<{ outcome: "completed" | "failed"; successors: WorkflowNode[] }> {
   const { runId, stepId, node, def, result, ctx, executionCtx, meta, registry, fence } = input;
   const stale = { outcome: "completed" as const, successors: [] as WorkflowNode[] };
@@ -30,7 +31,7 @@ export async function settleStepResult(input: {
       result.error || "Executor returned failed status",
       input.retryCount,
       policy,
-      { fence, output: result.output },
+      { fence, output: result.output, markRunFailed: input.markRunFailed },
     );
     if (failure.stale || failure.shouldRetry) return stale;
     throw new Error(result.error || "Step execution failed");
@@ -46,6 +47,7 @@ export async function settleStepResult(input: {
       undefined,
       {
         fence,
+        markRunFailed: input.markRunFailed,
       },
     );
     if (lost) return stale;
@@ -81,7 +83,7 @@ export async function settleStepResult(input: {
         "Validation failed, retrying",
         currentRetryCount,
         retryPolicy,
-        { fence },
+        { fence, markRunFailed: input.markRunFailed },
       );
       if (lost) return stale;
       return { outcome: "completed", successors: [] }; // Retry handled by poller

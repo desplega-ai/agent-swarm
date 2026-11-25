@@ -326,6 +326,8 @@ export function startScriptRunner(options: {
           const record: HeldStep = { controller, done: completed, confirm };
           if (held) record.deadline = setTimeout(() => expireStep(record), 15000);
           if (held) steps.set(message.jobId, record);
+          if (message.kind === "step-script")
+            message.input.configPayload.system.connectRetryMs = 30000;
           if (message.kind !== "step-shell") {
             message.input.configPayload.system.sdkBaseUrl = {
               value: options.apiUrl,

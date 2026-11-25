@@ -1,9 +1,10 @@
-import { getWorkflowRun, getWorkflowRunStep } from "../be/db";
+import { getRunWorkflow, getWorkflowRun, getWorkflowRunStep, updateWorkflowRun } from "../be/db";
+import { getRunLineageBlock } from "../be/db/workflow-runs";
 import { scriptRunnerSessions } from "../be/script-runners/sessions";
 import { getStorage } from "../be/storage";
 import type { ExecutorMeta } from "../types";
-import { checkpointStepWaiting } from "./checkpoint";
 import type { AsyncExecutorResult } from "./executors/base";
+import { resolveForeachParent } from "./foreach-join";
 
 export function shouldParkScriptNode(): boolean {
   return (
@@ -28,9 +29,17 @@ export async function parkStepJob<T = never>(
     if (
       !step ||
       !run ||
-      !(await checkpointStepWaiting(meta.runId, meta.stepId, { ...run.context }))
+      (await getRunLineageBlock(meta.runId)) ||
+      !(await storage.repos.workflows.parkRunningStep(meta.runId, meta.stepId))
     )
       throw new Error("Workflow step no longer accepts a job");
+    const workflow = await getRunWorkflow(run);
+    if (
+      workflow &&
+      !resolveForeachParent(workflow.definition, step.nodeId) &&
+      run.status === "running"
+    )
+      await updateWorkflowRun(run.id, { status: "waiting" });
     const saved = { ...((step.input ?? {}) as Record<string, unknown>) };
     if (step.retryCount === 0) delete saved._stepJobReferences;
     await storage.repos.workflows.updateStepColumns(step.id, { input: JSON.stringify(saved) });

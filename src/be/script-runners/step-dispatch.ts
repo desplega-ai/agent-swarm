@@ -6,7 +6,6 @@ import {
 } from "../../scripts-runtime/dispatch/held-reservations";
 import type { ExecutorOutput } from "../../scripts-runtime/executors/types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { checkpointStepFailure } from "../../workflows/checkpoint";
 import { getSuccessors } from "../../workflows/definition";
 import { interpolateNodeConfig, walkGraph } from "../../workflows/engine";
 import type { ExecutorResult } from "../../workflows/executors/base";
@@ -136,54 +135,42 @@ async function settleOutcome(
 ) {
   const current = await getWorkflowRunStep(job.stepId);
   if (current?.status !== "waiting" || current.retryCount !== job.attempt) return;
+  await updateWorkflowRunStep(job.stepId, { status: "running" });
+  try {
+    await settleStepResult({
+      runId: job.runId,
+      stepId: job.stepId,
+      node: data.node,
+      def: data.workflow.definition,
+      result,
+      ctx: data.ctx,
+      executionCtx: { ...data.ctx, ...data.inputCtx },
+      meta: data.build.meta,
+      registry,
+      fence: { retryCount: job.attempt },
+      retryCount: job.attempt,
+      markRunFailed: !data.parent,
+    });
+  } catch (error) {
+    if ((await getWorkflowRunStep(job.stepId))?.status !== "failed") throw error;
+  }
   if (data.parent) {
-    if (result.status === "failed") {
-      await updateWorkflowRunStep(job.stepId, { status: "running" });
-      const retry = await checkpointStepFailure(
-        job.runId,
-        job.stepId,
-        result.error ?? "Workflow job failed",
-        job.attempt,
-        result.retryable === false
-          ? undefined
-          : (data.node.retry ?? registry.get(data.node.type)?.retryPolicy),
-        { fence: { retryCount: job.attempt }, markRunFailed: false, output: result.output },
-      );
-      if (retry.shouldRetry || retry.stale) return;
-      await updateWorkflowRunStep(job.stepId, { status: "waiting" });
-    }
+    const settled = await getWorkflowRunStep(job.stepId);
+    if (!settled || settled.nextRetryAt || !["completed", "failed"].includes(settled.status))
+      return;
     await settleForeachChild(
       data.workflow.definition,
       job.runId,
       job.stepId,
       {
-        status: result.status === "failed" ? "failed" : "completed",
-        output: result.output,
-        error: result.error,
-        nextPort: result.nextPort,
+        status: settled.status === "failed" ? "failed" : "completed",
+        output: settled.output,
+        error: settled.error ?? undefined,
+        nextPort: settled.nextPort ?? undefined,
       },
       data.ctx,
-      { registry },
+      { registry, from: ["completed", "failed"] },
     );
-  } else {
-    await updateWorkflowRunStep(job.stepId, { status: "running" });
-    try {
-      await settleStepResult({
-        runId: job.runId,
-        stepId: job.stepId,
-        node: data.node,
-        def: data.workflow.definition,
-        result,
-        ctx: data.ctx,
-        executionCtx: { ...data.ctx, ...data.inputCtx },
-        meta: data.build.meta,
-        registry,
-        fence: { retryCount: job.attempt },
-        retryCount: job.attempt,
-      });
-    } catch (error) {
-      if ((await getWorkflowRunStep(job.stepId))?.status !== "failed") throw error;
-    }
   }
   const run = await getWorkflowRun(job.runId);
   if (run?.status === "waiting") await updateWorkflowRun(job.runId, { status: "running" });
@@ -235,6 +222,7 @@ export async function settleWorkflowStepJob(
       };
     }
     await storage.transaction(async () => {
+      accepted = false;
       if (await getRunLineageBlock(job.runId)) return;
       accepted = await storage.repos.workflowStepJobs.settle(
         id,
@@ -408,8 +396,6 @@ export async function drainWorkflowStepJobs(): Promise<void> {
         if (slot.runner.kind === "remote") {
           const runner = scriptRunnerSessions.get(slot.runner.id);
           if (!runner) throw new Error("Workflow job runner disconnected before dispatch");
-          if (prepared.job.kind === "step-script")
-            prepared.job.input.configPayload.system.connectRetryMs = 30000;
           send(runner, { type: "job", jobId: deliveryId, ...prepared.job });
         } else {
           void slot.runner
