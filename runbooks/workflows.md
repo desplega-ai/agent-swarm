@@ -1266,3 +1266,36 @@ The shared step dispatcher owns claims, leases, acknowledgments and checkpoint s
 The API scrubs remote shell output before it maps the result into a step checkpoint.
 A node with `cwd` uses the embedded runner because that directory belongs to the API host.
 If embedded slots are zero, a node with `cwd` fails with an explicit error.
+
+## Workflow jobs on script runners
+
+PostgreSQL parks `swarm-script` steps when a runner connects or embedded slots are zero.
+SQLite and PostgreSQL without a runner retain synchronous execution.
+A parked attempt remains a job if the runner disconnects.
+The job row stores identifiers, ownership, a lease and a scrubbed error.
+The step checkpoint stores the result. Job rows contain no credentials or payload.
+
+HTTP triggers, MCP triggers and webhooks return when the first script step parks.
+Schedules cannot observe a later script failure in their initial response.
+Event triggers can start the next workflow while a script step waits.
+Foreach bodies occupy concurrency slots while waiting and retain item order in the aggregate.
+
+The API claims a job only after it reserves capacity in the shared sync lane.
+Jobs have no queue deadline. Execution timeout starts on the runner.
+The API renews a 60-second lease on runner heartbeats.
+An expired lease permits another runner to execute the attempt again.
+External effects can repeat after a runner crash. Scripts must make these effects idempotent.
+
+The runner retains a result until the API commits the job and checkpoint, then acknowledges it.
+A reconnect preserves an owned job. Cancellation closes open jobs and revokes their credentials.
+The execution bus delivers job notifications. A startup scan and a 15-second scan recover missed notifications.
+
+Ownership combines the authenticated runner credential, its public instance UUID and a unique claim generation.
+An old result cannot settle a later claim, including another claim by the same runner.
+Older runner images cannot receive workflow jobs until they advertise the `stepJobs` capability.
+The API also checks the selected script executor against the runner's advertised executors.
+
+The checkpoint preserves dispatched script identifiers, version, source hash and executor for each attempt.
+Result replay uses these references even if the script catalog changes.
+Job rows contain none of these payloads or raw results.
+Only remote step jobs retry refused SDK connections for up to 30 seconds during an API restart.

@@ -1086,3 +1086,18 @@ Cancellation holds capacity until cleanup confirmation or removal of the session
 
 Embedded owners use a boot identity without lease expiry. PostgreSQL's process ownership lock and write fence protect API takeover.
 SQLite retains its local execution path. See [script-runners.md](./script-runners.md) for the transport and capacity details.
+
+## Workflow step jobs
+
+PostgreSQL workflow jobs use a 60-second owner lease and the shared sync capacity lane.
+Runner heartbeats renew owned jobs. A dead or stopped runner loses ownership after lease expiry.
+Another runner then rebuilds the payload from API state and executes the same step attempt.
+The API commits the result checkpoint and job status together before it acknowledges the runner.
+A lost finish notification leaves a running run for workflow recovery to continue.
+Cancellation closes jobs for the complete run tree and revokes per-step credentials.
+The authenticated credential and public instance UUID determine the stored runner identity.
+Each claim adds a unique generation. Renewal, result settlement and cancellation check that complete owner value.
+The runner starts a held job only after the API confirms its lease.
+It aborts execution when the confirmed monotonic deadline expires, including during an API outage.
+Reconnect restores held slot reservations before either dispatcher selects new work.
+An acknowledged result releases capacity only after its checkpoint commits.

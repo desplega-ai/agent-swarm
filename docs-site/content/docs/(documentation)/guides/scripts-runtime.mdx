@@ -805,3 +805,19 @@ Row inputs must fit within 1 MiB. Bulk creation accepts 1 to 500 value objects a
 Listing accepts typed equality filters for declared and system columns, sorting, and a limit from 1 to 1000 (default 200).
 Bulk deletion requires a non-empty `equals` filter and defaults to a limit of 1000.
 App actions remain REST/MCP-only. Scripts and extensions cannot invoke `app-action-run`, and the SDK excludes it to prevent recursion.
+
+### Workflow script jobs
+
+On PostgreSQL, `swarm-script` workflow nodes park when remote script runners exist or embedded slots are zero.
+Triggers then return before the script finishes. Read the workflow run for its final status.
+Without remote runners, the default embedded path remains synchronous. SQLite always uses that path.
+
+Workflow jobs use the shared sync lane without a queue timeout.
+The execution timeout starts when the runner starts the script.
+Foreach script bodies can execute concurrently across runner slots.
+A parked body counts toward the foreach concurrency limit.
+
+A runner retains its result across API reconnects until the checkpoint commits.
+If the runner dies, its lease expires after 60 seconds and another runner can repeat the attempt.
+Make external effects idempotent when an attempt can repeat.
+Cancelling the workflow cancels open jobs and revokes their per-run credentials.

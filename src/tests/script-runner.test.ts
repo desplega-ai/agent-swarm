@@ -640,8 +640,7 @@ test("step claims repeat unacknowledged results and retain them across reconnect
         expect(message.output.result).toBe(42);
         if (generation === 1) {
           if (++firstConnectionResults === 2) ws.terminate();
-        }
-        else {
+        } else {
           replayed = true;
           ws.send(JSON.stringify({ type: "ack", jobId: id }));
         }

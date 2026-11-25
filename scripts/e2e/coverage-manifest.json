@@ -230,13 +230,16 @@
     },
     "script-runner-credentials": {
       "description": "Human credential management and HTTP isolation",
-      "scenarios": [
-        "script-runner-credentials"
-      ]
+      "scenarios": ["script-runner-credentials"]
     },
     "execution-tier-baseline": {
       "description": "Script schedule principals, synchronous workflow scripts, sequential foreach bodies and nested durable execution.",
-      "scenarios": ["script-schedule-fire", "workflow-script-sync-baseline"]
+      "scenarios": [
+        "script-schedule-fire",
+        "workflow-script-sync-baseline",
+        "workflow-script-fanout",
+        "workflow-script-park-restart"
+      ]
     },
     "script-runner-operations": {
       "description": "Connect a runner, execute scripts and observe its available capacity.",
