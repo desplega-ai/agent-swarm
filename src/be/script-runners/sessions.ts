@@ -26,6 +26,7 @@ export class RemoteScriptRunner implements ScriptRunnerHandle {
     readonly socket: WebSocket,
     credentialId: string,
     readonly runtimes: ShellRuntime[] = [],
+    readonly stepJobs = false,
   ) {
     this.ownerId = scriptRunnerOwnerId(credentialId, id);
   }

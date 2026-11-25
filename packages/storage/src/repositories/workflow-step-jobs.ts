@@ -141,8 +141,10 @@ export class BaseWorkflowStepJobsRepository implements WorkflowStepJobsRepositor
   }
 
   listClaimable(now: string): Promise<WorkflowStepJob[]> {
-    return this.db.query<WorkflowStepJob>(sql`SELECT ${COLUMNS} FROM workflow_step_jobs
-      WHERE status='queued' OR (status='running' AND lease_expires_at <= ${now})
+    return this.db.query<WorkflowStepJob>(sql`SELECT ${COLUMNS} FROM workflow_step_jobs j
+      WHERE (status='queued' OR (status='running' AND lease_expires_at <= ${now}))
+      AND EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.id=j.step_id AND s.status='waiting' AND s."retryCount"=j.attempt)
+      AND EXISTS (SELECT 1 FROM workflow_runs r WHERE r.id=j.run_id AND r.status IN ('running','waiting'))
       ORDER BY created_at,id LIMIT 100`);
   }
 

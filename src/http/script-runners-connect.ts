@@ -169,7 +169,9 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                     ws,
                     credential.id,
                     message.runtimes,
+                    message.stepJobs,
                   );
+                  runner.draining = true;
                   scriptRunnerSessions.set(runner.id, runner);
                   ws.send(
                     JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }),
@@ -181,7 +183,11 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                   for (const id of message.held)
                     if (!(await heldStepHooks()?.reconnect(runner, id))) unhandled.push(id);
                   await reconnectDurable(runner, unhandled);
+                  runner.draining = false;
                   drainScriptQueue();
+                  void import("../be/script-runners/step-dispatch")
+                    .then(({ drainWorkflowStepJobs }) => drainWorkflowStepJobs())
+                    .catch((error) => console.error(scrubSecrets(String(error))));
                 } else {
                   if (!runner) throw new Error("hello required");
                   if (message.type === "draining") runner.draining = true;
@@ -190,7 +196,7 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                     const renewed: string[] = [];
                     for (const id of message.jobs) {
                       if (await heldStepHooks()?.heartbeat(runner, id)) renewed.push(id);
-                      else unhandled.push(id);
+                      else if (!id.includes(":")) unhandled.push(id);
                     }
                     renewed.push(...(await durableHeartbeat(runner, unhandled)));
                     if (message.nonce)

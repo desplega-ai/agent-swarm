@@ -602,3 +602,73 @@ test("runner owner identity binds the credential across API restart", async () =
     scriptRunnerOwnerId(credential, crypto.randomUUID()),
   );
 });
+
+test("step claims retain results across reconnect and ignore an early acknowledgement", async () => {
+  const {createServer}=await import("node:http");
+  const {WebSocketServer}=await import("ws");
+  const {listenOnFreePort}=await import("./test-net");
+  const {startScriptRunner}=await import("../script-runner/client");
+  const server=createServer();
+  const wss=new WebSocketServer({server});
+  const fixture=job();
+  const id=`${fixture.id}:${crypto.randomUUID()}`;
+  let connections=0;
+  let replayed=false;
+  let held=false;
+  wss.on("connection",ws=>{
+    const generation=++connections;
+    ws.on("message",data=>{
+      const message=JSON.parse(data.toString());
+      if(message.type==="hello") {
+        held ||= generation>1 && message.held.includes(id);
+        expect(message.stepJobs).toBe(true);
+        ws.send(JSON.stringify({type:"welcome",sessionId:crypto.randomUUID()}));
+        if(generation===1) {
+          ws.send(JSON.stringify({type:"job",...fixture,jobId:id,kind:"step-script"}));
+          ws.send(JSON.stringify({type:"ack",jobId:id}));
+        }
+      } else if(message.type==="heartbeat") ws.send(JSON.stringify({type:"lease",nonce:message.nonce,jobs:message.jobs.map((jobId:string)=>({jobId,leaseMs:60000}))}));
+      else if(message.type==="result") {
+        expect(message.output.result).toBe(42);
+        if(generation===1) ws.terminate();
+        else {replayed=true;ws.send(JSON.stringify({type:"ack",jobId:id}));}
+      }
+    });
+  });
+  const port=await listenOnFreePort(server);
+  const runner=startScriptRunner({apiUrl:`http://127.0.0.1:${port}`,token:"fixture",slots:1,executors:["native"],onRefused(){}});
+  try {
+    const deadline=Date.now()+10000;
+    while(!replayed && Date.now()<deadline) await Bun.sleep(20);
+    expect(replayed).toBe(true);
+    expect(held).toBe(true);
+  } finally {await runner.stop();for(const ws of wss.clients) ws.terminate();wss.close();server.close();}
+},15000);
+
+test("step guests stop when confirmed lease time expires", async () => {
+  const {createServer}=await import("node:http");
+  const {WebSocketServer}=await import("ws");
+  const {listenOnFreePort}=await import("./test-net");
+  const {startScriptRunner}=await import("../script-runner/client");
+  const server=createServer();
+  const wss=new WebSocketServer({server});
+  const fixture=job();
+  fixture.input.source="export default async () => {await new Promise(resolve=>setTimeout(resolve,60000));return 42;}";
+  const id=`${fixture.id}:${crypto.randomUUID()}`;
+  let expired=false;
+  wss.on("connection",ws=>ws.on("message",data=>{
+    const message=JSON.parse(data.toString());
+    if(message.type==="hello") {
+      ws.send(JSON.stringify({type:"welcome",sessionId:crypto.randomUUID()}));
+      ws.send(JSON.stringify({type:"job",...fixture,jobId:id,kind:"step-script"}));
+    } else if(message.type==="heartbeat") ws.send(JSON.stringify({type:"lease",nonce:message.nonce,jobs:[{jobId:id,leaseMs:200}]}));
+    else if(message.type==="result") {expired=message.output.exitCode!==0;ws.send(JSON.stringify({type:"ack",jobId:id}));}
+  }));
+  const port=await listenOnFreePort(server);
+  const runner=startScriptRunner({apiUrl:`http://127.0.0.1:${port}`,token:"fixture",slots:1,executors:["native"],onRefused(){}});
+  try {
+    const deadline=Date.now()+10000;
+    while(!expired && Date.now()<deadline) await Bun.sleep(20);
+    expect(expired).toBe(true);
+  } finally {await runner.stop();for(const ws of wss.clients) ws.terminate();wss.close();server.close();}
+},15000);

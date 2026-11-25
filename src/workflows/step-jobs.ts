@@ -31,6 +31,9 @@ export async function parkStepJob<T = never>(
       !(await checkpointStepWaiting(meta.runId, meta.stepId, { ...run.context }))
     )
       throw new Error("Workflow step no longer accepts a job");
+    const saved = { ...((step.input ?? {}) as Record<string, unknown>) };
+    delete saved._stepJobReferences;
+    await storage.repos.workflows.updateStepColumns(step.id, { input: JSON.stringify(saved) });
     const now = new Date().toISOString();
     await storage.repos.workflowStepJobs.insert({
       id,

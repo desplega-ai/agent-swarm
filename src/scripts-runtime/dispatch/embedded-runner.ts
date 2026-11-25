@@ -31,11 +31,12 @@ export function assertSerializableJob(job: ScriptJob): void {
 
 export const embeddedScriptRunner: ScriptRunnerHandle = {
   id: "embedded",
-  executors: ["native", "quickjs"],
   get runtimes() {
     return availableShellRuntimes();
   },
   kind: "embedded",
+  stepJobs: true,
+  executors: ["native", "quickjs"],
   startHeld: (input) => localProcessScriptExecutor.start(input),
   async run(job, signal) {
     if (getNodeEnv() === "test") assertSerializableJob(job);

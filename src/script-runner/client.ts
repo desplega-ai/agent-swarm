@@ -15,7 +15,7 @@ import type { ScriptExecutionResult } from "../script-workflows/executor";
 import { runWithCapacityRetry } from "../scripts-runtime/dispatch/capacity-retry";
 import type { ExecutorOutput, ScriptExecutorName } from "../scripts-runtime/executors/types";
 import { availableShellRuntimes } from "../scripts-runtime/shell-job";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { type DurableGuest, startDurableGuest } from "./durable-job";
 import {
   apiMessage,
@@ -103,10 +103,19 @@ export function startScriptRunner(options: {
   };
   const durable = new Map<string, HeldGuest>();
   let sendCurrent: (message: unknown) => void = () => {};
-  const steps = new Map<
-    string,
-    { controller: AbortController; done: Promise<void>; result?: ExecutorOutput }
-  >();
+  type HeldStep = {
+    controller: AbortController;
+    done: Promise<void>;
+    result?: ExecutorOutput;
+    confirm(): void;
+    deadline?: ReturnType<typeof setTimeout>;
+  };
+  const steps = new Map<string, HeldStep>();
+  const runtimes = availableShellRuntimes();
+  const expireStep = (job: HeldStep) => {
+    job.controller.abort();
+    job.confirm();
+  };
   let heartbeatNonce = "";
   let heartbeatSentAt = 0;
   const sendHeartbeat = () => {
@@ -167,12 +176,14 @@ export function startScriptRunner(options: {
         instanceId,
         version: 1,
         slots: options.slots,
+        stepJobs: true,
         executors: options.executors,
-        runtimes: availableShellRuntimes(),
+        runtimes,
         held: [...durable.keys(), ...steps.keys()],
       }),
     );
     current.on("message", (data, binary) => {
+      if (current !== socket || stopped) return;
       try {
         if (binary) throw new Error("binary");
         const message = apiMessage.parse(JSON.parse(data.toString()));
@@ -194,10 +205,16 @@ export function startScriptRunner(options: {
             !welcomed ||
             stopped ||
             durable.has(message.jobId) ||
+            jobs.has(message.jobId) ||
+            steps.has(message.jobId) ||
             jobs.size + durable.size + steps.size >= options.slots ||
             !options.executors.includes("native")
           ) {
-            if (!durable.has(message.jobId))
+            if (
+              !durable.has(message.jobId) &&
+              !jobs.has(message.jobId) &&
+              !steps.has(message.jobId)
+            )
               sendCurrent({
                 type: "durable-result",
                 jobId: message.jobId,
@@ -243,6 +260,16 @@ export function startScriptRunner(options: {
         } else if (message.type === "lease") {
           if (message.nonce !== heartbeatNonce) return;
           for (const renewed of message.jobs) {
+            const step = steps.get(renewed.jobId);
+            if (step && !step.result && !step.controller.signal.aborted) {
+              clearTimeout(step.deadline);
+              const remaining = heartbeatSentAt + renewed.leaseMs - performance.now();
+              if (remaining <= 0) expireStep(step);
+              else {
+                step.deadline = setTimeout(() => expireStep(step), remaining);
+                step.confirm();
+              }
+            }
             const job = durable.get(renewed.jobId);
             if (!job || job.result || job.cancelled) continue;
             clearTimeout(job.deadline);
@@ -256,19 +283,32 @@ export function startScriptRunner(options: {
         } else if (message.type === "cap") {
           durable.get(message.jobId)?.guest?.receive(message.frame);
         } else if (message.type === "ack") {
-          clearTimeout(durable.get(message.jobId)?.deadline);
-          durable.delete(message.jobId);
-          steps.delete(message.jobId);
+          const guest = durable.get(message.jobId);
+          if (guest?.result) {
+            clearTimeout(guest.deadline);
+            durable.delete(message.jobId);
+          }
+          const step = steps.get(message.jobId);
+          if (step?.result) {
+            clearTimeout(step.deadline);
+            steps.delete(message.jobId);
+          }
         } else if (message.type === "job") {
           if (
             !welcomed ||
             stopped ||
             jobs.has(message.jobId) ||
             steps.has(message.jobId) ||
+            durable.has(message.jobId) ||
+            (message.kind === "step-shell" && !runtimes.includes(message.input.runtime)) ||
             jobs.size + durable.size + steps.size >= options.slots ||
             !options.executors.includes(message.executor)
           ) {
-            if (!jobs.has(message.jobId))
+            if (
+              !jobs.has(message.jobId) &&
+              !steps.has(message.jobId) &&
+              !durable.has(message.jobId)
+            )
               sendCurrent({
                 type: "result",
                 jobId: message.jobId,
@@ -279,11 +319,12 @@ export function startScriptRunner(options: {
           const controller = new AbortController();
           const held = message.kind !== "inline";
           const completed = Promise.resolve();
-          const record = {
-            controller,
-            done: completed,
-            result: undefined as ExecutorOutput | undefined,
-          };
+          let confirm!: () => void;
+          const confirmed = new Promise<void>((resolve) => {
+            confirm = resolve;
+          });
+          const record: HeldStep = { controller, done: completed, confirm };
+          if (held) record.deadline = setTimeout(() => expireStep(record), 15000);
           if (held) steps.set(message.jobId, record);
           if (message.kind !== "step-shell") {
             message.input.configPayload.system.sdkBaseUrl = {
@@ -298,6 +339,11 @@ export function startScriptRunner(options: {
           const done = (async () => {
             let output: ExecutorOutput;
             try {
+              if (held) {
+                await confirmed;
+                if (controller.signal.aborted)
+                  throw new Error("Workflow job lease expired before start");
+              }
               output = await runWithCapacityRetry(
                 message.kind === "step-shell"
                   ? {
@@ -317,8 +363,37 @@ export function startScriptRunner(options: {
             } catch {
               output = failedJob("executor_error");
             }
-            if (held) record.result = output;
-            else jobs.delete(message.jobId);
+            if (message.kind === "step-script") {
+              const scrubber = createValueScrubber(
+                Object.entries(message.input.configPayload.user)
+                  .filter(([, value]) => value.isSecret)
+                  .map(([key, value]) => ({ name: `config:${key}`, value: value.value }))
+                  .concat([
+                    {
+                      name: "run-credential",
+                      value: message.input.configPayload.system.apiKey.value,
+                    },
+                  ]),
+              );
+              output = {
+                ...output,
+                result: scrubObject(scrubber.object(output.result)),
+                stdout: scrubSecrets(scrubber.text(output.stdout)),
+                stderr: scrubSecrets(scrubber.text(output.stderr)),
+                ...(output.runtimeError
+                  ? { runtimeError: scrubObject(scrubber.object(output.runtimeError)) }
+                  : {}),
+              };
+            }
+            try {
+              encodeRunnerFrame({ type: "result", jobId: message.jobId, output });
+            } catch {
+              output = failedJob("executor_error");
+            }
+            if (held) {
+              record.result = output;
+              clearTimeout(record.deadline);
+            } else jobs.delete(message.jobId);
             if (socket.readyState === WebSocket.OPEN) {
               let frame: string;
               try {
@@ -339,9 +414,15 @@ export function startScriptRunner(options: {
           })();
           record.done = done;
           if (!held) jobs.set(message.jobId, { controller, done });
+          else sendHeartbeat();
         } else if (message.type === "cancel") {
           jobs.get(message.jobId)?.controller.abort();
-          steps.get(message.jobId)?.controller.abort();
+          const step = steps.get(message.jobId);
+          if (step) {
+            clearTimeout(step.deadline);
+            expireStep(step);
+            void step.done.then(() => steps.delete(message.jobId));
+          }
           const job = durable.get(message.jobId);
           if (job) {
             expire(job);
@@ -405,7 +486,10 @@ export function startScriptRunner(options: {
       ]);
       clearTimeout(grace);
       await killJobs();
-      for (const step of steps.values()) step.controller.abort();
+      for (const step of steps.values()) {
+        clearTimeout(step.deadline);
+        expireStep(step);
+      }
       await Promise.all([...steps.values()].map((step) => step.done));
       steps.clear();
       await Promise.all(
