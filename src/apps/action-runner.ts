@@ -1,10 +1,10 @@
 import { normalizeAssetKey } from "../assets/key";
-import { getLeadAgent, recordInlineScriptRun } from "../be/db";
+import { getLeadAgent, recordInlineScriptRun, updateScriptRunIfRunning } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { resolveTemplate } from "../prompts/resolver";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import { scrubObject } from "../utils/secret-scrubber";
 import type { AppActionCaller } from "./action-caller";
 import type { AppRecord } from "./store";
 import { runAppSync } from "./sync";
@@ -85,43 +85,61 @@ export async function runAppAction({
       };
     }
 
-    // The run id is fixed up front and stamped on the run's token, so every
-    // run the script launches or calls records it as parent: the run tree
-    // `app-action-status` waits on.
+    // The run's row is written `running` before the script starts and its id is
+    // stamped on the run's token, so every run the script launches or calls
+    // records an existing parent: the run tree `app-action-status` waits on.
+    // `args.app.id` is what ties the run to this app.
     const runId = crypto.randomUUID();
-    const startedAt = new Date().toISOString();
     const scriptInput = { ...action.args, ...input, app: { id: app.id }, caller };
-    const output = await runSavedScriptAsAgent({
-      script,
-      input: scriptInput,
-      agentId: runAsAgentId,
-      provenance: { sourceScriptRunId: runId },
-    });
-    const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
-    const error = ok
-      ? undefined
-      : output.runtimeError
-        ? `${output.runtimeError.name}: ${output.runtimeError.message}`
-        : (output.error ?? `Script exited with code ${output.exitCode}`);
     let recorded = false;
     try {
-      // `args.app.id` is what ties the run to this app for app-action-status.
       await recordInlineScriptRun({
         id: runId,
         agentId: runAsAgentId,
         source: script.source,
         args: scrubObject(scriptInput),
         scriptName: script.name,
-        status: ok ? "completed" : "failed",
-        output: scrubObject(output.result),
-        ...(error === undefined ? {} : { error: scrubSecrets(error) }),
-        startedAt,
-        finishedAt: new Date().toISOString(),
+        status: "running",
+        startedAt: new Date().toISOString(),
       });
       recorded = true;
     } catch {
-      // swallow: the action already ran; the row is observability and the wait handle.
+      // swallow: the row is observability and the wait handle; the action still runs, untracked.
     }
+    const finish = async (status: "completed" | "failed", result: unknown, error?: string) => {
+      if (!recorded) return;
+      try {
+        // Running-guarded: a cancel that landed while the script ran keeps its status.
+        await updateScriptRunIfRunning(runId, {
+          status,
+          output: result,
+          error: error ?? null,
+          finishedAt: new Date().toISOString(),
+        });
+      } catch {
+        // swallow: the action already ran.
+      }
+    };
+    let output: Awaited<ReturnType<typeof runSavedScriptAsAgent>>;
+    try {
+      output = await runSavedScriptAsAgent({
+        script,
+        input: scriptInput,
+        agentId: runAsAgentId,
+        // Untracked run: no provenance, so no child points at a missing parent.
+        ...(recorded ? { provenance: { sourceScriptRunId: runId } } : {}),
+      });
+    } catch (err) {
+      await finish("failed", undefined, err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+    const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
+    const error = ok
+      ? undefined
+      : output.runtimeError
+        ? `${output.runtimeError.name}: ${output.runtimeError.message}`
+        : (output.error ?? `Script exited with code ${output.exitCode}`);
+    await finish(ok ? "completed" : "failed", output.result, error);
     return {
       status: 200 as const,
       body: scrubObject({

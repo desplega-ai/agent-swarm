@@ -543,6 +543,32 @@ export function scriptsContract(engine: ContractEngine): void {
       expect(await repo.countScriptRuns({ status: "completed" })).toBe(1);
       expect(await repo.countActiveScriptRuns()).toBe(2);
       expect((await repo.listActiveScriptRuns()).map((r) => r.id)).toEqual(["r1", "r2"]);
+      // An in-process inline run recorded `running` (an app action's root) is
+      // outside the supervisor: never relaunched, never counted against its cap.
+      await repo.insertInlineScriptRun({
+        id: "r4",
+        agentId: "ag",
+        scriptName: "action",
+        sourceHash: "h1",
+        args: "{}",
+        status: "running",
+        output: null,
+        error: null,
+        startedAt: T1,
+        finishedAt: null,
+        requestedByUserId: null,
+        created_by: null,
+        updated_by: null,
+        apiEndpointId: null,
+        sourceStepId: null,
+        parentScriptRunId: null,
+        objectScriptId: null,
+        objectId: null,
+        objectMethod: null,
+      });
+      expect(await repo.findScriptRun("r4")).toMatchObject({ status: "running", finishedAt: null });
+      expect(await repo.countActiveScriptRuns()).toBe(2);
+      expect((await repo.listActiveScriptRuns()).map((r) => r.id)).toEqual(["r1", "r2"]);
       expect(await repo.updateScriptRun("r1", {})).toBe(0);
       expect(await repo.updateScriptRun("r3", { status: "failed" }, "not-terminal")).toBe(0);
       expect(await repo.updateScriptRun("r1", { status: "paused" }, "running")).toBe(1);

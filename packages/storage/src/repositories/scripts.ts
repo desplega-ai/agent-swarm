@@ -372,7 +372,8 @@ export type NewInlineScriptRunRow = {
   output: string | null;
   error: string | null;
   startedAt: string;
-  finishedAt: string;
+  /** Null for a run recorded as `running` before it executes (an app action's root). */
+  finishedAt: string | null;
   requestedByUserId: string | null;
   created_by: string | null;
   updated_by: string | null;
@@ -600,7 +601,7 @@ export interface ScriptsRepository {
     update: ScriptRunColumnUpdate,
     guard?: "not-terminal" | "running",
   ): Promise<number>;
-  /** Running and paused runs with their stored source, in insertion order. */
+  /** Running and paused supervised (non-inline) runs with their stored source, in insertion order. */
   listActiveScriptRuns(): Promise<ScriptRunRow[]>;
 
   // ---- script_run_journal ----
@@ -1173,7 +1174,8 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
 
   async countActiveScriptRuns(): Promise<number> {
     const row = await this.db.get<{ count: number }>(
-      sql`SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')`,
+      // Inline rows run in-process, never under the supervisor or its cap.
+      sql`SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused') AND kind <> 'inline'`,
     );
     return row?.count ?? 0;
   }

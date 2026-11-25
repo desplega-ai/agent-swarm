@@ -2,6 +2,7 @@ import * as z from "zod";
 import { getScriptRun } from "../be/db";
 import { listScriptRunTree } from "../be/db/script-runs";
 import { getTaskById } from "../be/db/tasks/read";
+import { MAX_SCRIPT_WALL_CLOCK_MS } from "../scripts-runtime/executors/types";
 import { TERMINAL_SCRIPT_RUN_STATUSES } from "../types";
 import { scrubObject } from "../utils/secret-scrubber";
 
@@ -10,6 +11,8 @@ export const MAX_ACTION_RUN_WAIT_SECONDS = 25;
 /** Rows read per run tree; a bigger tree reports `truncated: true`. */
 const RUN_TREE_MAX_ROWS = 2000;
 const POLL_INTERVAL_MS = 500;
+/** Slack past the script wall cap before a still-running action root reads as lost. */
+const LOST_ROOT_GRACE_MS = 60_000;
 
 const SETTLED_TASK_STATUSES = new Set(["completed", "failed", "cancelled", "skipped"]);
 const FAILED_RUN_STATUSES = new Set(["failed", "cancelled", "aborted_limit"]);
@@ -62,6 +65,16 @@ async function readActionRun(appId: string, id: string): Promise<ActionRunState 
     const tree = await listScriptRunTree(id, RUN_TREE_MAX_ROWS + 1);
     const truncated = tree.length > RUN_TREE_MAX_ROWS;
     const rows = tree.slice(0, RUN_TREE_MAX_ROWS);
+    // An in-process action root still `running` past the script wall cap lost its
+    // process (a server restart mid-action): read it as failed, not running forever.
+    if (
+      root.kind === "inline" &&
+      root.status === "running" &&
+      Date.now() - Date.parse(root.startedAt) > MAX_SCRIPT_WALL_CLOCK_MS + LOST_ROOT_GRACE_MS &&
+      rows[0]?.id === id
+    ) {
+      rows[0] = { ...rows[0], status: "failed", error: "the action run stopped without a result" };
+    }
     // `paused` is not terminal: it resumes, so the tree is still running.
     const running = rows.filter((r) => !TERMINAL_RUN_STATUSES.has(r.status)).length;
     const failedRows = rows.filter((r) => FAILED_RUN_STATUSES.has(r.status));

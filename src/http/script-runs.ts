@@ -52,6 +52,7 @@ import {
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
 import { getAppUrl, getScriptApiBaseUrl } from "../utils/constants";
+import { getCurrentRunProvenance } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
@@ -81,7 +82,8 @@ const createScriptRunBodySchema = z.object({
   /**
    * The run this one works for, so it joins that run's tree (an app action's
    * `app-action-status`). `launch-script-run` sets it from the calling run's
-   * token; a run token's own provenance wins over this field.
+   * token; a run token's own provenance wins over this field. It must name a
+   * running run of the calling agent (404 otherwise).
    */
   parentScriptRunId: z.string().min(1).optional(),
 });
@@ -166,6 +168,7 @@ const createScriptRunRoute = route({
     400: { description: "Validation or label-lint failure" },
     // Idempotency conflict returns the EXISTING run's pointer, not the
     // standard error envelope — declare it so the fallback doesn't lie.
+    404: { description: "parentScriptRunId names no running run of the calling agent" },
     409: { description: "Existing idempotent run returned", schema: scriptRunCreatedSchema },
     429: { description: "Script run concurrency cap reached" },
   },
@@ -528,6 +531,20 @@ export async function handleScriptRuns(
     const requestedByUserId = parsed.body.requestedByUserId
       ? await resolveTaskRequester(req, agent.id, parsed.body.requestedByUserId)
       : undefined;
+    // A body-named parent is trusted only as the caller's own live run (the MCP
+    // launch proxy names its calling run here): another agent must not graft a
+    // run into, and so change the state of, someone else's run tree. A run
+    // token's provenance wins in createScriptRun and needs no check.
+    const parentScriptRunId = getCurrentRunProvenance()?.sourceScriptRunId
+      ? undefined
+      : parsed.body.parentScriptRunId;
+    if (parentScriptRunId) {
+      const parent = await getScriptRun(parentScriptRunId);
+      if (parent?.agentId !== agent.id || parent.status !== "running") {
+        jsonError(res, "parentScriptRunId does not name a running run of this agent", 404);
+        return true;
+      }
+    }
     const creation = await getStorage().transaction(async () => {
       if ((await countActiveScriptRuns()) >= cap) return null;
       return await createScriptRun({
@@ -540,7 +557,7 @@ export async function handleScriptRuns(
         requestedByUserId,
         sourceTaskId,
         createdBy: requestedByUserId,
-        parentScriptRunId: parsed.body.parentScriptRunId,
+        parentScriptRunId,
       });
     });
     if (!creation) {

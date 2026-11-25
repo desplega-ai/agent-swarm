@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -22,8 +23,10 @@ const ORCHESTRATOR = `export default async function (args: { fail?: boolean }, c
 }`;
 
 // The `refresh` action script: one inline nested run, then launch the orchestrator and return.
-const REFRESH = `export default async function (args: { fail?: boolean }, ctx: any) {
+// `holdMs` keeps the action itself running after its nested run, so a probe can read it mid-flight.
+const REFRESH = `export default async function (args: { fail?: boolean; holdMs?: number }, ctx: any) {
   await ctx.swarm.script_run({ source: "export default async function () { return 0; }" });
+  if (args.holdMs) await new Promise((r) => setTimeout(r, args.holdMs));
   const launched = await ctx.swarm.script_launchRun({
     source: ${JSON.stringify(ORCHESTRATOR)},
     args: { fail: args.fail === true },
@@ -65,7 +68,13 @@ export const knowledgeAppsActionRuns: Scenario = {
           refresh: { kind: "script", scriptId: script.id },
           review: { kind: "task", prompt: "Review and report.", agentId: worker.agentId },
         },
-        pages: { main: { title: "Main", root: "t", elements: { t: { type: "Text", props: { content: "x" } } } } },
+        pages: {
+          main: {
+            title: "Main",
+            root: "t",
+            elements: { t: { type: "Text", props: { content: "x" } } },
+          },
+        },
         defaultPage: "main",
       };
       let response = await ctx.api("POST", "/api/apps", {
@@ -94,13 +103,19 @@ export const knowledgeAppsActionRuns: Scenario = {
         const firstMs = Date.now() - t0;
         let run = runOf(result);
         const runId = asString(run.id, "run id");
-        expect(run.state === "running" && run.settled === false, `run starts running: ${JSON.stringify(run)}`);
+        expect(
+          run.state === "running" && run.settled === false,
+          `run starts running: ${JSON.stringify(run)}`,
+        );
         expect(firstMs < 5000, `app-action-run with waitSeconds 0 returns fast (${firstMs} ms)`);
         expect(
           typeof run.next === "string" && run.next.includes("app-action-status"),
           "a running run says how to continue",
         );
-        expect(toolText(result).includes("still running"), "the text channel says the run is running");
+        expect(
+          toolText(result).includes("still running"),
+          "the text channel says the run is running",
+        );
 
         result = await callToolOk(mcp, "app-action-status", { appId, runId, waitSeconds: 25 });
         calls++;
@@ -112,7 +127,10 @@ export const knowledgeAppsActionRuns: Scenario = {
         );
         const runs = asRecord(run.runs);
         // The action's run, its inline nested run and the orchestrator it launched.
-        expect(runs.total === 3 && runs.running === 0, `run tree has 3 runs: ${JSON.stringify(runs)}`);
+        expect(
+          runs.total === 3 && runs.running === 0,
+          `run tree has 3 runs: ${JSON.stringify(runs)}`,
+        );
         expect(doneMs < 12_000, `the tree settles within 12 s (${doneMs} ms)`);
         ctx.log(`calls_to_done=${calls} ms_to_done=${doneMs}`);
         expect(calls <= 2, `calls_to_done ${calls} <= 2`);
@@ -126,6 +144,82 @@ export const knowledgeAppsActionRuns: Scenario = {
         await callToolErr(mcp, "app-action-status", { appId: otherAppId, runId });
         response = await ctx.api("GET", `/api/apps/${appId}/action-runs/${runId}?waitSeconds=99`);
         expectStatus(response, [400], "waitSeconds above 25 is rejected");
+
+        // ── no other agent can graft a run into this tree and flip its state ──
+        const outsider = await registerAgent(ctx, "app-runs-outsider");
+        const graftBody = {
+          source: 'export default async function () { throw new Error("grafted"); }',
+          background: true,
+          parentScriptRunId: runId,
+        };
+        response = await ctx.api("POST", "/api/script-runs", {
+          agentId: outsider,
+          body: graftBody,
+        });
+        expectStatus(response, [403, 404], "another agent cannot name this run as parent");
+        // The owner cannot either once the run finished: only a running run takes children.
+        response = await ctx.api("POST", "/api/script-runs", { agentId: owner, body: graftBody });
+        expectStatus(response, [403, 404], "a finished run takes no new children");
+        const grafted = ctx.db.get<{ n: number }>(
+          sql`SELECT COUNT(*) AS n FROM script_runs WHERE "parentScriptRunId" = ${runId} AND "scriptName" IS NULL AND kind <> 'inline'`,
+        );
+        expect(Number(grafted?.n) === 0, `no grafted row: ${JSON.stringify(grafted)}`);
+        response = await ctx.api("GET", `/api/apps/${appId}/action-runs/${runId}`);
+        expect(
+          asRecord(response.json).state === "succeeded" &&
+            asRecord(asRecord(response.json).runs).total === 3,
+          `the tree is unchanged: ${JSON.stringify(response.json)}`,
+        );
+
+        // ── the action's own row is running while its script runs ──
+        // Every run that exists now; the in-flight action's nested run names a parent outside it.
+        const knownRoots = new Set(
+          ctx.db
+            .query<{ id: string }>(sql`SELECT id FROM script_runs WHERE "agentId" = ${owner}`)
+            .map((r) => r.id),
+        );
+        const inFlight = ctx.api("POST", `/api/apps/${appId}/actions/refresh`, {
+          body: { input: { holdMs: 2500 } },
+        });
+        let liveRoot: string | undefined;
+        for (const deadline = Date.now() + 10_000; !liveRoot && Date.now() < deadline; ) {
+          liveRoot = ctx.db
+            .query<{ parent: string }>(
+              sql`SELECT "parentScriptRunId" AS parent FROM script_runs WHERE "agentId" = ${owner} AND "parentScriptRunId" IS NOT NULL`,
+            )
+            .find((r) => !knownRoots.has(r.parent))?.parent;
+          if (!liveRoot) await Bun.sleep(50);
+        }
+        expect(liveRoot !== undefined, "the in-flight action's nested run names a parent");
+        const liveRow = ctx.db.get<{ status: string }>(
+          sql`SELECT status FROM script_runs WHERE id = ${liveRoot}`,
+        );
+        expect(
+          liveRow?.status === "running",
+          `the parent row exists, running: ${JSON.stringify(liveRow)}`,
+        );
+        response = await ctx.api("GET", `/api/apps/${appId}/action-runs/${liveRoot}`);
+        expectStatus(response, [200], "the in-flight action run reads");
+        expect(
+          asRecord(response.json).state === "running",
+          `it reads running: ${JSON.stringify(response.json)}`,
+        );
+        response = await inFlight;
+        expectStatus(response, [200], "the held action finishes");
+        expect(
+          asRecord(asRecord(response.json).run).id === liveRoot,
+          "the response names the same run",
+        );
+        result = await callToolOk(mcp, "app-action-status", {
+          appId,
+          runId: liveRoot,
+          waitSeconds: 25,
+        });
+        run = runOf(result);
+        expect(
+          run.settled === true && run.state === "succeeded" && asRecord(run.runs).total === 3,
+          `the held action's tree settles: ${JSON.stringify(run)}`,
+        );
 
         // ── a failing launched run fails the tree and names the failure ──
         result = await callToolOk(mcp, "app-action-run", {
@@ -150,13 +244,22 @@ export const knowledgeAppsActionRuns: Scenario = {
         const data = structured(result);
         const taskId = asString(data.taskId, "task id");
         run = runOf(result);
-        expect(run.id === taskId && run.taskId === taskId, `task run handle: ${JSON.stringify(run)}`);
-        result = await callToolOk(mcp, "app-action-status", { appId, runId: taskId, waitSeconds: 25 });
+        expect(
+          run.id === taskId && run.taskId === taskId,
+          `task run handle: ${JSON.stringify(run)}`,
+        );
+        result = await callToolOk(mcp, "app-action-status", {
+          appId,
+          runId: taskId,
+          waitSeconds: 25,
+        });
         run = runOf(result);
         expect(
           run.settled === true && run.state === "succeeded" && run.status === "completed",
           `the task run settles with its task: ${JSON.stringify(run)}`,
         );
+        response = await ctx.api("GET", `/api/apps/${otherAppId}/action-runs/${taskId}`);
+        expectStatus(response, [404], "a task run of another app is not found");
 
         await callToolErr(mcp, "app-action-status", { appId, runId: crypto.randomUUID() });
       });
