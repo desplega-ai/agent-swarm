@@ -32,7 +32,6 @@ import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import {
   adoptStoredContext,
-  checkpointStep,
   checkpointStepFailure,
   checkpointStepWaiting,
   type StepFence,
@@ -1197,7 +1196,9 @@ async function runClaimedStep(
 
   // Check for async result
   if ("async" in result && (result as AsyncExecutorResult).async) {
-    if ((result as AsyncExecutorResult).waitFor === "workflow.step_job.finished") { return {outcome:"waiting",successors:[]}; }
+    if ((result as AsyncExecutorResult).waitFor === "workflow.step_job.finished") {
+      return { outcome: "waiting", successors: [] };
+    }
     if ((result as AsyncExecutorResult).waitFor === FOREACH_ITEMS_WAIT_FOR) {
       // The foreach executor materialized its children; park the parent and
       // start them. Instant bodies run here, each against its own budget, and

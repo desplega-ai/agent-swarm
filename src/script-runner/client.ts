@@ -103,9 +103,13 @@ export function startScriptRunner(options: {
   >();
   let sendCurrent: (message: unknown) => void = () => {};
   const heartbeat = setInterval(
-    () => sendCurrent({ type: "heartbeat", jobs: [...durable.keys()] }),
+    () => sendCurrent({ type: "heartbeat", jobs: [...durable.keys(), ...steps.keys()] }),
     10000,
   );
+  const steps = new Map<
+    string,
+    { controller: AbortController; done: Promise<void>; result?: ExecutorOutput }
+  >();
   const jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
   const log = (message: string) => console.log(scrubSecrets(`[script-runner] ${message}`));
   const killJobs = async () => {
@@ -150,7 +154,7 @@ export function startScriptRunner(options: {
         version: 1,
         slots: options.slots,
         executors: options.executors,
-        held: [...durable.keys()],
+        held: [...durable.keys(), ...steps.keys()],
       }),
     );
     current.on("message", (data, binary) => {
@@ -165,6 +169,8 @@ export function startScriptRunner(options: {
           disconnectedAt = Date.now();
           ready.publish();
           log("connected");
+          for (const [id, job] of steps)
+            if (job.result) send({ type: "result", jobId: id, output: job.result });
           for (const job of durable.values()) job.guest?.reconnect();
           for (const [id, job] of durable)
             if (job.result) send({ type: "durable-result", jobId: id, ...job.result });
@@ -173,7 +179,7 @@ export function startScriptRunner(options: {
             !welcomed ||
             stopped ||
             durable.has(message.jobId) ||
-            jobs.size + durable.size >= options.slots ||
+            jobs.size + durable.size + steps.size >= options.slots ||
             !options.executors.includes("native")
           )
             throw new Error("Invalid durable job");
@@ -201,16 +207,25 @@ export function startScriptRunner(options: {
           durable.get(message.jobId)?.guest?.receive(message.frame);
         } else if (message.type === "ack") {
           durable.delete(message.jobId);
+          steps.delete(message.jobId);
         } else if (message.type === "job") {
           if (
             !welcomed ||
             stopped ||
             jobs.has(message.jobId) ||
-            jobs.size + durable.size >= options.slots ||
+            steps.has(message.jobId) ||
+            jobs.size + durable.size + steps.size >= options.slots ||
             !options.executors.includes(message.executor)
           )
             throw new Error("invalid job");
           const controller = new AbortController();
+          const held = message.kind !== "inline";
+          const record = {
+            controller,
+            done: Promise.resolve(),
+            result: undefined as ExecutorOutput | undefined,
+          };
+          if (held) steps.set(message.jobId, record);
           const input = message.input;
           input.configPayload.system.sdkBaseUrl = { value: options.apiUrl, isSecret: false };
           input.configPayload.system.mcpBaseUrl = { value: options.apiUrl, isSecret: false };
@@ -224,8 +239,9 @@ export function startScriptRunner(options: {
             } catch {
               output = failedJob("executor_error");
             }
-            jobs.delete(message.jobId);
-            if (current.readyState === WebSocket.OPEN) {
+            if (held) record.result = output;
+            else jobs.delete(message.jobId);
+            if (socket.readyState === WebSocket.OPEN) {
               let frame: string;
               try {
                 frame = encodeRunnerFrame({ type: "result", jobId: message.jobId, output });
@@ -234,7 +250,7 @@ export function startScriptRunner(options: {
                 frame = encodeRunnerFrame({ type: "result", jobId: message.jobId, output });
               }
               try {
-                current.send(frame, (error) => {
+                socket.send(frame, (error) => {
                   if (error) current.terminate();
                 });
               } catch {
@@ -243,9 +259,11 @@ export function startScriptRunner(options: {
             }
             log(`${message.jobId} ${output.error ?? "completed"}`);
           })();
-          jobs.set(message.jobId, { controller, done });
+          record.done = done;
+          if (!held) jobs.set(message.jobId, { controller, done });
         } else if (message.type === "cancel") {
           jobs.get(message.jobId)?.controller.abort();
+          steps.get(message.jobId)?.controller.abort();
           const job = durable.get(message.jobId);
           if (job) {
             job.cancelled = true;
@@ -308,6 +326,9 @@ export function startScriptRunner(options: {
       ]);
       clearTimeout(grace);
       await killJobs();
+      for (const step of steps.values()) step.controller.abort();
+      await Promise.all([...steps.values()].map((step) => step.done));
+      steps.clear();
       await Promise.all(
         [...durable.values()].map(async (job) => {
           job.cancelled = true;

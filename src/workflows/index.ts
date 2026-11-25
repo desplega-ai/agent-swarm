@@ -1,3 +1,7 @@
+import { startWorkflowStepJobs } from "../be/script-runners/step-dispatch";
+import { buildSwarmScriptStepJob } from "./executors/swarm-script";
+import { registerStepJobKind } from "./step-job-kinds";
+
 export { findEntryNodes, getSuccessors } from "./definition";
 export { startWorkflowExecution } from "./engine";
 export { workflowEventBus } from "./event-bus";
@@ -87,6 +91,9 @@ function setupEventTriggerListeners(): void {
 export async function initWorkflows(): Promise<void> {
   // 1. Create the executor registry singleton
   _registry = getExecutorRegistry();
+
+  registerStepJobKind("step-script", { build: buildSwarmScriptStepJob });
+  startWorkflowStepJobs(_registry);
 
   // 2. Wire up resume listener (task.completed / task.failed / task.cancelled)
   setupWorkflowResumeListener(workflowEventBus, _registry);

@@ -95,7 +95,13 @@ export const runnerMessage = z.discriminatedUnion("type", [
 ]);
 export const apiMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("welcome"), sessionId: id }),
-  z.object({ type: z.literal("job"), jobId: id, kind: z.literal("inline"), executor, input }),
+  z.object({
+    type: z.literal("job"),
+    jobId: id,
+    kind: z.enum(["inline", "step-script"]),
+    executor,
+    input,
+  }),
   z.object({ type: z.literal("durable-job"), jobId: id, run: ScriptRunSchema }),
   z.object({ type: z.literal("cap"), jobId: id, frame: z.string().max(64 * 1024 * 1024) }),
   z.object({ type: z.literal("cancel"), jobId: id }),

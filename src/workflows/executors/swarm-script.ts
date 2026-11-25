@@ -1,5 +1,3 @@
-import { parkStepJob, shouldParkScriptNode } from "../step-jobs";
-import type { AsyncExecutorResult } from "./base";
 import { z } from "zod";
 import {
   getScriptApiConnectionDescriptors,
@@ -21,6 +19,8 @@ import {
 import type { ExecutorMeta } from "../../types";
 import { findInterpolationTokens } from "../../utils/template";
 import { resolveWorkflowRunPrincipal } from "../run-principal";
+import { parkStepJob, shouldParkScriptNode } from "../step-jobs";
+import type { AsyncExecutorResult } from "./base";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 export const SWARM_SCRIPT_DEFAULT_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.wallClockMs;
@@ -275,44 +275,88 @@ async function resolveScriptSource(
 }
 
 /** Rebuild credentials and source on the API, never from the job row. */
-export async function buildSwarmScriptStepJob(input: import("../step-job-kinds").StepJobBuildInput): Promise<import("../step-job-kinds").PreparedStepJob> {
+export async function buildSwarmScriptStepJob(
+  input: import("../step-job-kinds").StepJobBuildInput,
+): Promise<import("../step-job-kinds").PreparedStepJob> {
   const { getRunWorkflow } = await import("../../be/db");
   const { acquireScriptApiCredential } = await import("../../be/scripts/run-credential");
   const { getStorage } = await import("../../be/storage");
   const { prepareScriptJob, finishScriptJob } = await import("../../scripts-runtime/loader");
   const config = SwarmScriptConfigSchema.parse(input.config);
-  const workflow = await getRunWorkflow({id:input.job.runId,workflowId:input.meta.workflowId});
+  const workflow = await getRunWorkflow({ id: input.job.runId, workflowId: input.meta.workflowId });
   const principal = await resolveWorkflowRunPrincipal(workflow, input.job.runId);
   if (!principal.ok) throw new Error(principal.error);
   const resolved = await resolveScriptSource(config, principal.agentId);
   if (!resolved.ok) throw new Error(resolved.error);
-  if (findWorkflowSourceTokens(resolved.source,input.meta.inputCtx).length)
+  if (findWorkflowSourceTokens(resolved.source, input.meta.inputCtx).length)
     throw new Error("Named script source contains unresolved workflow tokens");
-  const agentId = principal.userId ? "" : principal.agentId ?? "workflow";
-  const credentials = principal.userId ? undefined : await buildScriptCredentialBindingsWithFailures({agentId:principal.agentId});
-  const credential = await acquireScriptApiCredential(agentId,{sourceStepId:input.job.stepId},
-    principal.userId ? {kind:"user",userId:principal.userId} : principal.operator ? {kind:"operator"} : undefined);
+  const agentId = principal.userId ? "" : (principal.agentId ?? "workflow");
+  const credentials = principal.userId
+    ? undefined
+    : await buildScriptCredentialBindingsWithFailures({ agentId: principal.agentId });
+  const credential = await acquireScriptApiCredential(
+    agentId,
+    { sourceStepId: input.job.stepId },
+    principal.userId
+      ? { kind: "user", userId: principal.userId }
+      : principal.operator
+        ? { kind: "operator" }
+        : undefined,
+  );
   try {
-    const prepared = await prepareScriptJob({source:resolved.source,args:config.args,fsMode:config.fsMode,
-      executor:resolved.script.executor,agentId,apiKey:credential.apiKey,dbDialect:getStorage().capabilities.dbQueryDialect,
-      egressSecrets:credentials?.egressSecrets ?? [],failedBindings:credentials?.failedBindings ?? [],
-      userConfig:credentials?.userConfig ?? {},agentFs:credentials?.agentFs,
-      apiConnections:principal.userId ? [] : await getScriptApiConnectionDescriptors({agentId:principal.agentId}),
-      mcpConnections:principal.userId ? [] : await getScriptMcpConnectionDescriptors({agentId:principal.agentId}),
-      timeoutMs:config.timeoutMs});
-    if (!("job" in prepared)) throw new Error(prepared.stderr || prepared.error || "Script preparation failed");
+    const prepared = await prepareScriptJob({
+      source: resolved.source,
+      args: config.args,
+      fsMode: config.fsMode,
+      executor: resolved.script.executor,
+      agentId,
+      apiKey: credential.apiKey,
+      dbDialect: getStorage().capabilities.dbQueryDialect,
+      egressSecrets: credentials?.egressSecrets ?? [],
+      failedBindings: credentials?.failedBindings ?? [],
+      userConfig: credentials?.userConfig ?? {},
+      agentFs: credentials?.agentFs,
+      apiConnections: principal.userId
+        ? []
+        : await getScriptApiConnectionDescriptors({ agentId: principal.agentId }),
+      mcpConnections: principal.userId
+        ? []
+        : await getScriptMcpConnectionDescriptors({ agentId: principal.agentId }),
+      timeoutMs: config.timeoutMs,
+    });
+    if (!("job" in prepared))
+      throw new Error(prepared.stderr || prepared.error || "Script preparation failed");
     prepared.job.id = input.job.id;
     prepared.job.kind = "step-script";
     prepared.job.input.configPayload.system.connectRetryMs = 30000;
-    return {job:prepared.job,release:credential.release,async finish(raw) {
-      const output=finishScriptJob(raw,prepared.scrubber);
-      const workflowOutput={result:output.result,stdout:output.stdout,stderr:output.stderr,
-        truncated:output.truncated,durationMs:output.durationMs,exitCode:output.exitCode,
-        scriptName:resolved.script.name,contentHash:resolved.contentHash,version:resolved.version};
-      if(output.exitCode!==0 || output.error || output.runtimeError)
-        return {status:"failed",error:output.stderr || output.runtimeError?.message || "Script execution failed",output:workflowOutput};
-      await touchScratchScriptLastUsed(resolved.script.id);
-      return {status:"success",output:workflowOutput,nextPort:"success"};
-    }};
-  } catch(error) {await credential.release(); throw error;}
+    return {
+      job: prepared.job,
+      release: credential.release,
+      async finish(raw) {
+        const output = finishScriptJob(raw, prepared.scrubber);
+        const workflowOutput = {
+          result: output.result,
+          stdout: output.stdout,
+          stderr: output.stderr,
+          truncated: output.truncated,
+          durationMs: output.durationMs,
+          exitCode: output.exitCode,
+          scriptName: resolved.script.name,
+          contentHash: resolved.contentHash,
+          version: resolved.version,
+        };
+        if (output.exitCode !== 0 || output.error || output.runtimeError)
+          return {
+            status: "failed",
+            error: output.stderr || output.runtimeError?.message || "Script execution failed",
+            output: workflowOutput,
+          };
+        await touchScratchScriptLastUsed(resolved.script.id);
+        return { status: "success", output: workflowOutput, nextPort: "success" };
+      },
+    };
+  } catch (error) {
+    await credential.release();
+    throw error;
+  }
 }

@@ -597,6 +597,7 @@ async function bridgeFetch(
   init: RequestInit,
   { repeatSafe, readOnly }: { repeatSafe: boolean; readOnly: boolean },
   signal: AbortSignal | undefined,
+  connectRetryMs = 0,
 ): Promise<Response> {
   const started = Date.now();
   const remaining = () => BRIDGE_RETRY_BUDGET_MS - (Date.now() - started);
@@ -608,6 +609,15 @@ async function bridgeFetch(
     try {
       res = await fetch(url, budget ? { ...init, signal: budget } : init);
     } catch (error) {
+      if (
+        connectRetryMs &&
+        !signal?.aborted &&
+        Date.now() - started < connectRetryMs &&
+        (error as { code?: string })?.code === "ECONNREFUSED"
+      ) {
+        await sleep(Math.min(1000, connectRetryMs - (Date.now() - started)), signal);
+        continue;
+      }
       if (budget?.aborted && !signal?.aborted && previous) {
         if ("error" in previous) throw previous.error;
         return budgetSpentResponse(previous.response);
@@ -657,6 +667,7 @@ async function callBridgeApi(
       },
       bridgeSafety(isReadOnlyBridgeCall(name, "POST"), false),
       options.signal,
+      config.connectRetryMs,
     );
     const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
     if (!res.ok && options.throwOnError) {
@@ -695,6 +706,7 @@ async function callBridgeApi(
     },
     bridgeSafety(isReadOnlyBridgeCall(name, request.method), hasIdempotencyKey(request.headers)),
     options.signal,
+    config.connectRetryMs,
   );
   const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
   if (!res.ok && options.throwOnError) {

@@ -554,7 +554,9 @@ async function startChild(input: {
   }
 
   if ("async" in result && (result as AsyncExecutorResult).async) {
-    if ((result as AsyncExecutorResult).waitFor === "workflow.step_job.finished") { return null; }
+    if ((result as AsyncExecutorResult).waitFor === "workflow.step_job.finished") {
+      return null;
+    }
     const parked = await getStorage().repos.workflows.transitionStepStatus(
       child.id,
       "running",

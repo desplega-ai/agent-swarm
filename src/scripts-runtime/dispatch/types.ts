@@ -6,7 +6,7 @@ import type { ExecutorInput, ExecutorOutput, ScriptExecutorName } from "../execu
 
 export type ScriptJob = {
   id: string;
-  kind: "inline";
+  kind: "inline" | "step-script";
   executor: ScriptExecutorName;
   input: Omit<ExecutorInput, "signal">;
 };

@@ -20,7 +20,12 @@ export type WorkflowStepJob = {
 export interface WorkflowStepJobsRepository {
   insert(row: WorkflowStepJob): Promise<void>;
   get(id: string): Promise<WorkflowStepJob | null>;
-  claim(ownerId: string, now: string, leaseExpiresAt: string): Promise<WorkflowStepJob | null>;
+  claim(
+    ownerId: string,
+    now: string,
+    leaseExpiresAt: string,
+    id?: string,
+  ): Promise<WorkflowStepJob | null>;
   renew(id: string, ownerId: string, now: string, leaseExpiresAt: string): Promise<boolean>;
   settle(
     id: string,
@@ -31,6 +36,8 @@ export interface WorkflowStepJobsRepository {
   ): Promise<boolean>;
   cancelRun(runId: string, now: string): Promise<WorkflowStepJob[]>;
   listOpen(runId: string): Promise<WorkflowStepJob[]>;
+  listClaimable(now: string): Promise<WorkflowStepJob[]>;
+  revokeStepCredentials(stepId: string, now: string): Promise<void>;
 }
 
 const COLUMNS = sql`id, run_id AS "runId", step_id AS "stepId", attempt, kind, status,
@@ -58,10 +65,15 @@ export class BaseWorkflowStepJobsRepository implements WorkflowStepJobsRepositor
     return sql``;
   }
 
-  claim(ownerId: string, now: string, leaseExpiresAt: string): Promise<WorkflowStepJob | null> {
+  claim(
+    ownerId: string,
+    now: string,
+    leaseExpiresAt: string,
+    id?: string,
+  ): Promise<WorkflowStepJob | null> {
     return this.db.transaction(async () => {
       const row = await this.db.get<WorkflowStepJob>(sql`SELECT ${COLUMNS} FROM workflow_step_jobs j
-        WHERE (status = 'queued' OR (status = 'running' AND lease_expires_at <= ${now}))
+        WHERE ${id ? sql`id = ${id}` : sql`1 = 1`} AND (status = 'queued' OR (status = 'running' AND lease_expires_at <= ${now}))
         AND EXISTS (SELECT 1 FROM workflow_run_steps s WHERE s.id = j.step_id
           AND s.status = 'waiting' AND s."retryCount" = j.attempt)
         AND EXISTS (SELECT 1 FROM workflow_runs r WHERE r.id = j.run_id AND r.status IN ('running','waiting'))
@@ -106,6 +118,23 @@ export class BaseWorkflowStepJobsRepository implements WorkflowStepJobsRepositor
     return this.db.query<WorkflowStepJob>(sql`UPDATE workflow_step_jobs SET status = 'cancelled',
       lease_expires_at = NULL, updated_at = ${now} WHERE run_id = ${runId} AND status IN ('queued','running')
       RETURNING ${COLUMNS}`);
+  }
+
+  async revokeStepCredentials(stepId: string, now: string): Promise<void> {
+    await this.db.run(sql`UPDATE session_tokens SET "revokedAt"=${now}
+      WHERE "sourceStepId"=${stepId} AND "scriptRun"=${true} AND "revokedAt" IS NULL`);
+    const source =
+      this.db.dialect.name === "postgres"
+        ? sql`"runProvenance" ->> 'sourceStepId'`
+        : sql`json_extract("runProvenance", '$.sourceStepId')`;
+    await this.db.run(sql`UPDATE user_tokens SET "revokedAt"=${now}
+      WHERE ${source}=${stepId} AND "runProvenance" IS NOT NULL AND "revokedAt" IS NULL`);
+  }
+
+  listClaimable(now: string): Promise<WorkflowStepJob[]> {
+    return this.db.query<WorkflowStepJob>(sql`SELECT ${COLUMNS} FROM workflow_step_jobs
+      WHERE status='queued' OR (status='running' AND lease_expires_at <= ${now})
+      ORDER BY created_at,id LIMIT 100`);
   }
 
   listOpen(runId: string): Promise<WorkflowStepJob[]> {

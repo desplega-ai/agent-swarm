@@ -32,6 +32,7 @@ export type DurableInvocation = {
 
 export type SwarmConfigPayload = {
   system: {
+    connectRetryMs?: number;
     apiKey: { value: string; isSecret: true };
     agentId: { value: string; isSecret: false };
     mcpBaseUrl: { value: string; isSecret: false };
