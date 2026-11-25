@@ -8765,6 +8765,17 @@
           },
           "503": {
             "description": "Liveness update conflicted after retries. Retry after the delay in `Retry-After`.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Seconds to wait before retrying the ping."
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying the ping."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {

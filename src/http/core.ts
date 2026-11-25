@@ -434,6 +434,9 @@ const pingRoute = route({
     503: {
       description:
         "Liveness update conflicted after retries. Retry after the delay in `Retry-After`.",
+      headers: z.object({
+        "Retry-After": z.int().nonnegative().describe("Seconds to wait before retrying the ping."),
+      }),
     },
   },
 });

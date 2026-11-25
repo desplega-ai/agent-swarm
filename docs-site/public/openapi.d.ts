@@ -713,6 +713,8 @@ export interface paths {
                 /** @description Liveness update conflicted after retries. Retry after the delay in `Retry-After`. */
                 503: {
                     headers: {
+                        /** @description Seconds to wait before retrying the ping. */
+                        "Retry-After": number;
                         [name: string]: unknown;
                     };
                     content: {

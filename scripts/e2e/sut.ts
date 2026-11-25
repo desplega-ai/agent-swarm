@@ -362,7 +362,10 @@ export async function startSut(
   // needs the tables (it applies the chain when nothing else did; a migrated clone
   // has it already).
   if (databaseUrl) {
-    const databaseQueryUrl = await preparePostgresQueryReader(databaseUrl);
+    const databaseQueryUrl = await preparePostgresQueryReader(
+      databaseUrl,
+      sut.env.E2E_POSTGRES_SEED_SQL,
+    );
     sut.env = { ...sut.env, DATABASE_QUERY_URL: databaseQueryUrl };
   }
   await launch(sut, keep);
