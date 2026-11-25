@@ -52,6 +52,14 @@ function expectHandlerSpan(id: string, name: string, outcome: string, event = "p
   return span!;
 }
 
+function dispatchSpan(event = "pre.task.create") {
+  const spans = exporter
+    .getFinishedSpans()
+    .filter((span) => span.name === `extension.dispatch ${event}`);
+  expect(spans).toHaveLength(1);
+  return spans[0]!;
+}
+
 let savedTimeout: string | undefined;
 let savedFailureLimit: string | undefined;
 
@@ -141,8 +149,15 @@ describe("extension dispatcher", () => {
     );
     expect(result).toEqual({ action: "modify", data: { description: "startba" } });
     const child = expectHandlerSpan(loaded.record.id, loaded.record.name, "ok");
+    const dispatch = dispatchSpan();
     const parent = exporter.getFinishedSpans().find((span) => span.name === "mcp.tool task-create");
-    expect(child.parentSpanContext?.spanId).toBe(parent?.spanContext().spanId);
+    expect(dispatch.attributes).toMatchObject({
+      "extension.event": "pre.task.create",
+      "extension.handlers": 2,
+      "extension.outcome": "modified",
+    });
+    expect(child.parentSpanContext?.spanId).toBe(dispatch.spanContext().spanId);
+    expect(dispatch.parentSpanContext?.spanId).toBe(parent?.spanContext().spanId);
     expect(child.spanContext().traceId).toBe(parent?.spanContext().traceId);
   });
 
@@ -151,14 +166,29 @@ describe("extension dispatcher", () => {
     await loadAndRegister(await blockBundle("block-second", "second"), 20);
     const result = await dispatchPre("pre.task.create", taskPayload());
     expect(result).toMatchObject({ action: "block", reason: "first" });
-    expectHandlerSpan(loaded.record.id, loaded.record.name, "blocked");
+    const child = expectHandlerSpan(loaded.record.id, loaded.record.name, "blocked");
+    const dispatch = dispatchSpan();
+    expect(dispatch.attributes).toMatchObject({
+      "extension.outcome": "blocked",
+      "extension.blocked_by": loaded.record.id,
+    });
+    expect(child.parentSpanContext?.spanId).toBe(dispatch.spanContext().spanId);
+  });
+
+  test("opens no dispatch span when no handler matches the event", async () => {
+    expect(await dispatchPre("pre.task.create", taskPayload())).toEqual({ action: "continue" });
+    expect(exporter.getFinishedSpans()).toHaveLength(0);
   });
 
   test("fails open and records thrown handlers", async () => {
     const loaded = await fixture("throws");
     expect(await dispatchPre("pre.task.create", taskPayload())).toEqual({ action: "continue" });
     expect((await getExtensionById(loaded.record.id))?.consecutiveFailures).toBe(1);
-    expectHandlerSpan(loaded.record.id, loaded.record.name, "error");
+    const child = expectHandlerSpan(loaded.record.id, loaded.record.name, "error");
+    const dispatch = dispatchSpan();
+    expect(dispatch.attributes["extension.outcome"]).toBe("ok");
+    expect(dispatch.status.code).toBe(SpanStatusCode.OK);
+    expect(child.parentSpanContext?.spanId).toBe(dispatch.spanContext().spanId);
     expect(await listExtensionRuns(loaded.record.id)).toMatchObject([
       { action: "error", event: "pre.task.create", message: "fixture failure" },
     ]);
@@ -198,7 +228,9 @@ describe("extension dispatcher", () => {
     expect(
       (await listExtensionRuns(loaded.record.id)).some((run) => run.action === "timeout"),
     ).toBe(true);
-    expectHandlerSpan(loaded.record.id, loaded.record.name, "timeout");
+    const child = expectHandlerSpan(loaded.record.id, loaded.record.name, "timeout");
+    expect(child.events.some((event) => event.name === "exception")).toBe(true);
+    expect(child.parentSpanContext?.spanId).toBe(dispatchSpan().spanContext().spanId);
     await finished.promise;
     expect(lateError).toBeInstanceOf(ExtensionAbortedError);
     expect(await getKv(`task:agent:${loaded.record.agentId}`, "ext:slow:after-timeout")).toBeNull();
@@ -266,7 +298,19 @@ describe("extension dispatcher", () => {
       { skipExtensionId: first.record.id },
     );
     expect(calls).toEqual(["priority-b"]);
-    expectHandlerSpan(second.record.id, second.record.name, "ok", "post.slack.message");
+    const child = expectHandlerSpan(
+      second.record.id,
+      second.record.name,
+      "ok",
+      "post.slack.message",
+    );
+    const dispatch = dispatchSpan("post.slack.message");
+    expect(dispatch.attributes).toMatchObject({
+      "extension.event": "post.slack.message",
+      "extension.handlers": 1,
+      "extension.failed_handlers": 0,
+    });
+    expect(child.parentSpanContext?.spanId).toBe(dispatch.spanContext().spanId);
   });
 
   test("auto-disable skips remaining handlers in the same chain", async () => {

@@ -437,10 +437,34 @@ export async function dispatchPre<E extends PreEventName>(
     return { action: "continue" };
   }
 
+  const handlers = handlersFor(event, payload, opts);
+  // No span without handlers: pre dispatch runs on every tool call and task create.
+  if (handlers.length === 0) return { action: "continue" };
+  return withSpan(
+    `extension.dispatch ${event}`,
+    async (span) => {
+      const result = await runPreChain(event, payload, handlers, opts);
+      span.setAttribute(
+        "extension.outcome",
+        result.action === "block" ? "blocked" : result.action === "modify" ? "modified" : "ok",
+      );
+      if (result.action === "block") span.setAttribute("extension.blocked_by", result.extension.id);
+      return result;
+    },
+    { "extension.event": event, "extension.handlers": handlers.length },
+  );
+}
+
+async function runPreChain<E extends PreEventName>(
+  event: E,
+  payload: SwarmEventMap[E]["event"],
+  handlers: ReturnType<typeof handlersFor>,
+  opts?: PreDispatchOptions<E>,
+): Promise<PreDispatchResult<E>> {
   let currentPayload: Record<string, unknown> = { ...payload };
   const mergedData: Record<string, unknown> = {};
   let modified = false;
-  for (const { loaded, handler } of handlersFor(event, payload, opts)) {
+  for (const { loaded, handler } of handlers) {
     if (!isRegistered(loaded.record.id)) continue;
     const run = await runHandler(loaded, handler, event, currentPayload);
     if (!run.ok) continue;
@@ -546,19 +570,31 @@ export async function dispatchPost<E extends PostEventName>(
   payload: SwarmEventMap[E]["event"],
   opts?: DispatchOptions,
 ): Promise<void> {
-  for (const { loaded, handler } of handlersFor(event, payload, opts)) {
-    if (!isRegistered(loaded.record.id)) continue;
-    const run = await runHandler(loaded, handler, event, payload);
-    if (run.ok) {
-      await markSuccess(loaded);
-      await writeRun(
-        loaded,
-        event,
-        "continue",
-        run.durationMs,
-        undefined,
-        runContext(event, payload),
-      );
-    }
-  }
+  const handlers = handlersFor(event, payload, opts);
+  if (handlers.length === 0) return;
+  await withSpan(
+    `extension.dispatch ${event}`,
+    async (span) => {
+      let failed = 0;
+      for (const { loaded, handler } of handlers) {
+        if (!isRegistered(loaded.record.id)) continue;
+        const run = await runHandler(loaded, handler, event, payload);
+        if (run.ok) {
+          await markSuccess(loaded);
+          await writeRun(
+            loaded,
+            event,
+            "continue",
+            run.durationMs,
+            undefined,
+            runContext(event, payload),
+          );
+        } else {
+          failed += 1;
+        }
+      }
+      span.setAttribute("extension.failed_handlers", failed);
+    },
+    { "extension.event": event, "extension.handlers": handlers.length },
+  );
 }
