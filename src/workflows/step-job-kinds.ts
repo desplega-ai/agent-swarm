@@ -17,6 +17,7 @@ export type StepJobBuildInput = {
   meta: ExecutorMeta;
 };
 export interface StepJobKindHandler {
+  eligible?(runner: {executors: readonly string[]; runtimes?:readonly string[]}): boolean;
   build(input: StepJobBuildInput): Promise<PreparedStepJob>;
 }
 

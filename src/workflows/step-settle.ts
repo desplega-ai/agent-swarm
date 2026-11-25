@@ -18,9 +18,9 @@ export async function settleStepResult(input: {
   registry: ExecutorRegistry;
   fence: StepFence;
   retryCount: number;
-}): Promise<{ outcome: "completed" | "failed"; successors: string[] }> {
+}): Promise<{ outcome: "completed" | "failed"; successors: WorkflowNode[] }> {
   const { runId, stepId, node, def, result, ctx, executionCtx, meta, registry, fence } = input;
-  const stale = { outcome: "completed" as const, successors: [] as string[] };
+  const stale = { outcome: "completed" as const, successors: [] as WorkflowNode[] };
   if (result.status === "failed") {
     const executor = registry.get(node.type);
     const policy = result.retryable === false ? undefined : node.retry || executor?.retryPolicy;
