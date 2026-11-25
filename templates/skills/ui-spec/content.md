@@ -45,7 +45,7 @@ Do not make a card for:
 | `Text` | `content` (markdown, required), `style`: `plain`, `bold` or `muted` | none. Use `muted` for footnotes and the source line. |
 | `Fields` | none | `Field` elements only. A grid of label and value pairs. |
 | `Field` | `label`, `value` (string or number) | none. Good for KPIs. |
-| `Table` | `headers` (string list), `rows` (list of lists of strings or numbers), `align` (`left`, `center`, `right` per column), `caption` | none. Every row has one cell per header. Right-align numeric columns. |
+| `Table` | `headers` (string list), `rows` (list of lists of strings or numbers), `align` (`left`, `center`, `right` per column), `caption` | none. Every row has one cell per header. Right-align numeric columns. A table from a drive file: `data-query` with `card: true` returns a ready spec. |
 | `Chart` | `title` (required), `chart` | none. See below. |
 | `Divider` | none | none. A separator between groups. |
 | `Image` | `url` (https), `alt` (required) | none. |

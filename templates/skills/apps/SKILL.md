@@ -7,7 +7,7 @@ description: Build and iterate on schema-backed Swarm Apps with live models, nam
 
 Swarm Apps are persistent, agent-authored internal applications: a schema-backed row store, named queries, custom script/task actions, and a validated json-render interface served at `/apps/<id>`. Use an app when people need to view and change live records; use `create_page` for a static snapshot.
 
-**When to use a sheet or board instead:** a tracker or grid people keep editing, with no queries or actions, is a sheet. A plan, diagram or map to think through is a board. Both are editable agent-fs files; see the `boards-and-sheets` skill. To show one inside an app, use the `ObjectEmbed` component (section "Embed a sheet or board").
+**When to use a sheet or board instead:** a tracker or grid people keep editing, with no queries or actions, is a sheet. A plan, diagram or map to think through is a board. Both are editable agent-fs files; see the `boards-and-sheets` skill. To show one inside an app, use the `ObjectEmbed` component (section "Embed a sheet or board"). To fill a sheet from CSV, Parquet or xlsx files on the drive, use `data-query` with `sheet` (the `data` skill).
 
 > **Capability gate**: app tools are available when the server's `CAPABILITIES` includes `pages` (for example `CAPABILITIES=core,task-pool,pages`). There is no separate `apps` capability. If these tools are absent from your MCP list, this is why.
 

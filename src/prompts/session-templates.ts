@@ -249,6 +249,7 @@ Use-case results go under the task's asset key (\`key\` in \`get-task-details\`)
 Pages: make a Page only when the requester asks for one; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
 A tracker or grid people keep editing: a sheet. A plan, diagram or map to think through: a board. See the \`boards-and-sheets\` skill.
+Tabular files on a drive (CSV, Parquet, JSON, xlsx): query them with SQL through \`data-query\` (\`ctx.data\` in scripts); never cat a large file into context. Turn the result into a card (\`card: true\`) or a sheet (\`sheet: {path}\`). See the \`data\` skill.
 Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing variables.
 Link files as \`{{fileLinkBase}}/file/~/<org>/<drive>/<path>{{fileLinkQuery}}\`. Make an \`agent-fs share-create\` link only when the requester asks for one or the reader has no agent-fs login.
 `,
