@@ -710,6 +710,17 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Liveness update conflicted after retries. Retry after the delay in `Retry-After`. */
+                503: {
+                    headers: {
+                        /** @description Seconds to wait before retrying the ping. */
+                        "Retry-After": number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;

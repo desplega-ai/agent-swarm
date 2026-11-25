@@ -243,6 +243,7 @@
         "stress-task-finish",
         "stress-task-create",
         "stress-token-touch",
+        "ping-serialization-retry",
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
