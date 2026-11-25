@@ -186,12 +186,12 @@ export const workflowScriptNodeRemote: Scenario = {
         ctx,
         {
           runtime: "ts",
-          script: 'console.log(JSON.stringify({token:"ordinary",marker:"preserved"}))',
+          script: 'console.log(JSON.stringify({label:"ordinary",marker:"preserved"}))',
           cwd: "",
         },
         false,
         undefined,
-        "token",
+        "label",
       );
       expect(
         remoteOrdinary.run.status === "completed" &&
@@ -252,7 +252,11 @@ export const workflowScriptNodeRemote: Scenario = {
         async () => {
           expect(
             await pollUntil(async () => {
-              childPid = Number(await Bun.file(pidFile).text().catch(() => ""));
+              childPid = Number(
+                await Bun.file(pidFile)
+                  .text()
+                  .catch(() => ""),
+              );
               return Number.isInteger(childPid) && childPid > 0;
             }, 15000),
             "cancellable shell starts its synthetic child",

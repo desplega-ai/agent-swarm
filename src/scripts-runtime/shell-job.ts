@@ -134,7 +134,8 @@ export async function runShellJob(
   stderr: string;
 }> {
   signal?.throwIfAborted();
-  const { runtime, script, args = [], cwd } = config;
+  const { runtime, script, args = [] } = config;
+  const cwd = config.cwd === "" ? undefined : config.cwd;
   let cmd: string[];
 
   switch (runtime) {
