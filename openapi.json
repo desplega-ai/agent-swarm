@@ -8670,6 +8670,10 @@
                     "type": "object",
                     "additionalProperties": {},
                     "default": {}
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -65182,6 +65186,10 @@
                   "idempotencyKey": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 }
               }
@@ -65360,7 +65368,7 @@
             }
           },
           "404": {
-            "description": "Script not found",
+            "description": "Script not found, or parentScriptRunId names no running run of the calling agent",
             "content": {
               "application/json": {
                 "schema": {

@@ -4,7 +4,7 @@ import { type AppValidationIssue, collectScriptReferences } from "../apps/defini
 import { getScriptAppTypes } from "../apps/script-types";
 import { listAppRecords } from "../apps/store";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
+import { getAgentById, getScriptRun, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import {
   getScriptApiConnectionDescriptors,
@@ -62,7 +62,7 @@ import {
   ScriptScopeSchema,
   ScriptVersionRecordSchema,
 } from "../types";
-import { getCurrentRunProvenance, getRequestAuth } from "../utils/request-auth-context";
+import { authUser, getCurrentRunProvenance, getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { refuseAgentTokenWithout } from "./request-principal";
 import { route, runtimeInstanceHeader } from "./route-def";
@@ -93,6 +93,13 @@ const runBodySchema = z
     fsMode: ScriptFsModeSchema.default("none"),
     executor: ScriptExecutorNameSchema.nullable().optional(),
     idempotencyKey: z.string().max(200).optional(),
+    /**
+     * The run this one works for, so it joins that run's tree. A background
+     * run's `ctx.step.swarmScript` and `ctx.swarm.script_run` set it; a run
+     * token's own provenance wins. It must name a running run of the calling
+     * agent (404 otherwise).
+     */
+    parentScriptRunId: z.string().min(1).optional(),
   })
   .refine((body) => Boolean(body.name) !== Boolean(body.source), {
     message: "Provide exactly one of name or source",
@@ -313,7 +320,10 @@ const runRoute = route({
   responses: {
     200: { description: "Script run completed", schema: scriptRunResponseSchema },
     400: { description: "Validation error" },
-    404: { description: "Script not found" },
+    404: {
+      description:
+        "Script not found, or parentScriptRunId names no running run of the calling agent",
+    },
     409: { description: "Object busy, re-entry, or lease lost" },
     501: { description: "workspace-rw scripts are not supported in v1" },
   },
@@ -824,6 +834,20 @@ export async function handleScripts(
       return true;
     }
 
+    // Same rule as POST /api/script-runs: a body-named parent is trusted only as
+    // the caller's own live run, and a user caller or a run token ignores it.
+    const parentScriptRunId =
+      authUser(getRequestAuth(req)) || callerProvenance?.sourceScriptRunId
+        ? undefined
+        : parsed.body.parentScriptRunId;
+    if (parentScriptRunId) {
+      const parent = await getScriptRun(parentScriptRunId);
+      if (parent?.agentId !== agent.id || parent.status !== "running") {
+        jsonError(res, "parentScriptRunId does not name a running run of this agent", 404);
+        return true;
+      }
+    }
+
     // Per-boot identity of the invoking worker process. Carried into the
     // script runtime as system context so SDK work-acquisition calls present
     // the same runtime the worker itself would — never script input.
@@ -1065,6 +1089,7 @@ export async function handleScripts(
         error: runError,
         startedAt,
         finishedAt: new Date().toISOString(),
+        parentScriptRunId,
       });
     } catch {
       // swallow — the run already executed; persistence is observability only.

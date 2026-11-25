@@ -10819,6 +10819,8 @@ export async function recordInlineScriptRun(data: {
   createdBy?: string;
   /** Set when this run originated from an external API endpoint (POST /api/x/script/<id>). */
   apiEndpointId?: string | null;
+  /** A checked caller-named parent; a run token's provenance wins over it. */
+  parentScriptRunId?: string;
 }): Promise<ScriptRun> {
   // The run already executed, so args and output are a record, not an input:
   // redact them here so every caller is covered.
@@ -10846,7 +10848,7 @@ export async function recordInlineScriptRun(data: {
       // A run called through another script run's token (a nested
       // ctx.swarm.script_run) records that run and its workflow step.
       sourceStepId: provenance?.sourceStepId ?? null,
-      parentScriptRunId: provenance?.sourceScriptRunId ?? null,
+      parentScriptRunId: provenance?.sourceScriptRunId ?? data.parentScriptRunId ?? null,
       objectScriptId: data.objectScriptId ?? null,
       objectId: data.objectId ?? null,
       objectMethod: data.objectMethod ?? null,
