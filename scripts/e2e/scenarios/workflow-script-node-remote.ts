@@ -10,11 +10,30 @@ async function runNode(
   config: Record<string, unknown>,
   cancel = false,
   onTriggered?: (runId: string) => Promise<void>,
+  followField?: string,
 ) {
   const created = await ctx.api("POST", "/api/workflows", {
     body: {
       name: `shell-parity-${ctx.nonce}-${crypto.randomUUID()}`,
-      definition: { nodes: [{ id: "shell", type: "script", config }] },
+      definition: {
+        nodes: [
+          { id: "shell", type: "script", config, ...(followField ? { next: "follow" } : {}) },
+          ...(followField
+            ? [
+                {
+                  id: "follow",
+                  type: "script",
+                  inputs: { value: `shell.${followField}` },
+                  config: {
+                    runtime: "ts",
+                    script: "console.log(process.env.VALUE)",
+                    env: { VALUE: "{{value}}" },
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
     },
   });
   expectStatus(created, [201], "create shell workflow");
@@ -56,6 +75,7 @@ async function runNode(
     run: asRecord(detail.run),
     step,
     output: step.output == null ? {} : asRecord(step.output),
+    followOutput: asRecords(detail, "steps").find((step) => step.nodeId === "follow")?.output,
   };
 }
 
@@ -102,12 +122,21 @@ export const workflowScriptNodeRemote: Scenario = {
       );
       baseline.push(result.output);
     }
-    const ordinary = await runNode(ctx, {
-      runtime: "ts",
-      script: 'console.log(JSON.stringify({token:"ordinary",marker:"preserved"}))',
-      cwd: "",
-    });
-    expect(ordinary.output.token === "ordinary", "awaited shell preserves ordinary field values");
+    const ordinary = await runNode(
+      ctx,
+      {
+        runtime: "ts",
+        script: 'console.log(JSON.stringify({token:"ordinary",marker:"preserved"}))',
+        cwd: "",
+      },
+      false,
+      undefined,
+      "token",
+    );
+    expect(
+      ordinary.run.status === "completed" && asRecord(ordinary.followOutput).stdout === "ordinary",
+      "awaited shell preserves ordinary field values for downstream nodes",
+    );
     const minted = await ctx.api("POST", "/api/script-runners/credentials", {
       body: { name: `shell-${ctx.nonce}` },
     });
