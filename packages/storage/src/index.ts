@@ -24,6 +24,7 @@ export type {
 } from "./data-copy";
 export {
   type Dialect,
+  epochMs,
   forUpdate,
   forUpdateSkipLocked,
   greatestStrict,

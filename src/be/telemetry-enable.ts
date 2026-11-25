@@ -6,10 +6,12 @@
  * the boot config accessors and re-runs `initTelemetry` the first time the
  * flag reads on after reading off: from the dashboard banner's "Turn on"
  * (`via: banner`) or any config reload (`via: settings`). Each off-to-on
- * transition sends `telemetry.enabled` once.
+ * transition starts the telemetry ticker and sends `telemetry.enabled` once;
+ * an on-to-off transition stops the ticker.
  */
 import { initTelemetry, isTelemetryEnabled, setTelemetryIngestObserver, track } from "../telemetry";
 import { discardOrgActivity } from "../telemetry-activity";
+import { startTelemetryTicker, stopTelemetryTicker } from "../telemetry-snapshot";
 import { telemetryIngestRecorder } from "./telemetry-ingest-anchor";
 
 type GetConfig = (key: string) => Promise<string | undefined>;
@@ -55,10 +57,14 @@ export async function syncTelemetryEnabled(via: TelemetryEnabledVia): Promise<bo
   // An opt-out discards the buffered org.activity window, even with no hourly
   // tick or restart before a later opt-in.
   if (enabled !== wasEnabled) discardOrgActivity();
+  // The hourly ticker (org.activity, org.snapshot, org domain) starts only when
+  // telemetry is on at boot, so it follows the flag here both ways.
+  if (!enabled && wasEnabled) stopTelemetryTicker();
   if (!enabled || wasEnabled || !accessors) return false;
   await initTelemetry("api-server", accessors.getConfig, accessors.setConfig, {
     generateIfMissing: true,
   });
+  startTelemetryTicker(accessors);
   track({ event: "telemetry.enabled", properties: { via } });
   return true;
 }
