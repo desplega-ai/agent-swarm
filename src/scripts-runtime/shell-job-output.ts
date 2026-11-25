@@ -1,5 +1,5 @@
 import type { ExecutorOutput } from "./executors/types";
-import { executeShellJob, type ShellJobConfig } from "./shell-job";
+import { runShellJob, type ShellExecutionData, type ShellJobConfig } from "./shell-job";
 
 /** Keep shell results on the same transport as other script jobs. */
 export async function executeShellJobOutput(
@@ -7,12 +7,22 @@ export async function executeShellJobOutput(
   signal?: AbortSignal,
 ): Promise<ExecutorOutput> {
   const started = performance.now();
-  const result = await executeShellJob(config, signal);
+  let result: ShellExecutionData;
+  try {
+    result = await runShellJob(config, config.timeout ?? 30_000, signal);
+  } catch (error) {
+    result = {
+      exitCode: -1,
+      stdout: "",
+      stderr: "",
+      executionError: error instanceof Error ? error.message : String(error),
+    };
+  }
   return {
     result,
-    stdout: result.output.stdout,
-    stderr: result.output.stderr,
-    exitCode: result.output.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
     truncated: { stdout: false, stderr: false },
     durationMs: performance.now() - started,
   };

@@ -292,36 +292,7 @@ export async function executeShellJob(
     // tmpdir was deleted out from under a live process.
     const result = await runShellJob(config, timeoutMs, signal);
 
-    // Non-zero exit code is a hard failure. mark the step failed so the
-    // workflow engine stops the branch and operators can see what went wrong.
-    if (result.exitCode !== 0) {
-      return {
-        status: "failed",
-        error: result.stderr || `Script exited with code ${result.exitCode}`,
-        output: result,
-      };
-    }
-
-    // If stdout is valid JSON object, merge parsed fields into output
-    // so downstream nodes can access them via {{myScript.field}} interpolation
-    // (mirrors how agent-task nodes parse JSON in resume.ts)
-    let output: ShellJobResult["output"] = result;
-    if (result.stdout) {
-      try {
-        const parsed = JSON.parse(result.stdout);
-        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-          output = { ...result, ...parsed };
-        }
-      } catch {
-        // Not valid JSON. keep raw {exitCode, stdout, stderr}
-      }
-    }
-
-    return {
-      status: "success",
-      output: output,
-      nextPort: "success",
-    };
+    return mapShellJobResult(result);
   } catch (err) {
     // Populate a structured output payload so the failure surfaces in
     // get-workflow-run instead of leaving `output: null` and forcing operators
@@ -339,6 +310,60 @@ export async function executeShellJob(
       },
     };
   }
+}
+
+export type ShellExecutionData = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  executionError?: string;
+};
+
+export function mapShellJobResult(result: ShellExecutionData): ShellJobResult {
+  if (result.executionError !== undefined) {
+    const message = result.executionError;
+    return {
+      status: "failed",
+      error: `Script execution error: ${message}`,
+      output: {
+        exitCode: -1,
+        stdout: "",
+        stderr: message.startsWith("Script timed out after")
+          ? message
+          : `Script execution error: ${message}`,
+      },
+    };
+  }
+  // Non-zero exit code is a hard failure. mark the step failed so the
+  // workflow engine stops the branch and operators can see what went wrong.
+  if (result.exitCode !== 0) {
+    return {
+      status: "failed",
+      error: result.stderr || `Script exited with code ${result.exitCode}`,
+      output: result,
+    };
+  }
+
+  // If stdout is valid JSON object, merge parsed fields into output
+  // so downstream nodes can access them via {{myScript.field}} interpolation
+  // (mirrors how agent-task nodes parse JSON in resume.ts)
+  let output: ShellJobResult["output"] = result;
+  if (result.stdout) {
+    try {
+      const parsed = JSON.parse(result.stdout);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        output = { ...result, ...parsed };
+      }
+    } catch {
+      // Not valid JSON. keep raw {exitCode, stdout, stderr}
+    }
+  }
+
+  return {
+    status: "success",
+    output: output,
+    nextPort: "success",
+  };
 }
 
 export const SHELL_RUNTIME_BINARIES = { bash: "bash", ts: "bun", python: "python3" } as const;

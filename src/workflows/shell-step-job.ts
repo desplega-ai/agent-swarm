@@ -1,14 +1,14 @@
 import { z } from "zod";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
-import { ShellJobConfigSchema } from "../scripts-runtime/shell-job";
-import { scrubJson, scrubSecrets } from "../utils/secret-scrubber";
+import { mapShellJobResult, ShellJobConfigSchema } from "../scripts-runtime/shell-job";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { registerStepJobKind } from "./step-job-kinds";
 
 const resultSchema = z.object({
-  status: z.enum(["success", "failed"]),
-  output: z.looseObject({ exitCode: z.number(), stdout: z.string(), stderr: z.string() }),
-  error: z.string().optional(),
-  nextPort: z.string().optional(),
+  exitCode: z.number().int(),
+  stdout: z.string(),
+  stderr: z.string(),
+  executionError: z.string().optional(),
 });
 
 registerStepJobKind("step-shell", {
@@ -22,8 +22,8 @@ registerStepJobKind("step-shell", {
   async build(input) {
     if (!isExecutorAllowedByDeployment("native"))
       throw new Error("Deployment does not permit native workflow scripts");
-    const config = ShellJobConfigSchema.parse(input.config);
-    if (config.cwd !== undefined)
+    const { cwd, ...config } = ShellJobConfigSchema.parse(input.config);
+    if (cwd !== undefined && cwd !== "")
       throw new Error("A script with cwd must run on the embedded runner");
     return {
       job: { id: input.job.id, kind: "step-shell", executor: "native", input: config },
@@ -33,7 +33,15 @@ registerStepJobKind("step-shell", {
           const error = scrubSecrets(output.stderr || "Shell runner did not return a valid result");
           return { status: "failed", error, output: { exitCode: -1, stdout: "", stderr: error } };
         }
-        return scrubJson(parsed.data);
+        const raw = parsed.data;
+        return mapShellJobResult({
+          ...raw,
+          stdout: scrubSecrets(raw.stdout),
+          stderr: scrubSecrets(raw.stderr),
+          ...(raw.executionError !== undefined
+            ? { executionError: scrubSecrets(raw.executionError) }
+            : {}),
+        });
       },
       async release() {},
     };
