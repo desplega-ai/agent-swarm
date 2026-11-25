@@ -7,15 +7,15 @@
  * Freshness: every write statement that touches `agent_tasks` (or `agents`, or
  * `runtime_pools` through its ON DELETE SET NULL) bumps a process-wide epoch for
  * that table, from any request or background loop. A memo entry read under an
- * older epoch is a miss. A write inside a transaction bumps again after COMMIT,
- * because a pooled Postgres read can still see the old row until then. Reads
+ * older epoch is a miss. A write inside a transaction bumps again at COMMIT, before
+ * the transaction resolves, because a pooled Postgres read can still see the old
+ * row until then (src/be/storage-root.ts). Reads
  * inside a transaction skip the memo: they can see uncommitted rows. Entries also
  * expire after MEMO_TTL_MS, so a request that polls a row (a long-poll loop)
  * still sees writes this process did not make.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { isInPostgresTransaction } from "@desplega/storage-postgres";
-import { isInTransaction as sqliteIsInTransaction } from "@desplega/storage-sqlite";
+import { getDbClient } from "./db/runtime";
 import { isWriteStatement } from "./write-stats";
 
 const MEMO_TTL_MS = 250;
@@ -44,7 +44,7 @@ export function requestMemoStats(): { hits: number; misses: number } | undefined
 /** Memoize `load()` for `id` in the current request scope. Each caller gets its own copy. */
 export async function memoizedRead<T>(kind: Kind, id: string, load: () => Promise<T>): Promise<T> {
   const scope = scopes.getStore();
-  if (!scope || sqliteIsInTransaction() || isInPostgresTransaction()) return load();
+  if (!scope || getDbClient().inTransaction()) return load();
   const map = scope[kind];
   const now = performance.now();
   let entry = map.get(id);

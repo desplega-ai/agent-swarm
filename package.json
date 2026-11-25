@@ -109,7 +109,7 @@
     "mono:dev": "turbo run dev",
     "test:root": "bash scripts/run-bun-tests.sh",
     "test:storage": "bun test packages/storage-sqlite/test && bun run test:storage:postgres",
-    "test:storage:postgres": "bun test --path-ignore-patterns='' packages/storage-postgres/test --timeout 30000",
+    "test:storage:postgres": "bun test --path-ignore-patterns='' packages/storage-postgres/test src/tests/request-memo-postgres.test.ts --timeout 30000",
     "e2e": "bun scripts/e2e/run.ts",
     "e2e:strict": "bun scripts/e2e/run.ts --strict",
     "e2e:bench": "bun scripts/e2e/bench.ts",

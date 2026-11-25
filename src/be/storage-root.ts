@@ -145,8 +145,13 @@ export const TX_REPLAY_BANNER =
   "[storage] tx-replay on: every transaction callback runs twice, the first run rolled back";
 
 /**
- * A write to a memoized table invalidates every request memo now, and again after
- * COMMIT when it ran in a transaction (src/be/request-memo.ts).
+ * A write to a memoized table invalidates every request memo now, and again at
+ * COMMIT when it ran in a transaction (src/be/request-memo.ts). The second bump
+ * is an `onCommit` hook, which runs before `transaction()` resolves: a
+ * deferred `afterCommit` hook left a window where a reader that cached the old
+ * committed row during the transaction kept it after the commit returned. A
+ * fenced Postgres autocommit write runs in its own transaction, so it takes the
+ * same path.
  */
 function withRequestMemoInvalidation(
   observer: StatementObserver,
@@ -159,7 +164,8 @@ function withRequestMemoInvalidation(
       const kinds = requestMemoKindsWritten(sql);
       if (kinds.length === 0) return;
       invalidateRequestMemo(kinds);
-      if (isInTransaction()) client().afterCommit(() => invalidateRequestMemo(kinds));
+      const db = client();
+      if (db.inTransaction()) db.onCommit(() => invalidateRequestMemo(kinds));
     },
   };
 }
