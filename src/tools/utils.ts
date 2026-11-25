@@ -184,9 +184,10 @@ export type SwarmToolResult<TData extends SwarmToolData = SwarmToolData> = {
   /** Ctx-control metadata attached centrally when the full wire result is spilled. */
   truncation?: SwarmToolTruncation;
   /**
-   * Set by ctx-control only. Keeps `details` out of structuredContent when
-   * that channel already carries `data` verbatim and the duplicate rendering
-   * is what pushes it over the size budget. The text channel keeps `details`.
+   * Keeps `details` out of structuredContent when that channel already
+   * carries `data` verbatim. ctx-control sets it when the duplicate rendering
+   * is what pushes a result over the size budget; a tool may set it when its
+   * `details` is only the compact JSON of `data`. The text channel keeps `details`.
    */
   omitStructuredDetails?: boolean;
   /**
