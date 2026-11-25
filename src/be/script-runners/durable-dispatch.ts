@@ -29,9 +29,6 @@ const send = (runner: RemoteScriptRunner, message: unknown) =>
       reject(error);
     }
   });
-export function durableJobsForOwner(ownerId: string): number {
-  return [...held.values()].filter((job) => job.ownerId === ownerId).length;
-}
 export function pickDurableRunner(
   options: { lane?: "sync" | "long"; eligible?: (runner: RemoteScriptRunner) => boolean } = {},
 ): RemoteScriptRunner | undefined {
@@ -107,12 +104,18 @@ export async function durableHeartbeat(runner: RemoteScriptRunner, jobs: string[
 export async function durableCapability(runner: RemoteScriptRunner, id: string, frame: string) {
   const job = held.get(id);
   if (!job || job.ownerId !== runner.id || !(await owns(id, runner.id))) return;
-  await job.session.receive(frame, async (response) => {
-    if (await owns(id, runner.id)) {
-      const current = scriptRunnerSessions.get(runner.id);
-      if (current) await send(current, { type: "cap", jobId: id, frame: response });
-    }
-  });
+  try {
+    await job.session.receive(frame, async (response) => {
+      if (await owns(id, runner.id)) {
+        const current = scriptRunnerSessions.get(runner.id);
+        if (current) await send(current, { type: "cap", jobId: id, frame: response });
+      }
+    });
+  } catch (error) {
+    job.session.close();
+    await send(runner, { type: "cancel", jobId: id }).catch(() => {});
+    await durableResult(runner, id, { exitCode: 1, stderr: scrubSecrets(String(error)) });
+  }
 }
 export async function durableResult(
   runner: RemoteScriptRunner,
@@ -168,6 +171,7 @@ export async function releaseDurableOwner(ownerId: string, runId?: string) {
 }
 
 export async function longLaneMetrics() {
+  if (!getStorage().capabilities.scriptRunners) return { queued: 0, oldestWaitMs: 0, inFlight: 0 };
   const rows = (await getStorage().repos.scripts.listActiveScriptRuns()).filter(
     (run) => run.status === "running",
   );

@@ -203,6 +203,11 @@ export function startScriptRunner(options: {
             } catch {
               job.result = { exitCode: 1, stderr: "Durable guest failed" };
             }
+            try {
+              encodeRunnerFrame({ type: "durable-result", jobId: message.jobId, ...job.result });
+            } catch {
+              job.result = { exitCode: 1, stderr: "Durable result exceeds byte limit" };
+            }
             sendCurrent({ type: "durable-result", jobId: message.jobId, ...job.result });
           })();
         } else if (message.type === "cap") {

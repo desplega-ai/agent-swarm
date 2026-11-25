@@ -26076,6 +26076,11 @@ export interface paths {
                     content: {
                         "application/json": {
                             lanes: {
+                                long: {
+                                    queued: number;
+                                    oldestWaitMs: number;
+                                    inFlight: number;
+                                };
                                 sync: {
                                     queued: number;
                                     oldestWaitMs: number;

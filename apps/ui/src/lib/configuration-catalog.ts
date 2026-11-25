@@ -1984,7 +1984,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "number",
         defaultValue: "0.5",
         restartRequired: true,
-        docsUrl: "/docs/ui/configuration#script-runner-capacity",
+        docsUrl: `${DOCS}ui/configuration#script-executor`,
       },
       {
         key: "SCRIPT_EMBEDDED_RUNNER_SLOTS",

@@ -66515,6 +66515,25 @@
                     "lanes": {
                       "type": "object",
                       "properties": {
+                        "long": {
+                          "type": "object",
+                          "properties": {
+                            "queued": {
+                              "type": "number"
+                            },
+                            "oldestWaitMs": {
+                              "type": "number"
+                            },
+                            "inFlight": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "queued",
+                            "oldestWaitMs",
+                            "inFlight"
+                          ]
+                        },
                         "sync": {
                           "type": "object",
                           "properties": {
@@ -66543,6 +66562,7 @@
                         }
                       },
                       "required": [
+                        "long",
                         "sync"
                       ]
                     },

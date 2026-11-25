@@ -22,6 +22,9 @@ export function startScriptRunner(baseUrl: string, token: string, slots = 1) {
   const drained = Promise.all([drain(child.stdout), drain(child.stderr)]);
   return {
     logs: () => logs,
+    signal(signal: "SIGSTOP" | "SIGCONT") {
+      child.kill(signal);
+    },
     async stop(signal: "SIGTERM" | "SIGKILL" = "SIGTERM") {
       child.kill(signal);
       await child.exited;

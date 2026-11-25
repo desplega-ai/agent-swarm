@@ -98,6 +98,9 @@ test("remote dispatch refuses the operator key before transport", async () => {
   setRemoteScriptRunnerPicker(() => ({
     id: "fixture",
     kind: "remote",
+    async startHeld() {
+      throw new Error("Fixture does not start held jobs");
+    },
     async run() {
       sent++;
       return failedJob("executor_error");
@@ -348,6 +351,71 @@ test("an oversized result fails its job and preserves the connection for another
   } finally {
     await runner.stop();
     spy.mockRestore();
+    for (const ws of wss.clients) ws.terminate();
+    wss.close();
+    server.close();
+  }
+}, 15000);
+
+test("durable results remain held until acknowledgement across reconnect", async () => {
+  const { createServer } = await import("node:http");
+  const { WebSocketServer } = await import("ws");
+  const { listenOnFreePort } = await import("./test-net");
+  const { startScriptRunner } = await import("../script-runner/client");
+  const server = createServer();
+  const wss = new WebSocketServer({ server });
+  const id = crypto.randomUUID();
+  let connections = 0;
+  let replayed = false;
+  let heldAfterReconnect = false;
+  wss.on("connection", (ws) => {
+    const generation = ++connections;
+    ws.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "hello") {
+        heldAfterReconnect ||= generation > 1 && message.held.includes(id);
+        ws.send(JSON.stringify({ type: "welcome", sessionId: crypto.randomUUID() }));
+        if (generation === 1)
+          ws.send(
+            JSON.stringify({
+              type: "durable-job",
+              jobId: id,
+              run: {
+                id,
+                agentId: crypto.randomUUID(),
+                kind: "workflow",
+                status: "running",
+                startedAt: new Date().toISOString(),
+                source: "export default () => 42",
+                args: {},
+              },
+            }),
+          );
+      } else if (message.type === "durable-result") {
+        expect(message.output).toBe(42);
+        if (generation === 1) ws.terminate();
+        else {
+          replayed = true;
+          ws.send(JSON.stringify({ type: "ack", jobId: id }));
+        }
+      }
+    });
+  });
+  const port = await listenOnFreePort(server);
+  const runner = startScriptRunner({
+    apiUrl: `http://127.0.0.1:${port}`,
+    token: "fixture",
+    slots: 1,
+    executors: ["native"],
+    onRefused() {},
+  });
+  try {
+    const deadline = Date.now() + 10000;
+    while (!replayed && Date.now() < deadline) await Bun.sleep(20);
+    expect(replayed).toBe(true);
+    expect(heldAfterReconnect).toBe(true);
+  } finally {
+    await runner.stop();
     for (const ws of wss.clients) ws.terminate();
     wss.close();
     server.close();
