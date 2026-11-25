@@ -8,6 +8,23 @@ export class SkipError extends Error {}
 /** `flaky`: failed, then passed its rerun on a fresh API. It does not fail the run. */
 export type RunStatus = "pass" | "fail" | "skip" | "flaky";
 export type ScenarioAttempt = { status: RunStatus; durationMs: number; error?: string };
+/**
+ * Postgres commits and write statements while the scenario ran (`--write-stats`), over
+ * every API process of the run. The `maxRequest*` fields are the most that one HTTP
+ * request made: the commit budget of `bun run e2e:bench` gates on them. The totals also
+ * count pollers, timers and background loops, so they change with time: information only.
+ */
+export type StorageCounts = {
+  commits: number;
+  readOnlyCommits: number;
+  rollbacks: number;
+  writeStatements: number;
+  requests: number;
+  maxRequestCommits: number;
+  maxRequestCommitsPath: string;
+  maxRequestWriteStatements: number;
+  maxRequestWriteStatementsPath: string;
+};
 export type ScenarioResult = {
   name: string;
   status: RunStatus;
@@ -18,6 +35,8 @@ export type ScenarioResult = {
   attempts?: ScenarioAttempt[];
   /** Present when quarantine.json lists the scenario: a failure here cannot fail the run. */
   quarantine?: Omit<QuarantineEntry, "scenario">;
+  /** `--write-stats`: counts of the first attempt (a rerun runs on a fresh API). */
+  storage?: StorageCounts;
 };
 
 /** A failure that fails the run: not quarantined. */
@@ -128,6 +147,8 @@ export type Options = {
   engine: "sqlite" | "postgres";
   /** `--tx-replay`: the API runs every transaction callback twice (Postgres brief D6). */
   txReplay: boolean;
+  /** `--write-stats`: each API process writes its commit counts to a file in this directory. */
+  writeStatsDir?: string;
 };
 
 export const helpText = `Usage: bun run e2e [options]
@@ -160,6 +181,9 @@ Options:
                                 E2E_POSTGRES_URL and makes one new database per API boot
   --tx-replay                   The API runs each transaction callback twice and rolls
                                 back the first run, so a callback with a side effect fails
+  --write-stats dir             Count Postgres commits and write statements per scenario
+                                (needs --engine postgres). Each API process writes its
+                                counts to dir; the JSON result has them per scenario
   --help                        Show this help`;
 
 function optionValue(args: string[], index: number, flag: string): string {
@@ -243,6 +267,9 @@ export function parseOptions(
     else if (arg === "--tx-replay") {
       options.txReplay = true;
       options.sutEnv.STORAGE_TX_REPLAY = "1";
+    } else if (arg === "--write-stats") {
+      options.writeStatsDir = resolve(value());
+      options.sutEnv.STORAGE_WRITE_STATS_DIR = options.writeStatsDir;
     } else if (arg === "--shard") options.shard = parseShard(value());
     else if (arg === "--coverage") options.coverageDir = resolve("e2e-coverage");
     else if (arg === "--list") options.list = true;
@@ -257,6 +284,9 @@ export function parseOptions(
     (options.strict || options.minRouteCoverage > 0 || options.minToolCoverage > 0)
   ) {
     throw new Error("--shard cannot gate coverage: pass --strict and minimums to merge.ts");
+  }
+  if (options.writeStatsDir && options.engine !== "postgres") {
+    throw new Error("--write-stats counts Postgres commits: add --engine postgres");
   }
   if (options.shard && options.harness.length > 0) {
     throw new Error("--shard runs contract scenarios only; drop --harness");
