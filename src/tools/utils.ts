@@ -134,12 +134,16 @@ function previewValue(value: unknown): string | undefined {
   }
 }
 
-function toolRequestAttributes(name: string, requestInfo: RequestInfo, args?: unknown) {
+function toolRequestAttributes(name: string, requestInfo: RequestInfo, meta: Meta, args?: unknown) {
+  // Claude Code names the tool_use in `_meta`; the worker's `worker.mcp.tool`
+  // span carries the same id, so a trace view can stack the two.
+  const toolUseId = meta._meta?.["claudecode/toolUseId"];
   return {
     "mcp.tool.name": name,
     "mcp.session.id": requestInfo.sessionId,
     "agent.id": requestInfo.agentId,
     "agentswarm.task.id": requestInfo.sourceTaskId,
+    "agentswarm.tool.call_id": typeof toolUseId === "string" ? toolUseId : undefined,
     "agentswarm.tool.args_preview": previewValue(args),
   };
 }
@@ -1241,7 +1245,7 @@ export const createToolRegistrar = (server: McpServer) => {
             span.setAttributes(toolResultAttributes(result));
             return result;
           },
-          toolRequestAttributes(name, requestInfo),
+          toolRequestAttributes(name, requestInfo, meta),
         );
       };
       // Name the entry point for the event-loop stall line.
@@ -1291,7 +1295,7 @@ export const createToolRegistrar = (server: McpServer) => {
           span.setAttributes(toolResultAttributes(result));
           return result;
         },
-        toolRequestAttributes(name, requestInfo, args),
+        toolRequestAttributes(name, requestInfo, meta, args),
       );
     };
     return server.registerTool(

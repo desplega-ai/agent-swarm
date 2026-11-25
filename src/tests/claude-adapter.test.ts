@@ -937,6 +937,25 @@ describe("mergeMcpConfig (issue #369)", () => {
     );
   });
 
+  test("trace headers land on the agent-swarm entry only", () => {
+    const base = {
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+        other: { type: "http", url: "https://other.example/mcp", headers: {} },
+      },
+    };
+    const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+    const merged = mergeMcpConfig(base, null, TASK_ID, undefined, undefined, { traceparent });
+    const headersOf = (k: string) =>
+      (merged.mcpServers[k] as Record<string, unknown>).headers as Record<string, string>;
+    expect(headersOf("agent-swarm").traceparent).toBe(traceparent);
+    expect(headersOf("other").traceparent).toBeUndefined();
+  });
+
   test("no runtime identity → no X-Runtime-Instance-ID header", () => {
     const base = {
       mcpServers: {

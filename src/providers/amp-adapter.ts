@@ -222,6 +222,7 @@ function swarmMcpConfig(config: ProviderSessionConfig): Record<string, unknown> 
         "X-Source-Task-Id": config.taskId,
         ...(config.contextKey ? { "X-Context-Key": config.contextKey } : {}),
         ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
+        ...config.traceHeaders,
       },
     },
   };
