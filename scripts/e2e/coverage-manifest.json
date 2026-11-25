@@ -316,6 +316,7 @@
         "knowledge-apps",
         "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
+        "knowledge-apps-catalog",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
         "knowledge-apps-log-stream",
