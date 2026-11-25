@@ -69,6 +69,7 @@ apps/evals/  # eval harness, its own package and test job
 apps/templates-ui/  # templates site, its own package
 
 # Escape hatches for single test files.
+src/tests/extensions-dispatcher.test.ts  # span parentage and the absence of spans need an in-process OpenTelemetry exporter and active parent context, which the black-box API harness cannot inspect or inject
 src/tests/heartbeat-stall-thresholds.test.ts  # the two stall thresholds reach the API only through the deployment env (#3170): swarm_config's guard already rejects a non-positive or fractional value, and the E2E runner fixes the SUT env at boot, so no scenario can drive the branch; the cases run the heartbeat triage itself, not the parsers
 src/tests/oauth-token-endpoint-fetch-guard.test.ts  # OAuth code exchange and token refresh must not send the client secret to a token URL whose public name resolves to a private address; that needs faked DNS under production URL settings, while the black-box API runs with private hosts allowed and real DNS
 src/tests/agent-history.test.ts  # agent_history append-only triggers, full-row restore equality, extension and lead blockers, and revocation of every token kind need direct DB and token-mint access the black-box suite does not have; the HTTP surface is in core-agent-lifecycle
