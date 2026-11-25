@@ -106,7 +106,13 @@ export type ScenarioContext = {
    */
   slackJournal: () => SlackJournal | undefined;
   /** `env` adds variables to the restarted process only; the next restart drops them. */
-  restartSut: (options?: { env?: Record<string, string> }) => Promise<void>;
+  restartSut: (options?: {
+    env?: Record<string, string>;
+    /** Run while the API is stopped, before the next process starts. */
+    afterStop?: () => Promise<void>;
+    /** Run after health succeeds, before waiting for Slack to reconnect. */
+    onHealthy?: () => Promise<void>;
+  }) => Promise<void>;
   /**
    * Boot a second API on a named fixture or a prepared SQLite image (Slack off).
    * The main SUT keeps running. Call `stop` when done; the runner stops it otherwise.
@@ -477,7 +483,8 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
         // A scenario that moved Slack to HTTP mode has no socket to come back.
         const hadSocket = slack.mock.connectionCount > 0;
         db.close();
-        await restartSut(sut, options?.env);
+        await restartSut(sut, options?.env, options?.afterStop);
+        await options?.onHealthy?.();
         if (!hadSocket) return;
         const reconnected = await pollUntil(
           () => slack.mock.apiCalls("apps.connections.open").length > connectionCalls,
