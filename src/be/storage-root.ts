@@ -1,3 +1,4 @@
+import { getNodeEnv } from "../utils/node-env";
 /**
  * Storage composition root: the only `src/` file that imports an engine
  * package (check:dep-graph). Everything else in `src/` imports the contracts
@@ -224,7 +225,7 @@ export function createStorage(
       queryReader: options.queryReader ?? null,
       bus: {
         retentionMs:
-          process.env.NODE_ENV === "test" && process.env.E2E_BUS_EXPIRE_DELIVERED === "true"
+          getNodeEnv() === "test" && process.env.E2E_BUS_EXPIRE_DELIVERED === "true"
             ? 0
             : undefined,
         onError: (error, context) => {

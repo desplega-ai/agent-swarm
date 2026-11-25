@@ -1,5 +1,6 @@
 import type { ManagedBus } from "@desplega/storage";
 import type { ScriptRun } from "../../types";
+import { getNodeEnv } from "../../utils/node-env";
 import { getScriptRun } from "../db";
 import { getStorage } from "../storage";
 
@@ -32,14 +33,14 @@ export async function publishDurableRunRequested(runId: string, deferred = false
   if (process.env.SCRIPT_RUN_SUPERVISOR_DISABLE === "true") return;
   const storage = getStorage();
   if (storage.capabilities.scriptRunners) {
-    if (process.env.NODE_ENV === "test" && process.env.E2E_BUS_CRASH_AFTER_LAUNCH === "true") {
+    if (getNodeEnv() === "test" && process.env.E2E_BUS_CRASH_AFTER_LAUNCH === "true") {
       storage.afterCommit(() => process.exit(86));
     }
     await storage.executionBus?.publish("script.job.requested", {
       runId,
       ...(deferred ? { deferredByBootId: bootId } : {}),
     });
-    if (process.env.NODE_ENV === "test" && process.env.E2E_BUS_ROLLBACK_LAUNCH === "true") {
+    if (getNodeEnv() === "test" && process.env.E2E_BUS_ROLLBACK_LAUNCH === "true") {
       throw new Error("Test bus launch rollback");
     }
   }

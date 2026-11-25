@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { getNodeEnv } from "../utils/node-env";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { runnerReadyFile, startScriptRunner } from "./client";
 
@@ -30,7 +31,7 @@ export async function runScriptRunner(argv: string[]) {
     const slots = Number(process.env.SCRIPT_RUNNER_SLOTS ?? 2);
     if (!Number.isInteger(slots) || slots < 1 || slots > 1024) throw new Error("slots");
     registerVolatileSecret(token, "script-runner-token");
-    if (values["allow-shared-uid"] && process.env.NODE_ENV === "production")
+    if (values["allow-shared-uid"] && getNodeEnv() === "production")
       throw new Error("Shared UID is unavailable in production");
     if (values["allow-shared-uid"])
       console.warn(
