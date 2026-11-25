@@ -428,7 +428,7 @@ export const PERMISSIONS = {
   },
   "script.run.durable": {
     description:
-      "Launch a durable script run over HTTP. A user caller names a global script, which runs as its owning agent.",
+      "Launch a durable script run over HTTP. A user caller names a global script listed in SCRIPT_RUN_USER_ALLOWLIST, which runs as its owning agent.",
     namespace: "script",
   },
   "script.run.cancel": {

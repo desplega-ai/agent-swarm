@@ -55825,7 +55825,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 200,
-                    "description": "A global script to run instead of `source`. A user token must pass it: the run executes as the script's owning agent."
+                    "description": "A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent."
                   },
                   "args": {},
                   "background": {
@@ -55888,6 +55888,16 @@
           },
           "400": {
             "description": "Validation or label-lint failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST",
             "content": {
               "application/json": {
                 "schema": {

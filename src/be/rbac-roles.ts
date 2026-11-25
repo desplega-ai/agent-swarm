@@ -84,7 +84,7 @@ export const BUILTIN_ROLES = [
     id: "rbac-role-obs-lite-integration",
     name: "obs-lite-integration",
     description:
-      "Extra role: create and follow own tasks, trigger workflows, send workflow events, and launch or cancel durable runs of global scripts.",
+      "Extra role: create and follow own tasks, trigger workflows, send workflow events, and launch or cancel durable runs of the global scripts in SCRIPT_RUN_USER_ALLOWLIST (each runs as its owning agent).",
     isBuiltin: true,
     grantsAll: false,
     verbs: [

@@ -37260,7 +37260,7 @@ export interface operations {
                 "application/json": {
                     /** @description Inline TypeScript source. Pass this or `name`. */
                     source?: string;
-                    /** @description A global script to run instead of `source`. A user token must pass it: the run executes as the script's owning agent. */
+                    /** @description A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent. */
                     name?: string;
                     args?: unknown;
                     /** @default true */
@@ -37289,6 +37289,15 @@ export interface operations {
             };
             /** @description Validation or label-lint failure */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

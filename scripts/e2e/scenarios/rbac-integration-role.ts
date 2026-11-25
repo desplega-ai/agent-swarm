@@ -26,8 +26,8 @@ async function inviteRequester(ctx: ScenarioContext): Promise<{ token: string; u
 /**
  * Flow `rbac-integration-role`: a scoped user token (primary `requester`) is refused on the
  * workflow trigger, workflow event and durable script-run routes, and admitted once the extra
- * `obs-lite-integration` role is attached. A named global script launched by the user runs as
- * the script's owning agent; its idempotency keys do not collide with an agent's; it cancels only
+ * `obs-lite-integration` role is attached. A user may launch only the global scripts listed in
+ * `SCRIPT_RUN_USER_ALLOWLIST`, and each runs as the script's owning agent; its idempotency keys do not collide with an agent's; it cancels only
  * its own runs. The operator key and agents keep the routes as before.
  */
 export const rbacIntegrationRole: Scenario = {
@@ -38,6 +38,9 @@ export const rbacIntegrationRole: Scenario = {
     const launcherId = await registerAgent(ctx, "obs-int-launcher");
     const scriptName = `e2e-obs-int-${ctx.nonce}`;
     await upsertScript(ctx, leadId, { name: scriptName, source: NOOP, scope: "global" });
+    // A lead-owned global script the operator did not list for user tokens.
+    const unlistedName = `${scriptName}-unlisted`;
+    await upsertScript(ctx, leadId, { name: unlistedName, source: NOOP, scope: "global" });
     const eventName = `e2e.obs.int.${ctx.nonce}`;
     const workflowId = await createWorkflow(ctx, "obs-int", {
       nodes: [
@@ -140,11 +143,47 @@ export const rbacIntegrationRole: Scenario = {
       "the integration user sends a global event",
     );
 
-    // Durable script runs: a global script by name, run as its owning agent.
+    // Durable script runs: only a global script in SCRIPT_RUN_USER_ALLOWLIST, run as its owning agent.
     expectStatus(
       await ctx.api("POST", "/api/script-runs", { ...asUser, body: { source: NOOP } }),
       [400],
       "a user token cannot launch inline source",
+    );
+    const unlistedBeforeConfig = await ctx.api("POST", "/api/script-runs", {
+      ...asUser,
+      body: { name: scriptName },
+    });
+    expectStatus(unlistedBeforeConfig, [403], "an empty allowlist admits no user script run");
+    expect(
+      unlistedBeforeConfig.text.includes("SCRIPT_RUN_USER_ALLOWLIST"),
+      `the 403 names the allowlist: ${unlistedBeforeConfig.text}`,
+    );
+    expectStatus(
+      await ctx.api("PUT", "/api/config", {
+        body: {
+          scope: "global",
+          scopeId: null,
+          key: "SCRIPT_RUN_USER_ALLOWLIST",
+          value: `${scriptName}, ${scriptName}-missing`,
+          isSecret: false,
+        },
+      }),
+      [200],
+      "the operator lists the integration script",
+    );
+    const unlisted = await ctx.api("POST", "/api/script-runs", {
+      ...asUser,
+      body: { name: unlistedName },
+    });
+    expectStatus(unlisted, [403], "another lead-owned global script stays refused");
+    expect(asRecord(unlisted.json).id === undefined, `no run is created: ${unlisted.text}`);
+    expectStatus(
+      await ctx.api("POST", "/api/script-runs", {
+        ...asUser,
+        body: { name: `${scriptName}-nonexistent` },
+      }),
+      [403],
+      "an unlisted unknown name answers like an unlisted script",
     );
     expectStatus(
       await ctx.api("POST", "/api/script-runs", {
@@ -152,7 +191,7 @@ export const rbacIntegrationRole: Scenario = {
         body: { name: `${scriptName}-missing` },
       }),
       [404],
-      "an unknown global script",
+      "a listed but unknown global script",
     );
     const sameKey = { name: scriptName, idempotencyKey: `obs-int-key-${ctx.nonce}` };
     const launched = await ctx.api("POST", "/api/script-runs", { ...asUser, body: sameKey });

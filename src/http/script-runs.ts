@@ -61,6 +61,7 @@ import {
   RawLlmConfigSchema,
   RawLlmOutputSchema,
 } from "../workflows/executors/raw-llm";
+import { resolveConfigValue } from "./config-values";
 import { bodyTask, route } from "./route-def";
 import { resolveTaskRequester } from "./task-requester";
 import { json, jsonError } from "./utils";
@@ -82,7 +83,7 @@ const createScriptRunBodySchema = z.object({
     .max(200)
     .optional()
     .describe(
-      "A global script to run instead of `source`. A user token must pass it: the run executes as the script's owning agent.",
+      "A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent.",
     ),
   args: z.unknown().optional(),
   background: z.boolean().default(true),
@@ -176,6 +177,7 @@ const createScriptRunRoute = route({
         "Existing idempotent run returned. A key another caller used answers 409 with an error and no run.",
       schema: scriptRunCreatedSchema,
     },
+    403: { description: "A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST" },
     404: { description: "Global script not found" },
     429: { description: "Script run concurrency cap reached" },
   },
@@ -441,6 +443,17 @@ function scriptRunConcurrencyCap(): number {
     : DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP;
 }
 
+/** Global script names a user token may launch as durable runs. Unset or empty: none. */
+async function userDurableScriptAllowlist(): Promise<Set<string>> {
+  const raw = (await resolveConfigValue("SCRIPT_RUN_USER_ALLOWLIST")) ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
+}
+
 function bearerToken(req: IncomingMessage): string | undefined {
   const raw = req.headers.authorization;
   const header = Array.isArray(raw) ? raw[0] : raw;
@@ -493,6 +506,17 @@ export async function handleScriptRuns(
     let scriptName = parsed.body.scriptName;
     let runAsAgentId = agentId;
     if (parsed.body.name) {
+      // The run executes as the script's owner, so a user may launch only the scripts an
+      // operator listed. Checked before the lookup: an unlisted name answers the same 403
+      // whether or not it exists.
+      if (user && !(await userDurableScriptAllowlist()).has(parsed.body.name)) {
+        jsonError(
+          res,
+          `Forbidden: global script "${parsed.body.name}" is not in SCRIPT_RUN_USER_ALLOWLIST`,
+          403,
+        );
+        return true;
+      }
       const script = await getScript({ name: parsed.body.name, scope: "global" });
       if (!script) {
         jsonError(res, `Global script "${parsed.body.name}" not found`, 404);

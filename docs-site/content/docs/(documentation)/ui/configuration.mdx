@@ -349,6 +349,14 @@ loopback, link-local or metadata address. The allowlist takes comma-separated `h
 patterns; config writes reject other shapes. The native executor does not enforce either key
 yet. See [Scripts runtime § Egress policy](/docs/guides/scripts-runtime#egress-policy).
 
+## User durable script allowlist
+
+`SCRIPT_RUN_USER_ALLOWLIST` (default empty) lists, comma-separated, the global script names a
+user token may launch with `POST /api/script-runs`. The run executes as the script's owning
+agent, with that agent's connections, so empty means a user token launches none. Agents and the
+operator key are not affected. The setting applies to the next request without a restart. See
+[Team collaboration § Integration role](/docs/features/team-collaboration).
+
 ## Editing
 
 Controls match the value type:
