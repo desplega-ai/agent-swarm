@@ -201,6 +201,16 @@ export const rbacIntegrationRole: Scenario = {
     const replay = await ctx.api("POST", "/api/script-runs", { ...asUser, body: sameKey });
     expectStatus(replay, [409], "the user replays its own key");
     expect(asRecord(replay.json).id === userScriptRunId, "the replay returns the user's run");
+    // A user token has no calling run, and the run executes as the script's owner: a
+    // body-named parent is ignored, never checked against (or grafted onto) the owner's runs.
+    expectStatus(
+      await ctx.api("POST", "/api/script-runs", {
+        ...asUser,
+        body: { name: scriptName, parentScriptRunId: `no-such-run-${ctx.nonce}` },
+      }),
+      [201],
+      "a user token's parentScriptRunId is ignored",
+    );
     let run: Record<string, unknown> = {};
     const finished = await pollUntil(async () => {
       const response = await ctx.api("GET", `/api/script-runs/${userScriptRunId}`);
