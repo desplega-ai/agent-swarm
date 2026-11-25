@@ -203,7 +203,6 @@ export async function settleWorkflowStepJob(
   let prepared: Pick<PreparedStepJob, "finish" | "release"> | undefined =
     active.get(id)?.owner === owner ? active.get(id)?.prepared : undefined;
   let temporary = false;
-  let accepted = false;
   try {
     let data = await load(job, false);
     let result: ExecutorResult;
@@ -223,17 +222,16 @@ export async function settleWorkflowStepJob(
         error: scrubSecrets(error instanceof Error ? error.message : String(error)),
       };
     }
-    await storage.transaction(async () => {
-      accepted = false;
-      if (await getRunLineageBlock(job.runId)) return;
-      accepted = await storage.repos.workflowStepJobs.settle(
+    const accepted = await storage.transaction(async () => {
+      if (await getRunLineageBlock(job.runId)) return false;
+      const settled = await storage.repos.workflowStepJobs.settle(
         id,
         owner,
         new Date().toISOString(),
         result.status === "failed" ? "failed" : "completed",
         result.error ? scrubSecrets(result.error).slice(0, 4096) : null,
       );
-      if (!accepted) return;
+      if (!settled) return false;
       await storage.repos.workflowStepJobs.revokeStepCredentials(
         job.stepId,
         new Date().toISOString(),
@@ -243,6 +241,7 @@ export async function settleWorkflowStepJob(
         jobId: id,
         runId: job.runId,
       });
+      return true;
     });
     acknowledge?.();
     await release(id, owner);
@@ -327,7 +326,7 @@ export async function drainWorkflowStepJobs(): Promise<void> {
       try {
         data = await load(candidate);
         handler = getStepJobKind(candidate.kind);
-        data.build = handler.prepare ? await handler.prepare(data.build) : data.build;
+        if (handler.prepareInput) data.build = await handler.prepareInput(data.build);
         const live = [...scriptRunnerSessions.values()].filter(
           (runner) => runner.socket.readyState === 1,
         );

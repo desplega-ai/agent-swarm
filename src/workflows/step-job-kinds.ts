@@ -18,7 +18,7 @@ export type StepJobBuildInput = {
 };
 export interface StepJobKindHandler {
   restore?(input: StepJobBuildInput): Promise<Pick<PreparedStepJob, "finish" | "release">>;
-  prepare?(input: StepJobBuildInput): Promise<StepJobBuildInput>;
+  prepareInput?(input: StepJobBuildInput): Promise<StepJobBuildInput>;
   eligible?(
     runner: import("../scripts-runtime/dispatch/types").ScriptRunnerHandle,
     input: StepJobBuildInput,

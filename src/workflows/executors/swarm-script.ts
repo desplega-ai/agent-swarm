@@ -336,7 +336,7 @@ export async function buildSwarmScriptStepJob(
   const principal = await resolveWorkflowRunPrincipal(workflow, input.job.runId);
   if (!principal.ok) throw new Error(principal.error);
   input = await prepareSwarmScriptStepJob(input);
-  const reference = input.config._scriptReference as ScriptReference;
+  let reference = input.config._scriptReference as ScriptReference;
   const script = await getScriptById(reference.scriptId);
   const version = await getScriptVersion({
     scriptId: reference.scriptId,
@@ -367,24 +367,24 @@ export async function buildSwarmScriptStepJob(
   );
   try {
     if (resolved.script.isScratch) {
-      await getStorage().transaction(async () => {
+      reference = await getStorage().transaction(async () => {
         const { getWorkflowRunStep } = await import("../../be/db");
         const step = await getWorkflowRunStep(input.job.stepId);
         const held = await getStorage().repos.workflowStepJobs.get(input.job.id);
         if (!step || held?.ownerId !== input.job.ownerId || held?.status !== "running")
           throw new Error("Workflow job lost its claim before preparation");
         const touch = await touchScratchScriptLastUsed(script.id);
-        if (touch) {
-          reference.scratch = { prior: script.updatedAt, touch };
-          const saved = (step.input ?? {}) as Record<string, unknown>;
-          const refs = (saved._stepJobReferences ?? {}) as Record<string, ScriptReference>;
-          await getStorage().repos.workflows.updateStepColumns(step.id, {
-            input: JSON.stringify({
-              ...saved,
-              _stepJobReferences: { ...refs, [String(input.job.attempt)]: reference },
-            }),
-          });
-        }
+        if (!touch) return reference;
+        const updated = { ...reference, scratch: { prior: script.updatedAt, touch } };
+        const saved = (step.input ?? {}) as Record<string, unknown>;
+        const refs = (saved._stepJobReferences ?? {}) as Record<string, ScriptReference>;
+        await getStorage().repos.workflows.updateStepColumns(step.id, {
+          input: JSON.stringify({
+            ...saved,
+            _stepJobReferences: { ...refs, [String(input.job.attempt)]: updated },
+          }),
+        });
+        return updated;
       });
     }
     const prepared = await prepareScriptJob({

@@ -97,7 +97,7 @@ export async function initWorkflows(): Promise<void> {
   _registry = getExecutorRegistry();
 
   registerStepJobKind("step-script", {
-    prepare: prepareSwarmScriptStepJob,
+    prepareInput: prepareSwarmScriptStepJob,
     restore: restoreSwarmScriptStepJob,
     eligible: (runner, input) =>
       runner.stepJobs === true &&

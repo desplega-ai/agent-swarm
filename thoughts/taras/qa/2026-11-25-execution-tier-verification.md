@@ -38,6 +38,10 @@ A second test built the complete Dockerfile from `061bd3870a` and imported the i
 
 The test deleted the Kubernetes pod that owned a running durable guest. The surviving runner completed the run in 26.602 seconds. Two guests executed the source, the first journal entry stayed identical, and the counted effect occurred once. The three journal results were 41, 1 and 0. KEDA configuration received template validation.
 
+The final image test built `73aaec431e` and ran it in a fresh cluster. The API and both runner pods reported image ID `sha256:3570b95f7ba08514e5f4bed9dca76e45470b9c2b5bcb9b2d2dcfcf6b3b222d7c`. The imported manifest digest was `sha256:c7ddbbcf70ddb6a18e145780bbfd4ab5bc1ef794ea136e315d9e13c3ac423c83`.
+
+Deleting the owning pod triggered recovery in 28.167 seconds. Both native guests ran under UID 65534. QuickJS returned 42. The replacement guest preserved the first journal entry and completed all three steps. Two guests executed, and the journaled effect occurred once.
+
 ## Performance
 
 Three paired rounds of 300 HTTP requests gave median p50 changes of +0.144 ms for native and +0.028 ms for QuickJS after the dispatcher split. Individual rounds exceeded the 0.5 ms target.
@@ -59,6 +63,12 @@ The final Opus 5.5 review approved the integration. Three details received furth
 - The dispatch failure handler calls the owner-checked release function. It deletes the active entry, aborts execution, releases the credential and returns capacity.
 
 The integrated affected unit suite passed 9,674 tests, with 31 skips. Both TypeScript 5 projects passed. The storage SQL portability, RBAC coverage and async checks passed. Three additional failures from the full root suite reproduced in isolation on main at `361eb90ca4`. They cover a Pi model presence check and two macOS shell path expectations.
+
+On `73aaec431e`, all eight PostgreSQL execution scenarios passed on their first attempts. Eight one-second workflow bodies completed in 3.533 seconds with four running together. The combined restart took 3.293 seconds. The runner reconnected 27 ms after API health returned. The same workflow child survived, two durable guests executed, and each journaled effect occurred once.
+
+The full root suite on that revision recorded 23,318 passes, 43 skips and the three failures reproduced on main. The SQLite strict suite on the preceding integration revision passed all coverage checks. It recorded 290 first-attempt passes and two passes on retry.
+
+The database-copy check upgraded a disposable SQLite database from migration 383 to 384, then copied it to PostgreSQL. Each legacy credential kept its revocation date. The new operator credential stayed active. The old writer's empty issuer stayed distinct from the operator's null issuer.
 
 The full dashboard run had 295 passes, 79 skips and one failed Slack sidebar assertion. That case passed on an isolated rerun. Live KEDA scaling and the 5% performance criterion remain unverified.
 
