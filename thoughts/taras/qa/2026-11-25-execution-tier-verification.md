@@ -28,6 +28,8 @@ The repaired PostgreSQL scenario passed on its first attempt, in 47.8 seconds. T
 
 The original workflow process completed under the same claim. The sync caller failed and its child exited. The durable guest exited, and a replacement replayed its journal. Each of the two independently counted effects occurred once. This test covers the initial 30-second reconnect window. Longer outages use the documented backoff.
 
+The ten-step manual walkthrough also passed on `5352fdd087`. Eight one-second bodies finished in 2.660 seconds across four slots. A separate restart preserved all four running workflow children and completed all eight items. Both runners reconnected within 236 ms of API health. [Manual commands and receipts](2026-11-25-execution-tier-manual-e2e-e77d1a34.md)
+
 ## Kubernetes pod deletion
 
 The local cluster ran Linux binaries compiled from `39e5a796e0` in the verified runner image. Both pods passed binary checksum checks. The test deleted the pod that owned a running durable guest.
@@ -40,7 +42,9 @@ The complete image build passed on the earlier packaging revision. The final pod
 
 Three paired rounds of 300 HTTP requests gave median p50 changes of +0.144 ms for native and +0.028 ms for QuickJS after the dispatcher split. Individual rounds exceeded the 0.5 ms target.
 
-The five-round scenario comparison had 27 consistently passing pairs. Sixteen had a median slowdown above 5% on this shared host. The machine's load average exceeded 40 during these measurements. These runs leave the 5% criterion open.
+The Phase 1 five-round scenario comparison had 27 consistently passing pairs. Sixteen had a median slowdown above 5% on this shared host. The machine's load average exceeded 40 during these measurements. These runs leave the 5% criterion open.
+
+On `5352fdd087`, all 46 shared script and workflow scenarios passed twice without a runner. The comparison used three main passes. Sixteen scenarios exceeded 5% by median. The sum of medians was 3.1% lower on the branch. Four scenarios had disjoint timing ranges. Their slowdowns did not recur in four isolated runs per revision. The full-batch limit remains open.
 
 The durable benchmark made 200 calls per operation. Remote p50 was 40.03 ms for a new step, 3.00 ms for replay and 5.67 ms for a swarm call. The embedded measurements ran under heavier load and cannot establish transport overhead.
 
