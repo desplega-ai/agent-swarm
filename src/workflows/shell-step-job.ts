@@ -15,6 +15,7 @@ registerStepJobKind("step-shell", {
   eligible(runner, input) {
     const config = ShellJobConfigSchema.parse(input.config);
     return (
+      (runner.kind === "embedded" || runner.stepJobs === true) &&
       (runner.executors?.includes("native") ?? false) &&
       (runner.runtimes?.includes(config.runtime) ?? false)
     );

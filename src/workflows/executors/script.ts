@@ -52,7 +52,10 @@ export class ScriptExecutor extends BaseExecutor<
       process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS !== undefined &&
       Number(process.env.SCRIPT_EMBEDDED_RUNNER_SLOTS) === 0;
     const matchingRunner = [...scriptRunnerSessions.values()].some(
-      (runner) => runner.executors.includes("native") && runner.runtimes.includes(config.runtime),
+      (runner) =>
+        runner.stepJobs &&
+        runner.executors.includes("native") &&
+        runner.runtimes.includes(config.runtime),
     );
     if (config.cwd !== undefined && embeddedDisabled) {
       const error = "A workflow script with cwd requires the embedded runner";
