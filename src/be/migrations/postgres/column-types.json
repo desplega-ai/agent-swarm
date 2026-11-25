@@ -2182,6 +2182,12 @@
         "evidence": "src/be/db/session-costs.ts:173 INSERT binds input.thinkingTokens ?? 0"
       }
     },
+    "session_log_bytes": {
+      "bytes": {
+        "class": "bigint",
+        "evidence": "Portable sessions repository stores the cumulative UTF-8 row cost; configured budgets can exceed the 32-bit integer range."
+      }
+    },
     "session_logs": {
       "createdAt": {
         "class": "timestamptz",

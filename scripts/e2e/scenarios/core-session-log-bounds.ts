@@ -1,3 +1,4 @@
+import { insertionOrder, sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { asUser, createAssignedTask, createUser, registerWorker } from "./core-helpers";
@@ -50,8 +51,7 @@ export const coreSessionLogBounds: Scenario = {
     });
     expectStatus(stored, [201], "store an oversized line");
     const rows = ctx.db.query<{ content: string }>(
-      "SELECT content FROM session_logs WHERE sessionId = ?",
-      [oversizedSession],
+      sql`SELECT content FROM session_logs WHERE "sessionId" = ${oversizedSession}`,
     );
     expect(rows.length === 1, `Expected 1 stored row, got ${rows.length}`);
     const content = rows[0]?.content ?? "";
@@ -77,9 +77,9 @@ export const coreSessionLogBounds: Scenario = {
       "store an oversized JSON event",
     );
     const jsonRow =
-      ctx.db.get<{ content: string }>("SELECT content FROM session_logs WHERE sessionId = ?", [
-        jsonSession,
-      ])?.content ?? "";
+      ctx.db.get<{ content: string }>(
+        sql`SELECT content FROM session_logs WHERE "sessionId" = ${jsonSession}`,
+      )?.content ?? "";
     expect(
       (() => {
         try {
@@ -161,8 +161,7 @@ export const coreSessionLogBounds: Scenario = {
         "A foreign task must not exhaust the owner's budget",
       );
       const ownerRows = ctx.db.query<{ content: string }>(
-        "SELECT content FROM session_logs WHERE taskId = ? AND sessionId = ?",
-        [ownerTask, protectedSession],
+        sql`SELECT content FROM session_logs WHERE "taskId" = ${ownerTask} AND "sessionId" = ${protectedSession}`,
       );
       expect(
         ownerRows.some((row) => row.content === "owner-survives"),
@@ -209,13 +208,11 @@ export const coreSessionLogBounds: Scenario = {
         `A truncated batch must report fewer than the 40 posted lines, got ${String(reported)}`,
       );
       const written = ctx.db.query<{ content: string }>(
-        "SELECT content FROM session_logs WHERE sessionId = ? ORDER BY rowid",
-        [budgetSession],
+        sql`SELECT content FROM session_logs WHERE "sessionId" = ${budgetSession} ORDER BY ${insertionOrder}`,
       );
       const bytes =
         ctx.db.get<{ bytes: number }>(
-          "SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE sessionId = ?",
-          [budgetSession],
+          sql`SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE "sessionId" = ${budgetSession}`,
         )?.bytes ?? 0;
       // The marker is the only row allowed past the bound.
       expect(
@@ -235,8 +232,7 @@ export const coreSessionLogBounds: Scenario = {
         "post again after the budget is spent",
       );
       const after = ctx.db.query<{ content: string }>(
-        "SELECT content FROM session_logs WHERE sessionId = ?",
-        [budgetSession],
+        sql`SELECT content FROM session_logs WHERE "sessionId" = ${budgetSession}`,
       );
       expect(
         after.length === written.length,
@@ -265,16 +261,14 @@ export const coreSessionLogBounds: Scenario = {
       }
       const raceBytes =
         ctx.db.get<{ bytes: number }>(
-          "SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE sessionId = ?",
-          [raceSession],
+          sql`SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE "sessionId" = ${raceSession}`,
         )?.bytes ?? 0;
       expect(
         raceBytes <= 1024 * 1024 + 1024,
         `Concurrent batches must share one budget, stored ${raceBytes}`,
       );
       const markers = ctx.db.query<{ content: string }>(
-        "SELECT content FROM session_logs WHERE sessionId = ? AND content LIKE '%session_log_budget_exhausted%'",
-        [raceSession],
+        sql`SELECT content FROM session_logs WHERE "sessionId" = ${raceSession} AND content LIKE '%session_log_budget_exhausted%'`,
       );
       expect(
         markers.length === 1,
@@ -297,8 +291,7 @@ export const coreSessionLogBounds: Scenario = {
         "post after an API restart",
       );
       const afterRestart = ctx.db.query<{ content: string }>(
-        "SELECT content FROM session_logs WHERE sessionId = ?",
-        [budgetSession],
+        sql`SELECT content FROM session_logs WHERE "sessionId" = ${budgetSession}`,
       );
       expect(
         afterRestart.length === written.length,
@@ -321,8 +314,7 @@ export const coreSessionLogBounds: Scenario = {
         "store CJK lines",
       );
       const cjkBytes = ctx.db.get<{ bytes: number }>(
-        "SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE sessionId = ?",
-        [cjkSession],
+        sql`SELECT sum(octet_length(content)) AS bytes FROM session_logs WHERE "sessionId" = ${cjkSession}`,
       );
       expect(
         (cjkBytes?.bytes ?? 0) <= 2 * 1024 * 1024,
