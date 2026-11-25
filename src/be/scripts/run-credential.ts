@@ -42,6 +42,8 @@ export type ScriptApiCredential = {
   release: () => Promise<void>;
 };
 
+class ScriptPrincipalError extends Error {}
+
 /** Mint a credential for a registered agent or an explicit server-owned principal. */
 export async function acquireScriptApiCredential(
   agentId: string,
@@ -52,15 +54,15 @@ export async function acquireScriptApiCredential(
   if (authority?.kind === "user") {
     const user = await findUserById(authority.userId);
     if (!user || user.status !== "active" || user.mergedIntoUserId)
-      throw new Error("Script executing user is inactive");
+      throw new ScriptPrincipalError("Script executing user is inactive");
     const token = await mintUserScriptRunToken(authority.userId, ttlMs, provenance);
     return { apiKey: token.plaintext, release: () => revokeUserScriptRunToken(token.tokenId) };
   }
   if (authority?.kind === "agent" && authority.agentId !== agentId) {
-    throw new Error("Script agent does not match its execution principal");
+    throw new ScriptPrincipalError("Script agent does not match its execution principal");
   }
   if (authority?.kind !== "operator" && !(await getAgentById(agentId))) {
-    throw new Error("Script executing agent does not exist");
+    throw new ScriptPrincipalError("Script executing agent does not exist");
   }
   const token =
     authority?.kind === "operator"
@@ -97,11 +99,43 @@ export async function runScriptWithRunCredential(
   provenance: ScriptRunProvenance = {},
   authority?: ScriptExecutionPrincipal,
 ): Promise<RunScriptOutput> {
-  if (authority?.kind === "user")
-    return runScriptAsUserWithRunCredential(input, authority.userId, provenance);
-  const credential = await acquireScriptApiCredential(input.agentId, provenance, authority);
+  const userRun = authority?.kind === "user";
+  let credential: ScriptApiCredential;
   try {
-    return await runScript({ ...input, apiKey: credential.apiKey, dbDialect: scriptDbDialect() });
+    credential = await acquireScriptApiCredential(
+      input.agentId,
+      provenance,
+      authority,
+      userRun ? userScriptRunTokenTtlMs() : SCRIPT_RUN_TOKEN_TTL_MS,
+    );
+  } catch (error) {
+    if (!(error instanceof ScriptPrincipalError)) throw error;
+    return {
+      result: undefined,
+      stdout: "",
+      stderr: error.message,
+      truncated: { stdout: false, stderr: false },
+      durationMs: 0,
+      exitCode: 1,
+      error: "executor_error",
+    };
+  }
+  try {
+    return await runScript({
+      ...input,
+      apiKey: credential.apiKey,
+      dbDialect: scriptDbDialect(),
+      // A user credential carries no agent identity or deployment bindings.
+      ...(userRun && {
+        agentId: "",
+        egressSecrets: [],
+        failedBindings: [],
+        userConfig: {},
+        apiConnections: [],
+        mcpConnections: [],
+        agentFs: undefined,
+      }),
+    });
   } finally {
     await credential.release();
   }
@@ -129,28 +163,8 @@ export async function runScriptAsUserWithRunCredential(
   userId: string,
   provenance?: ScriptRunProvenance,
 ): Promise<RunScriptOutput> {
-  const credential = await acquireScriptApiCredential(
-    "",
-    provenance,
-    { kind: "user", userId },
-    userScriptRunTokenTtlMs(),
-  );
-  try {
-    return await runScript({
-      ...input,
-      apiKey: credential.apiKey,
-      dbDialect: scriptDbDialect(),
-      // Empty: the SDK then sends no X-Agent-ID, which the api refuses on a user token.
-      agentId: "",
-      // Explicit empties: omitted, the loader falls back to deployment-wide bindings.
-      egressSecrets: [],
-      failedBindings: [],
-      userConfig: {},
-      apiConnections: [],
-      mcpConnections: [],
-      agentFs: undefined,
-    });
-  } finally {
-    await credential.release();
-  }
+  return runScriptWithRunCredential({ ...input, agentId: "" }, provenance, {
+    kind: "user",
+    userId,
+  });
 }

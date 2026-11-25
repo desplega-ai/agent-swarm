@@ -82,21 +82,25 @@ export const scriptRunnerRemoteSync: Scenario = {
         ws.once("close", (code) => resolve({ ws, code }));
       });
     const fixture = await connectFixture(token);
-    expect(fixture.code === 0, "fixture runner welcomed");
-    const duplicate = await connectFixture(token);
-    expect(duplicate.code === 1011, "duplicate instance is retryable");
-    const secondCredential = await ctx.api("POST", "/api/script-runners/credentials", {
-      body: { name: `second-${ctx.nonce}` },
-    });
-    expectStatus(secondCredential, [201], "mint second credential");
-    const otherToken = asString(asRecord(secondCredential.json).token, "second token");
-    const otherDuplicate = await connectFixture(otherToken);
-    expect(otherDuplicate.code === 1008, "an instance cannot change its bound credential");
-    const held = await connectFixture(otherToken, [crypto.randomUUID()]);
-    expect(held.code === 1008, "held jobs cannot be adopted");
     try {
+      expect(fixture.code === 0, "fixture runner welcomed");
+      const duplicate = await connectFixture(token);
+      expect(duplicate.code === 1011, "duplicate instance is retryable");
+      const secondCredential = await ctx.api("POST", "/api/script-runners/credentials", {
+        body: { name: `second-${ctx.nonce}` },
+      });
+      expectStatus(secondCredential, [201], "mint second credential");
+      const otherToken = asString(asRecord(secondCredential.json).token, "second token");
+      const otherDuplicate = await connectFixture(otherToken);
+      expect(otherDuplicate.code === 1008, "an instance cannot change its bound credential");
+      const held = await connectFixture(otherToken, [crypto.randomUUID()]);
+      expect(held.code === 1008, "held jobs cannot be adopted");
       const started = performance.now();
-      const unanswered = await run("native");
+      const unanswered = await ctx.api("POST", "/api/scripts/run", {
+        agentId,
+        body: { executor: "native", source: "export default () => 42" },
+        timeoutMs: 45_000,
+      });
       expect(
         asRecord(unanswered.json).error === "executor_error",
         "missing result fails at RPC deadline",

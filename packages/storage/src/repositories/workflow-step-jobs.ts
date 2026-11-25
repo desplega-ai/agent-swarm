@@ -132,12 +132,8 @@ export class BaseWorkflowStepJobsRepository implements WorkflowStepJobsRepositor
   async revokeStepCredentials(stepId: string, now: string): Promise<void> {
     await this.db.run(sql`UPDATE session_tokens SET "revokedAt"=${now}
       WHERE "sourceStepId"=${stepId} AND "scriptRun"=${true} AND "revokedAt" IS NULL`);
-    const source =
-      this.db.dialect.name === "postgres"
-        ? sql`"runProvenance" ->> 'sourceStepId'`
-        : sql`json_extract("runProvenance", '$.sourceStepId')`;
     await this.db.run(sql`UPDATE user_tokens SET "revokedAt"=${now}
-      WHERE ${source}=${stepId} AND "runProvenance" IS NOT NULL AND "revokedAt" IS NULL`);
+      WHERE "runProvenance" ->> 'sourceStepId' = ${stepId} AND "runProvenance" IS NOT NULL AND "revokedAt" IS NULL`);
   }
 
   listClaimable(now: string): Promise<WorkflowStepJob[]> {

@@ -118,6 +118,26 @@ describe("acquireScriptApiCredential", () => {
 });
 
 describe("runScriptWithRunCredential revokes the run's token however the run ends", () => {
+  test("refuses missing principals before execution with a script result", async () => {
+    const input = { agentId: crypto.randomUUID(), source: "export default () => 42" };
+    const agent = await runScriptWithRunCredential(input);
+    const user = await runScriptWithRunCredential(
+      input,
+      {},
+      { kind: "user", userId: crypto.randomUUID() },
+    );
+    expect(agent).toMatchObject({
+      error: "executor_error",
+      exitCode: 1,
+      stderr: "Script executing agent does not exist",
+    });
+    expect(user).toMatchObject({
+      error: "executor_error",
+      exitCode: 1,
+      stderr: "Script executing user is inactive",
+    });
+  });
+
   spawnTest("success", async () => {
     await expectOneRevokedToken(async () => {
       const output = await runScriptWithRunCredential({

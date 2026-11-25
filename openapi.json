@@ -55815,7 +55815,7 @@
       "post": {
         "operationId": "script_runs_create",
         "summary": "Launch a durable script workflow run",
-        "description": "Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.",
+        "description": "An authenticated agent or operator can create a durable run and receive its dashboard URL.",
         "tags": [
           "Script Runs"
         ],
@@ -55898,6 +55898,16 @@
           },
           "400": {
             "description": "Validation or label-lint failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Durable execution requires an authenticated agent or operator",
             "content": {
               "application/json": {
                 "schema": {

@@ -22141,7 +22141,7 @@ export interface paths {
         put?: never;
         /**
          * Launch a durable script workflow run
-         * @description Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.
+         * @description An authenticated agent or operator can create a durable run and receive its dashboard URL.
          */
         post: operations["script_runs_create"];
         delete?: never;
@@ -37595,6 +37595,15 @@ export interface operations {
             };
             /** @description Validation or label-lint failure */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Durable execution requires an authenticated agent or operator */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

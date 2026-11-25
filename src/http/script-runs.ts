@@ -156,12 +156,13 @@ const createScriptRunRoute = route({
   operationId: "script_runs_create",
   summary: "Launch a durable script workflow run",
   description:
-    "Foundation endpoint for Script Workflows v1. In PR 1 it persists the run and returns its dashboard URL; spawning is added by the supervisor PR.",
+    "An authenticated agent or operator can create a durable run and receive its dashboard URL.",
   tags: ["Script Runs"],
   body: createScriptRunBodySchema,
   responses: {
     201: { description: "Script run created", schema: scriptRunCreatedSchema },
     400: { description: "Validation or label-lint failure" },
+    403: { description: "Durable execution requires an authenticated agent or operator" },
     // Idempotency conflict returns the EXISTING run's pointer, not the
     // standard error envelope — declare it so the fallback doesn't lie.
     409: { description: "Existing idempotent run returned", schema: scriptRunCreatedSchema },
