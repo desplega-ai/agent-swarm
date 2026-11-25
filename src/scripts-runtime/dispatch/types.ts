@@ -23,7 +23,6 @@ export type ScriptJob = InlineScriptJob | ShellScriptJob;
 export type ScriptRunnerHandle = {
   executors?: readonly ScriptExecutorName[];
   runtimes?: readonly ShellRuntime[];
-  executors?: readonly ScriptExecutorName[];
   stepJobs?: boolean;
   id: string;
   ownerId?: string;
