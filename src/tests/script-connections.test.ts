@@ -740,6 +740,10 @@ describe("script connections", () => {
       markMigrationApplied(database, "367_workflow_run_principal.sql");
       // The UTC backfill needs scheduled_tasks, which this fixture does not create.
       markMigrationApplied(database, "374_schedule_next_run_at_utc.sql");
+      // This migration-112 fixture has no script runs or token history.
+      markMigrationApplied(database, "377_script_run_operator_token.sql");
+      markMigrationApplied(database, "379_script_run_provenance.sql");
+      markMigrationApplied(database, "380_script_run_ownership.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

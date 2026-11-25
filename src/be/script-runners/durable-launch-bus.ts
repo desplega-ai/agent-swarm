@@ -20,7 +20,7 @@ export function startDurableBus(start: (run: ScriptRun) => Promise<void>): void 
       if (deferredByBootId === bootId) return;
       const run = await getScriptRun(runId);
       // The supervisor claims the unowned row before it mints a broker credential.
-      if (!run || run.status !== "running" || run.pid || run.ownerId) return;
+      if (!run || run.status !== "running" || run.pid) return;
       await start(run);
     },
     { delivery: "durable" },

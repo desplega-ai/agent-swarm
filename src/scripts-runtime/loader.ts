@@ -6,7 +6,7 @@ import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "./api-types";
 import type { FailedCredentialBinding } from "./credential-broker";
 import { dispatchScriptJob } from "./dispatch/dispatcher";
-import type { ScriptJob } from "./dispatch/types";
+import type { InlineScriptJob } from "./dispatch/types";
 import { buildEgressSecrets } from "./egress-secrets";
 import { isExecutorAllowedByDeployment, resolveScriptExecutorName } from "./executors/registry";
 import {
@@ -127,7 +127,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
 
 export async function prepareScriptJob(
   input: RunScriptInput,
-): Promise<ExecutorOutput | { job: ScriptJob; scrubber: ReturnType<typeof createValueScrubber> }> {
+): Promise<ExecutorOutput | { job: InlineScriptJob; scrubber: ReturnType<typeof createValueScrubber> }> {
   if (input.fsMode === "workspace-rw") {
     return {
       result: undefined,
@@ -181,7 +181,7 @@ export async function prepareScriptJob(
   };
 
   const configPayload = await buildConfigPayload(input);
-  const executorInput: ScriptJob["input"] = {
+  const executorInput: InlineScriptJob["input"] = {
     source: input.source,
     args: input.args ?? null,
     ...(input[HOST_VALIDATED_ARGS] === true ? { hostValidatedArgs: true } : {}),
