@@ -14,7 +14,6 @@ import { isTelemetryEnabled, isTelemetryReady, telemetry } from "./telemetry";
 import type { PropsFor } from "./telemetry-contract";
 
 export type OrgActivity = PropsFor<"org.activity">;
-type Counters = ReturnType<typeof zero>;
 
 /** What started a script execution. `other`: app actions, API endpoints, durable objects, task gates. */
 export type ScriptRunTrigger = "task" | "workflow_node" | "schedule" | "inline" | "other";
