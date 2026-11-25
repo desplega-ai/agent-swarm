@@ -40,7 +40,7 @@ const bytes = (value: unknown): number => new TextEncoder().encode(JSON.stringif
  * larger of the two. A spilled result (over the 10 KB wire limit) fails here instead.
  */
 function channelBytes(result: Record<string, unknown>): number {
-  expect(structured(result).truncated === undefined, "the result did not spill to KV");
+  expect(structured(result).truncation === undefined, "the result did not spill to KV");
   return Math.max(new TextEncoder().encode(toolText(result)).length, bytes(structured(result)));
 }
 
