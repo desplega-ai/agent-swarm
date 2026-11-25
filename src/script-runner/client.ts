@@ -113,7 +113,6 @@ export function startScriptRunner(options: {
   const steps = new Map<string, HeldStep>();
   const cleanup = new Map<string, Promise<void>>();
   const trackCleanup = (id: string, done: Promise<void>) => {
-    if (cleanup.has(id)) return;
     const tracked = done.finally(() => cleanup.delete(id));
     cleanup.set(id, tracked);
     void tracked.catch(() => {});
@@ -483,6 +482,7 @@ export function startScriptRunner(options: {
           else sendHeartbeat();
         } else if (message.type === "cancel") {
           pending.get(message.jobId)?.cancel();
+          if (cleanup.has(message.jobId)) return;
           const inline = jobs.get(message.jobId);
           if (inline) {
             inline.controller.abort();
