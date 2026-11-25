@@ -26113,7 +26113,7 @@ export interface paths {
                     "application/json": {
                         name: string;
                         /** Format: date-time */
-                        expiresAt: string;
+                        expiresAt?: string;
                     };
                 };
             };
@@ -28850,7 +28850,7 @@ export interface paths {
         get: operations["users_getRbacRoles"];
         /**
          * Set a user's RBAC roles
-         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Adding a role that grants session.read.all (the built-in auditor role) requires the operator key: every new user is a grant-all admin, so a user token could grant it to itself. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.
+         * @description Replaces the user's roles. The set holds exactly one of admin, requester, viewer plus any extra roles. Demoting a user below admin removes the ability to answer approval requests, even when the user is listed as an approver. Fails with 409 when it would leave no active admin. Only the operator can assign roles with session.read.all or script_runner.write. Adding such a role revokes the user's MCP tokens and spends its unused connector and invite codes.
          */
         put: operations["users_setRbacRoles"];
         post?: never;

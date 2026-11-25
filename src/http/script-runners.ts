@@ -1,13 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getUserGrant } from "../be/rbac-roles";
+import { userHoldsExplicitVerb } from "../be/rbac-roles";
 import {
+  MAX_RUNNER_CREDENTIAL_TTL_MS,
   mintScriptRunnerCredential,
   revokeScriptRunnerCredential,
 } from "../be/script-runners/credentials";
 import { getStorage } from "../be/storage";
-import { can, isRbacEnabled } from "../rbac";
+import { can } from "../rbac";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -50,7 +51,12 @@ const mint = route({
     name: z.string().trim().min(1).max(200),
     expiresAt: z.iso
       .datetime()
-      .refine((value) => Date.parse(value) > Date.now(), "Expiry must be in the future"),
+      .refine((value) => Date.parse(value) > Date.now(), "Expiry must be in the future")
+      .refine(
+        (value) => Date.parse(value) <= Date.now() + MAX_RUNNER_CREDENTIAL_TTL_MS,
+        "Expiry must be within 90 days",
+      )
+      .optional(),
   }),
   responses: {
     201: {
@@ -90,12 +96,12 @@ export async function handleScriptRunners(
     jsonError(res, "Script-runner credentials require an operator or user", 403);
     return true;
   }
-  if (principal.kind === "user" && isRbacEnabled()) {
-    const grant = await getUserGrant(principal.userId);
-    if (!grant.grantsAll && !grant.verbs.has("script_runner.write")) {
-      jsonError(res, "Missing permission: script_runner.write", 403);
-      return true;
-    }
+  if (
+    principal.kind === "user" &&
+    !(await userHoldsExplicitVerb(principal.userId, "script_runner.write"))
+  ) {
+    jsonError(res, "An operator must grant script_runner.write to this user", 403);
+    return true;
   }
   const decision = can({ principal, verb: "script_runner.write", source: "http" });
   if (!decision.allow) {
@@ -112,13 +118,14 @@ export async function handleScriptRunners(
       jsonError(res, "script_runners_need_postgres", 409);
       return true;
     }
+    res.setHeader("Cache-Control", "no-store");
     mint.respond(
       res,
       201,
       await mintScriptRunnerCredential(
         parsed.body.name,
         parsed.body.expiresAt,
-        await resolveHttpAuditUserId(req, agentId),
+        principal.kind === "user" ? principal.userId : null,
       ),
     );
   } else {

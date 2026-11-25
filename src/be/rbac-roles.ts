@@ -78,6 +78,14 @@ export const BUILTIN_ROLES = [
     grantsAll: false,
     verbs: ["session.read.all"],
   },
+  {
+    id: "rbac-role-script-runner-manager",
+    name: "script-runner-manager",
+    description: "Provision trusted script runners and manage their credentials.",
+    isBuiltin: true,
+    grantsAll: false,
+    verbs: ["script_runner.write"],
+  },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 
 /**
@@ -85,7 +93,10 @@ export const BUILTIN_ROLES = [
  * so letting a grant-all user add a role with one of these would let any user
  * grant it to itself.
  */
-export const OPERATOR_GRANTED_VERBS: readonly PermissionVerb[] = ["session.read.all"];
+export const OPERATOR_GRANTED_VERBS: readonly PermissionVerb[] = [
+  "session.read.all",
+  "script_runner.write",
+];
 
 /** A person holds exactly one of these; other roles are extras on top. */
 export const PRIMARY_ROLE_NAMES: readonly string[] = ["admin", "requester", "viewer"];

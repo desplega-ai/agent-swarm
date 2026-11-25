@@ -27,7 +27,10 @@ export function scriptRunnersContract(engine: ContractEngine): void {
         expect(await repo.revoke("missing", now, null)).toBe(false);
         expect(await repo.revoke(row.id, now, null)).toBe(true);
         expect(await repo.findActiveByHash("hash1", now)).toBeNull();
-        expect((await repo.list())[0].revokedAt).toBe(now);
+        expect(await repo.revoke(row.id, expiresAt, null)).toBe(true);
+        const revoked = (await repo.list())[0];
+        expect(revoked.revokedAt).toBe(now);
+        expect(revoked.updatedAt).toBe(now);
         expect(storage.capabilities.scriptRunners).toBe(engine.name === "postgres");
       } finally {
         await engine.release(storage);

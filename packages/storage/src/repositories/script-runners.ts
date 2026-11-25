@@ -46,8 +46,9 @@ export class BaseScriptRunnersRepository implements ScriptRunnersRepository {
 
   async revoke(id: string, now: string, actor: string | null): Promise<boolean> {
     const result = await this.db.run(sql`UPDATE script_runner_credentials
-      SET revoked_at = COALESCE(revoked_at, ${now}), updated_at = ${now},
-        updated_by = ${actor} WHERE id = ${id}`);
-    return result.changes > 0;
+      SET revoked_at = ${now}, updated_at = ${now},
+        updated_by = ${actor} WHERE id = ${id} AND revoked_at IS NULL`);
+    if (result.changes > 0) return true;
+    return !!(await this.db.get(sql`SELECT id FROM script_runner_credentials WHERE id = ${id}`));
   }
 }

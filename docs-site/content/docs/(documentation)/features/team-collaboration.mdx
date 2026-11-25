@@ -79,6 +79,10 @@ One deployment serves the whole team, and you run it on your own infrastructure.
 
 **Users and roles.** Role-based access control ships with three built-in primary roles: `admin` (full access), `requester` (create, read, cancel and act on their own tasks, plus their own files and favorites) and `viewer` (read-only). Each user holds exactly one primary role, plus any extra roles. Every new user is assigned `admin` by a database trigger. Enforcement is on by default via `RBAC_ENABLED` and gates only requests made with user tokens — operator-key and agent calls are not affected. A user acting on tasks is limited to tasks they requested. A dashboard identity sees only its own sessions, ownerless and schedule sessions, and sessions shared with it. A user whose role lists `session.read.all` explicitly can opt in to every user's tasks and sessions with the dashboard's **All users** toggle (`scope=all` on `GET /api/tasks` and `GET /api/sessions`); the opt-in is read-only. The `admin` role alone does not grant it, since every new user is admin. The built-in extra role `auditor` holds only `session.read.all` and is never assigned by default. Add it next to the user's primary role with `PUT /api/users/{id}/roles` and the operator key. A user token gets 403 when it adds `auditor`, even with a grant-all role, since every user could otherwise grant it to itself. The call replaces the user's roles, so list the primary role too:
 
+The operator can assign the extra `script-runner-manager` role to a trusted user. It grants `script_runner.write`.
+That user can provision runners that receive script jobs and their credentials. Each runner credential expires within 90 days.
+Removing the role or deactivating the user disables credentials that user issued.
+
 ```bash
 curl -X PUT "$MCP_BASE_URL/api/users/<user-id>/roles" \
   -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
