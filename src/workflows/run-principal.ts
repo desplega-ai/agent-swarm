@@ -71,7 +71,7 @@ export async function decideWorkflowRunPrincipal(
     if (editor && editor !== creator && !(await getAgentById(editor))?.isLead) {
       return {
         ok: false,
-        error: `Workflow "${workflow.name}" was edited by another agent. Its creator or a lead must save it before execution.`,
+        error: `Workflow "${workflow.name}" was last edited by agent ${editor}. Its creator or a lead must save it before execution.`,
       };
     }
     return trusted.userId ? trusted : { ok: true, agentId: creator };

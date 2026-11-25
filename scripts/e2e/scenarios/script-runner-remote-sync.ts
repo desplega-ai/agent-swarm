@@ -32,7 +32,12 @@ export const scriptRunnerRemoteSync: Scenario = {
       (await upgrade(ctx.apiKey)) === (ctx.db.engine === "sqlite" ? 409 : 401),
       "engine and operator key gate",
     );
-    if (ctx.db.engine === "sqlite") return;
+    if (ctx.db.engine === "sqlite") {
+      const result = await ctx.api("GET", "/api/script-runners");
+      expectStatus(result, [200], "list runners with embedded execution");
+      expect(asRecords(result.json, "sessions").length === 0, "SQLite has no remote sessions");
+      return;
+    }
     const minted = await ctx.api("POST", "/api/script-runners/credentials", {
       body: { name: ctx.nonce, expiresAt: new Date(Date.now() + 3600000).toISOString() },
     });
