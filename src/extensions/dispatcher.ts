@@ -1,6 +1,7 @@
 import { isInTransaction } from "../be/db-client";
 import { setAssetsEnabled } from "../be/extensions/assets";
 import { insertExtensionRun, recordExtensionFailure, setExtensionState } from "../be/extensions/db";
+import { withSpan } from "../otel";
 import { grantLeadEquivalence, revokeLeadEquivalence } from "../rbac/elevated-agents";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type { SwarmEventMap, ToolSource } from "./contract";
@@ -316,12 +317,40 @@ async function runHandler(
       );
       timeout.unref?.();
     });
-    const result = await Promise.race([
-      Promise.resolve().then(() =>
-        handler.handler(payload as never, buildCtx(loaded, event, controller.signal)),
-      ),
-      timeoutPromise,
-    ]);
+    const result = await withSpan(
+      `extension ${event}`,
+      async (span) => {
+        try {
+          const result = await Promise.race([
+            Promise.resolve().then(() =>
+              handler.handler(payload as never, buildCtx(loaded, event, controller.signal)),
+            ),
+            timeoutPromise,
+          ]);
+          const blocked =
+            event.startsWith("pre.") &&
+            typeof result === "object" &&
+            result !== null &&
+            "action" in result &&
+            result.action === "block" &&
+            "reason" in result &&
+            typeof result.reason === "string";
+          span.setAttribute("extension.outcome", blocked ? "blocked" : "ok");
+          return result;
+        } catch (error) {
+          span.setAttribute(
+            "extension.outcome",
+            error instanceof ExtensionTimeoutError ? "timeout" : "error",
+          );
+          throw error;
+        }
+      },
+      {
+        "extension.id": loaded.record.id,
+        "extension.name": loaded.record.name,
+        "extension.event": event,
+      },
+    );
     const durationMs = Date.now() - startedAt;
     return { ok: true, result, durationMs };
   } catch (error) {

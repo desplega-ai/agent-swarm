@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { closeDb, getDbClient, getKv, initDb } from "../be/db";
 import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import {
@@ -25,9 +28,30 @@ import {
   stopExtensionRuntime,
 } from "../extensions/lifecycle";
 import { cleanExtensionTmpRoot, loadExtension } from "../extensions/loader";
+import * as otel from "../otel";
+import { withSpan as realWithSpan } from "../otel-impl";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-extensions-dispatcher.sqlite";
+const exporter = new InMemorySpanExporter();
+const provider = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
+let spanSpy: ReturnType<typeof spyOn<typeof otel, "withSpan">>;
+
+function expectHandlerSpan(id: string, name: string, outcome: string, event = "pre.task.create") {
+  const span = exporter.getFinishedSpans().find((span) => span.attributes["extension.id"] === id);
+  expect(span?.name).toBe(`extension ${event}`);
+  expect(span?.attributes).toMatchObject({
+    "extension.id": id,
+    "extension.name": name,
+    "extension.event": event,
+    "extension.outcome": outcome,
+  });
+  expect(span?.status.code).toBe(
+    outcome === "error" || outcome === "timeout" ? SpanStatusCode.ERROR : SpanStatusCode.OK,
+  );
+  return span!;
+}
+
 let savedTimeout: string | undefined;
 let savedFailureLimit: string | undefined;
 
@@ -72,6 +96,8 @@ export default extension;
 
 describe("extension dispatcher", () => {
   beforeAll(async () => {
+    provider.register();
+    spanSpy = spyOn(otel, "withSpan").mockImplementation(realWithSpan);
     savedTimeout = process.env.EXTENSION_HANDLER_TIMEOUT_MS;
     savedFailureLimit = process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES;
     await removeDbFiles();
@@ -79,6 +105,9 @@ describe("extension dispatcher", () => {
   });
 
   afterAll(async () => {
+    spanSpy.mockRestore();
+    await provider.shutdown();
+    trace.disable();
     for (const loaded of listRegistered()) {
       unregister(loaded.record.id);
       await loaded.dispose();
@@ -93,6 +122,7 @@ describe("extension dispatcher", () => {
   });
 
   beforeEach(async () => {
+    exporter.reset();
     for (const loaded of listRegistered()) {
       unregister(loaded.record.id);
       await loaded.dispose();
@@ -104,25 +134,31 @@ describe("extension dispatcher", () => {
   });
 
   test("runs by priority and feeds each modify into the next handler", async () => {
-    await fixture("priority-a", 20);
+    const loaded = await fixture("priority-a", 20);
     await fixture("priority-b", 10);
-    expect(await dispatchPre("pre.task.create", taskPayload())).toEqual({
-      action: "modify",
-      data: { description: "startba" },
-    });
+    const result = await realWithSpan("mcp.tool task-create", () =>
+      dispatchPre("pre.task.create", taskPayload()),
+    );
+    expect(result).toEqual({ action: "modify", data: { description: "startba" } });
+    const child = expectHandlerSpan(loaded.record.id, loaded.record.name, "ok");
+    const parent = exporter.getFinishedSpans().find((span) => span.name === "mcp.tool task-create");
+    expect(child.parentSpanContext?.spanId).toBe(parent?.spanContext().spanId);
+    expect(child.spanContext().traceId).toBe(parent?.spanContext().traceId);
   });
 
   test("returns the first block", async () => {
-    await loadAndRegister(await blockBundle("block-first", "first"), 10);
+    const loaded = await loadAndRegister(await blockBundle("block-first", "first"), 10);
     await loadAndRegister(await blockBundle("block-second", "second"), 20);
     const result = await dispatchPre("pre.task.create", taskPayload());
     expect(result).toMatchObject({ action: "block", reason: "first" });
+    expectHandlerSpan(loaded.record.id, loaded.record.name, "blocked");
   });
 
   test("fails open and records thrown handlers", async () => {
     const loaded = await fixture("throws");
     expect(await dispatchPre("pre.task.create", taskPayload())).toEqual({ action: "continue" });
     expect((await getExtensionById(loaded.record.id))?.consecutiveFailures).toBe(1);
+    expectHandlerSpan(loaded.record.id, loaded.record.name, "error");
     expect(await listExtensionRuns(loaded.record.id)).toMatchObject([
       { action: "error", event: "pre.task.create", message: "fixture failure" },
     ]);
@@ -162,6 +198,7 @@ describe("extension dispatcher", () => {
     expect(
       (await listExtensionRuns(loaded.record.id)).some((run) => run.action === "timeout"),
     ).toBe(true);
+    expectHandlerSpan(loaded.record.id, loaded.record.name, "timeout");
     await finished.promise;
     expect(lateError).toBeInstanceOf(ExtensionAbortedError);
     expect(await getKv(`task:agent:${loaded.record.agentId}`, "ext:slow:after-timeout")).toBeNull();
@@ -229,6 +266,7 @@ describe("extension dispatcher", () => {
       { skipExtensionId: first.record.id },
     );
     expect(calls).toEqual(["priority-b"]);
+    expectHandlerSpan(second.record.id, second.record.name, "ok", "post.slack.message");
   });
 
   test("auto-disable skips remaining handlers in the same chain", async () => {
