@@ -79,6 +79,7 @@ import { renderDialectSections } from "../seed-skills/render";
 import { getStorage } from "../storage";
 import { resolveSeededEnabled } from "./automation-toggle";
 import { isSeedScriptsEnabled, isSeedWorkflowsEnabled } from "./seed-toggle";
+import { getSeedState } from "./state-db";
 import type { Seeder, SeedItem } from "./types";
 import { canonicalJson } from "./workflows-seeder";
 
@@ -264,8 +265,34 @@ export function loadSeedSchedules(
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
+/**
+ * The seed hash leaves out the operator-owned fields: whether the schedule is on,
+ * its cron and its timezone. An operator change to them is not a user edit, so
+ * the row still takes later template updates, and an update keeps their values.
+ */
 function scheduleSeedHash(schedule: SeedSchedule): string {
-  return computeContentHash(canonicalJson(schedule));
+  const { enabled: _enabled, cronExpression: _cron, timezone: _timezone, ...seeded } = schedule;
+  return computeContentHash(canonicalJson(seeded));
+}
+
+/**
+ * The seed state hashes of releases before operator-owned fields, which covered the
+ * whole schedule. One of them equals a recorded legacy hash when the live row
+ * differs from what the seeder wrote only in its operator fields: on/off either
+ * way, and the live or the template cron and timezone.
+ */
+function legacyScheduleSeedHashes(live: SeedSchedule, template: SeedSchedule): string[] {
+  const hashes: string[] = [];
+  for (const enabled of [true, false]) {
+    for (const cronExpression of new Set([live.cronExpression, template.cronExpression])) {
+      for (const timezone of new Set([live.timezone, template.timezone])) {
+        hashes.push(
+          computeContentHash(canonicalJson({ ...live, enabled, cronExpression, timezone })),
+        );
+      }
+    }
+  }
+  return hashes;
 }
 
 async function scheduleTargetFromRow(
@@ -401,11 +428,33 @@ export function createSchedulesSeeder(
 
     async upstreamHash(item): Promise<string | null> {
       const existing = await getScheduledTaskByName(item.key);
-      return existing ? scheduleSeedHash(await scheduleFromRow(existing)) : null;
+      if (!existing) return null;
+      const live = await scheduleFromRow(existing);
+      const liveHash = scheduleSeedHash(live);
+      if (liveHash === item.contentHash) return liveHash;
+      // The runner calls a row pristine when this equals the recorded hash. A row
+      // seeded by an earlier release records a whole-schedule hash, so report the
+      // recorded hash itself while the row differs from that seed only in its
+      // operator fields. Without this, every legacy row reads as user-edited.
+      const state = await getSeedState("schedule", item.key);
+      if (state && legacyScheduleSeedHashes(live, item.schedule).includes(state.seededHash)) {
+        return state.seededHash;
+      }
+      return liveHash;
     },
 
     async apply(item): Promise<void> {
-      const { schedule } = item;
+      const existing = await getScheduledTaskByName(item.schedule.name);
+      // A new row takes on/off, cron and timezone from the template. An update keeps
+      // the stored values: they belong to the operator (see scheduleSeedHash).
+      const schedule: SeedSchedule = existing
+        ? {
+            ...item.schedule,
+            enabled: existing.enabled,
+            cronExpression: existing.cronExpression ?? item.schedule.cronExpression,
+            timezone: existing.timezone,
+          }
+        : item.schedule;
       const resolvedNextRunAt = nextRunAt(schedule);
       const data = {
         description: schedule.description,
@@ -419,7 +468,6 @@ export function createSchedulesSeeder(
         requiredParams: schedule.requiredParams,
         requires: schedule.requires,
       };
-      const existing = await getScheduledTaskByName(schedule.name);
       if (existing) {
         // Nulls clear the previous target's fields when a template changes target.
         // Seed writes carry no agent and no person on purpose: the audit columns
