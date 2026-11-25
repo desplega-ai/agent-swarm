@@ -426,6 +426,23 @@ export const PERMISSIONS = {
     description: "Run a global or inline script as yourself from the user MCP.",
     namespace: "script",
   },
+  "script.run.durable": {
+    description:
+      "Launch a durable script run over HTTP. A user caller names a global script listed in SCRIPT_RUN_USER_ALLOWLIST, which runs as its owning agent.",
+    namespace: "script",
+  },
+  "script.run.cancel": {
+    description: "Cancel a durable script run (a user caller: only runs it launched).",
+    namespace: "script",
+  },
+  "workflow.trigger": {
+    description: "Trigger a workflow run over HTTP.",
+    namespace: "workflow",
+  },
+  "workflow.run.event": {
+    description: "Send an event to waiting workflow runs (run-scoped or global).",
+    namespace: "workflow",
+  },
   "script.api.read.secrets": {
     description: "Reveal an external script API endpoint bearer token.",
     namespace: "script",

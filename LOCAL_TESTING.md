@@ -76,7 +76,8 @@ workflow node type the server exposes is neither covered nor excluded with a rea
 `scripts/e2e/coverage-manifest.json`, when an exclusion is stale or dead, or when a pinned
 flow did not pass. Inference is mocked (`scripts/e2e/mocks/llm.ts`: OpenAI chat + Responses
 + embeddings, SystemOne) and the SUT boots with every capability on. Latency is recorded per
-call; `bun run e2e:bench before.json after.json` diffs two runs. Operator guide:
+call; `bun run e2e:bench before.json after.json` diffs two runs, and `bun run e2e:bench --check`
+checks the PostgreSQL commit budget (`scripts/e2e/bench-budget.json`). Operator guide:
 [runbooks/e2e-blackbox.md](./runbooks/e2e-blackbox.md). Authoring guide:
 [scripts/e2e/README.md](./scripts/e2e/README.md).
 
