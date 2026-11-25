@@ -1,6 +1,7 @@
 # Script runners
 
-Script runners execute synchronous scripts outside the API process. They require PostgreSQL.
+Script runners execute synchronous scripts, durable runs and parked workflow jobs outside the API process.
+They require PostgreSQL.
 The API keeps one connection registry per process. Multiple API replicas remain unsupported.
 SQLite rejects the WebSocket upgrade with `409 script_runners_need_postgres` before authentication.
 
@@ -49,10 +50,14 @@ Each RPC also has a deadline equal to its wall time plus five seconds.
 Termination fails every pending caller and releases its slot. Send errors also terminate the socket.
 The runner terminates a connection after 45 seconds without API pings and aborts its inline jobs.
 A socket close fails pending callers with `executor_error` and kills all inline children on the runner.
-The runner kills children before reconnecting. It retries every second for 30 seconds, then uses exponential delay with jitter.
+The runner kills inline children before reconnecting. It retries every second for 30 seconds, then uses exponential delay with jitter.
 A policy close (1008) stops the process. Authentication and engine refusals also stop it.
 A duplicate instance ID receives retryable close 1011 until the old connection closes.
-Connections never replace another session or adopt its jobs, regardless of credential.
+A connection cannot replace a live session with the same instance ID.
+Reconnects can retain durable guests and workflow jobs under their stored ownership and lease.
+After an API restart, durable guests stop and replay their journals because their broker lived in the API.
+Owned workflow jobs survive the restart and return their result to the new API.
+The SDK retries refused connections during the restart. Calls with uncertain side effects retain their normal retry policy.
 
 Set `SCRIPT_RUNNER_READY_FILE=/run/agent-swarm-script-runner/ready` for packaged health probes.
 Create the parent directory first. It must belong to the runner UID and have mode 0700.

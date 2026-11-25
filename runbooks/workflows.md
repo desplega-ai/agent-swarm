@@ -1248,7 +1248,11 @@ Two valid patterns:
 
 ### Multi-instance limitation
 
-`workflowEventBus` is an in-process `EventEmitter` (`src/workflows/event-bus.ts`). With multiple API replicas, a signal emitted on instance A will not reach a wait paused on instance B. Single-instance only for v1; cross-instance fan-out (Redis pub/sub, etc.) is a separate plan.
+`workflowEventBus` uses the in-process realtime bus (`src/workflows/event-bus.ts`).
+A signal on API A cannot reach a wait registered on API B. Workflow walks still require one API owner.
+PostgreSQL can distribute script jobs across script runners while the API retains the walk and its checkpoints.
+The execution bus carries script-job notifications. Existing workflow event subscribers retain local delivery.
+Script runners do not remove the replica blockers in `thoughts/taras/research/2026-11-20-replica-blockers.md`.
 
 ## Inline script runtime
 
@@ -1259,6 +1263,6 @@ An explicit `cwd` refers to a directory on the API host.
 With PostgreSQL, an inline script without `cwd` can park as a `step-shell` job.
 The API selects a runner that advertises the requested bash, TypeScript or Python runtime.
 The shared step dispatcher owns claims, leases, acknowledgments and checkpoint settlement.
-The API scrubs shell results before a step checkpoint stores them.
+The API scrubs remote shell output before it maps the result into a step checkpoint.
 A node with `cwd` uses the embedded runner because that directory belongs to the API host.
 If embedded slots are zero, a node with `cwd` fails with an explicit error.

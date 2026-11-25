@@ -5,7 +5,12 @@ The root `CLAUDE.md` keeps only the rules that cause damage when missed. This fi
 
 ## Architecture
 
-API server owns the `scripts` + `script_versions` tables. Workers + the runtime invoke via HTTP. The runtime evaluates user-supplied TS in a `Bun.spawn` subprocess wrapped in `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`, launched as `bun --no-orphans` (the harness dies with the API and SIGKILLs its whole descendant tree on exit; added by `buildSandboxedCommand` in `src/utils/sandboxed-process.ts`), a wall-clock AbortController (30s default; up to 5m where exposed), and a 1 MB stdout cap.
+The API owns the `scripts` and `script_versions` tables. Workers and the runtime invoke the API through HTTP.
+Native execution uses a sandboxed `Bun.spawn` subprocess on the selected executor host.
+`buildSandboxedCommand` launches `bun --no-orphans` with `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`.
+An embedded child belongs to the API host. A remote child belongs to its script runner.
+The wall-clock limit defaults to 30 seconds and allows five minutes where exposed. Stdout has a 1 MB cap.
+QuickJS uses a worker pool on the selected executor host.
 
 Synchronous runs use the dispatcher. With PostgreSQL, a connected script runner with capacity can execute the job.
 Otherwise the embedded runner executes it if capacity permits. Excess runs wait in the API sync queue. See [script-runners.md](./script-runners.md) for credentials, UID isolation and lifecycle.
@@ -24,7 +29,14 @@ Older durable rows recorded the owner and journal but omitted the launch session
 
 ## `ctx.fs` / `ctx.sh` (`src/scripts-runtime/script-fs.ts`)
 
-Just-bash over a `MountableFs`. `/afs` is the invoking agent's default agent-fs drive. It mounts only with the agent's own agent-scoped `AGENT_FS_API_KEY` (never a global or repo row, never `API_AGENT_FS_API_KEY`), and the key rides as a credential-broker placeholder. Every other path is `InMemoryFs`. Both executors run this host-side (under quickjs, that is the API process), so keep its limits: `SCRIPT_FS_MAX_BYTES` (scratch bodies, each shell command, each drive response) and `ScratchFs` in `scratch-fs.ts` (metadata budget, name limits, and `/afs` reserved in scratch, also through symlinks and cp / mv). just-bash and the adapter stay out of the native harness bundle: lazy import plus the Dockerfile externals. Durable script workflows and extensions do not get it.
+Just-bash uses a `MountableFs`. `/afs` is the invoking agent's default agent-fs drive.
+It mounts only with the agent's own agent-scoped `AGENT_FS_API_KEY` through a credential-broker placeholder.
+Global, repository and `API_AGENT_FS_API_KEY` values cannot mount it. Every other path uses `InMemoryFs`.
+Both executors run these adapters on the selected executor host. QuickJS uses the API process or remote runner process.
+Preserve `SCRIPT_FS_MAX_BYTES` for scratch bodies, shell commands and drive responses.
+Preserve the metadata budget, name limits and `/afs` protections in `scratch-fs.ts`, including symlinks and `cp` or `mv`.
+Just-bash and its adapter stay outside the native harness bundle through lazy imports and Dockerfile externals.
+Durable script workflows and extensions do not receive these adapters.
 
 ## SDK surface
 

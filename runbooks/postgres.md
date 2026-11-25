@@ -60,6 +60,10 @@ At start, a probe checks that the role cannot read the 7 denied tables (directly
 
 ## One process per database
 
+This restriction applies to API processes. Script runners connect through WebSocket and hold no database connection.
+PostgreSQL can serve one API with several script runners. The execution tier does not enable several API replicas.
+See [script-runners.md](./script-runners.md) for placement, leases and recovery.
+
 The API holds a session advisory lock on its database for its whole life. A second API process on the same database waits 10 seconds, then stops with `another API process holds this Postgres database`. `db-copy` takes the same lock, so it refuses a database an API runs on. If the lock session ends while the API runs (a database restart, a dropped connection), the API logs `lost the one-process lock` and exits within about a second; the supervisor restarts it, and the new process waits for the lock again. Writes are fenced in that window: each write transaction first checks that the process still holds the lock, and a new holder waits for the old holder's open write transactions before it writes (`packages/storage-postgres/src/owner-fence.ts`). A write after a takeover fails with `no longer holds the one-process lock`.
 
 Connection budget per API process: 1 session for the one-process lock, up to 10 for the application pool, and up to 4 for the optional db-query reader (15 in total). Set the role's or the server's connection limit to at least that. With a connection pooler (PgBouncer, a cloud proxy) between the API and Postgres, use session pooling for the API's `DATABASE_URL`. The lock is a session advisory lock, so the lock connection needs session affinity: in transaction pooling the lock lands on a server connection that other clients share, and the write fence cannot see the owner session. Connect directly when the pooler offers only transaction pooling.
@@ -213,5 +217,5 @@ All three routes require an operator or user principal with `script_runner.write
 - `DELETE /api/script-runners/credentials/{id}` revokes a credential.
 
 Mint returns an `assr_` token once. Storage retains only its SHA-256 hash.
-The credential cannot authenticate ordinary HTTP requests. Only the future runner link can use it.
+The credential cannot authenticate ordinary HTTP requests. Only `/api/script-runners/connect` accepts it.
 The credential lookup rejects expired and revoked credentials.

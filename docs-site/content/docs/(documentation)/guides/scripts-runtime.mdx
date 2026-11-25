@@ -620,7 +620,12 @@ scripts run. The setting applies to every script run on that server.
 | Value | How it runs | Per-run overhead (Linux) |
 |---|---|---|
 | `native` (default) | A sandboxed `bun` subprocess with `ulimit` limits. Everything on this page applies. | ~10 ms (process spawn) |
-| `quickjs` (experimental) | QuickJS compiled to WASM, in a pool of worker threads inside the API process. | ~1 ms |
+| `quickjs` (experimental) | QuickJS compiled to WASM, in a pool of worker threads on the selected executor host. | ~1 ms |
+
+On PostgreSQL, a connected script runner can execute either executor outside the API host.
+The API still selects the executor and enforces its deployment ceiling.
+With no runner or new capacity setting, execution remains embedded.
+SQLite retains embedded execution and refuses script-runner configuration.
 
 Durable script runs (`launch-script-run`, `POST /api/script-runs`) have only a
 `native` runner. Under `quickjs` the server refuses new durable runs with a 400
@@ -685,7 +690,7 @@ access except the host calls below. These are the differences from `native`:
   with lines mapped back to `user-script.ts`.
 - **Host calls:** at most 16 host calls (`fetch`, `ctx.swarm`, `ctx.api`,
   `ctx.mcp`, `ctx.fs`, `ctx.sh`) run at the same time for one script, and the
-  rest wait. `ctx.fs` and `ctx.sh` run on the host side, in the API process,
+  rest wait. `ctx.fs` and `ctx.sh` run on the host side, in the selected executor host process,
   so the limits in [Files and shell](#files-and-shell) apply instead of
   `memoryMb`. A run
   can have at most 1024 host calls and timers in flight or waiting. When the
