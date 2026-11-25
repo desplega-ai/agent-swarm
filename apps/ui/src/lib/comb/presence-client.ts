@@ -42,6 +42,10 @@ export interface PresenceClientOptions {
   createSocket?: (url: string) => PresenceSocket;
   /** Delay before retry `attempt` (1-based). Default: 1 s doubling to 15 s, plus jitter. */
   retryDelay?: (attempt: number) => number;
+  /** Channels to subscribe to on the same socket once the room is joined (again after a reconnect). */
+  channels?: readonly { namespace: string; name: string }[];
+  /** Every `channel` frame of a subscribed channel. */
+  onChannel?: (channel: { namespace: string; name: string }, data: unknown) => void;
 }
 
 const OPEN = 1;
@@ -192,6 +196,17 @@ export class PresenceClient {
         this.setStatus("open");
         this.options.onPeers(Array.isArray(message.peers) ? message.peers : []);
         if (this.latest !== undefined) this.request({ op: "presence", data: this.latest });
+        for (const channel of this.options.channels ?? []) {
+          this.request({ op: "subscribe", namespace: channel.namespace, name: channel.name });
+        }
+        return;
+      case "channel":
+        if (typeof message.namespace === "string" && typeof message.name === "string") {
+          const channel = (this.options.channels ?? []).find(
+            (c) => c.namespace === message.namespace && c.name === message.name,
+          );
+          if (channel) this.options.onChannel?.(channel, message.data);
+        }
         return;
       case "presence":
         if (message.namespace === this.options.namespace && Array.isArray(message.peers)) {

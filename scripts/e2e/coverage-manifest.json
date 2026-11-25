@@ -538,6 +538,10 @@
       "description": "room reset/change/decode over HTTP, MCP, WebSocket and workflow wait",
       "scenarios": ["realtime-rooms", "knowledge-rooms"]
     },
+    "realtime-apps": {
+      "description": "App row writes push refresh events to page rooms, presence rooms admit only declared pages and are purged on app delete",
+      "scenarios": ["realtime-apps", "realtime-apps-guards"]
+    },
     "repo-registry": {
       "description": "Register, update, gate allowMerge and the mergePolicy record, list and delete repo records over HTTP and MCP",
       "scenarios": ["platformb-repos", "platformb-repo-merge-policy"]

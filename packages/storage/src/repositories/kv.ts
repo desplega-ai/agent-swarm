@@ -87,6 +87,11 @@ export interface KvRepository {
     nowMs: number,
     limit: number,
   ): Promise<number>;
+  /**
+   * Deletes up to `limit` entries (expired or not) of every namespace matching
+   * `likePattern` (`\` escapes, ASCII case folded). Returns the change count.
+   */
+  deleteNamespacesLikeBatch(likePattern: string, limit: number): Promise<number>;
   /** Insert or overwrite (keeps `created_at`). */
   upsertEntry(row: KvRow): Promise<KvRow | null>;
   /** Insert, or overwrite an entry expired at `nowMs`; returns the change count. */
@@ -255,6 +260,16 @@ export abstract class BaseKvRepository implements KvRepository {
         WHERE (namespace = ${prefix} OR ${likeAsciiCi(sql`namespace`, sql`${likePattern}`, "\\")})
           AND expires_at IS NOT NULL
           AND expires_at <= ${nowMs}
+        LIMIT ${limit})`);
+    return result.changes;
+  }
+
+  async deleteNamespacesLikeBatch(likePattern: string, limit: number): Promise<number> {
+    const result = await this.db.run(sql`
+      DELETE FROM kv_entries
+      WHERE (namespace, key) IN (
+        SELECT namespace, key FROM kv_entries
+        WHERE ${likeAsciiCi(sql`namespace`, sql`${likePattern}`, "\\")}
         LIMIT ${limit})`);
     return result.changes;
   }

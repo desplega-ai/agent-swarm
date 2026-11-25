@@ -281,3 +281,8 @@ export function useCurrentUser(): CurrentUserContextValue {
   }
   return ctx;
 }
+
+/** `useCurrentUser` for surfaces that also render outside the provider (an app embed); `null` there. */
+export function useOptionalCurrentUser(): CurrentUserContextValue | null {
+  return useContext(CurrentUserContext);
+}
