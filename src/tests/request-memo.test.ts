@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createTaskExtended,
   getAgentById,
@@ -96,6 +97,29 @@ describe("request-scoped task and agent memo", () => {
     await updateTaskProgress(id, "written elsewhere");
     release();
     expect(await scoped).toBe("written elsewhere");
+  });
+
+  test("detached work keeps the scope after the handler returns and still sees later writes", async () => {
+    // A fire-and-forget workflow walk or a Slack render timer inherits the request scope.
+    const id = await newTask();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let detached!: Promise<string | undefined>;
+    await withRequestMemo(async () => {
+      expect((await getTaskById(id))!.status).toBe("in_progress");
+      detached = (async () => {
+        await gate;
+        const before = (await getTaskById(id))!.status;
+        await completeTask(id, "done");
+        return `${before}->${(await getTaskById(id))!.status}`;
+      })();
+    });
+    await updateTaskProgress(id, "written after the response");
+    release();
+    expect(await detached).toBe("in_progress->completed");
+    expect((await getTaskById(id))!.progress).toBe("written after the response");
   });
 
   test("a write inside a transaction is visible after it commits, and reads inside it skip the memo", async () => {
