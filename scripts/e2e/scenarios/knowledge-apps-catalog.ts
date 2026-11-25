@@ -23,7 +23,7 @@ function channelBytes(result: Record<string, unknown>, label: string): number {
  */
 export const knowledgeAppsCatalog: Scenario = {
   name: "knowledge-apps-catalog",
-  order: 558.6,
+  order: 558.7,
   async run(ctx) {
     const owner = await registerAgent(ctx, "app-catalog-owner");
     await withMcp(ctx, owner, async (mcp) => {
