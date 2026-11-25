@@ -79,8 +79,6 @@ import composioGoogleDocsContent from "../../../templates/skills/composio-google
   type: "text",
 };
 import dataConfig from "../../../templates/skills/data/config.json" with { type: "text" };
-import dataConfig from "../../../templates/skills/data/config.json" with { type: "text" };
-import dataContent from "../../../templates/skills/data/content.md" with { type: "text" };
 import dataContent from "../../../templates/skills/data/content.md" with { type: "text" };
 import dbQueryGuidanceConfig from "../../../templates/skills/db-query-guidance/config.json" with {
   type: "text",
