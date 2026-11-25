@@ -187,6 +187,7 @@ export async function settleWorkflowStepJob(
   const job = await storage.repos.workflowStepJobs.get(id);
   if (!job) {
     acknowledge?.();
+    await release(id, owner);
     return false;
   }
   if (
