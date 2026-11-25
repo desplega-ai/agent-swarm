@@ -2139,7 +2139,8 @@
               "system.profile_sync_reconciled",
               "system.profile_sync_conflict",
               "script.global_upsert",
-              "schedule.deleted"
+              "schedule.deleted",
+              "data.query"
             ]
           },
           "status": {
@@ -24639,7 +24640,8 @@
                       "system.profile_sync_reconciled",
                       "system.profile_sync_conflict",
                       "script.global_upsert",
-                      "schedule.deleted"
+                      "schedule.deleted",
+                      "data.query"
                     ]
                   },
                   "status": {
@@ -24787,7 +24789,8 @@
                 "system.profile_sync_reconciled",
                 "system.profile_sync_conflict",
                 "script.global_upsert",
-                "schedule.deleted"
+                "schedule.deleted",
+                "data.query"
               ]
             },
             "required": false,
@@ -25019,7 +25022,8 @@
                             "system.profile_sync_reconciled",
                             "system.profile_sync_conflict",
                             "script.global_upsert",
-                            "schedule.deleted"
+                            "schedule.deleted",
+                            "data.query"
                           ]
                         },
                         "status": {

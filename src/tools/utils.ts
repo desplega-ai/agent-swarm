@@ -462,6 +462,15 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "update-schedule": modelTierDeprecatedNudge,
   "patch-schedule": modelTierDeprecatedNudge,
   "slack-read": slackReadNudge,
+  "data-query": (r) => {
+    if (!r.ok) return undefined;
+    const d = r.data as { truncated?: boolean; rowCount?: number; output?: string } | undefined;
+    if (d?.truncated)
+      return "Truncated: aggregate in SQL (GROUP BY, LIMIT) instead of raising maxRows.";
+    return d?.output === "rows" && (d.rowCount ?? 0) > 20
+      ? "Handing these rows to a person? Re-run with `card: true` or `sheet: {path}` instead of pasting them."
+      : undefined;
+  },
   create_page: createPageNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
