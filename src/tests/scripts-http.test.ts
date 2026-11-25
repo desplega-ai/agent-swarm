@@ -739,17 +739,28 @@ describe("/api/scripts HTTP", () => {
       });
 
       // The operator key with an agent header and the same forged fields stamps nothing.
+      const { parentScriptRunId: _parent, ...forgedFields } = JSON.parse(body("plain-provenance"));
       const plain = await dispatch("/api/scripts/run", {
         method: "POST",
         agentId: workerId,
         headers: forged,
-        body: body("plain-provenance"),
+        body: JSON.stringify(forgedFields),
       });
       expect(plain.status).toBe(200);
       expect(await row("plain-provenance")).toEqual({
         sourceStepId: null,
         parentScriptRunId: null,
       });
+
+      // A body-named parent that is no running run of the agent is refused before it runs.
+      const forgedParent = await dispatch("/api/scripts/run", {
+        method: "POST",
+        agentId: workerId,
+        headers: forged,
+        body: body("forged-parent-provenance"),
+      });
+      expect(forgedParent.status).toBe(404);
+      expect(await row("forged-parent-provenance")).toBeNull();
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

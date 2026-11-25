@@ -845,6 +845,7 @@ export interface operations {
                     /** @enum {string|null} */
                     executor?: "native" | "quickjs" | null;
                     idempotencyKey?: string;
+                    parentScriptRunId?: string;
                 };
             };
         };
@@ -905,7 +906,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Script not found */
+            /** @description Script not found, or parentScriptRunId names no running run of the calling agent */
             404: {
                 headers: {
                     [name: string]: unknown;

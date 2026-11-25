@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createToolRegistrar } from "@/tools/utils";
+import { getBridgedScriptRunId } from "@/utils/request-auth-context";
 import {
   proxyScriptsApi,
   scriptExecutorSchema,
@@ -91,14 +92,17 @@ export const registerScriptRunTool = (server: McpServer) => {
       }),
       outputSchema: scriptToolOutputSchema,
     },
-    async (args, requestInfo) =>
-      proxyScriptsApi({
+    async (args, requestInfo) => {
+      // A background run's call: carry its id so the inline run joins its tree.
+      const parentScriptRunId = getBridgedScriptRunId();
+      return proxyScriptsApi({
         method: "POST",
         path: "/api/scripts/run",
-        body: args,
+        body: { ...args, ...(parentScriptRunId ? { parentScriptRunId } : {}) },
         requestInfo,
         successMessage: () => "Script run completed.",
         successDetails: renderRunOutput,
-      }),
+      });
+    },
   );
 };
