@@ -27,6 +27,7 @@ import { createExecutorRegistry } from "../workflows/executors/registry";
 import { drainForeachDrives } from "../workflows/foreach-driver";
 import { retryFailedRun, setupWorkflowResumeListener } from "../workflows/resume";
 
+// Direct engine calls in this fixture represent authenticated server triggers.
 const TEST_DB_PATH = "./test-workflow-foreach-retry.sqlite";
 
 const deps: ExecutorDependencies = {
@@ -211,7 +212,9 @@ describe("foreach run retry with attempt rows", () => {
         },
       ],
     });
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await drainForeachDrives();
     const [item] = await inFlightTasks(runId);
     await failTask(item!.taskId, "first failure");
@@ -253,7 +256,9 @@ describe("foreach run retry with attempt rows", () => {
         },
       ],
     });
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await drainForeachDrives();
     const [first, second] = await inFlightTasks(runId);
     await failTask(first!.taskId, "a failed");
@@ -320,6 +325,7 @@ describe("foreach run retry with attempt rows", () => {
       parent,
       { items: [{ id: "a" }, { id: "b" }] },
       registry,
+      { executionPrincipal: { ok: true, operator: true } },
     );
     await drainForeachDrives();
     await waitForRun(runId, (r) => r.status === "failed");
@@ -350,7 +356,9 @@ describe("dependency waves", () => {
     const workflow = await makeWorkflow(twoWaveDefinition(child.id));
     const before = await getWorkflow(workflow.id);
 
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await drainForeachDrives();
     const run = await waitForRun(runId, (r) => r.status === "completed");
 
@@ -457,7 +465,9 @@ async function failSecondOfFour(): Promise<string> {
     ],
   });
   const items = ["i0", "i1", "i2", "i3"].map((id) => ({ id }));
-  const runId = await startWorkflowExecution(workflow, { items }, registry);
+  const runId = await startWorkflowExecution(workflow, { items }, registry, {
+    executionPrincipal: { ok: true, operator: true },
+  });
   await drainForeachDrives();
   const [first] = await inFlightTasks(runId);
   await completeTask(first!.taskId, "first ok");

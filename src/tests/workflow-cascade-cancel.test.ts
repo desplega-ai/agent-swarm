@@ -53,6 +53,7 @@ import {
 } from "../workflows/task-step-routing";
 import { listenOnFreePort } from "./test-net";
 
+// Direct engine calls in this fixture represent authenticated server triggers.
 const TEST_DB_PATH = "./test-workflow-cascade-cancel.sqlite";
 
 const deps: ExecutorDependencies = {
@@ -294,7 +295,18 @@ describe("cascade cancel", () => {
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
 
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    // Missing authority must fail before the engine creates a child.
+    const deniedId = await startWorkflowExecution(root, {}, registry);
+    const denied = await getWorkflowRun(deniedId);
+    expect(denied?.status).toBe("failed");
+    expect(denied?.error).toContain("Workflow execution requires a trusted principal");
+    expect(
+      await getDbClient().get("SELECT id FROM workflow_runs WHERE workflowId = ?", [child.id]),
+    ).toBeNull();
+
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const grandchildRun = await runOf(grandchild.id, "waiting");
     const [task] = await waitFor(
@@ -302,6 +314,14 @@ describe("cascade cancel", () => {
       (tasks) => tasks.length === 1,
     );
     expect(task!.status).toBe("unassigned");
+    // Every descendant inherits the authority accepted at the root trigger.
+    for (const id of [rootId, childRun.id, grandchildRun.id]) {
+      const row = await getDbClient().get<{ principal: string }>(
+        "SELECT principal FROM workflow_runs WHERE id = ?",
+        [id],
+      );
+      expect(JSON.parse(row!.principal)).toEqual({ ok: true, operator: true });
+    }
 
     await cancelWorkflowRun(rootId, "stop the tree");
 
@@ -322,7 +342,9 @@ describe("cascade cancel", () => {
   test("fails tasks that depend on a cancelled tree task, and only those", async () => {
     const child = await makeWorkflow(taskDef);
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const [task] = await waitFor(
       () => tasksOfRun(childRun.id),
@@ -347,10 +369,14 @@ describe("cascade cancel", () => {
     const root = await makeWorkflow(parentOf(childA.id, childB.id));
     const independent = await makeWorkflow(waitingDef);
 
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const runA = await runOf(childA.id, "waiting");
     const runB = await runOf(childB.id, "waiting");
-    const otherId = await startWorkflowExecution(independent, {}, registry);
+    const otherId = await startWorkflowExecution(independent, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
 
     await cancelWorkflowRun(rootId);
 
@@ -424,7 +450,9 @@ describe("cascade cancel", () => {
     const grandchild = await makeWorkflow(taskDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const grandchildRun = await runOf(grandchild.id, "waiting");
     await waitFor(
       () => tasksOfRun(grandchildRun.id),
@@ -454,7 +482,9 @@ describe("cascade cancel", () => {
     const grandchild = await makeWorkflow(waitingDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     await runOf(grandchild.id, "waiting");
     await cancelWorkflowRun(rootId, "stop");
@@ -495,7 +525,9 @@ describe("cascade cancel", () => {
     const grandchild = await makeWorkflow(waitingDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const grandchildRun = await runOf(grandchild.id, "waiting");
     await cancelWorkflowRun(rootId, "stop");
@@ -548,7 +580,9 @@ describe("cascade cancel", () => {
 
   test("an approval linked to a live run without a step stays pending", async () => {
     const run = await makeWorkflow(waitingDef);
-    const runId = await startWorkflowExecution(run, {}, registry);
+    const runId = await startWorkflowExecution(run, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const created = await db.createApprovalRequest({
       id: crypto.randomUUID(),
       title: "Ask",
@@ -562,7 +596,9 @@ describe("cascade cancel", () => {
   test("concurrent repeat cancels of one run share a single tree walk", async () => {
     const child = await makeWorkflow(waitingDef);
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await runOf(child.id, "waiting");
     await cancelWorkflowRun(rootId);
 
@@ -582,7 +618,9 @@ describe("cascade cancel", () => {
   test("a repeat cancel of a cancelled root finishes descendants an older cancel left", async () => {
     const child = await makeWorkflow(waitingDef);
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     // A cancel from before cascading: the root only.
     await getDbClient().run(
@@ -608,7 +646,9 @@ describe("cascade cancel", () => {
     const grandchild = await makeWorkflow(waitingDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const grandchildRun = await runOf(grandchild.id, "waiting");
 
@@ -651,7 +691,9 @@ describe("cascade cancel atomicity", () => {
     const grandchild = await makeWorkflow(taskDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const grandchildRun = await runOf(grandchild.id, "waiting");
     const [task] = await waitFor(
@@ -736,7 +778,9 @@ describe("cascade cancel atomicity", () => {
           )
         )?.n;
 
-      const rootId = await startWorkflowExecution(root, {}, registry);
+      const rootId = await startWorkflowExecution(root, {}, registry, {
+        executionPrincipal: { ok: true, operator: true },
+      });
       // Every child walks on its own; wait until all grandchildren parked.
       await waitFor(
         () => count("workflowId = ? AND status = 'waiting'", [grandchild.id]),
@@ -765,7 +809,9 @@ describe("cascade cancel atomicity", () => {
   test("a repeat cancel retries a Slack post an outage dropped, and never repeats a delivered one", async () => {
     const child = await makeWorkflow(approvalDef);
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const [approval] = await waitFor(
       () =>
@@ -812,7 +858,9 @@ describe("cascade cancel atomicity", () => {
   test("a failed notification after commit does not undo the cancel", async () => {
     const child = await makeWorkflow(approvalDef);
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const [approval] = await waitFor(
       () =>
@@ -852,7 +900,9 @@ describe("late work after a cascade cancel", () => {
     const gate = barrier();
     const gated = gatedRegistry({ subWorkflowOf: grandchild.id, subWorkflow: gate });
 
-    const rootId = await startWorkflowExecution(root, {}, gated);
+    const rootId = await startWorkflowExecution(root, {}, gated, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     // The child run's sub-workflow step is claimed and its executor is about
     // to create the grandchild run.
     await gate.entered;
@@ -872,7 +922,9 @@ describe("late work after a cascade cancel", () => {
     const grandchild = await makeWorkflow(waitingDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const grandchildRun = await runOf(grandchild.id, "waiting");
 
     await cancelWorkflowRun(rootId);
@@ -885,7 +937,9 @@ describe("late work after a cascade cancel", () => {
     const child = await makeWorkflow(taskDef);
     const root = await makeWorkflow(parentOf(child.id));
 
-    const rootId = await startWorkflowExecution(root, {}, gatedRegistry({ agentTask: gate }));
+    const rootId = await startWorkflowExecution(root, {}, gatedRegistry({ agentTask: gate }), {
+      executionPrincipal: { ok: true, operator: true },
+    });
     await gate.entered;
     const [childRun] = await runsOf(child.id);
     const [step] = await getWorkflowRunStepsByRunId(childRun!.id);
@@ -914,7 +968,9 @@ describe("late work after a cascade cancel", () => {
       ],
     });
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const [task] = await waitFor(
       () => tasksOfRun(childRun.id),
@@ -960,7 +1016,9 @@ describe("late work after a cascade cancel", () => {
     const rootDef = parentOf(child.id);
     rootDef.nodes[0]!.retry = { maxRetries: 3, strategy: "static", baseDelayMs: 0, maxDelayMs: 0 };
     const root = await makeWorkflow(rootDef);
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const [parentStep] = await getWorkflowRunStepsByRunId(rootId);
 
@@ -1034,7 +1092,9 @@ describe("late work after a cascade cancel", () => {
     const grandchild = await makeWorkflow(waitingDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const grandchildRun = await runOf(grandchild.id, "waiting");
     const [waitStep] = await getWorkflowRunStepsByRunId(grandchildRun.id);
@@ -1145,7 +1205,9 @@ describe("run lineage guard", () => {
       ],
     });
     const parent = await makeWorkflow(parentOf(flaky.id));
-    const parentId = await startWorkflowExecution(parent, {}, registry);
+    const parentId = await startWorkflowExecution(parent, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const [flakyRun] = await waitFor(
       () => runsOf(flaky.id),
       (runs) => runs.length === 1,
@@ -1213,7 +1275,9 @@ describe("run tree read (GET /api/workflow-runs/{id}/tree)", () => {
     const grandchild = await makeWorkflow(taskDef);
     const child = await makeWorkflow(parentOf(grandchild.id));
     const root = await makeWorkflow(parentOf(child.id));
-    const rootId = await startWorkflowExecution(root, {}, registry);
+    const rootId = await startWorkflowExecution(root, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const childRun = await runOf(child.id, "waiting");
     const grandchildRun = await runOf(grandchild.id, "waiting");
     const [task] = await waitFor(

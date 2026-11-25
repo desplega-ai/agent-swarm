@@ -40,6 +40,7 @@ import {
 } from "../workflows/resume";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
+// Direct engine calls in this fixture represent authenticated server triggers.
 const TEST_DB_PATH = "./test-workflow-foreach-bodies.sqlite";
 const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -191,7 +192,9 @@ describe("foreach with any executor body", () => {
         config: { workflowId: child.id, inputs: { name: "{{item.name}}" } },
       }),
     );
-    const runId = await startWorkflowExecution(parent, { items: ITEMS }, registry);
+    const runId = await startWorkflowExecution(parent, { items: ITEMS }, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const run = await waitForRun(runId, (r) => r.status === "completed");
 
     const children = await childSteps(runId);
@@ -237,6 +240,7 @@ describe("foreach with any executor body", () => {
       workflow,
       { items: [...ITEMS.slice(0, 2), { id: "x", name: "Bad" }] },
       registry,
+      { executionPrincipal: { ok: true, operator: true } },
     );
     const run = await waitForRun(runId, (r) => r.status === "completed");
 
@@ -265,7 +269,9 @@ describe("foreach with any executor body", () => {
     // Three 0.6s items run back to back: 1.8s, past the parent's 1s budget.
     definition.nodes[0]!.config.timeoutMs = 1_000;
     const workflow = await makeWorkflow(definition);
-    const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry);
+    const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const run = await waitForRun(runId, (r) => r.status === "completed", 10_000);
 
     expect((await childSteps(runId)).map((step) => step.status)).toEqual([
@@ -287,7 +293,9 @@ describe("foreach with any executor body", () => {
       });
       definition.nodes[0]!.inputs = { item: "workflow.id", index: "workflow.id" };
       const workflow = await makeWorkflow({ ...definition, onNodeFailure: "continue" });
-      const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry);
+      const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry, {
+        executionPrincipal: { ok: true, operator: true },
+      });
       await waitForRun(runId, (r) => r.status === "completed" || r.status === "failed");
 
       const children = await childSteps(runId);
@@ -310,7 +318,9 @@ describe("foreach with any executor body", () => {
           config: { name: "per-item", args: { name: "{{item.name}}", index: "{{index}}" } },
         }),
       );
-      const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry);
+      const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry, {
+        executionPrincipal: { ok: true, operator: true },
+      });
       await waitForRun(runId, (r) => r.status === "completed");
 
       const children = await childSteps(runId);
@@ -333,7 +343,9 @@ describe("foreach with any executor body", () => {
         },
       }),
     );
-    const runId = await startWorkflowExecution(workflow, { items: ITEMS.slice(0, 2) }, registry);
+    const runId = await startWorkflowExecution(workflow, { items: ITEMS.slice(0, 2) }, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
     const [first, second] = await childSteps(runId);
@@ -363,7 +375,9 @@ describe("foreach with any executor body", () => {
     const workflow = await makeWorkflow(
       foreachOver({ type: "wait", config: { mode: "time", durationMs: 3_600_000 } }),
     );
-    const runId = await startWorkflowExecution(workflow, { items: ITEMS.slice(0, 2) }, registry);
+    const runId = await startWorkflowExecution(workflow, { items: ITEMS.slice(0, 2) }, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
     const children = await childSteps(runId);
@@ -404,7 +418,9 @@ describe("foreach with any executor body", () => {
         ],
       },
     });
-    const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry);
+    const runId = await startWorkflowExecution(workflow, { items: ITEMS }, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
     const children = await childSteps(runId);
@@ -421,7 +437,9 @@ describe("foreach with any executor body", () => {
     const workflow = await makeWorkflow(
       foreachOver({ type: "test-gated", config: { value: "x" } }),
     );
-    const walk = startWorkflowExecution(workflow, { items: ITEMS }, registry);
+    const walk = startWorkflowExecution(workflow, { items: ITEMS }, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const deadline = Date.now() + 2_000;
     while (gated.calls.length === 0 && Date.now() < deadline) await Bun.sleep(5);
     const runId = gated.calls[0]!.runId;
@@ -447,6 +465,7 @@ describe("foreach restart reconciliation", () => {
       await makeWorkflow(foreachOver(agentTaskBody())),
       { items: ITEMS },
       registry,
+      { executionPrincipal: { ok: true, operator: true } },
     );
     const [claimedNeverStarted, startedNeverParked, queued] = await childSteps(taskRun);
     // Crash after claim, before start: the row is `running` with no task.
@@ -469,6 +488,7 @@ describe("foreach restart reconciliation", () => {
       ),
       { items: ITEMS.slice(0, 2) },
       registry,
+      { executionPrincipal: { ok: true, operator: true } },
     );
     const subChildren = await childSteps(subRun);
     for (const step of subChildren) await setStepStatus(step.id, "running");
@@ -495,6 +515,7 @@ describe("foreach restart reconciliation", () => {
         await makeWorkflow(foreachOver(agentTaskBody())),
         { items: ITEMS },
         registry,
+        { executionPrincipal: { ok: true, operator: true } },
       );
       const children = await childSteps(runId);
       for (const step of children) {

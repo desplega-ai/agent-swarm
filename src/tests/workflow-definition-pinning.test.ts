@@ -58,6 +58,7 @@ import { snapshotAndUpdateWorkflow } from "../workflows/version";
 // (`n1 → b2`, with a changed config value) through the real edit path, then
 // drives one resume path. The run must finish on A.
 
+// Direct engine calls in this fixture represent authenticated server triggers.
 const TEST_DB_PATH = "./test-workflow-definition-pinning.sqlite";
 
 type Variant = "A" | "B";
@@ -295,7 +296,9 @@ async function pinHash(runId: string): Promise<string | null> {
 }
 
 async function startOnA(workflow: Workflow): Promise<string> {
-  const runId = await startWorkflowExecution(workflow, {}, registry);
+  const runId = await startWorkflowExecution(workflow, {}, registry, {
+    executionPrincipal: { ok: true, operator: true },
+  });
   expect(await pinHash(runId)).toBeTruthy();
   return runId;
 }
@@ -344,7 +347,9 @@ describe("a run finishes on the definition it started with", () => {
       next: successor,
     });
     const workflow = await makeWorkflow(twoNode("A", gateFirst));
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     expect((await getWorkflowRun(runId))?.status).toBe("failed");
 
     await editTo(workflow.id, twoNode("B", gateFirst));
@@ -368,7 +373,9 @@ describe("a run finishes on the definition it started with", () => {
       next: successor,
     });
     const workflow = await makeWorkflow(twoNode("A", gateFirst));
-    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const runId = await startWorkflowExecution(workflow, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     const queued = await stepFor(runId, "n1");
     expect(queued.status).toBe("failed");
     expect(queued.nextRetryAt).toBeTruthy();
@@ -475,7 +482,9 @@ describe("which definition a run uses", () => {
     const runA = await startOnA(workflow);
     await editTo(workflow.id, twoNode("B", agentTaskFirst));
 
-    const runB = await startWorkflowExecution((await getWorkflow(workflow.id))!, {}, registry);
+    const runB = await startWorkflowExecution((await getWorkflow(workflow.id))!, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     expect(await pinHash(runB)).not.toBe(await pinHash(runA));
     await completeN1Task(runB);
 
@@ -499,7 +508,9 @@ describe("which definition a run uses", () => {
     const workflow = await makeWorkflow(twoNode("A", agentTaskFirst));
     const run1 = await startOnA(workflow);
     await editTo(workflow.id, twoNode("B", agentTaskFirst));
-    const run2 = await startWorkflowExecution((await getWorkflow(workflow.id))!, {}, registry);
+    const run2 = await startWorkflowExecution((await getWorkflow(workflow.id))!, {}, registry, {
+      executionPrincipal: { ok: true, operator: true },
+    });
     expect((await getWorkflowRun(run2))?.status).toBe("waiting");
 
     await completeN1Task(run1);
