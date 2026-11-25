@@ -18,6 +18,7 @@ const held = new Map<
     ownerId: string;
     session: ReturnType<typeof createCapabilitySession>;
     finish: (result: ScriptExecutionResult) => void;
+    terminate: () => Promise<void>;
   }
 >();
 const send = (runner: RemoteScriptRunner, message: unknown) =>
@@ -65,7 +66,21 @@ export async function startRemoteDurable(
   const exited = new Promise<ScriptExecutionResult>((resolve) => {
     finish = resolve;
   });
-  held.set(input.run.id, { ownerId: runner.ownerId, session, finish });
+  const terminate = async () => {
+    session.close();
+    const current = scriptRunnerSessions.get(runner.id) ?? runner;
+    await send(current, { type: "cancel", jobId: input.run.id }).catch(() => {});
+    const deadline = setTimeout(() => {
+      (scriptRunnerSessions.get(runner.id) ?? runner).close();
+      finish({ exitCode: null, stderr: "", terminated: true });
+    }, 5000);
+    try {
+      await exited;
+    } finally {
+      clearTimeout(deadline);
+    }
+  };
+  held.set(input.run.id, { ownerId: runner.ownerId, session, finish, terminate });
   try {
     await send(runner, { type: "durable-job", jobId: input.run.id, run: input.run });
   } catch (error) {
@@ -79,20 +94,7 @@ export async function startRemoteDurable(
     tmpdir: "",
     startedAtMs: Date.now(),
     exited,
-    async terminate() {
-      session.close();
-      const current = scriptRunnerSessions.get(runner.id) ?? runner;
-      await send(current, { type: "cancel", jobId: input.run.id }).catch(() => {});
-      const deadline = setTimeout(() => {
-        (scriptRunnerSessions.get(runner.id) ?? runner).close();
-        finish({ exitCode: null, stderr: "", terminated: true });
-      }, 5000);
-      try {
-        await exited;
-      } finally {
-        clearTimeout(deadline);
-      }
-    },
+    terminate,
     async cleanup() {
       unregisterFence();
       session.close();
@@ -143,8 +145,8 @@ export async function durableCapability(runner: RemoteScriptRunner, id: string, 
     });
   } catch (error) {
     job.session.close();
-    await send(runner, { type: "cancel", jobId: id }).catch(() => {});
-    await durableResult(runner, id, { exitCode: 1, stderr: scrubSecrets(String(error)) });
+    console.error(scrubSecrets(String(error)));
+    await job.terminate();
   }
 }
 export async function durableResult(

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { WebSocket } from "ws";
 import {
   apiMessage,
@@ -12,9 +11,7 @@ import type { ScriptJob, ScriptRunnerHandle } from "../../scripts-runtime/dispat
 import type { ExecutorOutput, ScriptExecutorName } from "../../scripts-runtime/executors/types";
 import type { ShellRuntime } from "../../scripts-runtime/shell-job";
 
-export function scriptRunnerOwnerId(credentialId: string, instanceId: string): string {
-  return createHash("sha256").update(`${credentialId}:${instanceId}`).digest("hex");
-}
+import { scriptRunnerOwnerId } from "./owner-identity";
 
 export class RemoteScriptRunner implements ScriptRunnerHandle {
   readonly kind = "remote";

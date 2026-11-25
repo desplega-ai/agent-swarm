@@ -386,7 +386,16 @@ test("durable results remain held until acknowledgement across reconnect", async
                 kind: "workflow",
                 status: "running",
                 startedAt: new Date().toISOString(),
-                source: "export default () => 42",
+                source: `import { readdir, readFile } from "node:fs/promises";
+                  export default async () => {
+                    const files = await readdir(".");
+                    const json = await Promise.all(files.filter(name => name.endsWith(".json")).map(name => readFile(name, "utf8")));
+                    return {
+                      value: 42,
+                      credentialPresent: json.some(text => text.includes("fixture-runner-private")),
+                      credentialEnv: Object.keys(process.env).filter(name => /^(API_KEY|AGENT_SWARM_API_KEY|SCRIPT_RUNNER_TOKEN|SCRIPT_RUNNER_TOKEN_FILE|DATABASE_URL)$/.test(name)),
+                    };
+                  }`,
                 args: {},
               },
             }),
@@ -400,7 +409,9 @@ test("durable results remain held until acknowledgement across reconnect", async
           }),
         );
       } else if (message.type === "durable-result") {
-        expect(message.output).toBe(42);
+        expect(message.output.value).toBe(42);
+        expect(message.output.credentialPresent).toBe(false);
+        expect(message.output.credentialEnv).toEqual([]);
         if (generation === 1) ws.terminate();
         else {
           replayed = true;
@@ -412,7 +423,7 @@ test("durable results remain held until acknowledgement across reconnect", async
   const port = await listenOnFreePort(server);
   const runner = startScriptRunner({
     apiUrl: `http://127.0.0.1:${port}`,
-    token: "fixture",
+    token: "fixture-runner-private",
     slots: 1,
     executors: ["native"],
     onRefused() {},
@@ -580,7 +591,7 @@ test("unconfirmed heartbeats do not extend a durable guest lease", async () => {
 }, 15000);
 
 test("runner owner identity binds the credential across API restart", async () => {
-  const { scriptRunnerOwnerId } = await import("../be/script-runners/sessions");
+  const { scriptRunnerOwnerId } = await import("../be/script-runners/owner-identity");
   const instance = crypto.randomUUID();
   const credential = crypto.randomUUID();
   expect(scriptRunnerOwnerId(credential, instance)).toBe(scriptRunnerOwnerId(credential, instance));

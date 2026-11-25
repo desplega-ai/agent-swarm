@@ -207,7 +207,7 @@ export const scriptRunnerDurable: Scenario = {
           restarted = asRecord((await ctx.api("GET", `/api/script-runs/${restartId}`)).json);
           return asRecord(restarted.run).status === "completed";
         }, 70000),
-        "durable run replays after API restart",
+        `durable run replays after API restart (status=${asRecord(restarted.run).status}, runner=${shared.logs()})`,
       );
       expect(
         asRecords(restarted, "journal").length === 2,
