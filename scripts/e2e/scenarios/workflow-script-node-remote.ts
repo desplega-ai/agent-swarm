@@ -5,7 +5,7 @@ import { WebSocket } from "ws";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 
-async function runNode(ctx: ScenarioContext, config: Record<string, unknown>) {
+async function runNode(ctx: ScenarioContext, config: Record<string, unknown>, cancel = false) {
   const created = await ctx.api("POST", "/api/workflows", {
     body: {
       name: `shell-parity-${ctx.nonce}-${crypto.randomUUID()}`,
@@ -17,17 +17,41 @@ async function runNode(ctx: ScenarioContext, config: Record<string, unknown>) {
   const started = await ctx.api("POST", `/api/workflows/${id}/trigger`, { body: {} });
   expectStatus(started, [201], "trigger shell workflow");
   const runId = asString(asRecord(started.json).runId, "run id");
+  await onTriggered?.(runId);
+  if (cancel) {
+    expect(
+      await pollUntil(
+        async () =>
+          asRecords((await ctx.api("GET", "/api/script-runners")).json, "sessions").some(
+            (runner) => Number(runner.jobsInFlight) > 0,
+          ),
+        15000,
+      ),
+      "cancellable shell reaches runner",
+    );
+    expectStatus(
+      await ctx.api("POST", `/api/workflow-runs/${runId}/cancel`, {
+        body: { reason: "synthetic cancellation" },
+      }),
+      [200],
+      "cancel shell workflow",
+    );
+  }
   let detail: Record<string, unknown> = {};
   expect(
     await pollUntil(async () => {
       detail = asRecord((await ctx.api("GET", `/api/workflow-runs/${runId}`)).json);
-      return ["completed", "failed"].includes(String(asRecord(detail.run).status));
+      return ["completed", "failed", "cancelled"].includes(String(asRecord(detail.run).status));
     }, 60_000),
     "shell workflow became terminal",
   );
   const step = asRecords(detail.steps, "steps").find((step) => step.nodeId === "shell");
   expect(step, "shell step exists");
-  return { run: asRecord(detail.run), step, output: asRecord(step.output) };
+  return {
+    run: asRecord(detail.run),
+    step,
+    output: step.output == null ? {} : asRecord(step.output),
+  };
 }
 
 export const workflowScriptNodeRemote: Scenario = {
@@ -62,7 +86,10 @@ export const workflowScriptNodeRemote: Scenario = {
     const baseline = [];
     for (const config of configs) {
       const result = await runNode(ctx, config);
-      expect(result.run.status === "completed", "embedded shell completes");
+      expect(
+        result.run.status === "completed",
+        `embedded ${config.runtime} shell completes: ${JSON.stringify(result.step)}`,
+      );
       expect(result.output.marker === marker, "embedded JSON fields remain available");
       expect(
         typeof result.output.hostname === "string" && result.output.hostname.length > 0,
@@ -70,6 +97,12 @@ export const workflowScriptNodeRemote: Scenario = {
       );
       baseline.push(result.output);
     }
+    const ordinary = await runNode(ctx, {
+      runtime: "ts",
+      script: 'console.log(JSON.stringify({token:"ordinary",marker:"preserved"}))',
+      cwd: "",
+    });
+    expect(ordinary.output.token === "ordinary", "awaited shell preserves ordinary field values");
     const minted = await ctx.api("POST", "/api/script-runners/credentials", {
       body: { name: `shell-${ctx.nonce}` },
     });
@@ -87,7 +120,10 @@ export const workflowScriptNodeRemote: Scenario = {
       const before = Number((await sessions())[0]?.jobsCompleted ?? 0);
       for (let i = 0; i < configs.length; i++) {
         const result = await runNode(ctx, configs[i]!);
-        expect(result.run.status === "completed", "remote shell completes");
+        expect(
+          result.run.status === "completed",
+          `remote shell completes: ${JSON.stringify(result.step)}`,
+        );
         expect(
           Bun.deepEquals(result.output, baseline[i]),
           "remote shell output matches embedded output",
@@ -111,6 +147,38 @@ export const workflowScriptNodeRemote: Scenario = {
         Number((await sessions())[0]?.jobsCompleted) === before + configs.length,
         "cwd node consumes no remote slot",
       );
+
+      const failed = await runNode(ctx, {
+        runtime: "bash",
+        script: "printf synthetic-failure >&2; exit 7",
+      });
+      expect(
+        failed.run.status === "failed" && failed.step.error === "synthetic-failure",
+        "nonzero shell preserves exact failure error",
+      );
+      const secret = "ghp_" + "a".repeat(36);
+      const scrubbed = await runNode(ctx, {
+        runtime: "ts",
+        script: 'console.log(JSON.stringify({marker:"visible",value:process.env.SYNTHETIC_VALUE}))',
+        env: { SYNTHETIC_VALUE: secret },
+      });
+      expect(
+        scrubbed.run.status === "completed" && scrubbed.output.marker === "visible",
+        "scrubbing preserves ordinary output",
+      );
+      expect(
+        !JSON.stringify(scrubbed.output).includes(secret),
+        "API scrubs synthetic secret before JSON mapping",
+      );
+      const cancelled = await runNode(ctx, { runtime: "bash", script: "sleep 30" }, true);
+      expect(cancelled.run.status === "cancelled", "shell cancellation settles run");
+      expect(
+        await pollUntil(
+          async () => (await sessions()).every((runner) => Number(runner.jobsInFlight) === 0),
+          10000,
+        ),
+        "cancellation releases held runner slot",
+      );
     } finally {
       await runner.stop();
       await rm(cwd, { recursive: true, force: true });
@@ -121,35 +189,52 @@ export const workflowScriptNodeRemote: Scenario = {
       body: { name: `missing-runtime-${ctx.nonce}` },
     });
     expectStatus(limited, [201], "mint limited runner credential");
-    const socket = new WebSocket(
-      `${ctx.baseUrl.replace(/^http/, "ws")}/api/script-runners/connect`,
-      {
-        headers: { Authorization: `Bearer ${asRecord(limited.json).token}` },
-      },
-    );
-    socket.on("error", () => {});
-    socket.on("open", () =>
-      socket.send(
-        JSON.stringify({
-          type: "hello",
-          instanceId: crypto.randomUUID(),
-          version: 1,
-          slots: 1,
-          executors: ["native"],
-          runtimes: [],
-          held: [],
-        }),
-      ),
-    );
+    let socket: WebSocket | undefined;
     try {
-      expect(
-        await pollUntil(async () => (await sessions()).length === 1, 15000),
-        "limited runner connects",
+      const missing = await runNode(
+        ctx,
+        { runtime: "ts", script: "console.log('synthetic')" },
+        false,
+        async (runId) => {
+          expect(
+            await pollUntil(
+              async () =>
+                asRecord(asRecord((await ctx.api("GET", `/api/workflow-runs/${runId}`)).json).run)
+                  .status === "waiting",
+              10000,
+            ),
+            "shell parks before a runner connects",
+          );
+          socket = new WebSocket(
+            `${ctx.baseUrl.replace(/^http/, "ws")}/api/script-runners/connect`,
+            {
+              headers: { Authorization: `Bearer ${asRecord(limited.json).token}` },
+            },
+          );
+          socket!.on("error", () => {});
+          socket!.on("open", () =>
+            socket!.send(
+              JSON.stringify({
+                type: "hello",
+                instanceId: crypto.randomUUID(),
+                version: 1,
+                slots: 1,
+                executors: ["native"],
+                runtimes: [],
+                held: [],
+              }),
+            ),
+          );
+
+          expect(
+            await pollUntil(async () => (await sessions()).length === 1, 15000),
+            "limited runner connects after park",
+          );
+        },
       );
-      const missing = await runNode(ctx, { runtime: "ts", script: "console.log('synthetic')" });
       expect(missing.run.status === "failed", "missing runtime fails without waiting for a slot");
       expect(
-        String(missing.step.error).includes("runtime"),
+        missing.step.error === "No connected runner supports this workflow job",
         "missing runtime error explains the cause",
       );
       const pinned = await runNode(ctx, {
@@ -159,11 +244,11 @@ export const workflowScriptNodeRemote: Scenario = {
       });
       expect(pinned.run.status === "failed", "cwd fails when embedded runner is disabled");
       expect(
-        String(pinned.step.error).includes("embedded runner"),
+        pinned.step.error === "A workflow script with cwd requires the embedded runner",
         "cwd failure explains local requirement",
       );
     } finally {
-      socket.terminate();
+      socket?.terminate();
       await ctx.api(
         "DELETE",
         `/api/script-runners/credentials/${asRecord(asRecord(limited.json).credential).id}`,
