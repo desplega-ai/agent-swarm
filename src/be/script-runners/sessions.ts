@@ -5,6 +5,7 @@ import {
   failedJob,
   RPC_CLEANUP_GRACE_MS,
 } from "../../script-runner/protocol";
+import type { StartScriptExecutionInput } from "../../script-workflows/executor";
 import type { ScriptJob, ScriptRunnerHandle } from "../../scripts-runtime/dispatch/types";
 import type { ExecutorOutput, ScriptExecutorName } from "../../scripts-runtime/executors/types";
 
@@ -18,6 +19,10 @@ export class RemoteScriptRunner implements ScriptRunnerHandle {
     readonly executors: ScriptExecutorName[],
     readonly socket: WebSocket,
   ) {}
+  async startHeld(input: StartScriptExecutionInput) {
+    const { startRemoteDurable } = await import("./durable-dispatch");
+    return startRemoteDurable(input, this);
+  }
   run(job: ScriptJob, signal?: AbortSignal): Promise<ExecutorOutput> {
     if (signal?.aborted) return Promise.resolve(failedJob("killed"));
     let frame: string;

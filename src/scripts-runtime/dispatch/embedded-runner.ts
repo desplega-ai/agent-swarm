@@ -1,3 +1,4 @@
+import { localProcessScriptExecutor } from "../../script-workflows/executor";
 import { getNodeEnv } from "../../utils/node-env";
 import { runWithCapacityRetry } from "./capacity-retry";
 import type { ScriptJob, ScriptRunnerHandle } from "./types";
@@ -30,6 +31,7 @@ export function assertSerializableJob(job: ScriptJob): void {
 export const embeddedScriptRunner: ScriptRunnerHandle = {
   id: "embedded",
   kind: "embedded",
+  startHeld: (input) => localProcessScriptExecutor.start(input),
   async run(job, signal) {
     if (getNodeEnv() === "test") assertSerializableJob(job);
     return runWithCapacityRetry(job, signal);

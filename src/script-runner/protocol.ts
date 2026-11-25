@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorInput, ExecutorOutput } from "../scripts-runtime/executors/types";
+import { ScriptRunSchema } from "../types";
 
 export const SCRIPT_RUNNER_PATH = "/api/script-runners/connect";
 export const RPC_CLEANUP_GRACE_MS = 5000;
@@ -81,10 +82,22 @@ export const runnerMessage = z.discriminatedUnion("type", [
     held: z.array(id).max(1024),
   }),
   z.object({ type: z.literal("result"), jobId: id, output }),
+  z.object({ type: z.literal("cap"), jobId: id, frame: z.string().max(64 * 1024 * 1024) }),
+  z.object({ type: z.literal("heartbeat"), jobs: z.array(id).max(1024) }),
+  z.object({
+    type: z.literal("durable-result"),
+    jobId: id,
+    exitCode: z.number().int().nullable(),
+    stderr: z.string(),
+    output: z.unknown().optional(),
+    terminated: z.boolean().optional(),
+  }),
 ]);
 export const apiMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("welcome"), sessionId: id }),
   z.object({ type: z.literal("job"), jobId: id, kind: z.literal("inline"), executor, input }),
+  z.object({ type: z.literal("durable-job"), jobId: id, run: ScriptRunSchema }),
+  z.object({ type: z.literal("cap"), jobId: id, frame: z.string().max(64 * 1024 * 1024) }),
   z.object({ type: z.literal("cancel"), jobId: id }),
   z.object({ type: z.literal("ack"), jobId: id }),
 ]);

@@ -157,7 +157,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       const timeout = setTimeout(() => socket.destroy(), 2000);
       const fail = (error: unknown) => {
         if (authenticated) {
-          protocolFailure = error instanceof Error ? error : new Error(String(error));
+          protocolFailure ??= error instanceof Error ? error : new Error(String(error));
           built.abortInFlightSteps(protocolFailure);
           proc?.kill();
         }

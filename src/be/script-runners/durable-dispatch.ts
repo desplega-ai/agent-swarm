@@ -1,0 +1,159 @@
+import { encodeRunnerFrame } from "../../script-runner/protocol";
+import { createCapabilitySession } from "../../script-workflows/capability-session";
+import type {
+  ScriptExecutionHandle,
+  ScriptExecutionResult,
+  StartScriptExecutionInput,
+} from "../../script-workflows/executor";
+import { heldScriptSlots } from "../../scripts-runtime/dispatch/held-reservations";
+import { scrubSecrets } from "../../utils/secret-scrubber";
+import { getStorage } from "../storage";
+import { type RemoteScriptRunner, scriptRunnerSessions } from "./sessions";
+
+export const DURABLE_LEASE_MS = 60000;
+const held = new Map<
+  string,
+  {
+    ownerId: string;
+    session: ReturnType<typeof createCapabilitySession>;
+    finish: (result: ScriptExecutionResult) => void;
+  }
+>();
+const send = (runner: RemoteScriptRunner, message: unknown) =>
+  new Promise<void>((resolve, reject) => {
+    try {
+      runner.socket.send(encodeRunnerFrame(message), (error) =>
+        error ? reject(error) : resolve(),
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+export function durableJobsForOwner(ownerId: string): number {
+  return [...held.values()].filter((job) => job.ownerId === ownerId).length;
+}
+export function pickDurableRunner(): RemoteScriptRunner | undefined {
+  const share = Number(process.env.SCRIPT_RUNNER_LONG_LANE_SHARE ?? 0.5);
+  return [...scriptRunnerSessions.values()].find(
+    (runner) =>
+      runner.socket.readyState === 1 &&
+      runner.executors.includes("native") &&
+      runner.pending.size + heldScriptSlots(runner.id) < runner.slots &&
+      heldScriptSlots(runner.id) < Math.max(1, Math.floor(runner.slots * share)),
+  );
+}
+
+export async function startRemoteDurable(
+  input: StartScriptExecutionInput,
+  runner: RemoteScriptRunner,
+): Promise<ScriptExecutionHandle> {
+  const token = crypto.randomUUID();
+  const session = createCapabilitySession(input, token, true);
+  session.authenticate(JSON.stringify({ type: "hello", token }));
+  let finish!: (result: ScriptExecutionResult) => void;
+  const exited = new Promise<ScriptExecutionResult>((resolve) => {
+    finish = resolve;
+  });
+  held.set(input.run.id, { ownerId: runner.id, session, finish });
+  try {
+    await send(runner, { type: "durable-job", jobId: input.run.id, run: input.run });
+  } catch (error) {
+    held.delete(input.run.id);
+    session.close();
+    throw error;
+  }
+  return {
+    pid: null,
+    tmpdir: "",
+    startedAtMs: Date.now(),
+    exited,
+    async terminate() {
+      session.close();
+      await send(runner, { type: "cancel", jobId: input.run.id }).catch(() => {});
+      finish({ exitCode: null, stderr: "", terminated: true });
+    },
+    async cleanup() {
+      session.close();
+      if (held.get(input.run.id)?.session === session) held.delete(input.run.id);
+    },
+  };
+}
+async function owns(jobId: string, ownerId: string): Promise<boolean> {
+  const row = await getStorage().repos.scripts.findScriptRun(jobId);
+  return (
+    row?.status === "running" &&
+    row.ownerId === ownerId &&
+    !!row.leaseExpiresAt &&
+    row.leaseExpiresAt > new Date().toISOString()
+  );
+}
+export async function durableHeartbeat(runner: RemoteScriptRunner, jobs: string[]) {
+  const now = new Date().toISOString();
+  for (const id of jobs) {
+    if (
+      !(await getStorage().repos.scripts.renewScriptRunLease(
+        id,
+        runner.id,
+        now,
+        new Date(Date.now() + DURABLE_LEASE_MS).toISOString(),
+      ))
+    )
+      await send(runner, { type: "cancel", jobId: id });
+  }
+}
+export async function durableCapability(runner: RemoteScriptRunner, id: string, frame: string) {
+  const job = held.get(id);
+  if (!job || job.ownerId !== runner.id || !(await owns(id, runner.id))) return;
+  await job.session.receive(frame, async (response) => {
+    if (await owns(id, runner.id)) {
+      const current = scriptRunnerSessions.get(runner.id);
+      if (current) await send(current, { type: "cap", jobId: id, frame: response });
+    }
+  });
+}
+export async function durableResult(
+  runner: RemoteScriptRunner,
+  id: string,
+  result: ScriptExecutionResult,
+) {
+  const job = held.get(id);
+  if (job?.ownerId === runner.id && (await owns(id, runner.id))) {
+    const now = new Date().toISOString();
+    const changed = await getStorage().transaction(() =>
+      getStorage().repos.scripts.settleOwnedScriptRun(
+        id,
+        runner.id,
+        now,
+        result.exitCode === 0 ? "completed" : "failed",
+        result.exitCode === 0 ? scrubSecrets(JSON.stringify(result.output ?? null)) : null,
+        result.exitCode === 0
+          ? null
+          : scrubSecrets(result.stderr || `Guest exited with ${result.exitCode}`),
+      ),
+    );
+    if (changed) {
+      runner.jobsCompleted++;
+      job.finish(result);
+    }
+  }
+  // A repeated or stale result must not remain in the runner's retention map.
+  await send(runner, { type: "ack", jobId: id });
+}
+export async function reconnectDurable(runner: RemoteScriptRunner, ids: string[]) {
+  for (const id of ids) {
+    if (held.get(id)?.ownerId === runner.id && (await owns(id, runner.id))) continue;
+    await send(runner, { type: "cancel", jobId: id });
+    await getStorage().repos.scripts.releaseScriptRunOwner(id, runner.id);
+  }
+}
+export async function releaseDurableOwner(ownerId: string, runId?: string) {
+  for (const run of await getStorage().repos.scripts.listActiveScriptRuns()) {
+    if (run.ownerId !== ownerId || (runId && run.id !== runId)) continue;
+    await getStorage().repos.scripts.releaseScriptRunOwner(run.id, ownerId);
+    const job = held.get(run.id);
+    if (job?.ownerId === ownerId) {
+      job.session.close();
+      job.finish({ exitCode: null, stderr: "", terminated: true });
+    }
+  }
+}

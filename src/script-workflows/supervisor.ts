@@ -6,12 +6,14 @@ import {
   updateScriptRun,
   updateScriptRunIfRunning,
 } from "../be/db";
+import { DURABLE_LEASE_MS, releaseDurableOwner } from "../be/script-runners/durable-dispatch";
 import { acquireLegacyJournalCredential } from "../be/scripts/legacy-journal-credential";
 import {
   acquireScriptApiCredential,
   type ScriptExecutionPrincipal,
 } from "../be/scripts/run-credential";
 import { getStorage } from "../be/storage";
+import { reserveHeldScriptRunner } from "../scripts-runtime/dispatch/held-reservations";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
 import type { ScriptRun } from "../types";
 import type { ScriptRunProvenance } from "../utils/request-auth-context";
@@ -27,6 +29,7 @@ type ManagedRun = {
   execution: ScriptExecutionHandle;
 };
 
+const embeddedOwnerId = `embedded:${crypto.randomUUID()}`;
 const starting = new Map<string, Promise<void>>();
 const managed = new Map<string, ManagedRun>();
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -68,6 +71,39 @@ export async function startScriptRunProcess(run: ScriptRun, baseUrl: string): Pr
 async function startOwnedScriptRun(run: ScriptRun, baseUrl: string): Promise<void> {
   // Also covers reconcile respawns of runs created before the setting changed.
   if (!durableScriptRunsAllowed()) throw new Error(DURABLE_RUNS_NATIVE_REFUSED);
+  const tier = getStorage().capabilities.scriptRunners;
+  const stored = await getStorage().repos.scripts.findScriptRun(run.id);
+  if (!stored || stored.status !== "running" || (tier && stored.ownerId)) return;
+  const reservation = tier ? reserveHeldScriptRunner() : undefined;
+  if (tier && !reservation) return;
+  const remote = reservation?.runner.kind === "remote";
+  const ownerId = remote ? reservation.runner.id : embeddedOwnerId;
+  if (
+    tier &&
+    !(await getStorage().repos.scripts.claimScriptRun(
+      run.id,
+      ownerId,
+      remote ? new Date(Date.now() + DURABLE_LEASE_MS).toISOString() : null,
+    ))
+  ) {
+    reservation?.release();
+    return;
+  }
+  try {
+    await launchPlacedRun(run, baseUrl, reservation);
+  } catch (error) {
+    reservation?.release();
+    if (tier) await getStorage().repos.scripts.releaseScriptRunOwner(run.id, ownerId);
+    throw error;
+  }
+}
+
+async function launchPlacedRun(
+  run: ScriptRun,
+  baseUrl: string,
+  reservation: ReturnType<typeof reserveHeldScriptRunner>,
+): Promise<void> {
+  const remote = reservation?.runner.kind === "remote";
   const row = await getStorage().repos.scripts.getScriptRunPrincipal(run.id);
   if (!row) throw new Error("Script run does not exist");
   const ttl = scriptRunMaxWallMs() + 60_000;
@@ -95,7 +131,9 @@ async function startOwnedScriptRun(run: ScriptRun, baseUrl: string): Promise<voi
   try {
     const sealedArgs = await getScriptRunExecutionArgs(run.id);
     const args = sealedArgs === undefined ? run.args : sealedArgs;
-    execution = await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
+    execution = reservation
+      ? await reservation.startHeld({ run: { ...run, args }, baseUrl, apiKey })
+      : await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
   } catch (error) {
     await credential.release();
     throw error;
@@ -109,9 +147,10 @@ async function startOwnedScriptRun(run: ScriptRun, baseUrl: string): Promise<voi
       await execution.cleanup();
     } finally {
       await credential.release();
+      reservation?.release();
     }
   }
-  const persisted = updateScriptRun(run.id, {
+  const persisted = updateScriptRunIfRunning(run.id, {
     status: "running",
     pid: execution.pid,
     lastHeartbeatAt: new Date().toISOString(),
@@ -120,7 +159,7 @@ async function startOwnedScriptRun(run: ScriptRun, baseUrl: string): Promise<voi
   const finished = execution.exited
     .then(async ({ exitCode, stderr, terminated }) => {
       await persisted;
-      if (terminated) return;
+      if (terminated || remote) return;
       const current = await getScriptRun(run.id);
       if (current && current.status === "running") {
         if (exitCode !== 0) {
@@ -197,6 +236,24 @@ export async function reconcileScriptRuns(baseUrl: string): Promise<void> {
   if (supervisorDisabled()) return;
   for (const run of await getRunningScriptRuns()) {
     if (run.status === "paused") continue;
+    if (getStorage().capabilities.scriptRunners) {
+      const stored = await getStorage().repos.scripts.findScriptRun(run.id);
+      if (stored?.ownerId) {
+        if (stored.ownerId.startsWith("embedded:") && stored.ownerId !== embeddedOwnerId) {
+          await getStorage().repos.scripts.releaseScriptRunOwner(run.id, stored.ownerId);
+        } else if (stored.leaseExpiresAt && stored.leaseExpiresAt <= new Date().toISOString()) {
+          await releaseDurableOwner(stored.ownerId, run.id);
+        } else if (!stored.ownerId.startsWith("embedded:")) {
+          const current = managed.get(run.id);
+          if (current && Date.now() - current.execution.startedAtMs > scriptRunMaxWallMs())
+            await abortScriptRunLimit(
+              run.id,
+              `SCRIPT_RUN_MAX_WALL_MS exceeded (${scriptRunMaxWallMs()})`,
+            );
+          continue;
+        }
+      }
+    }
     const current = managed.get(run.id);
     if (current && Date.now() - current.execution.startedAtMs > scriptRunMaxWallMs()) {
       await abortScriptRunLimit(

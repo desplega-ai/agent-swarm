@@ -61,7 +61,11 @@ export async function dispatchCapability(
 }
 
 /** The API retains credentials and capability state across transport reconnects. */
-export function createCapabilitySession(input: StartScriptExecutionInput, token: string) {
+export function createCapabilitySession(
+  input: StartScriptExecutionInput,
+  token: string,
+  replayResponses = false,
+) {
   const { run, apiKey, baseUrl } = input;
   const built = buildWorkflowCtx({
     runId: run.id,
@@ -77,6 +81,8 @@ export function createCapabilitySession(input: StartScriptExecutionInput, token:
   let active = 0;
   let queuedBytes = 0;
   let closed = false;
+  const responses = new Map<string, Promise<string>>();
+  let retainedBytes = 0;
   const waiters: Array<() => void> = [];
   const dispatch = async (path: string, args: string) => {
     if (closed) throw new Error("Capability session closed");
@@ -113,7 +119,25 @@ export function createCapabilitySession(input: StartScriptExecutionInput, token:
         throw new Error("Capability pending call limit exceeded");
       pending++;
       try {
-        const response = await handleCapabilityRequest(frame, dispatch);
+        let result: Promise<string>;
+        const request = JSON.parse(frame);
+        const id = request.id;
+        if (replayResponses && typeof id !== "string")
+          throw new Error("Invalid capability request ID");
+        const previous = replayResponses ? responses.get(id) : undefined;
+        if (previous) result = previous;
+        else {
+          result = handleCapabilityRequest(frame, dispatch).then((response) => {
+            if (replayResponses) {
+              retainedBytes += Buffer.byteLength(response);
+              if (retainedBytes > SCRIPT_SDK_RESPONSE_LIMIT_BYTES)
+                throw new Error("Capability replay cache exceeds limit");
+            }
+            return response;
+          });
+          if (replayResponses) responses.set(id, result);
+        }
+        const response = await result;
         const bytes = Buffer.byteLength(response) + 1;
         if (closed) return;
         if (queuedBytes + bytes > SCRIPT_SDK_RESPONSE_LIMIT_BYTES)
@@ -130,6 +154,7 @@ export function createCapabilitySession(input: StartScriptExecutionInput, token:
     },
     close() {
       closed = true;
+      responses.clear();
       built.abortInFlightSteps();
       for (const resume of waiters.splice(0)) resume();
     },
