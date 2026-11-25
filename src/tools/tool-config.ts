@@ -194,6 +194,7 @@ export const DEFERRED_TOOLS = new Set([
   "app-get",
   "app-list",
   "app-patch",
+  "app-patch-node",
   "app-query",
   "app-rows-list",
   "app-row-get",

@@ -1313,3 +1313,122 @@ export function applyAppDefinitionPatch(
   const merged = applyMergePatch(structuredClone(stored), normalizedPatch, []);
   return { success: true, definition: structuredClone(merged) };
 }
+
+export const AppDefinitionOpSchema = z
+  .object({
+    op: z.enum(["add", "replace", "remove", "test"]),
+    path: z.string(),
+    value: z.unknown().optional(),
+  })
+  .strict();
+export type AppDefinitionOp = z.infer<typeof AppDefinitionOpSchema>;
+
+function parseJsonPointer(pointer: string): string[] | null {
+  if (pointer === "") return [];
+  if (!pointer.startsWith("/")) return null;
+  return pointer
+    .slice(1)
+    .split("/")
+    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+}
+
+function arrayIndex(token: string, length: number, allowEnd: boolean): number | null {
+  if (allowEnd && token === "-") return length;
+  if (!/^(0|[1-9][0-9]*)$/.test(token)) return null;
+  const index = Number(token);
+  return index < length || (allowEnd && index === length) ? index : null;
+}
+
+function applyOneOp(root: unknown, op: AppDefinitionOp): { root: unknown } | { error: string } {
+  const tokens = parseJsonPointer(op.path);
+  if (tokens === null) return { error: `path "${op.path}" is not a JSON pointer (start with /)` };
+  const unsafe = tokens.find((token) => DANGEROUS_PATCH_KEYS.has(token));
+  if (unsafe) return { error: `unsafe key "${unsafe}" is not allowed` };
+  if (tokens.length === 0) {
+    if (op.op === "test") {
+      return Bun.deepEquals(root, op.value) ? { root } : { error: "test failed at the root" };
+    }
+    return { error: "ops cannot replace the whole definition; use app-upsert" };
+  }
+  if ((op.op === "add" || op.op === "replace" || op.op === "test") && !("value" in op)) {
+    return { error: `${op.op} needs a value` };
+  }
+  let parent: unknown = root;
+  for (const [depth, token] of tokens.slice(0, -1).entries()) {
+    const next = Array.isArray(parent)
+      ? parent[arrayIndex(token, parent.length, false) ?? -1]
+      : isMergePatchObject(parent) && Object.hasOwn(parent, token)
+        ? parent[token]
+        : undefined;
+    if (next === undefined) {
+      return { error: `path /${tokens.slice(0, depth + 1).join("/")} does not exist` };
+    }
+    parent = next;
+  }
+  const last = tokens.at(-1)!;
+  if (Array.isArray(parent)) {
+    const index = arrayIndex(last, parent.length, op.op === "add");
+    if (index === null) return { error: `index "${last}" is out of range at ${op.path}` };
+    if (op.op === "test") {
+      return Bun.deepEquals(parent[index], op.value)
+        ? { root }
+        : { error: `test failed at ${op.path}` };
+    }
+    if (op.op === "add") parent.splice(index, 0, structuredClone(op.value));
+    else if (op.op === "replace") parent[index] = structuredClone(op.value);
+    else parent.splice(index, 1);
+    return { root };
+  }
+  if (!isMergePatchObject(parent)) return { error: `parent of ${op.path} is not an object` };
+  const exists = Object.hasOwn(parent, last);
+  if (op.op === "test") {
+    return exists && Bun.deepEquals(parent[last], op.value)
+      ? { root }
+      : { error: `test failed at ${op.path}` };
+  }
+  if ((op.op === "replace" || op.op === "remove") && !exists) {
+    return { error: `path ${op.path} does not exist` };
+  }
+  if (op.op === "remove") delete parent[last];
+  else defineMergePatchValue(parent, last, structuredClone(op.value));
+  return { root };
+}
+
+/**
+ * Apply RFC 6902 `add` / `replace` / `remove` / `test` ops (JSON pointers) to
+ * an app definition without mutating it. The first failing op stops the patch
+ * and reports `ops[<index>]`, so a `test` op is a cheap precondition.
+ */
+export function applyAppDefinitionOps(
+  stored: AppDefinition,
+  ops: AppDefinitionOp[],
+): AppDefinitionPatchResult {
+  let next: unknown = structuredClone(stored);
+  for (const [index, op] of ops.entries()) {
+    const tokens = parseJsonPointer(op.path) ?? [];
+    if (tokens[0] === "page" || tokens[0] === "schemaVersion") {
+      return {
+        success: false,
+        issues: [{ path: `ops[${index}]`, message: `${op.path} cannot be patched` }],
+      };
+    }
+    if (
+      op.op === "remove" &&
+      tokens.length === 2 &&
+      tokens[0] === "pages" &&
+      isMergePatchObject(next) &&
+      tokens[1] === next.defaultPage
+    ) {
+      return {
+        success: false,
+        issues: [{ path: `ops[${index}]`, message: "cannot delete the default page" }],
+      };
+    }
+    const applied = applyOneOp(next, op);
+    if ("error" in applied) {
+      return { success: false, issues: [{ path: `ops[${index}]`, message: applied.error }] };
+    }
+    next = applied.root;
+  }
+  return { success: true, definition: next };
+}

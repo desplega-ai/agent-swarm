@@ -317,9 +317,11 @@
         "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
         "knowledge-apps-catalog",
+        "knowledge-apps-closest-bounds",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
         "knowledge-apps-log-stream",
+        "knowledge-apps-patch-node",
         "knowledge-apps-primitives",
         "knowledge-apps-session-thread-files",
         "knowledge-apps-template-refs"

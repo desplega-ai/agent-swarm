@@ -207,6 +207,7 @@ export const SDK_TOOL_NAME_MAP = {
   app_diff: "app-diff",
   app_list: "app-list",
   app_patch: "app-patch",
+  app_patchNode: "app-patch-node",
   app_query: "app-query",
   app_rows_list: "app-rows-list",
   app_row_get: "app-row-get",

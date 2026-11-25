@@ -21,6 +21,7 @@ import { registerAppGetTool } from "./tools/app-get";
 import { registerAppHistoryTool } from "./tools/app-history";
 import { registerAppListTool } from "./tools/app-list";
 import { registerAppPatchTool } from "./tools/app-patch";
+import { registerAppPatchNodeTool } from "./tools/app-patch-node";
 import { registerAppQueryTool } from "./tools/app-query";
 import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppRowTools } from "./tools/app-rows";
@@ -694,6 +695,7 @@ export async function createServer(
     registerAppDiffTool(server);
     registerAppListTool(server);
     registerAppPatchTool(server);
+    registerAppPatchNodeTool(server);
     registerAppCatalogTool(server);
     registerAppQueryTool(server);
     registerAppRollbackTool(server);

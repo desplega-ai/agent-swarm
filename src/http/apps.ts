@@ -17,9 +17,11 @@ import {
 import { CLOSEST_NAME_MAX_LENGTH } from "../apps/closest-names";
 import {
   type AppDefinition,
+  AppDefinitionOpSchema,
   AppNameSchema,
   type AppQueryDef,
   type AppValidationIssue,
+  applyAppDefinitionOps,
   applyAppDefinitionPatch,
   isIso8601Date,
   type ModelDef,
@@ -484,13 +486,14 @@ const patchAppRoute = route({
   pattern: ["api", "apps", null],
   summary: "Patch an app",
   description:
-    "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.",
+    "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries. `ops` applies JSON-pointer add/replace/remove/test ops instead; the first failing op stores nothing.",
   tags: ["Apps"],
   params: appParamsSchema,
   body: z.object({
     name: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
     definition: z.record(z.string(), z.unknown()).optional(),
+    ops: z.array(AppDefinitionOpSchema).min(1).max(200).optional(),
     migration: AppMigrationSchema.optional(),
     forceElementBreak: ForceElementBreakSchema.optional(),
   }),
@@ -1697,7 +1700,14 @@ export async function handleApps(
           responseHandled = true;
           return;
         }
-        const patch = applyAppDefinitionPatch(existing.definition, parsed.body.definition ?? {});
+        if (parsed.body.definition !== undefined && parsed.body.ops !== undefined) {
+          jsonError(res, "give definition or ops, not both", 400);
+          responseHandled = true;
+          return;
+        }
+        const patch = parsed.body.ops
+          ? applyAppDefinitionOps(existing.definition, parsed.body.ops)
+          : applyAppDefinitionPatch(existing.definition, parsed.body.definition ?? {});
         if (!patch.success) {
           invalidDefinition(res, patch.issues);
           responseHandled = true;
@@ -1715,7 +1725,9 @@ export async function handleApps(
           responseHandled = true;
           return;
         }
-        if (parsed.body.definition !== undefined) writtenDefinition = definition.definition;
+        if (parsed.body.definition !== undefined || parsed.body.ops !== undefined) {
+          writtenDefinition = definition.definition;
+        }
         const migrated = await migrateAppSchema({
           appId: parsed.params.id,
           previousDefinition: existing.definition,

@@ -1190,7 +1190,7 @@ describe("app MCP iteration tools", () => {
     expect(listed.structuredContent.apps[0]).not.toHaveProperty("definition");
 
     const patched = (await tools["app-patch"]!.handler(
-      { appId, name: "Patched by MCP" },
+      { appId, name: "Patched by MCP", includeApp: true },
       toolMeta(),
     )) as StructuredResult<{ success: boolean; app: { name: string }; appId: string; url: string }>;
     expect(patched.structuredContent.success).toBe(true);
