@@ -5,7 +5,12 @@ import { WebSocket } from "ws";
 import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 
-async function runNode(ctx: ScenarioContext, config: Record<string, unknown>, cancel = false) {
+async function runNode(
+  ctx: ScenarioContext,
+  config: Record<string, unknown>,
+  cancel = false,
+  onTriggered?: (runId: string) => Promise<void>,
+) {
   const created = await ctx.api("POST", "/api/workflows", {
     body: {
       name: `shell-parity-${ctx.nonce}-${crypto.randomUUID()}`,
@@ -156,7 +161,7 @@ export const workflowScriptNodeRemote: Scenario = {
         failed.run.status === "failed" && failed.step.error === "synthetic-failure",
         "nonzero shell preserves exact failure error",
       );
-      const secret = "ghp_" + "a".repeat(36);
+      const secret = `ghp_${"a".repeat(36)}`;
       const scrubbed = await runNode(ctx, {
         runtime: "ts",
         script: 'console.log(JSON.stringify({marker:"visible",value:process.env.SYNTHETIC_VALUE}))',
