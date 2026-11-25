@@ -78,6 +78,26 @@ export const BUILTIN_ROLES = [
     grantsAll: false,
     verbs: ["session.read.all"],
   },
+  {
+    // An extra role for a service user that an alerting system (obs-lite)
+    // drives: own tasks, workflow triggers and events, durable script runs.
+    id: "rbac-role-obs-lite-integration",
+    name: "obs-lite-integration",
+    description:
+      "Extra role: create and follow own tasks, trigger workflows, send workflow events, and launch or cancel durable runs of global scripts.",
+    isBuiltin: true,
+    grantsAll: false,
+    verbs: [
+      "task.create.own",
+      "task.read.own",
+      "task.cancel.own",
+      "task.steer.own",
+      "workflow.trigger",
+      "workflow.run.event",
+      "script.run.durable",
+      "script.run.cancel",
+    ],
+  },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 
 /**

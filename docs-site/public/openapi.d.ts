@@ -37258,7 +37258,10 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    source: string;
+                    /** @description Inline TypeScript source. Pass this or `name`. */
+                    source?: string;
+                    /** @description A global script to run instead of `source`. A user token must pass it: the run executes as the script's owning agent. */
+                    name?: string;
                     args?: unknown;
                     /** @default true */
                     background?: boolean;
@@ -37293,7 +37296,16 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Existing idempotent run returned */
+            /** @description Global script not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Existing idempotent run returned. A key another caller used answers 409 with an error and no run. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -37370,6 +37382,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description A scoped user may cancel only the runs it launched */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Script run not found */
             404: {

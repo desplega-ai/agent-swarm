@@ -46,10 +46,7 @@ const runScopedSignalRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
-  rbac: {
-    ungated:
-      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
-  },
+  rbac: { permission: "workflow.run.event" },
 });
 
 /**
@@ -82,10 +79,7 @@ const globalSignalRoute = route({
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
-  rbac: {
-    ungated:
-      "workflow runs: open to agents like the workflow tools; no verb covers them, so user roles need admin",
-  },
+  rbac: { permission: "workflow.run.event" },
 });
 
 const RESERVED_EVENT_MESSAGE = "Event name is reserved for provider webhooks";

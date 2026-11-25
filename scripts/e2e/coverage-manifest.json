@@ -597,6 +597,10 @@
       "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
       "scenarios": ["script-runs-durable", "script-run-storage", "script-runs-executor-setting"]
     },
+    "rbac-integration-role": {
+      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events and durable script runs, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
+      "scenarios": ["rbac-integration-role"]
+    },
     "script-sandbox-identity": {
       "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
       "scenarios": ["script-sandbox-identity"]

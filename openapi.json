@@ -55818,7 +55818,14 @@
                 "properties": {
                   "source": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "Inline TypeScript source. Pass this or `name`."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "A global script to run instead of `source`. A user token must pass it: the run executes as the script's owning agent."
                   },
                   "args": {},
                   "background": {
@@ -55838,10 +55845,7 @@
                   "requestedByUserId": {
                     "type": "string"
                   }
-                },
-                "required": [
-                  "source"
-                ]
+                }
               }
             }
           }
@@ -55892,8 +55896,18 @@
               }
             }
           },
+          "404": {
+            "description": "Global script not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "Existing idempotent run returned",
+            "description": "Existing idempotent run returned. A key another caller used answers 409 with an error and no run.",
             "content": {
               "application/json": {
                 "schema": {
@@ -56204,6 +56218,16 @@
         "responses": {
           "204": {
             "description": "Script run cancelled, or already terminal"
+          },
+          "403": {
+            "description": "A scoped user may cancel only the runs it launched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Script run not found",
