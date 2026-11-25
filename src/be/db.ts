@@ -317,6 +317,7 @@ import {
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
 import { rowToWorkflow, type WorkflowRow } from "./db/workflows/read";
+import { invalidateScriptConnectionCatalog } from "./script-connection-catalog";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -8582,6 +8583,7 @@ export async function deleteMcpServer(id: string): Promise<DeleteMcpServerResult
 
   return await storage.transaction(async () => {
     const deleted = await storage.repos.mcpServers.deleteMcpServerCascade(id);
+    if (deleted.scriptConnections > 0) invalidateScriptConnectionCatalog();
     return {
       deleted: deleted.servers > 0,
       deletedScriptConnectionCount: deleted.scriptConnections,

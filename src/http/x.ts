@@ -5,6 +5,7 @@ import { recordInlineScriptRun } from "../be/db";
 import {
   getScriptApiConnectionDescriptors,
   getScriptMcpConnectionDescriptors,
+  loadScriptConnectionCatalog,
 } from "../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import {
@@ -249,6 +250,7 @@ export async function handleX(
   const credentials = await buildScriptCredentialBindingsWithFailures({
     agentId: endpoint.agentId,
   });
+  const connectionCatalog = await loadScriptConnectionCatalog();
   const output = await runScriptWithRunCredential({
     source: script.source,
     args: args ?? null,
@@ -266,8 +268,14 @@ export async function handleX(
     failedBindings: credentials.failedBindings,
     userConfig: credentials.userConfig,
     agentFs: credentials.agentFs,
-    apiConnections: await getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
-    mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
+    apiConnections: await getScriptApiConnectionDescriptors(
+      { agentId: endpoint.agentId },
+      connectionCatalog,
+    ),
+    mcpConnections: await getScriptMcpConnectionDescriptors(
+      { agentId: endpoint.agentId },
+      connectionCatalog,
+    ),
   });
 
   const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
