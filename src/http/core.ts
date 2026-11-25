@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { SerializationFailureError } from "@desplega/storage";
 import { z } from "zod";
 import { getStorage } from "@/be/storage";
 import { initAgentMail, resetAgentMail } from "../agentmail";
@@ -430,6 +431,10 @@ const pingRoute = route({
     204: { description: "Liveness recorded (or accepted as a no-op)" },
     400: { description: "Missing X-Agent-ID header" },
     404: { description: "Agent not found" },
+    503: {
+      description:
+        "Liveness update conflicted after retries. Retry after the delay in `Retry-After`.",
+    },
   },
 });
 
@@ -768,40 +773,48 @@ export async function handleCore(
     const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
     const multiRuntime = isMultiRuntimeEnabled();
 
-    const found = await getStorage().transaction(async () => {
-      const agent = await getAgentById(myAgentId);
+    let found: boolean;
+    try {
+      found = await getStorage().transaction(async () => {
+        const agent = await getAgentById(myAgentId);
 
-      if (!agent) {
-        return false;
-      }
-
-      if (multiRuntime) {
-        // Prove the identity before touching the agent: the status ladder
-        // below resolves `offline` to `idle`, so an anonymous, unknown, or
-        // already-closed runtime could otherwise revive an agent whose
-        // runtimes have all exited. Failing that check is a no-op rather
-        // than an error — ping is non-destructive, and rejecting it would
-        // break workers that predate the flag.
-        if (!runtimeInstanceId || !(await touchRuntimeInstance(runtimeInstanceId, agent.id))) {
-          return true;
+        if (!agent) {
+          return false;
         }
-      }
 
-      let status: AgentStatus = "idle";
+        if (multiRuntime) {
+          // Prove the identity before touching the agent: the status ladder
+          // below resolves `offline` to `idle`, so an anonymous, unknown, or
+          // already-closed runtime could otherwise revive an agent whose
+          // runtimes have all exited. Failing that check is a no-op rather
+          // than an error — ping is non-destructive, and rejecting it would
+          // break workers that predate the flag.
+          if (!runtimeInstanceId || !(await touchRuntimeInstance(runtimeInstanceId, agent.id))) {
+            return true;
+          }
+        }
 
-      if (agent.status === "busy") {
-        status = "busy";
-      } else if (agent.status === "waiting_for_credentials") {
-        // Preserve the waiting state — only the worker's own credential-wait
-        // tick (POST /api/agents/:id/credential-status) clears it once creds
-        // resolve. The pinger must not stomp it back to idle.
-        status = "waiting_for_credentials";
-      }
+        let status: AgentStatus = "idle";
 
-      await updateAgentStatus(agent.id, status);
+        if (agent.status === "busy") {
+          status = "busy";
+        } else if (agent.status === "waiting_for_credentials") {
+          // Preserve the waiting state — only the worker's own credential-wait
+          // tick (POST /api/agents/:id/credential-status) clears it once creds
+          // resolve. The pinger must not stomp it back to idle.
+          status = "waiting_for_credentials";
+        }
 
+        await updateAgentStatus(agent.id, status);
+
+        return true;
+      });
+    } catch (error) {
+      if (!(error instanceof SerializationFailureError)) throw error;
+      res.setHeader("Retry-After", "1");
+      jsonError(res, "Liveness update temporarily unavailable", 503);
       return true;
-    });
+    }
 
     if (!found) {
       res.writeHead(404, { "Content-Type": "application/json" });

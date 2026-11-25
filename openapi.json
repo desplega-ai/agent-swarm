@@ -8762,6 +8762,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Liveness update conflicted after retries. Retry after the delay in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
