@@ -10,6 +10,8 @@ import { scrubObject } from "../utils/secret-scrubber";
 export const MAX_ACTION_RUN_WAIT_SECONDS = 25;
 /** Rows read per run tree; a bigger tree reports `truncated: true`. */
 const RUN_TREE_MAX_ROWS = 2000;
+/** Levels read below the action's run; a deeper tree reports `truncated: true`. */
+const RUN_TREE_MAX_DEPTH = 32;
 const POLL_INTERVAL_MS = 500;
 /** Slack past the script wall cap before a still-running action root reads as lost. */
 const LOST_ROOT_GRACE_MS = 60_000;
@@ -62,9 +64,10 @@ async function readActionRun(appId: string, id: string): Promise<ActionRunState 
   const root = await getScriptRun(id);
   if (root) {
     if (!belongsToApp(root.args, appId)) return null;
-    const tree = await listScriptRunTree(id, RUN_TREE_MAX_ROWS + 1);
-    const truncated = tree.length > RUN_TREE_MAX_ROWS;
-    const rows = tree.slice(0, RUN_TREE_MAX_ROWS);
+    const { rows, truncated } = await listScriptRunTree(id, {
+      maxRows: RUN_TREE_MAX_ROWS,
+      maxDepth: RUN_TREE_MAX_DEPTH,
+    });
     // An in-process action root still `running` past the script wall cap lost its
     // process (a server restart mid-action): read it as failed, not running forever.
     if (

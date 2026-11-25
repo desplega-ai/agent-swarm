@@ -352,6 +352,16 @@ export type NewScriptRunRow = {
   parentScriptRunId: string | null;
 };
 
+/** Bounds of a run tree read: rows in all, root included, and levels below the root. */
+export type ScriptRunTreeBounds = { maxRows: number; maxDepth: number };
+
+/** Root first, then the descendants by start time. */
+function sortTree(rows: ScriptRunTreeRow[]): ScriptRunTreeRow[] {
+  const [root, ...rest] = rows;
+  rest.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+  return root ? [root, ...rest] : rows;
+}
+
 /** One run of a run tree (`listScriptRunTree`). */
 export type ScriptRunTreeRow = {
   id: string;
@@ -583,7 +593,10 @@ export interface ScriptsRepository {
    * The run and every descendant over `parentScriptRunId`, at most `limit`
    * rows, root first. Empty when the root does not exist.
    */
-  listScriptRunTree(rootId: string, limit: number): Promise<ScriptRunTreeRow[]>;
+  listScriptRunTree(
+    rootId: string,
+    bounds: ScriptRunTreeBounds,
+  ): Promise<{ rows: ScriptRunTreeRow[]; truncated: boolean }>;
   /** Newest `startedAt` first, then insertion order (newest first). */
   listScriptRuns(
     f: ScriptRunListFilter,
@@ -1122,18 +1135,42 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
       RETURNING *`);
   }
 
-  listScriptRunTree(rootId: string, limit: number): Promise<ScriptRunTreeRow[]> {
-    // UNION (not UNION ALL) drops revisited ids, so a parent cycle still terminates.
-    return this.db.query<ScriptRunTreeRow>(sql`
-      WITH RECURSIVE tree(id) AS (
-        SELECT id FROM script_runs WHERE id = ${rootId}
-        UNION
-        SELECT r.id FROM script_runs r JOIN tree t ON r."parentScriptRunId" = t.id
-      )
-      SELECT r.id, r."scriptName", r.status, r.error, r."startedAt", r."finishedAt"
-      FROM script_runs r JOIN tree t ON r.id = t.id
-      ORDER BY CASE WHEN r.id = ${rootId} THEN 0 ELSE 1 END, r."startedAt"
-      LIMIT ${limit}`);
+  async listScriptRunTree(
+    rootId: string,
+    bounds: ScriptRunTreeBounds,
+  ): Promise<{ rows: ScriptRunTreeRow[]; truncated: boolean }> {
+    // One LIMITed query per level instead of a recursive CTE: Postgres rejects
+    // LIMIT in a recursive term, and an outer LIMIT after ORDER BY still walks
+    // the whole tree. Here each read stops at the rows still allowed.
+    const cols = sql`id, "scriptName", status, error, "startedAt", "finishedAt"`;
+    const root = await this.db.get<ScriptRunTreeRow>(
+      sql`SELECT ${cols} FROM script_runs WHERE id = ${rootId}`,
+    );
+    if (!root) return { rows: [], truncated: false };
+    const rows = [root];
+    const seen = new Set([root.id]);
+    let frontier = [root.id];
+    for (let depth = 1; frontier.length > 0; depth++) {
+      const room = bounds.maxRows - rows.length;
+      // At a bound, one probe row tells whether the tree goes on (`truncated`).
+      const atBound = room <= 0 || depth > bounds.maxDepth;
+      const level = await this.db.query<ScriptRunTreeRow>(sql`
+        SELECT ${cols} FROM script_runs
+        WHERE "parentScriptRunId" IN (${sqlList(frontier)})
+        ORDER BY "startedAt", id
+        LIMIT ${atBound ? 1 : room + 1}`);
+      // A revisited id is a parent cycle: drop it so the walk still ends.
+      const fresh = level.filter((r) => !seen.has(r.id));
+      if (atBound) return { rows: sortTree(rows), truncated: fresh.length > 0 };
+      // shortcut: a cycle row can fill the probe slot and read as truncated; cycles need a hand-edited parent.
+      const truncated = level.length > room;
+      const kept = fresh.slice(0, room);
+      for (const r of kept) seen.add(r.id);
+      rows.push(...kept);
+      if (truncated) return { rows: sortTree(rows), truncated: true };
+      frontier = kept.map((r) => r.id);
+    }
+    return { rows: sortTree(rows), truncated: false };
   }
 
   insertInlineScriptRun(r: NewInlineScriptRunRow): Promise<ScriptRunRow | null> {
