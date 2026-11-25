@@ -10,6 +10,7 @@ import {
 import { listScriptRunnerSessions } from "../be/script-runners/sessions";
 import { getStorage } from "../be/storage";
 import { can } from "../rbac";
+import { syncLaneMetrics } from "../scripts-runtime/dispatch/dispatcher";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -20,11 +21,19 @@ const sessions = route({
   pattern: ["api", "script-runners"],
   tags: ["Script runners"],
   summary: "List live script-runner sessions",
-  rbac: { permission: "script_runner.write" },
+  rbac: { permission: "script_runner.read" },
   responses: {
     200: {
       description: "Live sessions",
       schema: z.object({
+        lanes: z.object({
+          sync: z.object({
+            queued: z.number(),
+            oldestWaitMs: z.number(),
+            inFlight: z.number(),
+            slots: z.number().nullable(),
+          }),
+        }),
         sessions: z.array(
           z.object({
             instanceId: z.string(),
@@ -122,21 +131,22 @@ export async function handleScriptRunners(
     jsonError(res, "Script-runner credentials require an operator or user", 403);
     return true;
   }
-  if (
-    principal.kind === "user" &&
-    !(await userHoldsExplicitVerb(principal.userId, "script_runner.write"))
-  ) {
-    jsonError(res, "An operator must grant script_runner.write to this user", 403);
+  const verb = sessions.match(req.method, segments) ? "script_runner.read" : "script_runner.write";
+  if (principal.kind === "user" && !(await userHoldsExplicitVerb(principal.userId, verb))) {
+    jsonError(res, `An operator must grant ${verb} to this user`, 403);
     return true;
   }
-  const decision = can({ principal, verb: "script_runner.write", source: "http" });
+  const decision = can({ principal, verb, source: "http" });
   if (!decision.allow) {
     jsonError(res, decision.reason, 403);
     return true;
   }
   if (sessions.match(req.method, segments)) {
     if (!(await sessions.parse(req, res, segments, query))) return true;
-    sessions.respond(res, 200, { sessions: listScriptRunnerSessions() });
+    sessions.respond(res, 200, {
+      sessions: listScriptRunnerSessions(),
+      lanes: { sync: syncLaneMetrics() },
+    });
   } else if (list.match(req.method, segments)) {
     if (!(await list.parse(req, res, segments, query))) return true;
     list.respond(res, 200, { credentials: await getStorage().repos.scriptRunners.list() });

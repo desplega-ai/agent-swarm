@@ -201,3 +201,8 @@ Per-replica by design (keep one per replica, no change): 11 loops. `src/http/ind
 - `src/http/script-runners-connect.ts`: handshake and ping timers, sockets and credential callbacks belong to the API process that accepted the connection.
 - `src/script-runner/client.ts`: active jobs and reconnect timers belong to one runner process. A disconnect aborts inline jobs before reconnect.
 - `src/scripts-runtime/dispatch/dispatcher.ts`: the remote picker resolves sessions from this API process only. This registry does not enable multiple API replicas.
+
+## Sync script capacity
+
+The FIFO sync queue, slot counters and waiters live in API process memory.
+An API restart loses queued callers. Multiple API replicas do not share placement or queue metrics.

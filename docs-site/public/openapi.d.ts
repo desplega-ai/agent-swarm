@@ -26075,6 +26075,14 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
+                            lanes: {
+                                sync: {
+                                    queued: number;
+                                    oldestWaitMs: number;
+                                    inFlight: number;
+                                    slots: number | null;
+                                };
+                            };
                             sessions: {
                                 instanceId: string;
                                 slots: number;

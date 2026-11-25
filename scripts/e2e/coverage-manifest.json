@@ -232,7 +232,7 @@
     },
     "execution-tier-baseline": {
       "description": "Script schedule principals, synchronous workflow scripts, sequential foreach bodies and nested durable execution.",
-      "scenarios": ["script-schedule-fire", "workflow-script-sync-baseline"]
+      "scenarios": ["script-schedule-fire", "workflow-script-sync-baseline", "script-runner-capacity", "script-runner-remote-sync"]
     },
     "storage-engine-parity": {
       "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",

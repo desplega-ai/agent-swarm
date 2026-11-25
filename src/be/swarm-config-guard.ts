@@ -1,5 +1,9 @@
 import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
 import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemetry-ranking";
+import {
+  SCRIPT_CAPACITY_KEYS,
+  validateScriptCapacity,
+} from "../scripts-runtime/dispatch/capacity-config";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { SLACK_WORKFLOW_BOT_IDS_KEY, validateSlackWorkflowBotIds } from "../slack/workflow-bots";
@@ -654,6 +658,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
   ...enumValidator("BOOT_SCRUB_MODE", ["backfill", "forward-only"]),
   ...enumValidator("TRANSCRIPTION_PROVIDER", ["openai", "elevenlabs", "groq"]),
+  SCRIPT_EMBEDDED_RUNNER_SLOTS: (value) =>
+    validateScriptCapacity("SCRIPT_EMBEDDED_RUNNER_SLOTS", value),
+  SCRIPT_QUEUE_WAIT_SYNC_MS: (value) => validateScriptCapacity("SCRIPT_QUEUE_WAIT_SYNC_MS", value),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
   ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
   SCRIPT_EGRESS_ALLOWLIST: (value) =>
@@ -929,6 +936,11 @@ export function validateConfigEntry(entry: {
   if ((entry.scope === "agent" || entry.scope === "repo") && !entry.scopeId) {
     return "Agent/repo scope requires scopeId";
   }
+  if (
+    SCRIPT_CAPACITY_KEYS.includes(entry.key.toUpperCase()) &&
+    !/^postgres(?:ql)?:/.test(process.env.DATABASE_URL ?? "")
+  )
+    return "script_runners_need_postgres";
   const keyError = invalidConfigKeyError(entry.key);
   if (keyError) return keyError;
   if (isReservedConfigKey(entry.key)) return reservedKeyError(entry.key).message;

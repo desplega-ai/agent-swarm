@@ -41,6 +41,7 @@ import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime"
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
+import { drainScriptQueue } from "../scripts-runtime/dispatch/dispatcher";
 import { startSlackApp, stopSlackAppUnderLifecycleLock } from "../slack";
 import { runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
 import type { AgentStatus } from "../types";
@@ -155,6 +156,7 @@ export async function loadGlobalConfigsIntoEnv(override = false): Promise<string
   }
   const { syncSlackTreeVisibility } = await import("../slack/tree-visibility");
   await syncSlackTreeVisibility();
+  drainScriptQueue();
   return updated;
 }
 

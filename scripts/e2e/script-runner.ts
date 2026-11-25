@@ -1,6 +1,6 @@
 import { minimalEnv, repoRoot } from "./sut";
 
-export function startScriptRunner(baseUrl: string, token: string) {
+export function startScriptRunner(baseUrl: string, token: string, slots = 1) {
   let logs = "";
   const child = Bun.spawn(
     ["bun", "run", "src/cli.tsx", "script-runner", "--api-url", baseUrl, "--allow-shared-uid"],
@@ -9,7 +9,7 @@ export function startScriptRunner(baseUrl: string, token: string) {
       env: {
         ...minimalEnv(),
         SCRIPT_RUNNER_TOKEN: token,
-        SCRIPT_RUNNER_SLOTS: "1",
+        SCRIPT_RUNNER_SLOTS: String(slots),
         DESPLEGA_TELEMETRY_ENV: "test",
       },
       stdout: "pipe",

@@ -66512,6 +66512,40 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "lanes": {
+                      "type": "object",
+                      "properties": {
+                        "sync": {
+                          "type": "object",
+                          "properties": {
+                            "queued": {
+                              "type": "number"
+                            },
+                            "oldestWaitMs": {
+                              "type": "number"
+                            },
+                            "inFlight": {
+                              "type": "number"
+                            },
+                            "slots": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "queued",
+                            "oldestWaitMs",
+                            "inFlight",
+                            "slots"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "sync"
+                      ]
+                    },
                     "sessions": {
                       "type": "array",
                       "items": {
@@ -66540,6 +66574,7 @@
                     }
                   },
                   "required": [
+                    "lanes",
                     "sessions"
                   ]
                 }

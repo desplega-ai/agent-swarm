@@ -68,6 +68,7 @@ import { realtimeBus } from "../realtime/bus";
 import { closeRooms, removeNamespaceRooms, sweepRooms } from "../realtime/rooms";
 import { attachRealtimeTransport } from "../realtime/transport";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
+import { assertScriptCapacityConfig } from "../scripts-runtime/dispatch/capacity-config";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { telemetry } from "../telemetry";
@@ -695,6 +696,15 @@ startEventLoopLagProbe();
 // DATABASE_URL with a postgres:// scheme selects the Postgres engine (decision D1).
 // Its start is asynchronous, so it runs here, before the first database access.
 // The SQLite engine opens lazily on first use, as before.
+try {
+  assertScriptCapacityConfig(isPostgresEngine());
+} catch (error) {
+  console.error(
+    "[startup]",
+    error instanceof Error ? error.message : "Invalid script capacity settings",
+  );
+  process.exit(1);
+}
 if (isPostgresEngine()) {
   try {
     await startPostgres();
@@ -723,6 +733,7 @@ try {
 let startupConfigsInjected: string[] = [];
 try {
   startupConfigsInjected = await loadGlobalConfigsIntoEnv(true);
+  assertScriptCapacityConfig(isPostgresEngine());
 } catch (err) {
   console.error("[startup] Failed to load global swarm configs before listen:", err);
   process.exitCode = 1;

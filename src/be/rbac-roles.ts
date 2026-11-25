@@ -84,7 +84,7 @@ export const BUILTIN_ROLES = [
     description: "Provision trusted script runners and manage their credentials.",
     isBuiltin: true,
     grantsAll: false,
-    verbs: ["script_runner.write"],
+    verbs: ["script_runner.read", "script_runner.write"],
   },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 
@@ -95,6 +95,7 @@ export const BUILTIN_ROLES = [
  */
 export const OPERATOR_GRANTED_VERBS: readonly PermissionVerb[] = [
   "session.read.all",
+  "script_runner.read",
   "script_runner.write",
 ];
 

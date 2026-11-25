@@ -36,9 +36,9 @@ The API selects the executor and enforces its deployment ceiling. The runner nev
 ## Placement and lifecycle
 
 A connected runner receives work when its matching executor has a free advertised slot.
-Otherwise the embedded runner executes the job. This phase has no waiting queue.
+Otherwise the embedded runner executes the job if it has capacity. Excess jobs enter the sync queue.
 `GET /api/script-runners` returns instance IDs, slots, jobs in flight and completed counts.
-Access requires operator or user permission `script_runner.write`.
+Access requires the operator key or user permission `script_runner.read`.
 
 Messages use shared Zod schemas. The transport caps frames at 80 MiB and sends pings every 15 seconds.
 Each outgoing job and result must fit the same byte limit. An oversized job fails before transmission.
@@ -74,3 +74,23 @@ Treat the runner host as trusted infrastructure. Its process receives these plai
 The dedicated runner credential authenticates only the runner connection. It differs from the per-run bearer inside a job.
 The native child receives configuration through stdin. The runner retains its own credential outside that child.
 QuickJS executes with host adapters in the runner process. Do not treat its process as separate from the runner's credentials.
+
+## Capacity
+
+PostgreSQL accepts `SCRIPT_EMBEDDED_RUNNER_SLOTS` (0 to 1024) and `SCRIPT_QUEUE_WAIT_SYNC_MS` (0 to 599999).
+SQLite refuses either key through configuration writes and at API boot.
+Unset embedded slots allow unlimited native runs. Zero disables the embedded runner.
+The QuickJS pool remains inside the executor. `SCRIPT_QUICKJS_POOL_SIZE` still controls that pool.
+`SCRIPT_RUN_CONCURRENCY_CAP` still controls durable script-workflow concurrency.
+`SCRIPT_RUNNER_SLOTS` belongs to the runner environment, defaults to 2, and accepts 1 to 1024.
+
+The API queues synchronous jobs in FIFO order when no matching slot is free.
+The default queue wait is 30000 milliseconds. Expiry returns `capacity_exceeded` and names the sync queue.
+A caller abort removes its queued job. An executing job retains its slot until its executor ends.
+Execution wall time starts when the executor receives the job. The caller signal bounds queue and execution together.
+The maximum queue wait plus the 300-second execution limit stays below the 15-minute credential lifetime.
+Durable-object leases include queue wait, execution time and a 10-second commit allowance.
+
+`GET /api/script-runners` requires `script_runner.read` for users or the operator key.
+Its `lanes.sync` reports `queued`, `oldestWaitMs`, `inFlight` and `slots`.
+`slots: null` means unlimited embedded capacity. Counters and waiters belong to this API process.

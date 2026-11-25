@@ -82,7 +82,7 @@ export type ScenarioContext = {
    * every agent a scenario started when the scenario ends, so a lingering poller cannot
    * steal the next scenario's pool tasks. Stop earlier yourself when the scenario needs it.
    */
-  startScriptRunner: (token: string) => ReturnType<typeof startScriptRunner>;
+  startScriptRunner: (token: string, slots?: number) => ReturnType<typeof startScriptRunner>;
   startAgent: (options?: SimulatedAgentOptions) => Promise<SimulatedAgent>;
   /** Count a request made outside `ctx.api` (raw fetch, WebSocket, SSE) toward coverage. */
   recordHttpCall: typeof recordHttpCall;
@@ -368,8 +368,8 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
       db,
       slack: slack.mock,
       llm,
-      startScriptRunner(token) {
-        const runner = startScriptRunner(sut.baseUrl, token);
+      startScriptRunner(token, slots) {
+        const runner = startScriptRunner(sut.baseUrl, token, slots);
         activeScriptRunners.add(runner);
         return runner;
       },

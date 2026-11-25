@@ -13,7 +13,7 @@ import {
   runnerMessage,
   SCRIPT_RUNNER_PATH,
 } from "../script-runner/protocol";
-import { setRemoteScriptRunnerPicker } from "../scripts-runtime/dispatch/dispatcher";
+import { drainScriptQueue, setRemoteScriptRunnerPicker } from "../scripts-runtime/dispatch/dispatcher";
 import { registerSessionTokenConnection } from "../utils/session-token-connections";
 import { route } from "./route-def";
 
@@ -34,13 +34,15 @@ route({
 export function attachScriptRunnerTransport(server: Server): () => void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   let closing = false;
-  setRemoteScriptRunnerPicker((job) =>
-    [...scriptRunnerSessions.values()].find(
-      (runner) =>
-        runner.socket.readyState === WebSocket.OPEN &&
-        runner.pending.size < runner.slots &&
-        runner.executors.includes(job.executor),
-    ),
+  setRemoteScriptRunnerPicker(
+    (job) =>
+      [...scriptRunnerSessions.values()].find(
+        (runner) =>
+          runner.socket.readyState === WebSocket.OPEN &&
+          runner.pending.size < runner.slots &&
+          runner.executors.includes(job.executor),
+      ),
+    () => [...scriptRunnerSessions.values()].reduce((sum, runner) => sum + runner.slots, 0),
   );
   const upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     if (req.url?.split("?")[0] !== SCRIPT_RUNNER_PATH) return;
@@ -132,6 +134,7 @@ export function attachScriptRunnerTransport(server: Server): () => void {
                       if (error) ws.terminate();
                     },
                   );
+                  drainScriptQueue();
                 } else {
                   if (!runner) throw new Error("hello required");
                   runner.result(message.jobId, message.output);

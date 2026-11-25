@@ -10,6 +10,7 @@ import { isChatSdkEnabled } from "./integrations/chat-sdk/config";
 import { MCP_MAX_TOOL_INPUT_ELEMENTS } from "./mcp-limits";
 import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
+import { assertScriptCapacityConfig } from "./scripts-runtime/dispatch/capacity-config";
 import { getSlackConfiguration } from "./slack/config";
 import { isSlackLeaveThreadDisabled } from "./slack/left-threads";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
@@ -420,11 +421,13 @@ export async function createServer(
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
   // DATABASE_URL with a postgres:// scheme selects the Postgres engine instead (async start).
   // Before the config load below: it is the first database read.
+  assertScriptCapacityConfig(isPostgresEngine());
   if (isPostgresEngine()) await startPostgres();
   else initDb(process.env.DATABASE_PATH);
 
   // Reload env
   await loadGlobalConfigsIntoEnv(true);
+  assertScriptCapacityConfig(isPostgresEngine());
 
   // The tool allowlist replaces CAPABILITIES and SCRIPTS_ONLY_MCP when set.
   // Full-surface consumers (the scripts SDK bridge) ignore it.

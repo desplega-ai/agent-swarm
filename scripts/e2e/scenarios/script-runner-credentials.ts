@@ -20,6 +20,11 @@ export const scriptRunnerCredentials: Scenario = {
     const userToken = await ctx.api("POST", `/api/users/${userId}/mcp-tokens`, { body: {} });
     expectStatus(userToken, [200], "mint user token");
     const apiKey = asString(asRecord(userToken.json).plaintext, "user token");
+    expectStatus(
+      await ctx.api("GET", "/api/script-runners", { apiKey }),
+      [403],
+      "runner metrics require explicit read grant",
+    );
     for (const [method, target] of [
       ["GET", path],
       ["POST", path],
@@ -71,6 +76,12 @@ export const scriptRunnerCredentials: Scenario = {
       const authorized = await ctx.api("POST", `/api/users/${userId}/mcp-tokens`, { body: {} });
       expectStatus(authorized, [200], "mint a credential after the role grant");
       const authorizedKey = asString(asRecord(authorized.json).plaintext, "authorized user token");
+      const metrics = await ctx.api("GET", "/api/script-runners", { apiKey: authorizedKey });
+      expectStatus(metrics, [200], "runner manager can read metrics");
+      expect(
+        typeof asRecord(asRecord(asRecord(metrics.json).lanes).sync).queued === "number",
+        "typed sync metric",
+      );
       const minted = await ctx.api("POST", path, {
         apiKey: authorizedKey,
         body: { name: body.name },

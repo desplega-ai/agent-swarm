@@ -17,6 +17,10 @@
 import * as z from "zod";
 
 export const PERMISSIONS = {
+  "script_runner.read": {
+    description: "Read script-runner sessions and sync queue metrics.",
+    namespace: "script_runner",
+  },
   "script_runner.write": {
     description: "Mint, list, or revoke script-runner credentials.",
     namespace: "script_runner",
