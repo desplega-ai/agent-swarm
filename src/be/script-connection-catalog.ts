@@ -1,4 +1,4 @@
-import { getDbClient } from "./db/runtime";
+import { getStorage } from "./storage";
 
 let generation = 0;
 
@@ -15,7 +15,7 @@ export function getScriptConnectionCatalogGeneration(): number {
 /** Call after every script_connections write, inside its transaction when there is one. */
 export function invalidateScriptConnectionCatalog(): void {
   generation++;
-  const client = getDbClient();
+  const storage = getStorage();
   // A read that starts before COMMIT (another Postgres connection) still sees the old rows.
-  if (client.inTransaction()) client.afterCommit(() => void generation++);
+  if (storage.inTransaction()) storage.afterCommit(() => void generation++);
 }

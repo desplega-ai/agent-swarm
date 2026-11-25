@@ -21,7 +21,6 @@ import {
 } from "@/scripts-runtime/credential-broker";
 import { createSsrfGuardedFetch } from "@/utils/egress-guard";
 import { refreshSecretScrubberCache } from "@/utils/secret-scrubber";
-import { getDbClient } from "./db/runtime";
 import { listMcpServerTools } from "./mcp-proxy";
 import {
   getScriptConnectionCatalogGeneration,
@@ -2032,21 +2031,21 @@ let cachedCatalog: {
  * it to both descriptor loaders.
  */
 export async function loadScriptConnectionCatalog(): Promise<ScriptConnectionCatalog> {
-  const client = getDbClient();
+  const storage = getStorage();
   // Inside a transaction the caller may read its own uncommitted writes: never cache those.
-  if (client.inTransaction()) return catalogFromRows(await scriptsRepo().listConnections());
+  if (storage.inTransaction()) return catalogFromRows(await scriptsRepo().listConnections());
   const now = Date.now();
   const generation = getScriptConnectionCatalogGeneration();
   if (
     cachedCatalog &&
-    cachedCatalog.client === client &&
+    cachedCatalog.client === storage &&
     cachedCatalog.generation === generation &&
     now - cachedCatalog.at < CONNECTION_CATALOG_TTL_MS
   ) {
     return cachedCatalog.catalog;
   }
   const entry: NonNullable<typeof cachedCatalog> = {
-    client,
+    client: storage,
     generation,
     at: now,
     catalog: scriptsRepo().listConnections().then(catalogFromRows),
