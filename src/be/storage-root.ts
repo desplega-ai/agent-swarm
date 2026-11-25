@@ -222,6 +222,19 @@ export function createStorage(
     return createPostgresStorage(client, {
       vectorSearch: options.vectorSearch,
       queryReader: options.queryReader ?? null,
+      bus: {
+        retentionMs:
+          process.env.NODE_ENV === "test" && process.env.E2E_BUS_EXPIRE_DELIVERED === "true"
+            ? 0
+            : undefined,
+        onError: (error, context) => {
+          console.error(
+            scrubSecrets(
+              `[execution-bus] ${JSON.stringify(context)}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+            ),
+          );
+        },
+      },
     });
   }
   return createSqliteStorage(client, {

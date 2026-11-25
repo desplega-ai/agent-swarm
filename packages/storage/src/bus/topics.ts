@@ -10,7 +10,8 @@ export const BUS_TOPICS: Record<keyof BusTopics, "durable" | "ephemeral"> = {
 };
 
 /** Stable groups let a producer publish before the API consumer starts. */
-export const BUS_DURABLE_GROUPS: Record<keyof BusTopics, readonly string[]> = {
+export type BusDurableGroups = Readonly<Record<keyof BusTopics, readonly string[]>>;
+export const BUS_DURABLE_GROUPS: BusDurableGroups = {
   "workflow.step_job.requested": ["workflow-step-dispatcher"],
   "workflow.step_job.finished": ["workflow-resume"],
   "script.job.requested": ["script-dispatcher"],

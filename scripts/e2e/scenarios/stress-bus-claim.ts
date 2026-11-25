@@ -57,6 +57,28 @@ export const stressBusClaim: Scenario = {
       FROM bus_events e JOIN bus_deliveries d ON d."eventId"=e.id WHERE e.payload->>'runId' IN (${sqlList(ids)})`);
     expect(counts?.events === 20 && counts.deliveries === 20, "one event and delivery per launch");
     ctx.log(`bus launches: ${JSON.stringify(counts)}`);
+    try {
+      // Shorten only the test horizon. The API still runs the normal retention pump.
+      await ctx.restartSut({ env: { E2E_BUS_EXPIRE_DELIVERED: "true" } });
+      expect(
+        await pollUntil(
+          () =>
+            ctx.db.get<{ n: number }>(sql`
+            SELECT count(*) n FROM bus_events WHERE payload->>'runId' IN (${sqlList(ids)})
+          `)?.n === 0,
+          10_000,
+        ),
+        "retention removes delivered events from public synthetic launches",
+      );
+      expect(
+        ctx.db.get<{ n: number }>(sql`
+          SELECT count(*) n FROM script_runs WHERE id IN (${sqlList(ids)})
+        `)?.n === 20,
+        "bus retention preserves public run history",
+      );
+    } finally {
+      await ctx.restartSut();
+    }
   },
 };
 
@@ -68,6 +90,34 @@ export const busLaunchRecovery: Scenario = {
     const agentId = await registerAgent(ctx, "bus-recovery");
     const key = `bus-crash-${ctx.nonce}`;
     try {
+      await ctx.restartSut({ env: { SCRIPT_RUN_SUPERVISOR_DISABLE: "true" } });
+      const disabled = await ctx.api("POST", "/api/script-runs", {
+        agentId,
+        body: { source: "export default async () => 1;", background: true },
+      });
+      expectStatus(disabled, [201], "persist a public launch with the supervisor disabled");
+      const disabledId = asString(asRecord(disabled.json).id, "disabled run id");
+      expect(
+        ctx.db.get<{ n: number }>(sql`
+          SELECT count(*) n FROM bus_events WHERE payload->>'runId'=${disabledId}
+        `)?.n === 0,
+        "a disabled supervisor creates no unconsumed event",
+      );
+      const disabledRun = asRecord(
+        asRecord((await ctx.api("GET", `/api/script-runs/${disabledId}`)).json).run,
+      );
+      expect(
+        disabledRun.status === "running" && !disabledRun.pid,
+        "the disabled supervisor starts no guest",
+      );
+      await ctx.restartSut();
+      expect(
+        await pollUntil(async () => {
+          const r = await ctx.api("GET", `/api/script-runs/${disabledId}`);
+          return asRecord(asRecord(r.json).run).status === "completed";
+        }, 60_000),
+        "reconciliation recovers a launch after the supervisor is enabled",
+      );
       await ctx.restartSut({ env: { E2E_BUS_RECOVERY_ONLY: "true" } });
       const deferred = await ctx.api("POST", "/api/script-runs", {
         agentId,

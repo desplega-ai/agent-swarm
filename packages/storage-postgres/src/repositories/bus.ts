@@ -1,6 +1,7 @@
 import type { DbClient } from "@desplega/storage";
 
-export type BusClaim = { eventId: string; payload: unknown; claimedBy: string };
+export const BUS_PRUNE_BATCH_SIZE = 500;
+export type BusClaim = { eventId: string; payload: unknown; claimedBy: string; attempts: number };
 
 /** All ownership changes commit before the caller executes a handler. */
 export class PostgresBusRepository {
@@ -22,8 +23,8 @@ export class PostgresBusRepository {
   async claim(topic: string, group: string, leaseMs: number): Promise<BusClaim | null> {
     return this.client.transaction(async () => {
       const now = Date.now();
-      const row = await this.client.get<{ eventId: string }>(
-        `SELECT d."eventId" FROM bus_deliveries d JOIN bus_events e ON e.id=d."eventId"
+      const row = await this.client.get<{ eventId: string; attempts: number }>(
+        `SELECT d."eventId", d.attempts FROM bus_deliveries d JOIN bus_events e ON e.id=d."eventId"
          WHERE e.topic=$1 AND d."groupName"=$2 AND
          ((d.status='pending' AND d."availableAt" <= $3) OR
           (d.status='claimed' AND d."leaseExpiresAt" <= $3))
@@ -44,6 +45,7 @@ export class PostgresBusRepository {
       return event
         ? {
             ...row,
+            attempts: row.attempts + 1,
             payload: typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload,
             claimedBy,
           }
@@ -76,8 +78,8 @@ export class PostgresBusRepository {
           SELECT e.id FROM bus_events e WHERE e."createdAt" < $1
           AND NOT EXISTS (SELECT 1 FROM bus_deliveries d WHERE d."eventId"=e.id
             AND (d.status != 'delivered' OR d."deliveredAt" >= $1))
-          ORDER BY e."createdAt" LIMIT 500)`,
-        [cutoff],
+          ORDER BY e."createdAt" LIMIT $2)`,
+        [cutoff, BUS_PRUNE_BATCH_SIZE],
       );
       return result.changes;
     });

@@ -1,4 +1,5 @@
 import type { ManagedBus } from "@desplega/storage";
+import type { ScriptRun } from "../../types";
 import { getScriptRun } from "../db";
 import { getStorage } from "../storage";
 
@@ -8,7 +9,7 @@ let current: ManagedBus | undefined;
 let unsubscribe: (() => void) | undefined;
 
 /** Register before accepting launches, so every launch gets a delivery row. */
-export function startDurableBus(start: (run: NonNullable<Awaited<ReturnType<typeof getScriptRun>>>) => Promise<void>): void {
+export function startDurableBus(start: (run: ScriptRun) => Promise<void>): void {
   const storage = getStorage();
   if (!storage.capabilities.scriptRunners || current) return;
   current = storage.executionBus;
@@ -28,6 +29,7 @@ export function startDurableBus(start: (run: NonNullable<Awaited<ReturnType<type
 }
 
 export async function publishDurableRunRequested(runId: string, deferred = false): Promise<void> {
+  if (process.env.SCRIPT_RUN_SUPERVISOR_DISABLE === "true") return;
   const storage = getStorage();
   if (storage.capabilities.scriptRunners) {
     if (process.env.NODE_ENV === "test" && process.env.E2E_BUS_CRASH_AFTER_LAUNCH === "true") {

@@ -221,7 +221,9 @@ Unset the affected retention key. The table stops sweeping on its next tick, and
 ## Execution bus (PostgreSQL only)
 
 The execution bus retains delivered events for seven days after delivery.
-An hourly pass deletes at most 500 events and cascades their deliveries.
+A pass deletes at most 500 events and cascades their deliveries.
+A full batch keeps retention due for the next wake or 15-second sweep.
+After a partial batch, retention waits for the next hourly pass.
 The pass keeps every event with an undelivered group, including expired claims.
 Events without durable groups expire seven days after publication.
 This internal queue policy has no operator setting.

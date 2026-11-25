@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { Bus } from "../src";
+import type { BusDurableGroups, ManagedBus } from "../src";
 
 type Harness = {
-  bus: Bus;
+  bus: ManagedBus;
   transaction(fn: () => Promise<void>): Promise<void>;
   drain(): Promise<void>;
   retry(): Promise<void>;
@@ -10,10 +10,11 @@ type Harness = {
 };
 
 /** Reusable behavioral tests. No storage engine or SQL enters these bodies. */
-export function runBusContract(fresh: () => Promise<Harness>): void {
+export function runBusContract(fresh: (groups: BusDurableGroups) => Promise<Harness>): void {
+  const groups: BusDurableGroups = { "script.job.requested": ["a", "b", "durable", "retry"] };
   describe("bus contract", () => {
     test("each durable group receives each event once on success", async () => {
-      const h = await fresh();
+      const h = await fresh(groups);
       try {
         const seen: string[] = [];
         h.bus.subscribe(
@@ -41,8 +42,9 @@ export function runBusContract(fresh: () => Promise<Harness>): void {
       }
     });
     test("rollback drops delivery and wakeups; commit precedes handlers", async () => {
-      const h = await fresh();
+      const h = await fresh(groups);
       try {
+        h.bus.start();
         const seen: string[] = [];
         for (const delivery of ["durable", "wake-up"] as const) {
           h.bus.subscribe(
@@ -74,23 +76,86 @@ export function runBusContract(fresh: () => Promise<Harness>): void {
       }
     });
     test("a failed handler receives the event again", async () => {
-      const h = await fresh();
+      const h = await fresh(groups);
       try {
         let attempts = 0;
         h.bus.subscribe(
           "script.job.requested",
           "retry",
           async () => {
-            if (++attempts === 1) throw new Error("retry");
+            if (++attempts <= 12) throw new Error("retry");
           },
           { delivery: "durable" },
         );
         await h.bus.publish("script.job.requested", { runId: "retry" });
         await h.drain();
         expect(attempts).toBe(1);
-        await h.retry();
+        for (let attempt = 2; attempt <= 13; attempt++) {
+          await h.retry();
+          await h.drain();
+          expect(attempts).toBe(attempt);
+        }
+      } finally {
+        await h.close();
+      }
+    });
+    test("declared groups receive earlier publications and undeclared groups fail", async () => {
+      const h = await fresh(groups);
+      try {
+        expect(() =>
+          h.bus.subscribe("script.job.requested", "undeclared", async () => {}, {
+            delivery: "durable",
+          }),
+        ).toThrow("catalog");
+        await h.bus.publish("script.job.requested", { runId: "before-subscribe" });
+        const seen: string[] = [];
+        h.bus.subscribe(
+          "script.job.requested",
+          "a",
+          async (p) => {
+            seen.push(p.runId);
+          },
+          { delivery: "durable" },
+        );
         await h.drain();
-        expect(attempts).toBe(2);
+        expect(seen).toEqual(["before-subscribe"]);
+      } finally {
+        await h.close();
+      }
+    });
+    test("stop cancels pending wakeups, including callbacks from a previous start", async () => {
+      const h = await fresh(groups);
+      try {
+        const seen: string[] = [];
+        h.bus.subscribe(
+          "script.job.requested",
+          "wake",
+          async (p) => {
+            seen.push(p.runId);
+          },
+          {
+            delivery: "wake-up",
+          },
+        );
+        h.bus.start();
+        await h.transaction(async () => {
+          await h.bus.publish("script.job.requested", { runId: "before-stop" });
+          await h.bus.stop();
+        });
+        await h.drain();
+        expect(seen).toEqual([]);
+        h.bus.start();
+        await h.transaction(async () => {
+          await h.bus.publish("script.job.requested", { runId: "previous-start" });
+          await h.bus.stop();
+          h.bus.start();
+        });
+        await h.drain();
+        expect(seen).toEqual([]);
+        h.bus.start();
+        await h.bus.publish("script.job.requested", { runId: "current-start" });
+        await h.drain();
+        expect(seen).toEqual(["current-start"]);
       } finally {
         await h.close();
       }

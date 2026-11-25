@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
+import type { BusDurableGroups, BusErrorContext } from "@desplega/storage";
 import { runBusContract } from "../../storage/test/bus-contract";
 import { PostgresTableBus } from "../src/bus/table-backend";
 import { createPostgresClient } from "../src/client";
 import { PostgresBusRepository } from "../src/repositories/bus";
 import { createScratchDatabase } from "./scratch";
 
-async function fresh() {
+async function fresh(durableGroups?: BusDurableGroups) {
   const scratch = await createScratchDatabase("bus");
   const observations: { attempts: number; outcome: string; stack: string }[] = [];
   const client = createPostgresClient(scratch.url, {
@@ -13,11 +14,18 @@ async function fresh() {
     onTransactionEnd: (o) => observations.push(o),
   });
   await client.run(await Bun.file("src/be/migrations/postgres/381_bus_tables.sql").text());
-  const bus = new PostgresTableBus(client, { sweepMs: 60_000, leaseMs: 60_000 });
+  const errors: { error: unknown; context: BusErrorContext }[] = [];
+  const bus = new PostgresTableBus(client, {
+    sweepMs: 60_000,
+    leaseMs: 60_000,
+    durableGroups,
+    onError: (error, context) => errors.push({ error, context }),
+  });
   return {
     bus,
     client,
     observations,
+    errors,
     scratch,
     async close() {
       await bus.stop();
@@ -26,15 +34,14 @@ async function fresh() {
     },
   };
 }
-runBusContract(async () => {
-  const h = await fresh();
+runBusContract(async (groups) => {
+  const h = await fresh(groups);
   return {
     ...h,
     transaction: (fn) => h.client.transaction(fn),
     async drain() {
       h.bus.start();
-      await h.bus.drain();
-      await Bun.sleep(5);
+      await new Promise<void>((resolve) => h.client.afterCommit(resolve));
       await h.bus.drain();
       await h.bus.stop();
     },
@@ -62,6 +69,57 @@ test("expired claims recover, and a stale owner cannot acknowledge", async () =>
     expect(
       (await h.client.get<{ attempts: number }>("SELECT attempts FROM bus_deliveries"))?.attempts,
     ).toBe(2);
+  } finally {
+    await h.close();
+  }
+});
+
+test("handler failures include delivery context and retry with capped backoff", async () => {
+  const h = await fresh();
+  try {
+    const error = new Error("fixture handler failure");
+    h.bus.subscribe(
+      "script.job.requested",
+      "script-dispatcher",
+      async () => {
+        throw error;
+      },
+      { delivery: "durable" },
+    );
+    await h.bus.publish("script.job.requested", { runId: "backoff" });
+    const before = Date.now();
+    h.bus.start();
+    await h.bus.drain();
+    await h.bus.stop();
+    const first = await h.client.get<{ eventId: string; attempts: number; availableAt: number }>(
+      'SELECT "eventId", attempts, "availableAt" FROM bus_deliveries',
+    );
+    expect(first?.attempts).toBe(1);
+    expect(first!.availableAt).toBeGreaterThanOrEqual(before + 60_000);
+    expect(first!.availableAt).toBeLessThanOrEqual(Date.now() + 60_000);
+    expect(h.errors).toEqual([
+      {
+        error,
+        context: {
+          operation: "handler",
+          topic: "script.job.requested",
+          group: "script-dispatcher",
+          eventId: first!.eventId,
+        },
+      },
+    ]);
+    await h.client.run('UPDATE bus_deliveries SET attempts=20, "availableAt"=0');
+    const retryAt = Date.now();
+    h.bus.start();
+    await h.bus.drain();
+    await h.bus.stop();
+    const next = await h.client.get<{ attempts: number; availableAt: number; status: string }>(
+      'SELECT attempts, "availableAt", status FROM bus_deliveries',
+    );
+    expect(next?.attempts).toBe(21);
+    expect(next?.status).toBe("pending");
+    expect(next!.availableAt).toBeGreaterThanOrEqual(retryAt + 300_000);
+    expect(next!.availableAt).toBeLessThanOrEqual(Date.now() + 300_000);
   } finally {
     await h.close();
   }
@@ -138,6 +196,24 @@ test("producer before consumer, restart recovery, and bounded retention preserve
     await h.client.run('UPDATE bus_events SET "createdAt"=0');
     expect(await repo.prune(Date.now())).toBe(0);
     expect((await h.client.get<{ n: number }>("SELECT count(*) n FROM bus_deliveries"))?.n).toBe(1);
+    // Prepare an old delivered backlog without paying for 1001 launch transactions.
+    await h.client.run(`
+      INSERT INTO bus_events (id, topic, payload, "createdAt")
+      SELECT 'retention-' || i, 'script.job.requested', '{}'::jsonb, 0
+      FROM generate_series(1, 1001) AS i`);
+    await h.client.run(`
+      INSERT INTO bus_deliveries ("eventId", "groupName", status, "availableAt", "deliveredAt")
+      SELECT id, 'script-dispatcher', 'delivered', 0, 0 FROM bus_events WHERE id LIKE 'retention-%'`);
+    expect(await h.bus.prune()).toBe(500);
+    expect((await h.client.get<{ n: number }>("SELECT count(*) n FROM bus_events"))?.n).toBe(502);
+    h.bus.start();
+    await h.bus.drain();
+    await h.bus.drain();
+    await h.bus.stop();
+    expect((await h.client.get<{ n: number }>("SELECT count(*) n FROM bus_events"))?.n).toBe(1);
+    expect(
+      (await h.client.get<{ status: string }>("SELECT status FROM bus_deliveries"))?.status,
+    ).toBe("pending");
   } finally {
     await h.close();
   }

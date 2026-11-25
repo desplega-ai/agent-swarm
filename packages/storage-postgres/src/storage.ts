@@ -1,4 +1,5 @@
 import {
+  type BusErrorContext,
   type Capabilities,
   type DbClient,
   type QueryReader,
@@ -47,6 +48,10 @@ export type PostgresStorageOptions = {
   vectorSearch: boolean;
   /** The `DATABASE_QUERY_URL` reader, when its restricted-role probe passed (decision D10). */
   queryReader: QueryReader | null;
+  bus?: {
+    retentionMs?: number;
+    onError?: (error: unknown, context: BusErrorContext) => void;
+  };
 };
 
 /** Assemble the Postgres engine over an open Postgres client. */
@@ -61,7 +66,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
   };
   const memory = new PostgresMemoryRepository(executor);
   return {
-    executionBus: new PostgresTableBus(client),
+    executionBus: new PostgresTableBus(client, options.bus),
     dialect: postgresDialect,
     capabilities,
     executor,

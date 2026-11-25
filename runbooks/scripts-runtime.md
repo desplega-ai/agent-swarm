@@ -58,17 +58,34 @@ See [script-runners.md](./script-runners.md#durable-runs) for lease, replay and 
 
 The API writes `script.job.requested` with the durable run in one transaction.
 The `script-dispatcher` consumer group exists in the topic catalog, even before a consumer starts.
+Every producer and consumer uses the same durable group catalog.
+The backend rejects a durable subscription when its group is absent from that catalog.
+Tests can supply a fixture catalog through the storage-neutral `BusDurableGroups` contract.
+Publication creates deliveries for declared groups only. Local subscribers cannot add implicit durable groups.
 The launch still starts a background run directly. A repeated delivery uses the supervisor guard.
 A deferred launch records its originating API boot in the event.
 That boot acknowledges the event without starting a guest.
 A new boot can start the guest from a delivery left pending by a crash.
 The ordinary supervisor scan still recovers deferred runs.
+With `SCRIPT_RUN_SUPERVISOR_DISABLE=true`, launches retain their run rows but create no bus events.
+After the supervisor is enabled, reconciliation recovers those rows.
 
 The table backend claims deliveries with SERIALIZABLE transactions and `FOR UPDATE SKIP LOCKED`.
 It executes handlers outside those transactions and fences acknowledgements with a unique claim token.
-A failed handler waits for the next sweep. A claim expires after 60 seconds.
+A failed handler returns its delivery to pending. Retry delays double from 15 seconds to a five-minute maximum.
+The bus retries indefinitely. It never discards an undelivered event because of its attempt count.
+A claim expires after 60 seconds. An expired claim can repeat a handler that still executes.
 After-commit wakes and a 15-second sweep trigger delivery. A boot starts delivery before reconciliation.
 The supervisor still reads active run rows for recovery.
+
+Each backend instance runs one serial pump across its local subscriptions.
+Each pass claims at most 100 deliveries per subscription, then continues if that batch was full.
+Slow handlers delay other local subscriptions. Other API instances can claim concurrently.
+Claims prefer the earliest availability time, then the event ID. This does not guarantee publication order.
+Later events can precede a failed event during its retry delay. Handlers must tolerate repeated delivery.
+Stopping the bus suppresses pending wake callbacks, including callbacks from transactions that commit after a restart.
+The API logs the failed operation, topic, group and event ID when available.
+The API scrubs the complete diagnostic before it reaches stderr.
 
 The API owns the bus and its database connection. A script runner never accesses bus tables.
 SQLite uses the existing supervisor path and has no execution bus tables.
