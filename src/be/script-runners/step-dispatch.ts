@@ -204,9 +204,10 @@ export async function settleWorkflowStepJob(
   let temporary = false;
   let accepted = false;
   try {
-    const data = await load(job, false);
+    let data = await load(job, false);
     let result: ExecutorResult;
     try {
+      data = await load(job);
       if (!prepared) {
         const handler = getStepJobKind(job.kind);
         prepared = handler.restore
@@ -365,12 +366,19 @@ export async function drainWorkflowStepJobs(): Promise<void> {
           : `embedded:${embeddedOwner}`) +
         ":" +
         generation;
-      const job = await storage.repos.workflowStepJobs.claim(
-        owner,
-        new Date().toISOString(),
-        new Date(Date.now() + LEASE_MS).toISOString(),
-        candidate.id,
-      );
+      let job: WorkflowStepJob | null;
+      try {
+        job = await storage.repos.workflowStepJobs.claim(
+          owner,
+          new Date().toISOString(),
+          new Date(Date.now() + LEASE_MS).toISOString(),
+          candidate.id,
+        );
+      } catch (error) {
+        slot.release();
+        report(error);
+        continue;
+      }
       if (!job) {
         slot.release();
         continue;
