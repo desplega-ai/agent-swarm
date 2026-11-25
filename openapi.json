@@ -10593,7 +10593,7 @@
       },
       "patch": {
         "summary": "Patch an app",
-        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.",
+        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries. `ops` applies JSON-pointer add/replace/remove/test ops instead; the first failing op stores nothing.",
         "tags": [
           "Apps"
         ],
@@ -10632,6 +10632,34 @@
                   "definition": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "ops": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "add",
+                            "replace",
+                            "remove",
+                            "test"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "op",
+                        "path"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
                   },
                   "migration": {
                     "type": "object",

@@ -1576,7 +1576,7 @@ export interface paths {
         head?: never;
         /**
          * Patch an app
-         * @description Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.
+         * @description Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries. `ops` applies JSON-pointer add/replace/remove/test ops instead; the first failing op stores nothing.
          */
         patch: {
             parameters: {
@@ -1595,6 +1595,12 @@ export interface paths {
                         definition?: {
                             [key: string]: unknown;
                         };
+                        ops?: {
+                            /** @enum {string} */
+                            op: "add" | "replace" | "remove" | "test";
+                            path: string;
+                            value?: unknown;
+                        }[];
                         migration?: {
                             [key: string]: {
                                 set: string | number | boolean | {

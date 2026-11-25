@@ -969,7 +969,7 @@ declare module "swarm-sdk" {
     mcpServer_uninstall(args: Record<string, unknown>): Promise<unknown>;
 
     // --- pages & metrics ---
-    app_get(args: { appId: string }): Promise<unknown>;
+    app_get(args: { appId: string; path?: string; outline?: boolean }): Promise<unknown>;
     app_history(args: { appId: string; limit?: number }): Promise<unknown>;
     app_diff(args: { appId: string; from?: number; to?: number }): Promise<unknown>;
     app_list(args?: Record<string, never>): Promise<unknown>;
@@ -980,6 +980,21 @@ declare module "swarm-sdk" {
       definition?: Record<string, unknown>;
       migration?: Record<string, unknown>;
       forceElementBreak?: string[];
+      ops?: Array<{ op: "add" | "replace" | "remove" | "test"; path: string; value?: unknown }>;
+      dryRun?: boolean;
+      includeApp?: boolean;
+    }): Promise<unknown>;
+    app_patchNode(args: {
+      appId: string;
+      page?: string;
+      element?: string;
+      nodeId: string;
+      props?: Record<string, unknown>;
+      set?: Record<string, unknown>;
+      remove?: true;
+      create?: { parentId: string; index?: number; node: Record<string, unknown> };
+      dryRun?: boolean;
+      includeApp?: boolean;
     }): Promise<unknown>;
     app_query(args: {
       appId: string;

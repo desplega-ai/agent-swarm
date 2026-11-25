@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { appDefinitionOutline, readDefinitionPath } from "@/apps/definition-edit";
 import { type AppRow, listAppRows } from "@/apps/row-store";
-import { getApp } from "@/apps/store";
+import { appDefinitionNeedsRepair, getApp } from "@/apps/store";
 import { collectAppSyncStatus } from "@/apps/sync";
 import { getAgentById } from "@/be/db";
 import { AppQueryParamsError, applyQuery } from "@/http/apps";
@@ -33,17 +34,32 @@ export const registerAppGetTool = (server: McpServer) => {
     {
       title: "Get an app",
       description:
-        "Get an app by ID, including its models, named queries, actions, and json-render pages definition.",
+        "Get an app by ID, including its models, named queries, actions, and json-render pages definition. To edit, read less: outline: true returns the tree without props (pages with params and {nodeId: [type, childIds]}, model columns, queries, actions); path returns one subtree (dot path pages.main.elements.title or JSON pointer /pages/main/elements/title). Then change it with app-patch-node.",
       annotations: { readOnlyHint: true },
       rbac: { permission: "app.use" },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID to retrieve."),
+        path: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Return only this definition subtree: a dot path or a JSON pointer."),
+        outline: z
+          .boolean()
+          .optional()
+          .describe("Return the definition outline without props instead of the whole app."),
       }),
       outputSchema: swarmToolOutputSchema({
         app: z.unknown().optional(),
+        appId: z.string().optional(),
+        updatedAt: z.string().optional(),
+        path: z.string().optional(),
+        value: z.unknown().optional(),
+        outline: z.unknown().optional(),
+        closest: z.array(z.string()).optional(),
       }),
     },
-    async ({ appId }, requestInfo) => {
+    async ({ appId, path, outline }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
@@ -55,6 +71,30 @@ export const registerAppGetTool = (server: McpServer) => {
       if (!decision.allow) return toolErr(decision.reason);
       const app = await getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
+      if (path !== undefined && outline) return toolErr("Give path or outline, not both.");
+      if (path !== undefined) {
+        const read = readDefinitionPath(app.definition, path);
+        if (!read.ok) {
+          return toolErr(`Path ${read.at} not found in app ${app.id}.`, {
+            data: { appId: app.id, path, closest: read.closest },
+          });
+        }
+        const data = { appId: app.id, updatedAt: app.updatedAt, path, value: read.value };
+        return toolOk(`App "${app.name}" at ${path}.`, { details: JSON.stringify(data), data });
+      }
+      if (outline) {
+        if (appDefinitionNeedsRepair(app)) {
+          return toolErr("Definition needs repair; read it whole without outline.", {
+            data: { appId: app.id },
+          });
+        }
+        const data = {
+          appId: app.id,
+          updatedAt: app.updatedAt,
+          outline: { name: app.name, ...appDefinitionOutline(app.definition) },
+        };
+        return toolOk(`App "${app.name}" outline.`, { details: JSON.stringify(data), data });
+      }
 
       const syncStatus = await collectAppSyncStatus(app.id);
       const hasSyncStatus = Object.keys(syncStatus).length > 0;

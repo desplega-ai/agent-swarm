@@ -156,6 +156,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-diff](#app-diff)
   - [app-list](#app-list)
   - [app-patch](#app-patch)
+  - [app-patch-node](#app-patch-node)
   - [app-query](#app-query)
   - [app-rollback](#app-rollback)
   - [app-sync](#app-sync)
@@ -1806,11 +1807,13 @@ Capability: `pages` (enabled by default)
 
 **Get an app**
 
-Get an app by ID, including its models, named queries, actions, and json-render pages definition.
+Get an app by ID, including its models, named queries, actions, and json-render pages definition. To edit, read less: outline: true returns the tree without props (pages with params and {nodeId: [type, childIds]}, model columns, queries, actions); path returns one subtree (dot path pages.main.elements.title or JSON pointer /pages/main/elements/title). Then change it with app-patch-node.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `appId` | `string` | Yes | - | App ID to retrieve. |
+| `path` | `string` | No | - | Return only this definition subtree: a dot path or a JSON pointer. |
+| `outline` | `boolean` | No | - | Return the definition outline without props instead of the whole app. |
 
 ### app-rows-list
 
@@ -1960,7 +1963,7 @@ List app summaries without their definitions. Use app-get to inspect one app in 
 
 **Patch an app**
 
-Partially update an app, including zero-model pure-UI apps. userConfig defines versioned field schema while per-user values live outside definitions, survive rollback, and never need migration directives; userConfig.<field> entries are atomic. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, model columns, and userConfig fields are atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it.
+Partially update an app, including zero-model pure-UI apps. userConfig defines versioned field schema while per-user values live outside definitions, survive rollback, and never need migration directives; userConfig.<field> entries are atomic. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, model columns, and userConfig fields are atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it. ops applies JSON-pointer add/replace/remove/test instead; to change one page or element node prefer app-patch-node. Returns a compact summary (changed paths, issues, warnings, migration); includeApp adds the whole app, dryRun stores nothing.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1970,6 +1973,21 @@ Partially update an app, including zero-model pure-UI apps. userConfig defines v
 | `definition` | `object` | No | - | Definition merge patch. Objects merge recursively; arrays and scalars replace; null deletes. For elements.<name>, a value containing ONLY the elements key merges node-by-node; any mode/root/props/export key makes it a full replace, so restate every field to keep. Page-element, param, action, and column entries replace atomically. |
 | `migration` | `unknown` | No | - | Explicit per-column directives for lossy schema changes (set, from/map/else, coerce/else, or purge). |
 | `forceElementBreak` | `unknown` | No | - | Exported element names whose known consumers may be broken by this patch. Use only to abandon those consumers explicitly. |
+| `ops` | `array` | No | - | JSON-pointer ops instead of a merge patch: [{op: "add"|"replace"|"remove"|"test", path: "/pages/main/elements/title/props/text", value?}]. Applied in order; the first failing op (a failed test included) stores nothing and is reported at ops[<i>]. |
+| `dryRun` | `boolean` | No | - | Validate and plan the write, report changed paths and issues, store nothing. |
+| `includeApp` | `boolean` | No | - | Also return the whole stored app. Off by default: the response is the compact write summary. |
+
+### app-patch-node
+
+**Patch one app node**
+
+Edit one node of a page (page) or reusable element (element) without resending the definition, like patch-workflow-node. props merges one level into the node's props (null deletes a prop); set replaces node keys whole (type, props, children, on, visible, repeat, watch); remove deletes the node, unlinks it from its parent and drops its now-unreachable subtree; create adds nodeId under create.parentId at create.index. The result is validated like app-patch and snapshotted. A missing node returns the closest node ids. Returns a compact summary (changed paths, issues, warnings); includeApp adds the whole app, dryRun stores nothing. Read the node first with app-get {path}, or the tree with app-get {outline: true}.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID to patch. |
+| `dryRun` | `boolean` | No | - | Validate the edit and report changed paths and issues, store nothing. |
+| `includeApp` | `boolean` | No | - | Also return the whole stored app. Off by default. |
 
 ### app-query
 
