@@ -6,6 +6,7 @@ import {
   workerToolResultPreview,
 } from "../commands/runner";
 import type { Attributes, AttributeValue, SwarmSpan } from "../otel";
+import { CodexSession, type ThreadItem } from "../providers/codex-adapter";
 
 /**
  * Minimal recording SwarmSpan stub for asserting attributes/status/end calls.
@@ -286,6 +287,49 @@ describe("worker tool span previews keep data-query payloads out of telemetry", 
     expect(String(workerToolArgsPreview("data-query", JSON.stringify(args)))).not.toContain(
       sentinel,
     );
+  });
+
+  test("nested harness envelopes are redacted at every depth", () => {
+    const envelope = (inner: unknown) => ({
+      server: "agent-swarm",
+      tool: "data-query",
+      arguments: inner,
+    });
+    for (const wrapped of [
+      envelope(args),
+      envelope(JSON.stringify(args)),
+      envelope(`{"sql":"SELECT '${sentinel}'`),
+      { input: [{ arguments: args }] },
+    ]) {
+      const preview = String(workerToolArgsPreview("data-query", wrapped));
+      expect(preview).not.toContain(sentinel);
+      expect(preview).toContain("[omitted]");
+    }
+  });
+
+  test("Codex mcp_tool_call tool_start args keep data-query SQL out of the preview", () => {
+    // The exact mapping CodexSession uses for a tool_start event's args: it
+    // wraps MCP arguments as { server, tool, arguments } (object or JSON string).
+    const toolArgsForItem = (item: ThreadItem): unknown =>
+      (
+        CodexSession.prototype as unknown as { toolArgsForItem(i: ThreadItem): unknown }
+      ).toolArgsForItem(item);
+    for (const inner of [args, JSON.stringify(args)]) {
+      const codexArgs = toolArgsForItem({
+        id: "mcp-1",
+        type: "mcp_tool_call",
+        server: "agent-swarm",
+        tool: "data-query",
+        arguments: inner,
+      });
+      // Control: the raw Codex envelope really carries the SQL.
+      expect(JSON.stringify(codexArgs)).toContain(sentinel);
+      const preview = String(workerToolArgsPreview("data-query", codexArgs));
+      expect(preview).not.toContain(sentinel);
+      expect(preview).toContain("[omitted]");
+      expect(preview).toContain("/shared/x.csv");
+      expect(String(workerToolArgsPreview("db-query", codexArgs))).toContain(sentinel);
+    }
   });
 
   test("control: other tools keep their args and result previews", () => {

@@ -11,15 +11,54 @@ const REDACTED_TOOL_PAYLOADS: Record<string, { args: readonly string[]; result: 
 
 export const TELEMETRY_OMITTED = "[omitted]";
 
-/** `args` with the tool's sensitive fields replaced by a marker, for a telemetry preview. */
+/**
+ * `args` with the tool's sensitive fields replaced by a marker, for a telemetry
+ * preview. Harnesses wrap MCP arguments differently (Codex emits
+ * `{ server, tool, arguments: { sql } }`, others pass `{ sql }` flat, some hand a
+ * JSON string), so the sensitive keys are redacted at every depth and a nested
+ * JSON string is parsed and redacted too.
+ */
 export function telemetryToolArgs(tool: string | undefined, args: unknown): unknown {
   const rule = tool ? REDACTED_TOOL_PAYLOADS[tool] : undefined;
   if (!rule || args === undefined) return args;
   // A raw string or other shape could hold the SQL anywhere: drop it whole.
   if (!args || typeof args !== "object" || Array.isArray(args)) return TELEMETRY_OMITTED;
-  const copy: Record<string, unknown> = { ...(args as Record<string, unknown>) };
-  for (const key of rule.args) if (key in copy) copy[key] = TELEMETRY_OMITTED;
+  return redactPayload(args, new Set(rule.args), 0);
+}
+
+// shortcut: a payload nested deeper than this is dropped whole; raise it if a
+// harness envelope ever legitimately nests further.
+const MAX_REDACTION_DEPTH = 8;
+
+function redactPayload(value: unknown, keys: ReadonlySet<string>, depth: number): unknown {
+  if (typeof value === "string") {
+    const parsed = parseJsonContainer(value);
+    // A string holding one of the sensitive keys that does not parse (cut, or
+    // not JSON) cannot be redacted field by field: drop it.
+    if (parsed === undefined) {
+      return [...keys].some((key) => value.includes(key)) ? TELEMETRY_OMITTED : value;
+    }
+    return JSON.stringify(redactPayload(parsed, keys, depth + 1));
+  }
+  if (!value || typeof value !== "object") return value;
+  if (depth >= MAX_REDACTION_DEPTH) return TELEMETRY_OMITTED;
+  if (Array.isArray(value)) return value.map((item) => redactPayload(item, keys, depth + 1));
+  const copy: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+    copy[key] = keys.has(key) ? TELEMETRY_OMITTED : redactPayload(field, keys, depth + 1);
+  }
   return copy;
+}
+
+function parseJsonContainer(value: string): object | undefined {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** True when a tool's result must not appear in a telemetry preview. */
