@@ -4572,6 +4572,9 @@
     "id": {
       "exempt": "identifier"
     },
+    "issuer_user_id": {
+      "exempt": "immutable user identifier"
+    },
     "name": "scrubbed",
     "token_hash": {
       "exempt": "SHA-256 digest"

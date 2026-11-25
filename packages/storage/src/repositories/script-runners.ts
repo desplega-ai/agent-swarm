@@ -28,9 +28,9 @@ export class BaseScriptRunnersRepository implements ScriptRunnersRepository {
 
   async insert(row: ScriptRunnerCredential, tokenHash: string): Promise<void> {
     await this.db.run(sql`INSERT INTO script_runner_credentials
-      (id, name, token_hash, expires_at, revoked_at, created_at, updated_at, created_by, updated_by)
+      (id, name, token_hash, expires_at, revoked_at, created_at, updated_at, created_by, updated_by, issuer_user_id)
       VALUES (${row.id}, ${row.name}, ${tokenHash}, ${row.expiresAt}, ${row.revokedAt},
-        ${row.createdAt}, ${row.updatedAt}, ${row.createdBy}, ${row.updatedBy})`);
+        ${row.createdAt}, ${row.updatedAt}, ${row.createdBy}, ${row.updatedBy}, ${row.createdBy})`);
   }
 
   list(): Promise<ScriptRunnerCredential[]> {
@@ -41,7 +41,9 @@ export class BaseScriptRunnersRepository implements ScriptRunnersRepository {
   findActiveByHash(tokenHash: string, now: string): Promise<ScriptRunnerCredential | null> {
     return this.db.get<ScriptRunnerCredential>(sql`SELECT ${COLUMNS}
       FROM script_runner_credentials WHERE token_hash = ${tokenHash}
-      AND revoked_at IS NULL AND expires_at > ${now}`);
+      AND revoked_at IS NULL AND expires_at > ${now}
+      AND ((issuer_user_id IS NULL AND created_by IS NULL)
+        OR (issuer_user_id <> '' AND issuer_user_id = created_by))`);
   }
 
   async revoke(id: string, now: string, actor: string | null): Promise<boolean> {

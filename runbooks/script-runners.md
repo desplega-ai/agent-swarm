@@ -79,6 +79,9 @@ The runner rewrites the SDK and MCP addresses to its configured API address.
 Results contain the return value, output streams, truncation flags, duration, exit status and optional runtime errors or durable state.
 
 Treat the runner host as trusted infrastructure. Its process receives these plaintext values inside the authenticated TLS connection.
+A user-issued credential retains its original issuer identity. Deleting the issuer or reassigning its audit fields prevents admission.
+Migration 384 revokes credentials from earlier development builds because their original issuer cannot be verified. Mint new credentials after upgrading those builds.
+
 The dedicated runner credential authenticates only the runner connection. It differs from the per-run bearer inside a job.
 The native child receives configuration through stdin. The runner retains its own credential outside that child.
 QuickJS executes with host adapters in the runner process. Do not treat its process as separate from the runner's credentials.

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { sql } from "../../src";
 import type { ContractEngine } from "./env";
 
 export function scriptRunnersContract(engine: ContractEngine): void {
@@ -31,6 +32,23 @@ export function scriptRunnersContract(engine: ContractEngine): void {
         const revoked = (await repo.list())[0];
         expect(revoked.revokedAt).toBe(now);
         expect(revoked.updatedAt).toBe(now);
+        for (const id of ["issuer", "replacement"]) {
+          await storage.executor.run(sql`INSERT INTO users (id, name, status, "createdAt", "lastUpdatedAt")
+            VALUES (${id}, ${id}, 'active', ${now}, ${now})`);
+        }
+        await repo.insert({ ...row, id: "user-runner", createdBy: "issuer" }, "user-hash");
+        expect((await repo.findActiveByHash("user-hash", now))?.createdBy).toBe("issuer");
+        // User deletion can clear audit attribution or transfer it to another user.
+        for (const replacement of ["replacement", null]) {
+          await storage.executor.run(sql`UPDATE script_runner_credentials SET created_by = ${replacement}
+            WHERE id = 'user-runner'`);
+          expect(await repo.findActiveByHash("user-hash", now)).toBeNull();
+        }
+        // A pre-migration binary omits the issuer column when it inserts a credential.
+        await storage.executor.run(sql`INSERT INTO script_runner_credentials
+          (id, name, token_hash, expires_at, created_at, updated_at)
+          VALUES ('old-writer', 'old writer', 'old-hash', ${expiresAt}, ${now}, ${now})`);
+        expect(await repo.findActiveByHash("old-hash", now)).toBeNull();
         expect(storage.capabilities.scriptRunners).toBe(engine.name === "postgres");
       } finally {
         await engine.release(storage);
