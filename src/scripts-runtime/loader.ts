@@ -5,8 +5,10 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { createValueScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "./api-types";
 import type { FailedCredentialBinding } from "./credential-broker";
+import { dispatchScriptJob } from "./dispatch/dispatcher";
+import type { ScriptJob } from "./dispatch/types";
 import { buildEgressSecrets } from "./egress-secrets";
-import { isExecutorAllowedByDeployment, resolveScriptExecutor } from "./executors/registry";
+import { isExecutorAllowedByDeployment, resolveScriptExecutorName } from "./executors/registry";
 import {
   DEFAULT_SCRIPT_RESOURCES,
   type DurableInvocation,
@@ -22,23 +24,6 @@ import {
 import { HOST_VALIDATED_ARGS } from "./host-validated-args";
 import { validateScriptImports } from "./import-allowlist";
 import type { ScriptDbDialect } from "./script-db";
-
-/**
- * `capacity_exceeded` (see `ScriptExecutorError`) means the sandboxed process
- * aborted because a host-wide, shared RLIMIT_NPROC budget was momentarily
- * exhausted — not because the script failed. The executor (`native.ts`'s
- * `classifyExit`) only assigns this classification when the abort happened
- * BEFORE user-authored code got control, using a sentinel file the harness
- * writes right before it — see `eval-harness.ts`'s `startedFile`. That
- * guarantees a retry here can never replay a side effect the script already
- * caused. Retry transparently here, once, for every caller (HTTP script
- * runs, workflow script/swarm-script nodes, scheduled scripts), independent
- * of whatever concurrency limiter or retry policy an individual caller does
- * or doesn't configure. Short and bounded: this is a blip mitigation, not a
- * substitute for the caller's own retry policy if the underlying contention
- * is sustained.
- */
-const CAPACITY_EXCEEDED_RETRY_DELAYS_MS = [200, 750];
 
 export type RunScriptInput = {
   source: string;
@@ -140,7 +125,9 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
   };
 }
 
-export async function runScript(input: RunScriptInput): Promise<RunScriptOutput> {
+export async function prepareScriptJob(
+  input: RunScriptInput,
+): Promise<ExecutorOutput | { job: ScriptJob; scrubber: ReturnType<typeof createValueScrubber> }> {
   if (input.fsMode === "workspace-rw") {
     return {
       result: undefined,
@@ -194,7 +181,7 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
   };
 
   const configPayload = await buildConfigPayload(input);
-  const executorInput = {
+  const executorInput: ScriptJob["input"] = {
     source: input.source,
     args: input.args ?? null,
     ...(input[HOST_VALIDATED_ARGS] === true ? { hostValidatedArgs: true } : {}),
@@ -202,16 +189,19 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     resources,
     fsMode: input.fsMode ?? "none",
     network: scriptEgressPolicy(),
-    signal: input.signal,
   };
 
-  let output = await resolveScriptExecutor(input.executor).run(executorInput);
-  for (const delayMs of CAPACITY_EXCEEDED_RETRY_DELAYS_MS) {
-    if (output.error !== "capacity_exceeded" || input.signal?.aborted) break;
-    await Bun.sleep(delayMs);
-    output = await resolveScriptExecutor(input.executor).run(executorInput);
-  }
+  const executor = resolveScriptExecutorName(input.executor);
+  return {
+    job: { id: crypto.randomUUID(), kind: "inline", executor, input: executorInput },
+    scrubber: runSecrets,
+  };
+}
 
+export function finishScriptJob(
+  output: ExecutorOutput,
+  runSecrets: ReturnType<typeof createValueScrubber>,
+): RunScriptOutput {
   return {
     ...output,
     result: scrubObject(runSecrets.object(output.result)),
@@ -221,4 +211,11 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
       ? { runtimeError: scrubObject(runSecrets.object(output.runtimeError)) }
       : {}),
   };
+}
+
+export async function runScript(input: RunScriptInput): Promise<RunScriptOutput> {
+  const prepared = await prepareScriptJob(input);
+  if (!("job" in prepared)) return prepared;
+  const output = await dispatchScriptJob(prepared.job, { signal: input.signal });
+  return finishScriptJob(output, prepared.scrubber);
 }

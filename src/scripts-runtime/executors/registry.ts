@@ -1,8 +1,8 @@
 import { NativeScriptExecutor } from "./native";
 import { QuickJSScriptExecutor } from "./quickjs";
-import type { ScriptExecutor } from "./types";
+import type { ScriptExecutor, ScriptExecutorName } from "./types";
 
-const EXECUTORS: Record<string, () => ScriptExecutor> = {
+const EXECUTORS: Record<ScriptExecutorName, () => ScriptExecutor> = {
   native: () => new NativeScriptExecutor(),
   quickjs: () => new QuickJSScriptExecutor(),
 };
@@ -28,23 +28,31 @@ export function isExecutorAllowedByDeployment(
   return true;
 }
 
+function registeredName(name: string): ScriptExecutorName {
+  const trimmed = name.trim();
+  if (trimmed === "native" || trimmed === "quickjs") return trimmed;
+  throw new Error(
+    `Unknown SCRIPT_EXECUTOR: ${name}. Available: ${Object.keys(EXECUTORS).join(", ")}`,
+  );
+}
+
 export function getScriptExecutor(name = process.env.SCRIPT_EXECUTOR ?? "native"): ScriptExecutor {
-  const factory = EXECUTORS[name.trim()];
-  if (!factory) {
-    throw new Error(
-      `Unknown SCRIPT_EXECUTOR: ${name}. Available: ${Object.keys(EXECUTORS).join(", ")}`,
-    );
+  return EXECUTORS[registeredName(name)]();
+}
+
+export function resolveScriptExecutorName(
+  requested?: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+): ScriptExecutorName {
+  if (!isExecutorAllowedByDeployment(requested, env)) {
+    throw new Error('Executor "native" is not permitted when deployment SCRIPT_EXECUTOR="quickjs"');
   }
-  return factory();
+  return registeredName(requested ?? env.SCRIPT_EXECUTOR ?? "native");
 }
 
 export function resolveScriptExecutor(
   requested?: string | null,
   env: NodeJS.ProcessEnv = process.env,
 ): ScriptExecutor {
-  if (!isExecutorAllowedByDeployment(requested, env)) {
-    throw new Error('Executor "native" is not permitted when deployment SCRIPT_EXECUTOR="quickjs"');
-  }
-  const effective = requested ?? env.SCRIPT_EXECUTOR ?? "native";
-  return getScriptExecutor(effective);
+  return EXECUTORS[resolveScriptExecutorName(requested, env)]();
 }

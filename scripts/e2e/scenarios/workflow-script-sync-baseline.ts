@@ -28,35 +28,26 @@ export const workflowScriptSyncBaseline: Scenario = {
           await new Promise(resolve => setTimeout(resolve, 25));
         }
         return await ctx.step.swarmScript("after-inline", {
-          source: "export default async function() { return { startedAt: Date.now(), value: 42 }; }"
+          source: "export default async function() { return { value: 42 }; }"
         });
       }`;
-    const gate = startStub(async (request) => {
-      if (request.method === "GET") return Response.json({ released });
-      if (request.method !== "POST" || new URL(request.url).pathname !== "/launch") {
-        return new Response(null, { status: 404 });
-      }
-      const launched = await ctx.api("POST", "/api/script-runs", {
-        agentId,
-        body: { source: durableSource, args: { gate: gate.origin }, background: true },
-      });
-      expectStatus(launched, [201], "launch fixture durable run");
-      durableId = asString(asRecord(launched.json).id, "durable id");
-      return Response.json({ id: durableId }, { status: 201 });
-    });
+    const gate = startStub(() => Response.json({ released }));
     try {
       const name = `sync-baseline-${ctx.nonce}`;
       await upsertScript(ctx, fixtureOwner, {
         name,
         scope: "global",
         source: `export default async function(args: any, ctx: any) {
-          const read = await ctx.swarm.config_get({ key: args.key, includeSecrets: true });
-          const response = await fetch(args.launchUrl, { method: "POST" });
-          const launched: any = await response.json();
-          if (response.status !== 201) throw new Error(JSON.stringify(launched));
-          return { durableId: launched.id, agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId),
-            status: read.status, count: read.data.configs.length,
-            secretVisible: read.data.configs[0]?.value !== "********" };
+          const agentId = ctx.stdlib.Redacted.value(ctx.swarm.config.agentId);
+          if (agentId === "workflow") {
+            const read = await ctx.swarm.config_get({ key: args.key, includeSecrets: true });
+            const config = read.data.configs[0];
+            return { agentId, status: read.status, count: read.data.configs.length,
+              secretVisible: config?.isSecret === true && typeof config.value === "string" && config.value !== "********" };
+          }
+          const launched = await ctx.swarm.script_launchRun({ source: args.source, args: { gate: args.gate } });
+          if (!launched.success) throw new Error(launched.message ?? "durable launch failed");
+          return { agentId, durableId: launched.data.data.id };
         }`,
       });
       scripts.push(name);
@@ -70,7 +61,8 @@ export const workflowScriptSyncBaseline: Scenario = {
               scope: "global",
               args: {
                 key,
-                launchUrl: `${gate.origin}/launch`,
+                source: durableSource,
+                gate: gate.origin,
               },
             },
           },
@@ -80,7 +72,6 @@ export const workflowScriptSyncBaseline: Scenario = {
       const definition = await ctx.api("GET", `/api/workflows/${workflow}`);
       expect(!asRecord(definition.json).createdByAgentId, "workflow must have no creator");
       const triggered = await triggerWorkflow(ctx, workflow);
-      const returnedAt = Date.now();
       const detail = await getRunDetail(ctx, triggered.runId);
       expect(detail.run.status === "completed", "trigger must return after inline completion");
       const result = asRecord(outputOf(detail, "run").result);
@@ -89,7 +80,13 @@ export const workflowScriptSyncBaseline: Scenario = {
         result.status === 200 && result.count === 1 && result.secretVisible === true,
         "creator-less script must retain operator access to the synthetic secret",
       );
-      durableId = asString(result.durableId, "nested durable id");
+      // The public launch tool requires a registered agent. The trigger stamps that identity.
+      const initiated = await triggerWorkflow(ctx, workflow, {}, { agentId });
+      const parent = await getRunDetail(ctx, initiated.runId);
+      expect(parent.run.status === "completed", "agent-triggered inline run must complete");
+      const launch = asRecord(outputOf(parent, "run").result);
+      expect(launch.agentId === agentId, "the nested launch must use the initiating agent");
+      durableId = asString(launch.durableId, "nested durable id");
       const pending = asRecord((await ctx.api("GET", `/api/script-runs/${durableId}`)).json);
       expect(
         asRecords(pending, "journal").length === 0,
@@ -109,12 +106,10 @@ export const workflowScriptSyncBaseline: Scenario = {
         "nested durable run never finished",
       );
       const run = asRecord(finished.run);
+      expect(run.agentId === agentId, "durable run must retain its launching agent");
       expect(run.status === "completed", `nested durable run failed: ${JSON.stringify(run)}`);
       const output = asRecord(asRecord(run.output).result);
-      expect(
-        output.value === 42 && Number(output.startedAt) >= returnedAt,
-        "durable step must execute after inline completion",
-      );
+      expect(output.value === 42, "durable step must complete after the gate opens");
       expect(
         asRecords(finished, "journal").some(
           (row) => row.stepKey === "after-inline" && row.status === "completed",

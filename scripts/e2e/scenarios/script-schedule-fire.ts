@@ -11,15 +11,18 @@ export const scriptScheduleFire: Scenario = {
     const fixtureOwner = await getLead(ctx);
     const key = `E2E_SCHEDULE_BASELINE_${ctx.nonce.toUpperCase()}`;
     const dropConfig = await setGlobalConfig(ctx, key, crypto.randomUUID(), true);
+    const missingId = crypto.randomUUID();
     const name = `schedule-baseline-${ctx.nonce}`;
     await upsertScript(ctx, fixtureOwner, {
       name,
       scope: "global",
       source: `export default async function(args: any, ctx: any) {
-        const read = await ctx.swarm.config_get({ key: args.key, includeSecrets: args.includeSecrets });
+        const read = await ctx.swarm.config_get({ key: args.key, includeSecrets: true });
         const rows = read.data.configs;
+        const permission = await ctx.swarm.config_delete({ id: args.missingId });
         return { marker: args.marker, agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId),
-          status: read.status, count: rows.length, secretVisible: rows[0]?.value !== "********" };
+          status: read.status, count: rows.length, permissionStatus: permission.status,
+          secretVisible: rows[0]?.isSecret === true && typeof rows[0].value === "string" && rows[0].value !== "********" };
       }`,
     });
     const schedules: string[] = [];
@@ -32,7 +35,7 @@ export const scriptScheduleFire: Scenario = {
             name: `baseline-${marker}`,
             targetType: "script",
             scriptName: name,
-            scriptArgs: { key, marker, includeSecrets: !creator },
+            scriptArgs: { key, marker, missingId },
             cronExpression: "0 3 1 1 *",
             enabled: true,
           },
@@ -68,8 +71,13 @@ export const scriptScheduleFire: Scenario = {
           "script must read only the synthetic config",
         );
         expect(
-          result.secretVisible === !creator,
-          "the scheduled script must respect the requested masking of its fixture",
+          result.secretVisible === true,
+          "the running script must read its own synthetic global setting",
+        );
+        // A worker must stop at authorization. The operator reaches the missing-row check.
+        expect(
+          result.permissionStatus === (creator ? 403 : 404),
+          "schedule must use its server-assigned principal",
         );
       }
     } finally {
