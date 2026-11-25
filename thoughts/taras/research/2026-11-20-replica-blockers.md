@@ -32,7 +32,7 @@ Replacement patterns used below:
 
 - `packages/storage-postgres/src/bus/table-backend.ts:21`, `:62`: execution-bus subscriptions remain in process memory. Durable delivery rows survive restarts, but wake-up callbacks reach only local subscribers. Register durable groups on each consumer process and relay wake-ups between replicas.
 - `src/be/script-runners/durable-launch-bus.ts:8`, `:15`: the durable launch subscription and its boot identity belong to one API process. Another API cannot wake this process's dispatcher directly. Preserve the row scan and route delivery to the owner.
-- `src/be/script-runners/step-dispatch.ts:60`: workflow job subscriptions wake the local dispatcher and workflow engine. Route completion events to the replica that owns the workflow.
+- `src/be/script-runners/step-dispatch.ts:59`: workflow job subscriptions wake the local dispatcher and workflow engine. Route completion events to the replica that owns the workflow.
 - `src/realtime/bus.ts:6`, `:31-33`: `InProcessBus` wraps one Node `EventEmitter`, stored on `globalThis.__realtimeBus`. A publish on replica B never reaches a subscriber on replica A (lost event). Replace with NOTIFY behind the same `publish`/`subscribe` interface, with a replica id to skip echo.
 - `src/workflows/event-bus.ts:19-20`, `:71`: `workflowEventBus` sits on `realtimeBus` and keeps prefix handlers in a local `Map`. Each event fires only on the replica that committed it. Subscribers that only read the DB stay correct. The ones below do not. Replace as for the realtime bus, or keep local delivery and fix each subscriber.
 - `src/workflows/resume.ts:1276-1277`, `:1340`: `waitsByEvent` and `listenersByEvent` hold event-mode workflow waits. A wait is registered only on the replica that created it (or that scanned it at boot, `:1288`). An event on the other replica does not resolve it, so it waits until its timeout (lost event). Replace with a fixed listener per event name that queries pending `wait_states` rows, as `src/scheduler/deferred-task-waits.ts` already does.
@@ -51,7 +51,7 @@ Replacement patterns used below:
 
 - `src/scripts-runtime/dispatch/dispatcher.ts:10`, `:18`, `:84`: the FIFO sync queue, slot counters, caller waiters and queue deadlines belong to one API process. Another replica cannot serve a queued caller or enforce the same capacity. Route sync requests to the owning dispatcher or share placement through owner-addressed requests.
 - `src/scripts-runtime/dispatch/held-reservations.ts:4`: held slot reservations cover durable runs and parked workflow jobs in one API process. A second replica can reserve the same runner capacity independently. Give each runner one admission owner and route reservations to it.
-- `src/be/script-runners/step-dispatch.ts:45`, `:55`, `:56`: active job preparations, adopted reservations, release callbacks and the drain guard remain local. Job leases fence database settlement but cannot share these handles. Route cancellation and dispatch to the owner before enabling another API.
+- `src/be/script-runners/step-dispatch.ts:44`, `:54`, `:55`: active job preparations, adopted reservations, release callbacks and the drain guard remain local. Job leases fence database settlement but cannot share these handles. Route cancellation and dispatch to the owner before enabling another API.
 - `src/workflows/step-jobs.ts:8`: `shouldParkScriptNode` reads the local runner registry and embedded capacity. Replicas can choose different execution modes for the same deployment. Derive placement from shared runner presence or route workflow walks to one owner.
 - `src/be/script-runners/broker-fence.ts:5`: broker bearer attribution uses a local map. A broker request on another replica cannot find its ownership fence. Persist the attribution or route every broker request to its issuing API.
 
@@ -141,7 +141,7 @@ None of these loops has leader election. Each replica starts all of them from th
 ### Execution tier loops
 
 - `src/script-workflows/supervisor.ts:37`, `:292`: the durable reconciliation timer uses local launch and process handles. Remote row leases protect remote claims, but embedded ownership still assumes one API. Add replica leases before another API runs this sweep.
-- `src/be/script-runners/step-dispatch.ts:59`, `:570`: a timer scans queued jobs and expired leases every 15 seconds. The local drain guard cannot serialize two dispatchers. Preserve fenced claims and coordinate runner admission across API owners.
+- `src/be/script-runners/step-dispatch.ts:58`, `:565`: a timer scans queued jobs and expired leases every 15 seconds. The local drain guard cannot serialize two dispatchers. Preserve fenced claims and coordinate runner admission across API owners.
 - `packages/storage-postgres/src/bus/table-backend.ts:23`, `:112`: the delivery timer and active pump belong to one process. Database claim tokens fence durable acknowledgements, but they do not distribute wake-up subscribers. Keep durable consumers registered and recover lost wakes with row scans.
 
 ### Double run with real damage
