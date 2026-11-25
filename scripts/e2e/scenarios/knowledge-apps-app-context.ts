@@ -133,6 +133,107 @@ export const knowledgeAppsAppContext: Scenario = {
         );
       }
 
+      // ── Bridge props inside reusable elements and as expressions ───────────
+      const framePageId = "8b8077e8b7a94dfc89c88636889a46ac";
+      const bridge = (page: Json, element?: { mode: "pure" | "bound"; props: Json }): Json => ({
+        models: { note: { columns: { title: { kind: "string" } } } },
+        queries: { allNotes: { model: "note" } },
+        actions: {
+          run: { kind: "script", scriptId: example.actions.traceDetail.scriptId },
+          work: { kind: "task", prompt: "do it" },
+        },
+        ...(element
+          ? {
+              elements: {
+                frame: {
+                  mode: element.mode,
+                  export: true,
+                  root: "f",
+                  elements: {
+                    f: { type: "PageFrame", props: { pageId: framePageId, ...element.props } },
+                  },
+                },
+              },
+            }
+          : {}),
+        pages: {
+          main: {
+            title: "Main",
+            params: { names: { kind: "string" } },
+            root: "f",
+            elements: { f: { type: "PageFrame", props: { pageId: framePageId, ...page } } },
+          },
+        },
+        defaultPage: "main",
+      });
+      const names = { $state: "/route/params/names" };
+      const bridgeCases: [string, Json, string, RegExp?][] = [
+        [
+          "a pure element's frame cannot run actions",
+          bridge({}, { mode: "pure", props: { actions: ["run"] } }),
+          "elements.frame.elements.f.props.actions",
+        ],
+        [
+          "a pure element's frame cannot expose app state outside its props",
+          bridge({}, { mode: "pure", props: { expose: ["/queries/allNotes/data"] } }),
+          "elements.frame.elements.f.props.expose.0",
+        ],
+        [
+          "a bound element's frame cannot call a task action",
+          bridge({}, { mode: "bound", props: { actions: ["work"] } }),
+          "elements.frame.elements.f.props.actions.0",
+        ],
+        [
+          "actions as an expression are rejected",
+          bridge({ actions: names }),
+          "pages.main.elements.f.props.actions",
+        ],
+        [
+          "expose as an expression is rejected",
+          bridge({ expose: names }),
+          "pages.main.elements.f.props.expose",
+        ],
+        [
+          "a bound element's actions as an expression are rejected",
+          bridge({}, { mode: "bound", props: { actions: names } }),
+          "elements.frame.elements.f.props.actions",
+        ],
+        [
+          "an inherited Object property is not an app action",
+          bridge({ actions: ["constructor"] }),
+          "pages.main.elements.f.props.actions.0",
+          /unknown app action "constructor"/,
+        ],
+      ];
+      for (const [label, definition, path, message] of bridgeCases) {
+        response = await ctx.api("POST", "/api/apps", {
+          body: { name: `E2E app context bridge bad ${ctx.nonce}`, definition },
+        });
+        expectStatus(response, [400], label);
+        const issues = asRecords(response.json, "issues");
+        expect(
+          issues.some(
+            (found) => found.path === path && (!message || message.test(String(found.message))),
+          ),
+          `${label}: expected ${path}, got ${JSON.stringify(issues).slice(0, 400)}`,
+        );
+      }
+      response = await ctx.api("POST", "/api/apps", {
+        body: {
+          name: `E2E app context bridge ok ${ctx.nonce}`,
+          definition: bridge(
+            {},
+            { mode: "bound", props: { actions: ["run"], expose: ["/queries/allNotes/data"] } },
+          ),
+        },
+      });
+      expectStatus(
+        response,
+        [201],
+        "a bound exported element's frame takes script actions and query reads",
+      );
+      created.push(String(asRecord(asRecord(response.json).app).id));
+
       // ── The served SDK ──────────────────────────────────────────────────────
       response = await ctx.api("POST", "/api/pages", {
         agentId: owner,
