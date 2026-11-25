@@ -1,6 +1,7 @@
-import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "./db";
+import { getSwarmConfigs, upsertSwarmConfig } from "./db";
 import { wasDbCreatedThisBoot } from "./db/runtime";
 import { DB_RETENTION_TABLES } from "./db-retention";
+import { getStorage } from "./storage";
 
 /**
  * New-install seed: store each table's `newInstallDefault` as a global
@@ -19,9 +20,9 @@ export async function seedDbRetentionDefaults(
   isNewInstall: boolean = wasDbCreatedThisBoot(),
 ): Promise<string[]> {
   if (!isNewInstall) return [];
-  const seeded: string[] = [];
   // One transaction: a failure must not leave a partial set that no later boot completes.
-  await getDbClient().transaction(async () => {
+  const seeded = await getStorage().transaction(async () => {
+    const written: string[] = [];
     for (const table of DB_RETENTION_TABLES) {
       // Presence, not truthiness: an empty or blank env value is the operator's
       // explicit "off" and must not be replaced by a deleting default.
@@ -34,8 +35,9 @@ export async function seedDbRetentionDefaults(
         value: String(table.newInstallDefault),
         description: `New-install default: ${table.table} retention. Rows past it are permanently deleted. Delete this entry to turn the sweep off.`,
       });
-      seeded.push(`${table.envKey}=${table.newInstallDefault}`);
+      written.push(`${table.envKey}=${table.newInstallDefault}`);
     }
+    return written;
   });
   if (seeded.length > 0) {
     console.log(

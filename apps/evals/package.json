@@ -16,8 +16,8 @@
     "@desplega/model-catalog": "workspace:*",
     "@libsql/client": "^0.18.0",
     "@openrouter/ai-sdk-provider": "^2.10.0",
-    "ai": "^6.0.331",
-    "e2b": "2.63.0",
+    "ai": "^6.0.333",
+    "e2b": "2.64.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

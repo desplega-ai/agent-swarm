@@ -62,6 +62,15 @@ It runs deterministic HTTP and MCP scenarios with simulated agents. It does not 
 The runner discovers route, MCP tool and workflow node-type coverage from the running server.
 It writes `./e2e-results.json` by default.
 
+`bun run e2e --only storage-recovery` recovers an acknowledged write from a historical SQLite database and its WAL after an API crash.
+`bun run e2e --engine postgres --only storage-recovery` also restores a live PostgreSQL backup into a fresh database.
+It checks decryption with the saved key and verifies that the API releases its original connections.
+Set `E2E_POSTGRES_URL` to a disposable PostgreSQL 16 server with pgvector. Put its matching `pg_dump` and `pg_restore` clients on `PATH`.
+With `--engine postgres`, the runner migrates one template database (`e2e_tpl_*`) per run and clones it for each API boot. Boots that run `db-copy` get an empty database. The runner drops the template at the end of the run.
+
+To verify a built API image, run `bash scripts/smoke-api-storage.sh <local-api-image>`.
+It writes a task on each engine, replaces both API containers, and reads the tasks from their original volumes.
+
 `bun run e2e --strict` is the CI contract: it fails when any route operation, MCP tool or
 workflow node type the server exposes is neither covered nor excluded with a reason in
 `scripts/e2e/coverage-manifest.json`, when an exclusion is stale or dead, or when a pinned

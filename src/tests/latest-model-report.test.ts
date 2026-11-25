@@ -24,6 +24,7 @@ type ReportedModel = { model: string; source: string };
 async function runTask(
   claim: { resolvedModel?: string; modelSource?: string; modelTier?: "smol" },
   agentConfigModel = CONFIG,
+  actualModel?: string,
 ): Promise<ReportedModel[]> {
   const reports: ReportedModel[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -49,7 +50,7 @@ async function runTask(
         totalCostUsd: 0,
         inputTokens: 1,
         outputTokens: 1,
-        model: config.model,
+        model: actualModel ?? config.model,
         durationMs: 1,
         numTurns: 1,
         isError: false,
@@ -93,26 +94,34 @@ async function runTask(
   return reports;
 }
 
-describe("latest model source across the initial, result and final reports", () => {
+describe("Pi latest model source across the result and final reports", () => {
+  test("reports only the model the Pi session ran when it differs from the resolved model", async () => {
+    const actual = "openrouter/google/gemini-3-flash-preview";
+    const reports = await runTask(
+      { resolvedModel: RESOLVED, modelSource: "tier-default" },
+      CONFIG,
+      actual,
+    );
+    expect(reports.map((report) => report.model)).toEqual([actual, actual]);
+  });
+
   test.each([
     "tier-default",
     "tier-config",
     "worker-env",
     "profile:task",
     "profile:tier-alias",
-  ])("claim source %s stays task in all three reports", async (modelSource) => {
+  ])("claim source %s stays task in both reports", async (modelSource) => {
     const reports = await runTask({ resolvedModel: RESOLVED, modelSource });
     expect(reports.map((r) => [r.model, r.source])).toEqual([
-      [RESOLVED, "task"],
       [RESOLVED, "task"],
       [RESOLVED, "task"],
     ]);
   });
 
-  test("a tier resolved only locally (no server resolution) stays task in all three reports", async () => {
+  test("a tier resolved only locally (no server resolution) stays task in both reports", async () => {
     const reports = await runTask({ modelTier: "smol" });
-    expect(reports).toHaveLength(3);
-    expect(reports.map((r) => r.source)).toEqual(["task", "task", "task"]);
+    expect(reports.map((r) => r.source)).toEqual(["task", "task"]);
   });
 
   test("the agent default profile is never task-selected: custom when it differs from the agent config", async () => {
@@ -123,14 +132,12 @@ describe("latest model source across the initial, result and final reports", () 
     expect(reports.map((r) => [r.model, r.source])).toEqual([
       [RESOLVED, "custom"],
       [RESOLVED, "custom"],
-      [RESOLVED, "custom"],
     ]);
   });
 
   test("the agent default profile reports agent_config when it matches the agent config", async () => {
     const reports = await runTask({ resolvedModel: CONFIG, modelSource: "profile:agent-default" });
     expect(reports.map((r) => [r.model, r.source])).toEqual([
-      [CONFIG, "agent_config"],
       [CONFIG, "agent_config"],
       [CONFIG, "agent_config"],
     ]);

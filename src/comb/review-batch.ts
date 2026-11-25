@@ -8,7 +8,8 @@
  * account.
  */
 
-import { claimKv, deleteKv, getDbClient, getKv, getLeadAgent, upsertKv } from "../be/db";
+import { getStorage } from "@/be/storage";
+import { claimKv, deleteKv, getKv, getLeadAgent, upsertKv } from "../be/db";
 import { findUserById } from "../be/users";
 import {
   type AgentFsComment,
@@ -332,7 +333,7 @@ async function claimComments(
   candidates: CommentRead[],
   claim: string,
 ): Promise<{ won: CommentRead[]; lost: Array<{ id: string; entry: KvEntry | null }> }> {
-  return await getDbClient().transaction(async () => {
+  return await getStorage().transaction(async () => {
     const won: CommentRead[] = [];
     const lost: Array<{ id: string; entry: KvEntry | null }> = [];
     for (const read of candidates) {
@@ -362,7 +363,7 @@ async function settleClaims(
 ): Promise<void> {
   const settled = await Promise.allSettled(
     ids.map((id) =>
-      getDbClient().transaction(async () => {
+      getStorage().transaction(async () => {
         const entry = await getKv(SENT_KV_NAMESPACE, id);
         if (entry && claimToken(entry) !== claim) return false;
         if (next) {
@@ -457,7 +458,7 @@ async function renderTaskText(
     const comment = (thread as AgentFsCommentThread).comment;
     const path = combPath(comment.path);
     const quote = comment.quote?.exact ?? comment.quotedContent;
-    const block = resolveTemplate("comb.review.comment", {
+    const block = await resolveTemplate("comb.review.comment", {
       comment_id: comment.id,
       author: comment.authorDisplayName
         ? `${oneLine(comment.authorDisplayName)} (agent-fs user ${comment.author})`
@@ -473,7 +474,7 @@ async function renderTaskText(
     blocks.push(block.text);
   }
   const scopePath = combPath(input.scopePath);
-  const batch = resolveTemplate("comb.review.batch", {
+  const batch = await resolveTemplate("comb.review.batch", {
     comment_count: reads.length,
     scope_path: scopePath,
     scope_url: combUrl(input, scopePath),

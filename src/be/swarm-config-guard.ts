@@ -2,6 +2,7 @@ import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
 import { parseTelemetryRanking, TELEMETRY_RANKING_KEY } from "../ranking/telemetry-ranking";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
+import { SLACK_WORKFLOW_BOT_IDS_KEY, validateSlackWorkflowBotIds } from "../slack/workflow-bots";
 import { ProviderNameSchema } from "../types";
 import {
   UI_SPEC_SCRIPT_ACTIONS_KEY,
@@ -93,6 +94,13 @@ const RESERVED_KEYS = new Set([
   "OPENCODE_SDK_PATH",
   // Every script run token goes to this base URL; a config writer must not redirect it.
   "SCRIPT_API_BASE_URL",
+  // Storage engine selection and its credentials (Postgres decisions D1, D10):
+  // deployment env only, never a config row.
+  "DATABASE_URL",
+  "DATABASE_QUERY_URL",
+  "DATABASE_PASSWORD",
+  // Locates the encryption key file before any config row is read (D2).
+  "SWARM_DATA_DIR",
 ]);
 
 /**
@@ -732,7 +740,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SLACK_RENDER_V2_TASK_TREE_ENABLED",
     "SLACK_REPLY_FOOTER_ENABLED",
     "SLACK_RENDER_V2_DELEGATION",
+    "SLACK_RENDER_V2_QUIET_LEAD_THREADS",
     "SLACK_BLOCK_EXTERNAL_CHANNELS",
+    "SLACK_STOP_BUTTON_ENABLED",
     "GITHUB_DISABLE",
     "GITLAB_DISABLE",
     "AZURE_DEVOPS_DISABLE",
@@ -755,6 +765,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "BUDGET_ADMISSION_DISABLED",
     "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
     "OTEL_TRACE_POLL",
+    "OTEL_TRACE_DB_STATEMENTS",
     "OTEL_EXPORT_API_LOGS",
     "ANONYMIZED_TELEMETRY",
     "IMPROVEMENTS_ENABLED",
@@ -773,6 +784,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
   ...enumValidator("SLACK_SESSION_MIRROR", ["off", "reply", "both"]),
+  [SLACK_WORKFLOW_BOT_IDS_KEY]: validateSlackWorkflowBotIds,
   ...shortcodeValidators([
     "SLACK_REACTION_ACCEPTED",
     "SLACK_REACTION_BUFFERED",

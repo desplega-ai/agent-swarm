@@ -38,6 +38,22 @@ const liveCatalog: LiveModelsCatalog = {
 };
 
 describe("agents list model display", () => {
+  test("shows the actual Pi model and retains the configured model", () => {
+    expect(
+      getAgentModelDisplay(
+        "openrouter/acme/requested",
+        "openrouter/acme/actual",
+        undefined,
+        "custom",
+        true,
+      ),
+    ).toMatchObject({
+      primary: "openrouter/acme/actual",
+      configured: "openrouter/acme/requested",
+      showingLastUsed: true,
+    });
+  });
+
   test("shows configured and last-used models when they diverge", () => {
     const display = getAgentModelDisplay("claude-opus-4-7", "claude-sonnet-4-6");
 
@@ -83,11 +99,21 @@ describe("agents list model display", () => {
     ).toBe(true);
   });
 
-  test("shows configured model alone before an agent reports a last-used model", () => {
-    const display = getAgentModelDisplay("claude-opus-4-7", null);
+  test.each([
+    false,
+    true,
+  ])("shows the configured model before a result when preferLastUsed=%s", (preferLastUsed) => {
+    const display = getAgentModelDisplay(
+      "claude-opus-4-7",
+      undefined,
+      undefined,
+      undefined,
+      preferLastUsed,
+    );
 
     expect(display.primary).toBe("claude-opus-4-7");
     expect(display.diverged).toBe(false);
+    expect(display.showingLastUsed).toBeUndefined();
   });
 
   test("presents known provider-prefixed model ids as readable labels", () => {

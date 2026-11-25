@@ -13,8 +13,8 @@ CI runs strict.
 ```bash
 bun run e2e                       # every scenario, coverage report, no gate
 bun run e2e --strict              # the full contract, one process
-bun run e2e --shard 2/4           # one fixed band, as each CI shard runs it
-bun scripts/e2e/merge.ts --strict shard-1.json shard-2.json shard-3.json shard-4.json  # gate the union
+bun run e2e --shard 2/6           # one fixed band, as each CI shard runs it
+bun scripts/e2e/merge.ts --strict shard-1.json shard-2.json shard-3.json shard-4.json shard-5.json shard-6.json  # gate the union
 bun run e2e --coverage            # also write lcov per API process to ./e2e-coverage/
 bun scripts/e2e/diff-coverage.ts  # changed API lines (vs origin/main) no scenario runs
 bun run e2e --only <name>,<name>  # while authoring
@@ -33,7 +33,7 @@ This file is the authoring guide.
 | Path | Role |
 |---|---|
 | `run.ts` | Entry point. Boots mocks + SUT, runs scenarios in `order`, reruns failures once on a fresh SUT, computes coverage, applies gates, writes reports. |
-| `shard.ts`, `merge.ts` | `--shard i/4` bands (`SHARD_CUTS`) and the raw coverage observations a shard writes; `merge.ts` unions them and applies `--strict` and the minimums once. |
+| `shard.ts`, `merge.ts` | `--shard i/6` bands (`SHARD_CUTS`) and the raw coverage observations a shard writes; `merge.ts` unions them and applies `--strict` and the minimums once. |
 | `rerun.ts` | Rerun plan (`needs`, transitively) and how two attempts settle into one result (`flaky` or `fail`). |
 | `quarantine.ts`, `quarantine.json` | Quarantined scenarios: they run and report but cannot fail the run. Ships empty. |
 | `sut.ts` | Spawns `bun run src/http.ts` with every capability, `CHAT_SDK_ENABLED=true`, a 1 s Slack watcher tick (`SLACK_TASK_WATCHER_INTERVAL_MS=1000`, the server default is 10 s), and mock endpoints. External integrations remain disabled until a scenario configures a mock. |
@@ -43,7 +43,7 @@ This file is the authoring guide.
 | `agent-sim.ts` | Simulated agent: polls `/api/poll` and settles tasks over HTTP. |
 | `http.ts` | `ctx.api` client, assertions (`expect`, `expectStatus`, `asRecord`, `asRecords`, `asString`), call recorder with latency. |
 | `mcp.ts` | `ctx.connectMcp(agentId)` over Streamable HTTP, tool-call recorder. |
-| `db.ts` | The only file allowed to import `bun:sqlite`. Read-only. |
+| `db.ts` | Owns `bun:sqlite`. Provides read-only assertions and prepares offline fixtures. |
 | `coverage.ts` | Route, tool and node-type coverage, manifest exclusions, flows, latency, the strict contract. |
 | `coverage-manifest.json` | Deliberate exclusions with reasons, pinned flows. |
 | `report.ts` | CLI options, result JSON and Markdown summary. |
@@ -82,8 +82,9 @@ Rules, enforced by the registry, the boundary check, or review:
    exports no scenario goes in `NON_SCENARIO_FILES` in `scenarios/registry.ts`.
 2. **Black box only.** Import from `../http`, `../mcp`, `../run`, `../report`, Bun and node
    builtins. Never from `src/`, `apps/`, `packages/`. `bun:sqlite` belongs to `db.ts`.
-3. **Seed through the API.** `ctx.db` is read-only and exists for assertions
-   (`SELECT ... FROM ...`). A write throws.
+3. **Seed through the API.** Use the read-only `ctx.db` for assertions. For state the API
+   cannot create, prepare a separate database fixture before boot. For example, the metrics
+   scenario gives `ctx.startFixtureSut` a fixture with historical task timestamps.
 4. **Assert the documented contract.** Check the status code `openapi.json` declares, the
    response shape, and the persisted effect. A `2xx` with no shape check is a smoke test,
    not coverage. Negative paths (401, 403, 404, 400 on bad input) are part of the contract.
@@ -136,23 +137,26 @@ routes only it would have reached uncovered, so the strict gate can still name t
 | 400-499 | scripts: scripts, script runs, connections, kv, db-query, internal script-run routes |
 | 500-599 | knowledge: memory, skills, prompt templates, pages, assets, apps, rooms |
 | 600-699 | platform: users, invites, keys, oauth, mcp servers, config, integrations, webhooks, repos, trackers, models, pricing, extensions, runtime, fs |
+| 9000-9499 | storage-engine parity: upgrade from a base-commit database, divergence, trigger and stress scenarios |
 | 9000+ | Reserved for ordering-sensitive tail scenarios |
 
 ### Shards
 
-CI splits the run into four bands by `order`, cut at 130, 140 and 190 (`SHARD_CUTS` in
-`shard.ts`): shard 1 runs below 130, shard 2 runs 130 up to 140, shard 3 runs 140 up to 190,
-shard 4 runs 190 on. Each band boots its own API process and database, so a band starts from
-a fresh server. The first two cuts sit where the Slack renderer flags change for the rest of
-a process: `SLACK_RENDER_V2` goes on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. The cut
-at 190 balances the bands: `slack-delegation-band-entry` (190) sets both flags again, so
-shard 4 runs in the state it had inside shard 3. Two rules follow:
+CI splits the run into six bands by `order`, cut at 130, 140, 190, 500 and 9006 (`SHARD_CUTS`
+in `shard.ts`): shard 1 runs below 130, shard 2 runs 130 up to 140, shard 3 runs 140 up to
+190, shard 4 runs 190 up to 500, shard 5 runs 500 up to 9006, shard 6 runs 9006 on. Each band
+boots its own API process and database, so a band starts from a fresh server. The first two
+cuts sit where the Slack renderer flags change for the rest of a process: `SLACK_RENDER_V2`
+goes on at 130 and `SLACK_RENDER_V2_DELEGATION` at 140. The cuts at 190, 500 and 9006 balance
+the bands by Postgres time. A band-entry scenario sits at each of them
+(`slack-delegation-band-entry`, `-knowledge` and `-storage`) and sets both flags again, so
+shards 4 to 6 run in the state they had inside shard 3. Two rules follow:
 
 - A scenario's `needs` must sit in its own band. `--shard` refuses to start when one crosses
   a cut.
 - A scenario at the start of a band must set the flag state it asserts itself. Placing a
   scenario that relied on an earlier band's leftovers just after a cut breaks it in CI only.
-  Check with `bun run e2e --shard i/4 --only <name>` before you pick an order near a cut.
+  Check with `bun run e2e --shard i/6 --only <name>` before you pick an order near a cut.
 
 ## The scenario context
 
@@ -167,6 +171,7 @@ shard 4 runs in the state it had inside shard 3. Two rules follow:
 | `ctx.recordHttpCall(method, path, status)` | Count a raw `fetch`, WebSocket upgrade or SSE request toward route coverage. |
 | `ctx.sutLog()` | The SUT's output so far. Take `.length` before a step and slice after it to read only what the step logged. |
 | `ctx.restartSut({ env })` | Restart the API process, keeping db, port, key, mocks. For durability scenarios. `env` adds variables to that one process (a test-only crash point); the next restart drops them. |
+| `ctx.startDataCopy({ env })` | A second API on a new SQLite file (`source`). `copy()` stops it, runs `agent-swarm db-copy` into a new Postgres database and boots an API on the copy (`target`). It also returns read-only `sourceDb` and `targetDb`, `restartTarget(env)` (a later start of the API on the copy, for example with `POSTGRES_MIGRATIONS_DIR` set to a later chain) and `targetLog()`. Needs `E2E_POSTGRES_URL` on both engines. See `data-copy` and `data-copy-later-release`. |
 | `ctx.nonce` | Per-run random hex. Put it in every name. |
 | `runCli(args, { env, cwd, stdin, timeoutMs, whileRunning })` (import from `../cli`) | Not on `ctx`: runs `bun run src/cli.tsx <args>` with a temp HOME and cwd and returns `{ exitCode, stdout, stderr, cwd, home }`. Check the exit code, the output and the files under `cwd`. A run counts its command covered unless it only asked for `--help`. `whileRunning` is for a command that serves until stopped (`api`): it runs alongside, then the child gets SIGTERM. |
 | `ctx.log`, `ctx.markThread` | Console output; Slack visual thread marks. A scenario that proves a visible Slack change joins a visuals group (`groups: ["visuals-v2"]`, `"visuals-legacy"`) and marks each thread a reviewer must see: the Slack Visuals PR comment and the PR's `## Before / after` frames come from those marks. On the Chat SDK mock, use `flip.ctx.markThread` (that mock has its own journal). Mark the thread root, with a label that matches `^[a-z0-9-]+$`. |
@@ -209,9 +214,13 @@ After the scenarios, `coverage.ts`:
    that is covered anyway is **stale**; one that matches nothing is **dead**. Both fail strict.
 4. Reads every `stateSurfaces` entry: one read-only `SELECT ... AS value` on the SUT database
    (task statuses, workflow run and step statuses, script run statuses, script step types,
-   script scopes, fs modes, executors). Every value in the declared universe must have been
+   script scopes, fs modes, executors). A scenario can call `ctx.captureStateSurface(name)`
+   to run the same query while a transient state is held. The report includes both reads.
+   Every value in the declared universe must have been
    produced unless excluded with a reason; a value in the database that the universe does not
-   list is a new engine state and fails strict until it is declared.
+   list is a new engine state and fails strict until it is declared. A state exclusion marked
+   `"transient": true` (a state the engine leaves within one heartbeat or poll) is never
+   stale: a final read, or a scenario rerun on a fresh database, may catch it by chance.
 5. Checks `flows`: each named scenario must exist and have passed, and every scenario in the
    registry must belong to at least one flow.
 6. Runs `bun run src/cli.tsx help` for the CLI command universe and counts the commands

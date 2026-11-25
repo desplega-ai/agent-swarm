@@ -344,6 +344,17 @@ export class RequestBodyTooLargeError extends Error {
   }
 }
 
+/**
+ * The request body is not valid JSON (`parseBody`). The `route()` factory
+ * answers it with 400. The message does not quote the body.
+ */
+export class RequestBodyParseError extends Error {
+  constructor() {
+    super("Request body is not valid JSON");
+    this.name = "RequestBodyParseError";
+  }
+}
+
 function requestContentLength(req: IncomingMessage): number | undefined {
   const raw = req.headers["content-length"];
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -353,7 +364,8 @@ function requestContentLength(req: IncomingMessage): number | undefined {
 }
 
 /**
- * Parse a JSON request body with an optional byte cap.
+ * Parse a JSON request body with an optional byte cap. A body that is not
+ * valid JSON rejects with `RequestBodyParseError`.
  *
  * On overflow, the request keeps draining while the caller receives the
  * rejection. This preserves keep-alive connections for the next request.
@@ -413,8 +425,8 @@ export async function parseBody<T = unknown>(
       }
       try {
         resolve(JSON.parse(raw) as T);
-      } catch (error) {
-        reject(error);
+      } catch {
+        reject(new RequestBodyParseError());
       }
     };
 

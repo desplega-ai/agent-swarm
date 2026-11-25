@@ -89,7 +89,12 @@ export async function handleLinearWebhook(
   }
 
   // 3. Parse and dispatch
-  const event = JSON.parse(rawBody) as Record<string, unknown>;
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(rawBody) as Record<string, unknown>;
+  } catch {
+    return { status: 400, body: { error: "Request body is not valid JSON" } };
+  }
 
   // Fire-and-forget for heavy work
   processWebhookEvent(event, deliveryId ?? undefined).catch((err) => {

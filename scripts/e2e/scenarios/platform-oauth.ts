@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -205,8 +206,7 @@ export const platformOauthApps: Scenario = {
       );
       expect(!created.text.includes(clientSecret), "the client secret never leaves the server");
       const stored = ctx.db.get<{ clientSecret: string }>(
-        "SELECT clientSecret FROM oauth_apps WHERE id = ?",
-        [appId],
+        sql`SELECT "clientSecret" FROM oauth_apps WHERE id = ${appId}`,
       );
       expect(
         stored && stored.clientSecret !== clientSecret,
@@ -358,8 +358,7 @@ export const platformOauthApps: Scenario = {
         "the authorize url never carries the client secret",
       );
       const pending = ctx.db.get<{ appId: string; label: string; flow: string }>(
-        "SELECT appId, label, flow FROM oauth_pending WHERE state = ?",
-        [work.state],
+        sql`SELECT "appId", label, flow FROM oauth_pending WHERE state = ${work.state}`,
       );
       expect(
         pending?.appId === appId && pending.label === "work" && pending.flow === "generic",
@@ -779,7 +778,7 @@ export const platformOauthApps: Scenario = {
         "delete an authorization twice",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM oauth_authorizations WHERE id = ?", [workId]) === null,
+        ctx.db.get(sql`SELECT 1 AS one FROM oauth_authorizations WHERE id = ${workId}`) === null,
         "the authorization row is gone",
       );
 
@@ -789,11 +788,12 @@ export const platformOauthApps: Scenario = {
         "delete the app",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM oauth_apps WHERE id = ?", [appId]) === null,
+        ctx.db.get(sql`SELECT 1 AS one FROM oauth_apps WHERE id = ${appId}`) === null,
         "the app row is gone",
       );
       expect(
-        ctx.db.get("SELECT 1 AS one FROM oauth_authorizations WHERE appId = ?", [appId]) === null,
+        ctx.db.get(sql`SELECT 1 AS one FROM oauth_authorizations WHERE "appId" = ${appId}`) ===
+          null,
         "deleting an app deletes its authorizations",
       );
       expectStatus(
@@ -897,9 +897,9 @@ export const platformOauthLocks: Scenario = {
     const owner = String(asRecord(first.json).owner);
     expect(owner.length > 0, "acquire returns an owner token");
     expect(
-      ctx.db.get<{ owner: string }>("SELECT owner FROM oauth_refresh_locks WHERE lockKey = ?", [
-        key,
-      ])?.owner === owner,
+      ctx.db.get<{ owner: string }>(
+        sql`SELECT owner FROM oauth_refresh_locks WHERE "lockKey" = ${key}`,
+      )?.owner === owner,
       "the lock is persisted",
     );
     const contended = await ctx.api("POST", `/api/oauth/refresh-locks/${key}`, {

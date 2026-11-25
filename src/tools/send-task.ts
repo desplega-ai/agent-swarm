@@ -8,7 +8,6 @@ import {
   findExistingLinearTrackerContextWork,
   getActiveTaskCount,
   getAgentById,
-  getDbClient,
   getLeadAgent,
   getTaskById,
   getUserById,
@@ -19,6 +18,7 @@ import {
 import { modelGroupRefError, modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
+import { getStorage } from "@/be/storage";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { can } from "@/rbac";
 import {
@@ -672,7 +672,7 @@ export async function sendTaskHandler(
       : toolErr(guard.message, { data: guardData });
   }
 
-  const created = getDbClient().transaction(async () => {
+  const created = getStorage().transaction(async () => {
     // Authoritative re-check: the reads above are separated from the INSERT by
     // the whole handler, so only a guard inside this transaction can see a
     // concurrent send-task's committed task.
@@ -681,17 +681,19 @@ export async function sendTaskHandler(
 
     // This transaction already checked the tracker key, excluding the caller's
     // lineage. The creation guard would otherwise match work in that lineage.
-    if (isLinearTrackerContextKey(effectiveParentTask?.contextKey)) {
-      taskOptions.bypassTrackerContextDedup = true;
-    }
+    // A copy, not a write to taskOptions: a replayed attempt (decision D6) must
+    // run its guards on the caller's options.
+    const options = isLinearTrackerContextKey(effectiveParentTask?.contextKey)
+      ? { ...taskOptions, bypassTrackerContextDedup: true }
+      : taskOptions;
 
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
-    const targetAgentId = taskOptions.offeredTo ?? taskOptions.agentId ?? undefined;
+    const targetAgentId = options.offeredTo ?? options.agentId ?? undefined;
     if (!targetAgentId) {
-      const newTask = await createTaskExtended(taskDescription, taskOptions);
+      const newTask = await createTaskExtended(taskDescription, options);
       await transferTrackerSyncToResumeChild({
-        parentTaskId: taskOptions.parentTaskId,
-        taskType: taskOptions.taskType,
+        parentTaskId: options.parentTaskId,
+        taskType: options.taskType,
         child: newTask,
       });
 
@@ -722,7 +724,7 @@ export async function sendTaskHandler(
       return { success: false, message: extensionAgentAssignmentError(agent) };
     }
 
-    if (taskOptions.routingAffinity?.leadOnly && !agent.isLead) {
+    if (options.routingAffinity?.leadOnly && !agent.isLead) {
       return {
         success: false,
         message: `Lead-only task requires a Lead agent; "${agent.name}" is not a Lead.`,
@@ -730,7 +732,7 @@ export async function sendTaskHandler(
     }
 
     // For direct assignment (not offer), check if agent has capacity
-    if (ctx.kind !== "user" && !taskOptions.offeredTo && !(await hasCapacity(targetAgentId))) {
+    if (ctx.kind !== "user" && !options.offeredTo && !(await hasCapacity(targetAgentId))) {
       const activeCount = await getActiveTaskCount(targetAgentId);
       return {
         success: false,
@@ -738,12 +740,12 @@ export async function sendTaskHandler(
       };
     }
 
-    if (taskOptions.offeredTo) {
+    if (options.offeredTo) {
       // Offer the task to the agent (they must accept/reject)
-      const newTask = await createTaskExtended(taskDescription, taskOptions);
+      const newTask = await createTaskExtended(taskDescription, options);
       await transferTrackerSyncToResumeChild({
-        parentTaskId: taskOptions.parentTaskId,
-        taskType: taskOptions.taskType,
+        parentTaskId: options.parentTaskId,
+        taskType: options.taskType,
         child: newTask,
       });
 
@@ -755,10 +757,10 @@ export async function sendTaskHandler(
     }
 
     // Direct assignment
-    const newTask = await createTaskExtended(taskDescription, taskOptions);
+    const newTask = await createTaskExtended(taskDescription, options);
     await transferTrackerSyncToResumeChild({
-      parentTaskId: taskOptions.parentTaskId,
-      taskType: taskOptions.taskType,
+      parentTaskId: options.parentTaskId,
+      taskType: options.taskType,
       child: newTask,
     });
 

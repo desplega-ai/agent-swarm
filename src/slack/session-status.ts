@@ -24,7 +24,7 @@ import { getSlackApp } from "./app";
  *  - It works in channel threads as well as DMs, and creates the session on
  *    first use.
  *  - Slack shows a Stop button only if the app subscribes to
- *    `agent_session_stopped`. The manifest does not, so there is none.
+ *    `agent_session_stopped`, an opt-in step (see `session-stop.ts`).
  *
  * The indicator is only ever a nicety. Every failure is absorbed here: the
  * thread keeps the reaction and the tree message (DMs also keep the legacy
@@ -432,12 +432,26 @@ export async function reconcileSlackSessionStatus(input: {
   client?: WebClient;
   budget?: StatusBudget;
   outcomeDelivered?: boolean;
+  /** A person clicked Stop: Slack holds `processing` whatever this process last recorded. */
+  stopped?: boolean;
 }): Promise<void> {
   try {
     const client = input.client ?? getSlackApp()?.client;
     if (!client) return;
     const { channelId, threadTs } = input;
-    await withThreadLock(threadKey(channelId, threadTs), async () => {
+    const key = threadKey(channelId, threadTs);
+    await withThreadLock(key, async () => {
+      const entry = threads.get(key);
+      if (input.stopped && !entry?.refused) {
+        threads.set(key, {
+          status: "processing",
+          setAt: 0,
+          failures: entry?.failures ?? 0,
+          retryAt: 0,
+          refused: false,
+          uncertain: true,
+        });
+      }
       const desired = await desiredStatus(channelId, threadTs);
       const result = await applyStatus(client, channelId, threadTs, desired, input.budget);
       if (input.outcomeDelivered && result === "unavailable") {

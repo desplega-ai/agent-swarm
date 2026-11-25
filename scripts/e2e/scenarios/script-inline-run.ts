@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
@@ -117,6 +118,7 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
           "api",
           "boards",
           "caller",
+          "db",
           "fs",
           "logger",
           "mcp",
@@ -167,8 +169,7 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
       `scratch script metadata is wrong: ${JSON.stringify(scratch)}`,
     );
     const row = ctx.db.get<ScratchRow>(
-      "SELECT isScratch, typeChecked, scopeId FROM scripts WHERE name = ?",
-      [slug],
+      sql`SELECT "isScratch", "typeChecked", "scopeId" FROM scripts WHERE name = ${slug}`,
     );
     expect(
       row?.isScratch === 1 && row.typeChecked === 0 && row.scopeId === agentId,
@@ -178,9 +179,9 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
     // ── the same source again reuses the scratch script instead of adding another ──
     const again = await runScript(ctx, agentId, { source, args: { n: 1, marker }, intent });
     expect(asRecord(again.autoSaved).slug === slug, "same source must map to the same slug");
-    const count = ctx.db.get<{ n: number }>("SELECT count(*) AS n FROM scripts WHERE name = ?", [
-      slug,
-    ]);
+    const count = ctx.db.get<{ n: number }>(
+      sql`SELECT count(*) AS n FROM scripts WHERE name = ${slug}`,
+    );
     expect(count?.n === 1, "re-running the same inline source duplicated the scratch script");
 
     // ── a scratch script runs by name ──
@@ -190,8 +191,7 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
 
     // ── every inline run lands in the Script Runs list as an inline run ──
     const inlineRuns = ctx.db.query<RunRow>(
-      "SELECT status, kind, scriptName, error FROM script_runs WHERE agentId = ? AND kind = 'inline'",
-      [agentId],
+      sql`SELECT status, kind, "scriptName", error FROM script_runs WHERE "agentId" = ${agentId} AND kind = 'inline'`,
     );
     expect(
       inlineRuns.length >= 3 && inlineRuns.every((entry) => entry.status === "completed"),
@@ -249,8 +249,7 @@ export default async function (args: { memoryId: string }, ctx: ScriptContext) {
     const failedKv = await ctx.api("GET", `/api/kv/_/script:executions/e2e-idem-fail-${ctx.nonce}`);
     expectStatus(failedKv, [404], "failed run must not write KV");
     const failedRow = ctx.db.get<RunRow>(
-      "SELECT status, kind, scriptName, error FROM script_runs WHERE agentId = ? AND status = 'failed' AND kind = 'inline'",
-      [agentId],
+      sql`SELECT status, kind, "scriptName", error FROM script_runs WHERE "agentId" = ${agentId} AND status = 'failed' AND kind = 'inline'`,
     );
     expect(
       failedRow?.error?.includes("eval_error") && failedRow.error.includes(`boom-${marker}`),

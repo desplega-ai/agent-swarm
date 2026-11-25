@@ -234,7 +234,10 @@ async function metricRun(ctx: ScenarioContext, agentId: string): Promise<void> {
           {
             id: "rows",
             title: "Rows",
-            query: { sql: "SELECT ? AS token, ? AS plain", params: [token, ctx.nonce] },
+            query: {
+              sql: "SELECT CAST($1 AS text) AS token, CAST($2 AS text) AS plain",
+              params: [token, ctx.nonce],
+            },
             viz: { type: "table" },
           },
         ],

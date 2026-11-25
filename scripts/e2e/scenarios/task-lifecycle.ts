@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -67,16 +68,16 @@ export const taskLifecycle: Scenario = {
     expect(finished.status === "completed", "Task did not reach completed status");
     expect(String(finished.output).includes(ctx.nonce), "Task output does not contain the nonce");
 
-    const taskRow = ctx.db.get<{ status: string }>("SELECT status FROM agent_tasks WHERE id = ?", [
-      String(taskId),
-    ]);
+    const taskRow = ctx.db.get<{ status: string }>(
+      sql`SELECT status FROM agent_tasks WHERE id = ${String(taskId)}`,
+    );
     expect(
       taskRow?.status === "completed",
       `agent_tasks row for ${String(taskId)} has status ${taskRow?.status ?? "<missing row>"}`,
     );
-    const agentRow = ctx.db.get<{ id: string }>("SELECT id FROM agents WHERE id = ?", [
-      String(agentId),
-    ]);
+    const agentRow = ctx.db.get<{ id: string }>(
+      sql`SELECT id FROM agents WHERE id = ${String(agentId)}`,
+    );
     expect(agentRow?.id === agentId, `No agents row for the registered worker ${String(agentId)}`);
 
     response = await ctx.api("GET", "/api/tasks?status=completed");
@@ -98,6 +99,28 @@ export const taskLifecycle: Scenario = {
       searchResults.length === 1 && searchResults[0]?.id === taskId,
       "Search did not return exactly the created task",
     );
+
+    // An alert task (obs-lite) is found again by its fingerprint tag.
+    const alertTag = `alert:${ctx.nonce}`;
+    response = await ctx.api("POST", "/api/tasks", {
+      body: { task: `E2E alert ${ctx.nonce}`, source: "alert", tags: ["obs-lite", alertTag] },
+    });
+    expectStatus(response, [201], "create alert task");
+    const alertTaskId = asRecord(response.json).id;
+    expect(asRecord(response.json).source === "alert", "Alert task did not keep source=alert");
+    response = await ctx.api(
+      "GET",
+      `/api/tasks?source=alert&tags=${encodeURIComponent(`${alertTag},unused-${ctx.nonce}`)}`,
+    );
+    expectStatus(response, [200], "filter tasks by source and tag");
+    const tagged = records(response.json, "tasks");
+    expect(
+      tagged.length === 1 && tagged[0]?.id === alertTaskId,
+      "Tag filter did not return exactly the alert task",
+    );
+    response = await ctx.api("GET", `/api/tasks?tags=${encodeURIComponent(`unused-${ctx.nonce}`)}`);
+    expectStatus(response, [200], "filter tasks by an unused tag");
+    expect(records(response.json, "tasks").length === 0, "An unused tag matched a task");
 
     expectStatus(await ctx.api("GET", `/api/agents/${agentId}`), [200], "read agent");
     response = await ctx.api("GET", "/api/agents");

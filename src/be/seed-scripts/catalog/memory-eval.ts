@@ -76,19 +76,24 @@ async function computeBackfillPoint(
   freshDays: number,
   usefulnessThreshold: number,
 ): Promise<DailyPoint> {
-  const w = `datetime('${refDate}','-${days} days')`;
-  const ref = `'${refDate}'`;
-  const freshW = `datetime('${refDate}','-${freshDays} days')`;
+  // Window bounds are bound as ISO text (the format the timestamp columns
+  // store on SQLite, timestamptz on Postgres): midnight UTC of refDate and of
+  // refDate minus `days` / `freshDays`.
+  const refMs = Date.parse(`${refDate}T00:00:00.000Z`);
+  const ref = new Date(refMs).toISOString();
+  const w = new Date(refMs - days * 86_400_000).toISOString();
+  const freshW = new Date(refMs - freshDays * 86_400_000).toISOString();
 
   const axis1TotalRows = rowsToObjects(
     await ctx.swarm.db_query({
-      sql: `SELECT count(*) as cnt FROM agent_tasks t
-            WHERE t.contextKey IS NOT NULL AND t.status = 'completed'
-              AND t.createdAt > ${w} AND t.createdAt <= ${ref}
+      sql: `SELECT count(*) AS cnt FROM agent_tasks t
+            WHERE t."contextKey" IS NOT NULL AND t.status = 'completed'
+              AND t."createdAt" > $1 AND t."createdAt" <= $2
               AND EXISTS (
                 SELECT 1 FROM agent_tasks p
-                WHERE p.contextKey = t.contextKey AND p.id != t.id AND p.createdAt < t.createdAt
+                WHERE p."contextKey" = t."contextKey" AND p.id != t.id AND p."createdAt" < t."createdAt"
               )`,
+      params: [w, ref],
     }),
   );
   const a1Total = Number(axis1TotalRows[0]?.cnt ?? 0);
@@ -97,21 +102,22 @@ async function computeBackfillPoint(
   if (a1Total > 0) {
     const axis1HitRows = rowsToObjects(
       await ctx.swarm.db_query({
-        sql: `SELECT count(DISTINCT mr.taskId) as cnt FROM memory_retrieval mr
-              JOIN agent_memory m ON mr.memoryId = m.id
-              JOIN agent_tasks ct ON mr.taskId = ct.id
-              WHERE ct.contextKey IS NOT NULL AND ct.status = 'completed'
-                AND ct.createdAt > ${w} AND ct.createdAt <= ${ref}
-                AND m.sourceTaskId IS NOT NULL
-                AND m.alpha / nullif(m.alpha + m.beta, 0) > ${usefulnessThreshold}
+        sql: `SELECT count(DISTINCT mr."taskId") AS cnt FROM memory_retrieval mr
+              JOIN agent_memory m ON mr."memoryId" = m.id
+              JOIN agent_tasks ct ON mr."taskId" = ct.id
+              WHERE ct."contextKey" IS NOT NULL AND ct.status = 'completed'
+                AND ct."createdAt" > $1 AND ct."createdAt" <= $2
+                AND m."sourceTaskId" IS NOT NULL
+                AND m.alpha / nullif(m.alpha + m.beta, 0) > $3
                 AND EXISTS (
                   SELECT 1 FROM agent_tasks p
-                  WHERE p.contextKey = ct.contextKey AND p.id = m.sourceTaskId AND p.createdAt < ct.createdAt
+                  WHERE p."contextKey" = ct."contextKey" AND p.id = m."sourceTaskId" AND p."createdAt" < ct."createdAt"
                 )
                 AND EXISTS (
                   SELECT 1 FROM agent_tasks e
-                  WHERE e.contextKey = ct.contextKey AND e.id != ct.id AND e.createdAt < ct.createdAt
+                  WHERE e."contextKey" = ct."contextKey" AND e.id != ct.id AND e."createdAt" < ct."createdAt"
                 )`,
+        params: [w, ref, usefulnessThreshold],
       }),
     );
     a1Hits = Number(axis1HitRows[0]?.cnt ?? 0);
@@ -121,15 +127,17 @@ async function computeBackfillPoint(
     await ctx.swarm.db_query({
       sql: `SELECT
               CASE
-                WHEN m.createdAt > ${freshW} THEN 'fresh'
-                WHEN m.expiresAt IS NOT NULL AND m.expiresAt < ${ref} THEN 'expired'
+                WHEN m."createdAt" > $1 THEN 'fresh'
+                WHEN m."expiresAt" IS NOT NULL AND m."expiresAt" < $2 THEN 'expired'
                 ELSE 'other'
-              END as bucket,
-              count(DISTINCT mr.memoryId) as uniqueMemories
+              END AS bucket,
+              count(DISTINCT mr."memoryId") AS "uniqueMemories"
             FROM memory_retrieval mr
-            JOIN agent_memory m ON mr.memoryId = m.id
-            WHERE mr.retrievedAt > ${w} AND mr.retrievedAt <= ${ref}
-            GROUP BY bucket`,
+            JOIN agent_memory m ON mr."memoryId" = m.id
+            WHERE mr."retrievedAt" > $3 AND mr."retrievedAt" <= $2
+            GROUP BY bucket
+            ORDER BY bucket`,
+      params: [freshW, ref, w],
     }),
   );
 
@@ -146,10 +154,11 @@ async function computeBackfillPoint(
   const storeRows = rowsToObjects(
     await ctx.swarm.db_query({
       sql: `SELECT
-              count(*) as total,
-              sum(CASE WHEN expiresAt IS NULL OR expiresAt > ${ref} THEN 1 ELSE 0 END) as searchable,
-              sum(CASE WHEN expiresAt IS NOT NULL AND expiresAt <= ${ref} THEN 1 ELSE 0 END) as expired
-            FROM agent_memory WHERE createdAt <= ${ref}`,
+              count(*) AS total,
+              sum(CASE WHEN "expiresAt" IS NULL OR "expiresAt" > $1 THEN 1 ELSE 0 END) AS searchable,
+              sum(CASE WHEN "expiresAt" IS NOT NULL AND "expiresAt" <= $1 THEN 1 ELSE 0 END) AS expired
+            FROM agent_memory WHERE "createdAt" <= $1`,
+      params: [ref],
     }),
   );
   const store = storeRows[0] ?? {};
@@ -207,21 +216,25 @@ export default async function memoryEval(args: any, ctx: any) {
   const report: any = { generatedAt: now, days, freshDays, usefulnessThreshold };
 
   // ─── Axis 1: Carry-forward context ───────────────────────────────────
-  const w = `datetime('now','-${days} days')`;
+  // Window cutoffs are bound as ISO text: the format the timestamp columns
+  // store on SQLite (timestamptz on Postgres).
+  const nowMs = Date.parse(now);
+  const w = new Date(nowMs - days * 86_400_000).toISOString();
 
   const axis1FollowUps = rowsToObjects(
     await ctx.swarm.db_query({
-      sql: `SELECT t.id as taskId, t.contextKey
+      sql: `SELECT t.id AS "taskId", t."contextKey"
             FROM agent_tasks t
-            WHERE t.contextKey IS NOT NULL
+            WHERE t."contextKey" IS NOT NULL
               AND t.status = 'completed'
-              AND t.createdAt > ${w}
+              AND t."createdAt" > $1
               AND EXISTS (
                 SELECT 1 FROM agent_tasks prior
-                WHERE prior.contextKey = t.contextKey
+                WHERE prior."contextKey" = t."contextKey"
                   AND prior.id != t.id
-                  AND prior.createdAt < t.createdAt
+                  AND prior."createdAt" < t."createdAt"
               )`,
+      params: [w],
     }),
   );
 
@@ -231,27 +244,28 @@ export default async function memoryEval(args: any, ctx: any) {
   if (axis1Total > 0) {
     const axis1Hits = rowsToObjects(
       await ctx.swarm.db_query({
-        sql: `SELECT DISTINCT mr.taskId
+        sql: `SELECT DISTINCT mr."taskId"
               FROM memory_retrieval mr
-              JOIN agent_memory m ON mr.memoryId = m.id
-              JOIN agent_tasks current_task ON mr.taskId = current_task.id
-              WHERE current_task.contextKey IS NOT NULL
+              JOIN agent_memory m ON mr."memoryId" = m.id
+              JOIN agent_tasks current_task ON mr."taskId" = current_task.id
+              WHERE current_task."contextKey" IS NOT NULL
                 AND current_task.status = 'completed'
-                AND current_task.createdAt > ${w}
-                AND m.sourceTaskId IS NOT NULL
-                AND m.alpha / nullif(m.alpha + m.beta, 0) > ${usefulnessThreshold}
+                AND current_task."createdAt" > $1
+                AND m."sourceTaskId" IS NOT NULL
+                AND m.alpha / nullif(m.alpha + m.beta, 0) > $2
                 AND EXISTS (
                   SELECT 1 FROM agent_tasks prior
-                  WHERE prior.contextKey = current_task.contextKey
-                    AND prior.id = m.sourceTaskId
-                    AND prior.createdAt < current_task.createdAt
+                  WHERE prior."contextKey" = current_task."contextKey"
+                    AND prior.id = m."sourceTaskId"
+                    AND prior."createdAt" < current_task."createdAt"
                 )
                 AND EXISTS (
                   SELECT 1 FROM agent_tasks earlier
-                  WHERE earlier.contextKey = current_task.contextKey
+                  WHERE earlier."contextKey" = current_task."contextKey"
                     AND earlier.id != current_task.id
-                    AND earlier.createdAt < current_task.createdAt
+                    AND earlier."createdAt" < current_task."createdAt"
                 )`,
+        params: [w, usefulnessThreshold],
       }),
     );
     axis1HitCount = axis1Hits.length;
@@ -272,14 +286,15 @@ export default async function memoryEval(args: any, ctx: any) {
 
   const prefMemories = rowsToObjects(
     await ctx.swarm.db_query({
-      sql: `SELECT id, name, sourcePath, alpha, beta, accessCount,
-                   CASE WHEN (alpha + beta) > 0 THEN round(alpha / (alpha + beta), 4) ELSE 0.5 END as usefulness
+      sql: `SELECT id, name, "sourcePath", alpha, beta, "accessCount",
+                   CASE WHEN (alpha + beta) > 0 THEN round(CAST(alpha / (alpha + beta) AS numeric), 4) ELSE 0.5 END AS usefulness
             FROM agent_memory
             WHERE source = 'file_index'
-              AND (sourcePath LIKE '%CLAUDE.md'
-                OR sourcePath LIKE '%IDENTITY.md'
-                OR sourcePath LIKE '%SOUL.md'
-                OR sourcePath LIKE '%TOOLS.md')`,
+              AND ("sourcePath" LIKE '%CLAUDE.md'
+                OR "sourcePath" LIKE '%IDENTITY.md'
+                OR "sourcePath" LIKE '%SOUL.md'
+                OR "sourcePath" LIKE '%TOOLS.md')
+            ORDER BY id`,
     }),
   );
 
@@ -294,16 +309,17 @@ export default async function memoryEval(args: any, ctx: any) {
 
   const prefRatings = rowsToObjects(
     await ctx.swarm.db_query({
-      sql: `SELECT mr.source as raterSource, count(*) as cnt,
-                   round(avg(mr.signal), 4) as avgSignal
+      sql: `SELECT mr.source AS "raterSource", count(*) AS cnt,
+                   round(CAST(avg(mr.signal) AS numeric), 4) AS "avgSignal"
             FROM memory_rating mr
-            JOIN agent_memory m ON mr.memoryId = m.id
+            JOIN agent_memory m ON mr."memoryId" = m.id
             WHERE m.source = 'file_index'
-              AND (m.sourcePath LIKE '%CLAUDE.md'
-                OR m.sourcePath LIKE '%IDENTITY.md'
-                OR m.sourcePath LIKE '%SOUL.md'
-                OR m.sourcePath LIKE '%TOOLS.md')
-            GROUP BY mr.source`,
+              AND (m."sourcePath" LIKE '%CLAUDE.md'
+                OR m."sourcePath" LIKE '%IDENTITY.md'
+                OR m."sourcePath" LIKE '%SOUL.md'
+                OR m."sourcePath" LIKE '%TOOLS.md')
+            GROUP BY mr.source
+            ORDER BY mr.source`,
     }),
   );
 
@@ -311,22 +327,23 @@ export default async function memoryEval(args: any, ctx: any) {
     await ctx.swarm.db_query({
       sql: `SELECT
               CASE
-                WHEN sourcePath LIKE '%CLAUDE.md' THEN 'CLAUDE.md'
-                WHEN sourcePath LIKE '%IDENTITY.md' THEN 'IDENTITY.md'
-                WHEN sourcePath LIKE '%SOUL.md' THEN 'SOUL.md'
-                WHEN sourcePath LIKE '%TOOLS.md' THEN 'TOOLS.md'
+                WHEN "sourcePath" LIKE '%CLAUDE.md' THEN 'CLAUDE.md'
+                WHEN "sourcePath" LIKE '%IDENTITY.md' THEN 'IDENTITY.md'
+                WHEN "sourcePath" LIKE '%SOUL.md' THEN 'SOUL.md'
+                WHEN "sourcePath" LIKE '%TOOLS.md' THEN 'TOOLS.md'
                 ELSE 'other'
-              END as fileType,
-              count(*) as cnt,
-              sum(accessCount) as totalAccess,
-              round(avg(CASE WHEN (alpha + beta) > 0 THEN alpha / (alpha + beta) ELSE 0.5 END), 4) as avgUsefulness
+              END AS "fileType",
+              count(*) AS cnt,
+              sum("accessCount") AS "totalAccess",
+              round(CAST(avg(CASE WHEN (alpha + beta) > 0 THEN alpha / (alpha + beta) ELSE 0.5 END) AS numeric), 4) AS "avgUsefulness"
             FROM agent_memory
             WHERE source = 'file_index'
-              AND (sourcePath LIKE '%CLAUDE.md'
-                OR sourcePath LIKE '%IDENTITY.md'
-                OR sourcePath LIKE '%SOUL.md'
-                OR sourcePath LIKE '%TOOLS.md')
-            GROUP BY fileType`,
+              AND ("sourcePath" LIKE '%CLAUDE.md'
+                OR "sourcePath" LIKE '%IDENTITY.md'
+                OR "sourcePath" LIKE '%SOUL.md'
+                OR "sourcePath" LIKE '%TOOLS.md')
+            GROUP BY "fileType"
+            ORDER BY "fileType"`,
     }),
   );
 
@@ -356,24 +373,26 @@ export default async function memoryEval(args: any, ctx: any) {
 
   // ─── Axis 3: Stay current over time ──────────────────────────────────
 
-  const freshW = `datetime('now','-${freshDays} days')`;
+  const freshW = new Date(nowMs - freshDays * 86_400_000).toISOString();
 
   const axis3Buckets = rowsToObjects(
     await ctx.swarm.db_query({
       sql: `SELECT
               CASE
-                WHEN m.createdAt > ${freshW} THEN 'fresh'
-                WHEN m.expiresAt IS NOT NULL AND m.expiresAt < datetime('now') THEN 'expired'
-                WHEN m.accessedAt < datetime('now','-${freshDays} days') AND m.accessCount > 0 THEN 'aging'
-                WHEN m.accessCount = 0 AND m.createdAt < ${freshW} THEN 'stranded'
+                WHEN m."createdAt" > $1 THEN 'fresh'
+                WHEN m."expiresAt" IS NOT NULL AND m."expiresAt" < $2 THEN 'expired'
+                WHEN m."accessedAt" < $1 AND m."accessCount" > 0 THEN 'aging'
+                WHEN m."accessCount" = 0 AND m."createdAt" < $1 THEN 'stranded'
                 ELSE 'aging'
-              END as bucket,
-              count(DISTINCT mr.memoryId) as uniqueMemories,
-              count(*) as retrievals
+              END AS bucket,
+              count(DISTINCT mr."memoryId") AS "uniqueMemories",
+              count(*) AS retrievals
             FROM memory_retrieval mr
-            JOIN agent_memory m ON mr.memoryId = m.id
-            WHERE mr.retrievedAt > ${w}
-            GROUP BY bucket`,
+            JOIN agent_memory m ON mr."memoryId" = m.id
+            WHERE mr."retrievedAt" > $3
+            GROUP BY bucket
+            ORDER BY bucket`,
+      params: [freshW, now, w],
     }),
   );
 
@@ -393,12 +412,13 @@ export default async function memoryEval(args: any, ctx: any) {
 
   const staleRefCount = rowsToObjects(
     await ctx.swarm.db_query({
-      sql: `SELECT count(DISTINCT mr.memoryId) as cnt
+      sql: `SELECT count(DISTINCT mr."memoryId") AS cnt
             FROM memory_retrieval mr
-            JOIN agent_memory m ON mr.memoryId = m.id
-            WHERE mr.retrievedAt > ${w}
-              AND m.expiresAt IS NOT NULL
-              AND m.expiresAt < datetime('now')`,
+            JOIN agent_memory m ON mr."memoryId" = m.id
+            WHERE mr."retrievedAt" > $1
+              AND m."expiresAt" IS NOT NULL
+              AND m."expiresAt" < $2`,
+      params: [w, now],
     }),
   );
 
@@ -446,10 +466,11 @@ export default async function memoryEval(args: any, ctx: any) {
 
   const totalMemoryRows = rowsToObjects(
     await ctx.swarm.db_query({
-      sql: `SELECT count(*) as total,
-                   sum(CASE WHEN accessCount > 0 THEN 1 ELSE 0 END) as accessed,
-                   sum(CASE WHEN expiresAt IS NOT NULL AND expiresAt < datetime('now') THEN 1 ELSE 0 END) as expired
+      sql: `SELECT count(*) AS total,
+                   sum(CASE WHEN "accessCount" > 0 THEN 1 ELSE 0 END) AS accessed,
+                   sum(CASE WHEN "expiresAt" IS NOT NULL AND "expiresAt" < $1 THEN 1 ELSE 0 END) AS expired
             FROM agent_memory`,
+      params: [now],
     }),
   );
 

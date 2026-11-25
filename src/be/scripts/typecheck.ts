@@ -900,6 +900,26 @@ export interface ScriptShResult {
   exitCode: number;
 }
 
+/** SQL dialect of the swarm database: the storage engine of the API. */
+export type ScriptDbDialect = "sqlite" | "postgres";
+
+/** Portable SQL text, or one text per dialect (\`ctx.db.query\` runs the text of \`ctx.db.dialect\`). */
+export type ScriptDbSql = string | { sqlite: string; postgres: string };
+
+export interface ScriptDb {
+  /** The dialect of the swarm database, known when the run starts. No probe query. */
+  readonly dialect: ScriptDbDialect;
+  /**
+   * Runs read-only SQL through \`ctx.swarm.db_query\` (same permissions, limits
+   * and errors) and returns the rows as objects keyed by column name. Throws
+   * when the query fails.
+   */
+  query<Row = Record<string, unknown>>(
+    sql: ScriptDbSql,
+    params?: unknown[],
+  ): Promise<Row[]>;
+}
+
 /** The invoking agent, or the saved script that made a nested call. */
 export type ScriptCaller =
   | { kind: "agent"; agentId: string }
@@ -932,6 +952,8 @@ export interface ScriptContext {
    * Files persist across calls in one run. cwd and env do not.
    */
   sh(command: string, options?: ScriptShOptions): Promise<ScriptShResult>;
+  /** The swarm database: its SQL dialect and a query helper. Not available in script workflows. */
+  db: ScriptDb;
   stdlib: ScriptStdlib;
   logger: ScriptLogger;
   // Each SDK_NAMESPACES entry (src/scripts-runtime/sdk-allowlist.ts) needs a typed \`<ns>\` key here.
@@ -959,10 +981,12 @@ export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<un
 `;
 
 export async function scriptSdkTypesWithGeneratedApis(
-  apiTypes = getScriptApiTypes(),
-  mcpTypes = getScriptMcpTypes(),
+  apiTypesArg?: string,
+  mcpTypesArg?: string,
   appTypes?: string,
 ): Promise<string> {
+  const apiTypes = apiTypesArg ?? (await getScriptApiTypes());
+  const mcpTypes = mcpTypesArg ?? (await getScriptMcpTypes());
   const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
   if (!resolvedAppTypes) return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
   return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}\n`;
@@ -1035,10 +1059,12 @@ export const SCRIPT_STDLIB_TYPES = stdlibTypesFor(SCRIPT_SDK_TYPES);
  * `ctx.api.<slug>` completions break in the editor.
  */
 export async function scriptStdlibTypesWithGeneratedApis(
-  apiTypes = getScriptApiTypes(),
-  mcpTypes = getScriptMcpTypes(),
+  apiTypesArg?: string,
+  mcpTypesArg?: string,
   appTypes?: string,
 ): Promise<string> {
+  const apiTypes = apiTypesArg ?? (await getScriptApiTypes());
+  const mcpTypes = mcpTypesArg ?? (await getScriptMcpTypes());
   const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
   if (!resolvedAppTypes) return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
   return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}`);
@@ -1613,8 +1639,8 @@ export async function typecheckScript(
   source: string,
   context: ScriptTypeContext = {},
 ): Promise<ScriptTypecheckResult> {
-  const apiTypes = getScriptApiTypes(context);
-  const mcpTypes = getScriptMcpTypes(context);
+  const apiTypes = await getScriptApiTypes(context);
+  const mcpTypes = await getScriptMcpTypes(context);
   const appTypesReport = await getScriptAppTypesReport(context, source);
   const appTypes = appTypesReport.source;
   const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);

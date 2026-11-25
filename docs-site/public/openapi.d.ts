@@ -2466,6 +2466,11 @@ export interface paths {
                             total: number;
                             truncated: boolean;
                             rowLimit: number | null;
+                            /**
+                             * @description SQL dialect of the storage engine that ran the query
+                             * @enum {string}
+                             */
+                            dialect: "sqlite" | "postgres";
                         };
                     };
                 };
@@ -6120,6 +6125,135 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/codex-oauth/slots/{slot}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Persist refreshed Codex OAuth credentials for a pool slot
+         * @description Writes the global secret codex_oauth_<slot>. The caller must hold the slot's refresh lock (lockOwner). Open to registered agents so a worker can persist the tokens it just rotated; no other config key is writable here.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slot: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot> */
+                        lockOwner: string;
+                        credentials: {
+                            access: string;
+                            refresh: string;
+                            expires: number;
+                            accountId: string;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Credentials stored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            slot: number;
+                            key: string;
+                        };
+                    };
+                };
+                /** @description Caller is not the operator or a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller does not hold the slot's refresh lock */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Quarantine a Codex OAuth pool slot after a failed persist
+         * @description Deletes the global secret codex_oauth_<slot> so no caller replays a consumed refresh token. The caller must hold the slot's refresh lock (lockOwner).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    slot: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot> */
+                        lockOwner: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Slot quarantined (deleted is false when no row existed) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            slot: number;
+                            key: string;
+                            deleted: boolean;
+                        };
+                    };
+                };
+                /** @description Caller is not the operator or a registered agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller does not hold the slot's refresh lock */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -11146,6 +11280,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Memory search failed (never sent as an empty result list) */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -16093,6 +16236,8 @@ export interface paths {
                     createdAfter?: string;
                     createdBefore?: string;
                     source?: string;
+                    /** @description Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all. */
+                    tags?: string;
                     requestedByUserId?: string;
                     orderBy?: "lastUpdatedAt" | "createdAt";
                     limit?: number | null;
@@ -16130,7 +16275,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -16238,7 +16383,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -17120,7 +17265,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -20232,7 +20377,7 @@ export interface paths {
         put?: never;
         /**
          * Issue a one-shot dashboard realtime ticket
-         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
+         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`), sessions (`session.presence`) and app pages plus app event channels (`app.use`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
          */
         post: {
             parameters: {
@@ -23665,7 +23810,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -27956,6 +28101,15 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Signed body is not valid JSON */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Invalid signature */
                 401: {
                     headers: {
@@ -31162,7 +31316,20 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                            /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                            match?: {
+                                /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                                repo?: string;
+                                /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                                project?: string;
+                                /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                                label?: string;
+                                /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                                assignee?: string;
+                                /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                                status?: string;
+                            };
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -31391,7 +31558,20 @@ export interface paths {
                             /** @enum {string} */
                             type: "event";
                             /** @enum {string} */
-                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                            eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                            /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                            match?: {
+                                /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                                repo?: string;
+                                /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                                project?: string;
+                                /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                                label?: string;
+                                /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                                assignee?: string;
+                                /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                                status?: string;
+                            };
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -32656,7 +32836,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -32895,6 +33075,7 @@ export interface components {
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
             opencodeGo?: components["schemas"]["AgentOpencodeGoStatus"];
+            piModelIds?: string[];
             acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
@@ -34243,7 +34424,20 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                match?: {
+                    /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                    repo?: string;
+                    /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                    project?: string;
+                    /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                    label?: string;
+                    /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                    assignee?: string;
+                    /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                    status?: string;
+                };
             })[];
             cooldown?: {
                 hours?: number;
@@ -34522,7 +34716,20 @@ export interface components {
                 /** @enum {string} */
                 type: "event";
                 /** @enum {string} */
-                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented";
+                eventName: "slack.message" | "azure-devops.work_item.assigned" | "azure-devops.work_item.commented" | "github.pull_request.opened" | "github.pull_request.ready_for_review" | "github.pull_request.synchronize" | "github.pull_request.closed" | "github.issue.opened" | "github.issue.assigned" | "github.issue.labeled" | "github.issue_comment.created" | "github.check_suite.completed" | "jira.issue.assigned" | "jira.issue.commented" | "jira.issue.transitioned";
+                /** @description Start a run only when every given field matches the event payload. A field the payload lacks never matches. */
+                match?: {
+                    /** @description GitHub repository `owner/name` (payload `repo`). Compared case-insensitively. */
+                    repo?: string;
+                    /** @description Jira project key (payload `project`). Compared case-insensitively. */
+                    project?: string;
+                    /** @description Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively. */
+                    label?: string;
+                    /** @description Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively. */
+                    assignee?: string;
+                    /** @description Jira status the issue moved to (payload `status`). Compared case-insensitively. */
+                    status?: string;
+                };
             })[];
             cooldown?: {
                 hours?: number;

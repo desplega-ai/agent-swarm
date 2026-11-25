@@ -36,6 +36,8 @@ src/commands/seat-mismatch-report.ts  # worker runtime helper imported by the ru
 src/commands/templates.ts  # runner trigger prompt templates, worker runtime
 src/commands/worktree-reaper.ts  # worker runtime helper imported by the runner
 src/utils/runtime-model-catalog.ts  # the Codex subprocess regression seeds a live-only model in the worker parent and checks the isolated child
+src/tests/vcs-provider.test.ts  # worker VCS detection needs a remote URL and deployment env matrix the black-box API suite cannot drive
+src/tests/pi-mono-adapter.test.ts  # checking offline and refreshed model resolution needs control of the worker's Pi SDK catalog and session factory, which the contract E2E suite never starts
 src/providers/  # harness adapters, worker runtime
 src/hooks/  # harness hooks, worker runtime
 src/prompts/  # prompt-template registry, worker runtime
@@ -90,3 +92,4 @@ src/tests/operator-actor-keyless.test.ts  # getOperatorActor with no swarm key c
 src/tests/follow-up-gate-shadow.test.ts  # the gate verdict branches need an in-process verifier stub that throws, hangs past a shortened deadline or returns a fixed verdict, plus a drain of the after-commit hooks; the black-box API fixes the 60s deadline for a whole boot and gives a scenario no way to wait on those hooks
 src/tests/x402-client.test.ts  # src/x402 is a standalone payment library: no API route, MCP tool or CLI command loads it, so the black-box suite cannot reach its spending-limit hook; the cases sign real x402 v1 and v2 payloads locally with a throwaway viem key and no network
 src/tests/scm-sender-trust.test.ts  # one matrix of the mention sender rule across the GitLab, Bitbucket and Azure DevOps handlers with GitHub as the control, written to fail on the handlers before the rule existed; the GitLab rule is also checked over HTTP in platform-webhooks
+src/tests/seed-script-time-windows.test.ts  # cutoff regressions need backdated rows and a fixed script clock to check millisecond boundaries; public write APIs assign timestamps server-side

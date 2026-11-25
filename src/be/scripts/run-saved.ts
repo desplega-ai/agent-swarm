@@ -42,8 +42,8 @@ export async function runSavedScriptAsAgent(
     buildCredentials({ agentId: args.agentId }),
   );
   const descriptorSpan = startSpan("script.descriptors");
-  const apiConnections = getScriptApiConnectionDescriptors({ agentId: args.agentId });
-  const mcpConnections = getScriptMcpConnectionDescriptors({ agentId: args.agentId });
+  const apiConnections = await getScriptApiConnectionDescriptors({ agentId: args.agentId });
+  const mcpConnections = await getScriptMcpConnectionDescriptors({ agentId: args.agentId });
   descriptorSpan.end();
   const output: RunScriptOutput = args.signal?.aborted
     ? {

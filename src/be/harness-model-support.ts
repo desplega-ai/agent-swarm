@@ -20,7 +20,7 @@ import {
   modelFamilyKey,
 } from "@desplega/model-catalog";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDbClient } from "./db";
+import { getStorage } from "./storage";
 
 export type HarnessModelSupportStatus = "ok" | "unsupported" | "unknown";
 
@@ -41,10 +41,7 @@ export async function getHarnessModelSupport(
   cliVersion: string,
   modelId: string,
 ): Promise<HarnessModelSupportStatus> {
-  const row = await getDbClient().get<{ status: HarnessModelSupportStatus }>(
-    "SELECT status FROM harness_model_support WHERE harness = ? AND cliVersion = ? AND modelId = ?",
-    [harness, cliVersion, modelId],
-  );
+  const row = await getStorage().repos.models.findHarnessModelSupport(harness, cliVersion, modelId);
   return row?.status ?? "unknown";
 }
 
@@ -52,22 +49,7 @@ export async function listHarnessModelSupport(filter?: {
   harness?: string;
   cliVersion?: string;
 }): Promise<HarnessModelSupportRow[]> {
-  const where: string[] = [];
-  const params: string[] = [];
-  if (filter?.harness) {
-    where.push("harness = ?");
-    params.push(filter.harness);
-  }
-  if (filter?.cliVersion) {
-    where.push("cliVersion = ?");
-    params.push(filter.cliVersion);
-  }
-  return await getDbClient().query<HarnessModelSupportRow>(
-    `SELECT harness, cliVersion, modelId, status, checkedAt, error FROM harness_model_support${
-      where.length > 0 ? ` WHERE ${where.join(" AND ")}` : ""
-    } ORDER BY checkedAt DESC`,
-    params,
-  );
+  return await getStorage().repos.models.listHarnessModelSupport(filter ?? {});
 }
 
 /** Upsert one outcome. An `ok` never downgrades to `unknown`. */
@@ -81,19 +63,16 @@ export async function recordHarnessModelSupport(input: {
 }): Promise<HarnessModelSupportRow> {
   const checkedAt = input.now ?? Date.now();
   const error = input.error ? scrubSecrets(input.error).slice(0, 2000) : null;
-  await getDbClient().run(
-    `INSERT INTO harness_model_support (harness, cliVersion, modelId, status, checkedAt, error)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (harness, cliVersion, modelId) DO UPDATE SET
-       status = CASE WHEN excluded.status = 'unknown' THEN harness_model_support.status ELSE excluded.status END,
-       checkedAt = excluded.checkedAt,
-       error = excluded.error`,
-    [input.harness, input.cliVersion, input.modelId, input.status, checkedAt, error],
-  );
-  const row = await getDbClient().get<HarnessModelSupportRow>(
-    "SELECT harness, cliVersion, modelId, status, checkedAt, error FROM harness_model_support WHERE harness = ? AND cliVersion = ? AND modelId = ?",
-    [input.harness, input.cliVersion, input.modelId],
-  );
+  const models = getStorage().repos.models;
+  await models.upsertHarnessModelSupport({
+    harness: input.harness,
+    cliVersion: input.cliVersion,
+    modelId: input.modelId,
+    status: input.status,
+    checkedAt,
+    error,
+  });
+  const row = await models.findHarnessModelSupport(input.harness, input.cliVersion, input.modelId);
   if (!row) throw new Error("harness_model_support upsert returned no row");
   return row;
 }
@@ -104,21 +83,11 @@ export async function recordHarnessModelSupport(input: {
  * worker actually ran, so it cannot mark an arbitrary model unsupported for its peers.
  */
 export async function agentRanModel(agentId: string, modelId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ id: string }>(
-    `SELECT id FROM agent_tasks
-     WHERE agentId = ? AND (resolvedModel = ? OR (resolvedModel IS NULL AND model = ?))
-     LIMIT 1`,
-    [agentId, modelId, modelId],
-  );
-  return row !== null && row !== undefined;
+  return getStorage().repos.tasks.agentRanModel(agentId, modelId);
 }
 
 export async function getAgentHarnessCliVersion(agentId: string): Promise<string | null> {
-  const row = await getDbClient().get<{ harnessCliVersion: string | null }>(
-    "SELECT harnessCliVersion FROM agents WHERE id = ?",
-    [agentId],
-  );
-  return row?.harnessCliVersion ?? null;
+  return getStorage().repos.agents.getHarnessCliVersion(agentId);
 }
 
 /** Store the worker's CLI version; no write when unchanged. */
@@ -126,10 +95,7 @@ export async function setAgentHarnessCliVersion(
   agentId: string,
   cliVersion: string | null,
 ): Promise<void> {
-  await getDbClient().run(
-    "UPDATE agents SET harnessCliVersion = ? WHERE id = ? AND harnessCliVersion IS NOT ?",
-    [cliVersion, agentId, cliVersion],
-  );
+  await getStorage().repos.agents.setHarnessCliVersion(agentId, cliVersion);
 }
 
 export function unsupportedModelMessage(harness: string, cliVersion: string, model: string) {

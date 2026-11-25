@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asString, expect, pollUntil } from "../http";
 import type { Scenario } from "../run";
 import { callTool, expectToolError, expectToolOk } from "./platformb-helpers";
@@ -175,8 +176,7 @@ export const slackReplyCard: Scenario = {
     const settled = await pollUntil(
       () =>
         ctx.db.get<{ delivery_abandoned_at: string | null; finalized_at: string | null }>(
-          "SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ?",
-          [taskId],
+          sql`SELECT delivery_abandoned_at, finalized_at FROM slack_messages WHERE kind = 'outcome' AND task_id = ${taskId}`,
         )?.delivery_abandoned_at != null,
       30_000,
     );

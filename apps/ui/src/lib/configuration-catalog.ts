@@ -1312,6 +1312,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_RENDER_V2_QUIET_LEAD_THREADS",
+        label: "Quiet Lead threads in Slack",
+        description:
+          "Post only the Lead's replies in Slack threads: no waiting card when the Lead defers, and no card for a Lead follow-up that ends without a reply. The task tree still shows both. Requires Slack thread renderer v2.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#quiet-lead-threads-in-slack`,
+      },
+      {
         key: "UI_SPEC_ENABLED",
         label: "Rich result cards",
         description:
@@ -1632,6 +1641,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_STOP_BUTTON_ENABLED",
+        label: "Slack Stop button",
+        description:
+          "Let people stop a running ask with Slack's native Stop button in the thread's Working… line. Stop cancels the thread's open tasks and the tasks they delegated. The button appears only once the Slack app also subscribes to the `agent_session_stopped` bot event.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack#stop-button`,
+      },
+      {
+        key: "SLACK_WORKFLOW_BOT_IDS",
+        label: "Bots that start Slack workflows",
+        description:
+          "Comma-separated `CHANNEL_ID:BOT_ID` pairs. A post from a listed bot in its listed channel starts `slack.message` workflows, and never creates an agent task. Unset drops every bot message. The swarm's own bot is always ignored.",
+        kind: "string",
+        placeholder: "e.g. C0123ABCD:B0123ABCD",
+        docsUrl: `${DOCS}integrations/slack#bot-messages-and-workflows`,
       },
       {
         key: "LINEAR_ALLOWED_STATES",
@@ -2081,6 +2108,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Trace poll loop",
         description:
           "Include the worker poll-loop spans in tracing. High volume — enable only while debugging polling.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/observability-opentelemetry`,
+      },
+      {
+        key: "OTEL_TRACE_DB_STATEMENTS",
+        label: "Trace database statements",
+        description:
+          "Add a span per database statement under its request span, with the statement text and no parameters. High volume. The duration metric is always on.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/observability-opentelemetry`,

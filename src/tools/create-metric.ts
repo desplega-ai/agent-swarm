@@ -64,6 +64,10 @@ export const registerCreateMetricTool = (server: McpServer) => {
         for (const widget of input.definition.widgets) {
           assertSelectOnlyQuery(widget.query.sql);
         }
+        // Saved options SQL runs like widget SQL: the same single-SELECT rule.
+        for (const variable of input.definition.variables ?? []) {
+          if (variable.optionsQuery) assertSelectOnlyQuery(variable.optionsQuery.sql);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return toolErr(`Metric query rejected: ${msg}`, {

@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { getDbClient } from "../be/db";
+import { getStorage } from "../be/storage";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AppDefinition,
@@ -314,10 +314,8 @@ async function exportedElementCompatibilityIssues(
   // Phase 4 has no reverse ElementRef index yet. This scan shares no lock with
   // consumer writes, so a concurrent consumer-add can race a producer removal;
   // Phase 6's unresolved-reference error card is the fallback for that TOCTOU.
-  const rows = await getDbClient().query<StoredAppDefinitionRow>(
-    "SELECT id, name, definition FROM apps WHERE id != ? ORDER BY name, id",
-    [appId],
-  );
+  const rows: StoredAppDefinitionRow[] =
+    await getStorage().repos.pages.listOtherAppDefinitions(appId);
   for (const row of rows) {
     let raw: unknown;
     let parseable = false;
@@ -1061,7 +1059,7 @@ export async function migrateAppSchema<T>(input: {
     );
     if (plan.issues.length > 0) throw new AppSchemaMigrationError(plan.issues);
 
-    const result = await getDbClient().transaction(async () => {
+    const result = await getStorage().transaction(async () => {
       await input.snapshot();
       for (const modelPlan of plan.models) {
         for (const row of modelPlan.changedRows) {

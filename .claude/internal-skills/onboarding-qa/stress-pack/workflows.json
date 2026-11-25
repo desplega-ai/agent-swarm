@@ -1,0 +1,11 @@
+{
+  "order": [
+    "stress-child",
+    "stress-parent",
+    "stress-fanout",
+    "stress-retry",
+    "stress-wait",
+    "stress-dedup",
+    "stress-sandbox"
+  ]
+}

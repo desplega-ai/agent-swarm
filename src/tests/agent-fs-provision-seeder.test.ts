@@ -188,7 +188,7 @@ describe("agent-fs provisioning seeder", () => {
   beforeAll(async () => {
     await removeDbFiles(TEST_DB_PATH);
     initDb(TEST_DB_PATH);
-    ensureRbacSeedsSynced({ quiet: true });
+    await ensureRbacSeedsSynced({ quiet: true });
   });
 
   afterEach(() => {

@@ -43,6 +43,9 @@ COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
 COPY packages/model-routing/package.json ./packages/model-routing/package.json
+COPY packages/storage/package.json ./packages/storage/package.json
+COPY packages/storage-sqlite/package.json ./packages/storage-sqlite/package.json
+COPY packages/storage-postgres/package.json ./packages/storage-postgres/package.json
 # Retry transient extraction failures with a clean dependency tree.
 RUN for attempt in 1 2 3; do \
         bun install --frozen-lockfile && break; \
@@ -51,6 +54,9 @@ RUN for attempt in 1 2 3; do \
     done
 COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
+COPY packages/storage/ ./packages/storage/
+COPY packages/storage-sqlite/ ./packages/storage-sqlite/
+COPY packages/storage-postgres/ ./packages/storage-postgres/
 COPY src/ ./src/
 COPY templates/ ./templates/
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
@@ -138,7 +144,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.330
+ARG CLAUDE_CODE_VERSION=2.1.331
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -164,7 +170,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.171.0
+ARG CODEX_VERSION=0.172.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -203,7 +209,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.3.2
+ARG OPENCODE_VERSION=2.4.1
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -231,7 +237,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.37
+ARG AGENT_FS_VERSION=0.18.38
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -573,9 +579,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795334436-g660843
-ARG AMP_SHA512_AMD64=2f6c7d2df89ae0b9c9ea67552f2920e9f2490dd7dfd8f3d60ab6fd01e71edf0a2564027dd9e8349aa070490820c00df2b58629472a31817809cb074112d3e66b
-ARG AMP_SHA512_ARM64=b810b54cdf46046ceab59d4bd1cc5cffab7f91680b036434a3af2b80787f0a60ba71ade9249a6b0d95653aee30879eef2b83dd1d884cc3e9f1e8b16a0a351825
+ARG AMP_VERSION=0.0.1795507243-g81a840
+ARG AMP_SHA512_AMD64=6c1c45b0408748e4fc039135993e84ec172fd426eabc239a8d91a980a815cd19cf00d7cbb151b061923663cca526a6bbee2d6e656ef3c1cf120c1fbb17da18cd
+ARG AMP_SHA512_ARM64=c5931ef57616af80d1fac0578a88e94c805073cbd6f0605d777c6bb4a1fbad0d17023838b26ee72a723e41d548cc1433f91e5ffc4a28d53e75f7062e296c3cfd
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -610,7 +616,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.70.0
+ARG GEMINI_CLI_VERSION=0.71.1
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -623,7 +629,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.114
+ARG COPILOT_CLI_VERSION=1.0.115
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -740,7 +746,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.43.0",
+    "agent-browser": "0.44.0",
     "playwright": "1.63.0"
   },
   "overrides": {

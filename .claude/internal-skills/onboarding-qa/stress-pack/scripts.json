@@ -1,0 +1,35 @@
+{
+  "stress-kv-counter": {
+    "description": "Stress pack: KV counter contention. Parallel atomic increments in one run and across nested runs, and a read-modify-write for contrast. No LLM."
+  },
+  "stress-kv-edge": {
+    "description": "Stress pack: KV round trips of edge values (emoji, right-to-left text, combining marks, empty string, 2 MiB value, deep JSON, big integers, case and special keys) and prefix list order. No LLM."
+  },
+  "stress-rejections": {
+    "description": "Stress pack: requests the API must refuse with a clean 4xx (NUL characters, lone surrogates, long keys, large bodies, bad increments). Records every status code. No LLM."
+  },
+  "stress-memory": {
+    "description": "Stress pack: store memories with unique markers, read them back, find them with a search, delete them. Local embeddings only. No LLM."
+  },
+  "stress-db-query": {
+    "description": "Stress pack: parallel read queries through db-query, one query over the row limit, and write attempts that must be refused. No LLM."
+  },
+  "stress-sandbox-case": {
+    "description": "Stress pack: one sandbox behaviour (cpu, sleep, throw, timeout, flood). Run as a nested script by stress-sandbox. No LLM."
+  },
+  "stress-sandbox": {
+    "description": "Stress pack: runs the five sandbox cases at the same time and checks the status and fields each one ends with. No LLM."
+  },
+  "stress-wf-step": {
+    "description": "Stress pack: one step of a stress workflow (fan-out counter, flaky node, wait check, child run, duplicate-trigger hit). No LLM."
+  },
+  "stress-launch": {
+    "description": "Stress pack: starts stress workflows by name without waiting for them. No LLM."
+  },
+  "stress-trigger-storm": {
+    "description": "Stress pack: fires one workflow many times at once with repeated idempotency keys and through the signed webhook route. Runs must equal distinct keys. No LLM."
+  },
+  "stress-scoreboard": {
+    "description": "Stress pack: reads the result records and the run tables, writes KV stress/scoreboard, deletes old records. No LLM."
+  }
+}

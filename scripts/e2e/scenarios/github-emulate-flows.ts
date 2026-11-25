@@ -13,6 +13,7 @@
 // Emulator gaps (no reactions route, no GraphQL, no repository rules, no combined commit
 // status) are listed in the PR that added this file; nothing here hand-mocks them.
 import { createEmulator } from "emulate";
+import { type SqlQuery, sql } from "../db";
 import { asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -31,15 +32,9 @@ const MENTION = "@agent-swarm-bot";
 
 type TaskRow = { id: string; status: string; vcsEventType: string | null };
 
-function webhookTasks(
-  ctx: ScenarioContext,
-  repo: string,
-  where: string,
-  params: (string | number)[],
-) {
+function webhookTasks(ctx: ScenarioContext, repo: string, where: SqlQuery) {
   return ctx.db.query<TaskRow>(
-    `SELECT id, status, vcsEventType FROM agent_tasks WHERE source = 'github' AND vcsRepo = ? AND ${where}`,
-    [repo, ...params],
+    sql`SELECT id, status, "vcsEventType" FROM agent_tasks WHERE source = 'github' AND "vcsRepo" = ${repo} AND ${where}`,
   );
 }
 
@@ -149,15 +144,14 @@ export const githubEmulateFlows: Scenario = {
       );
       const commentId = Number(comment.id);
       const created = await pollUntil(
-        () => webhookTasks(ctx, REPO, "vcsCommentId = ?", [commentId]).length === 1,
+        () => webhookTasks(ctx, REPO, sql`"vcsCommentId" = ${commentId}`).length === 1,
         15_000,
       );
       expect(created, `no task for the maintainer's comment ${commentId} on ${REPO}`);
-      const [commentTask] = webhookTasks(ctx, REPO, "vcsCommentId = ?", [commentId]);
+      const [commentTask] = webhookTasks(ctx, REPO, sql`"vcsCommentId" = ${commentId}`);
       cleanupTasks.push(commentTask!.id);
       const row = ctx.db.get<{ vcsInstallationId: number | null; vcsNumber: number }>(
-        "SELECT vcsInstallationId, vcsNumber FROM agent_tasks WHERE id = ?",
-        [commentTask!.id],
+        sql`SELECT "vcsInstallationId", "vcsNumber" FROM agent_tasks WHERE id = ${commentTask!.id}`,
       );
       expect(
         commentTask!.vcsEventType === "issue_comment" &&
@@ -166,10 +160,11 @@ export const githubEmulateFlows: Scenario = {
         `the comment task must carry the event, issue and installation: ${JSON.stringify(row)}`,
       );
       // Webhooks arrive in write order, so by now the issue and outsider deliveries landed too.
-      const others = webhookTasks(ctx, REPO, "vcsNumber = ? AND id != ?", [
-        issueNumber,
-        commentTask!.id,
-      ]);
+      const others = webhookTasks(
+        ctx,
+        REPO,
+        sql`"vcsNumber" = ${issueNumber} AND id != ${commentTask!.id}`,
+      );
       expect(
         others.length === 0,
         `the mention-free issue and the outsider's comment must not create tasks: ${JSON.stringify(others)}`,
@@ -222,12 +217,15 @@ export const githubEmulateFlows: Scenario = {
       const prNumber = Number(pr.number);
       const prTask = await pollUntil(
         () =>
-          webhookTasks(ctx, REPO, "vcsNumber = ? AND vcsEventType = 'pull_request'", [prNumber])
-            .length === 1,
+          webhookTasks(
+            ctx,
+            REPO,
+            sql`"vcsNumber" = ${prNumber} AND "vcsEventType" = 'pull_request'`,
+          ).length === 1,
         15_000,
       );
       expect(prTask, `no task for PR #${prNumber} opened with a mention`);
-      for (const task of webhookTasks(ctx, REPO, "vcsNumber = ?", [prNumber]))
+      for (const task of webhookTasks(ctx, REPO, sql`"vcsNumber" = ${prNumber}`))
         cleanupTasks.push(task.id);
 
       // ── PR state: a real merge wakes a vcs.pr.merged waiter ──
@@ -254,8 +252,7 @@ export const githubEmulateFlows: Scenario = {
       });
       const waitStatus = () =>
         ctx.db.get<{ status: string; firedBy: string | null }>(
-          "SELECT status, firedBy FROM deferred_event_waits WHERE scheduleId = ?",
-          [scheduleId],
+          sql`SELECT status, "firedBy" FROM deferred_event_waits WHERE "scheduleId" = ${scheduleId}`,
         );
       expect(
         waitStatus()?.status === "pending",
@@ -268,8 +265,7 @@ export const githubEmulateFlows: Scenario = {
       const woke = await pollUntil(() => waitStatus()?.status === "fired", 15_000);
       expect(woke, `the merge never fired the wait: ${JSON.stringify(waitStatus())}`);
       const wake = ctx.db.get<{ id: string }>(
-        "SELECT id FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'deferred'",
-        [waiter],
+        sql`SELECT id FROM agent_tasks WHERE "parentTaskId" = ${waiter} AND "taskType" = 'deferred'`,
       );
       expect(wake, "the fired wait created no wake-up task");
       cleanupTasks.push(wake.id);

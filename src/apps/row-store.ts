@@ -1,6 +1,15 @@
-import { deleteKv, getDbClient, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import {
+  deleteKv,
+  getKv,
+  kvPrefixUpperBound,
+  listKv,
+  literalPrefixPattern,
+  upsertKv,
+} from "../be/db";
 import { kvKeyAfter } from "../be/db/kv-windows";
 import { isInTransaction } from "../be/db-client";
+import { getStorage } from "../be/storage";
+import { removeNamespaceFamilyRooms } from "../realtime/rooms";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -11,6 +20,7 @@ import {
   type ModelDef,
 } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
+import { publishAppRowsChanged } from "./realtime-events";
 
 export type AppRow = {
   id: string;
@@ -208,6 +218,18 @@ function prepareValues(
 }
 
 /**
+ * One DbClient transaction for the KV writes of one request: a row key plus its
+ * index keys, or every row of a bulk request. Each autocommit write is its own
+ * commit, and a commit on Postgres waits for a WAL flush. Call it only while the
+ * mutation lock is held (see the lock ordering below). A Postgres serialization
+ * failure runs the callback again, whole, so the callback must have no side
+ * effect outside the database.
+ */
+function inRowTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  return getStorage().transaction(operation);
+}
+
+/**
  * Lock ordering: this per-app/model lock is always acquired BEFORE the DbClient
  * transaction lock, never the other way round. Awaiting `withMutationLock` (or
  * anything that calls it, such as `purgeAppRows`) from inside an open client
@@ -220,7 +242,14 @@ export function withMutationLock<T>(
 ): Promise<T> {
   const lockKey = `${appId}:${model}`;
   const previous = mutationChains.get(lockKey) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
+  // Every row write runs under this lock: tell open app surfaces once it lands.
+  const current = previous
+    .catch(() => undefined)
+    .then(operation)
+    .then((result) => {
+      if (model !== "*") publishAppRowsChanged(appId, model);
+      return result;
+    });
   mutationChains.set(lockKey, current);
   return current.finally(() => {
     if (mutationChains.get(lockKey) === current) mutationChains.delete(lockKey);
@@ -242,19 +271,13 @@ async function writeRow(
 }
 
 async function appExists(appId: string): Promise<boolean> {
-  const row = await getDbClient().get<{ present: number }>(
-    "SELECT 1 AS present FROM apps WHERE id = ?",
-    [appId],
-  );
-  return row !== null;
+  return getStorage().repos.pages.appExists(appId);
 }
 
 async function currentModelDefinition(appId: string, model: string): Promise<ModelDef | null> {
-  const row = await getDbClient().get<{ definition: string }>(
-    "SELECT definition FROM apps WHERE id = ?",
-    [appId],
-  );
-  if (!row) return null;
+  const definitionJson = await getStorage().repos.pages.getAppDefinition(appId);
+  if (definitionJson === null) return null;
+  const row = { definition: definitionJson };
   try {
     const definition = AppDefinitionSchema.safeParse(
       upgradeAppDefinition(JSON.parse(row.definition)),
@@ -312,10 +335,16 @@ export function createAppRow(
     const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
     const prepared = prepareValues(currentDefinition, values, "create", options);
-    return createRowUnlocked(appId, model, currentDefinition, prepared, options);
+    return inRowTransaction(() =>
+      createRowUnlocked(appId, model, currentDefinition, prepared, options),
+    );
   });
 }
 
+/**
+ * All or nothing: the rows are validated before the first write, and the writes
+ * share one transaction, so a database error leaves no row of the request.
+ */
 export function createAppRows(
   appId: string,
   model: string,
@@ -329,11 +358,14 @@ export function createAppRows(
     const prepared = rows.map((values) =>
       prepareValues(currentDefinition, values, "create", options),
     );
-    const created: AppRow[] = [];
-    for (const values of prepared) {
-      created.push(await createRowUnlocked(appId, model, currentDefinition, values, options));
-    }
-    return created;
+    return inRowTransaction(async () => {
+      // A retried attempt starts again with new row ids and timestamps.
+      const created: AppRow[] = [];
+      for (const values of prepared) {
+        created.push(await createRowUnlocked(appId, model, currentDefinition, values, options));
+      }
+      return created;
+    });
   });
 }
 
@@ -379,17 +411,16 @@ async function indexedRowIds(
     const definition = Object.hasOwn(columns, column) ? columns[column] : undefined;
     if (!definition || !isIndexed(definition)) continue;
     const prefix = appIndexKey(model, column, value, "");
-    const keys = await getDbClient().query<{ key: string }>(
-      `SELECT key FROM kv_entries
-          WHERE namespace = ? AND key >= ? AND key < ?
-            AND (expires_at IS NULL OR expires_at > ?)
-          ORDER BY key
-          LIMIT ?`,
-      [namespace, prefix, kvPrefixUpperBound(prefix)!, Date.now(), INDEX_LIST_MAX_KEYS + 1],
+    const keys = await getStorage().repos.kv.listLiveKeys(
+      namespace,
+      prefix,
+      kvPrefixUpperBound(prefix)!,
+      Date.now(),
+      INDEX_LIST_MAX_KEYS + 1,
     );
     if (keys.length > INDEX_LIST_MAX_KEYS) continue;
     if (best === null || keys.length < best.length) {
-      best = keys.map((entry) => entry.key.slice(entry.key.lastIndexOf("/") + 1));
+      best = keys.map((key) => key.slice(key.lastIndexOf("/") + 1));
     }
   }
   return best;
@@ -420,12 +451,10 @@ export async function listAppRows(
     const rows: AppRow[] = [];
     for (let start = 0; start < ids.length; start += INDEX_FETCH_BATCH) {
       const batch = ids.slice(start, start + INDEX_FETCH_BATCH);
-      const entries = await getDbClient().query<{ value: string; value_type: string }>(
-        `SELECT value, value_type FROM kv_entries
-            WHERE namespace = ? AND key IN (${batch.map(() => "?").join(",")})
-              AND (expires_at IS NULL OR expires_at > ?)
-            ORDER BY key`,
-        [namespace, ...batch.map((id) => rowKey(model, id)), Date.now()],
+      const entries = await getStorage().repos.kv.listLiveValues(
+        namespace,
+        batch.map((id) => rowKey(model, id)),
+        Date.now(),
       );
       for (const entry of entries) {
         if (entry.value_type !== "json") continue;
@@ -485,13 +514,13 @@ export async function listAllAppRowsForMigrationUnlocked(
   // skipped row on each page. Same rows, order and TTL filter as `listKv`.
   let afterKey = "";
   while (true) {
-    const page = await getDbClient().query<{ key: string; value: string; value_type: string }>(
-      `SELECT key, value, value_type FROM kv_entries
-          WHERE namespace = ? AND key >= ? AND key < ? AND key > ?
-            AND (expires_at IS NULL OR expires_at > ?)
-          ORDER BY key
-          LIMIT ?`,
-      [namespace, prefix, upper, afterKey, Date.now(), MIGRATION_KV_BATCH_SIZE],
+    const page = await getStorage().repos.kv.listLiveEntriesAfter(
+      namespace,
+      prefix,
+      upper,
+      afterKey,
+      Date.now(),
+      MIGRATION_KV_BATCH_SIZE,
     );
     for (const entry of page) {
       if (entry.value_type !== "json") continue;
@@ -525,7 +554,9 @@ export function patchAppRow(
     const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
     const prepared = prepareValues(currentDefinition, values, "patch", options);
-    return patchPreparedRowUnlocked(appId, model, currentDefinition, rowId, prepared, options);
+    return inRowTransaction(() =>
+      patchPreparedRowUnlocked(appId, model, currentDefinition, rowId, prepared, options),
+    );
   });
 }
 
@@ -628,6 +659,21 @@ export async function rebuildAppColumnIndexUnlocked(
   }
 }
 
+async function deleteRowUnlocked(
+  appId: string,
+  model: string,
+  definition: ModelDef,
+  rowId: string,
+  matches?: (row: AppRow) => boolean,
+): Promise<boolean> {
+  const namespace = appsNamespace(appId);
+  const row = await getAppRow(appId, model, rowId);
+  if (!row || (matches && !matches(row))) return false;
+  for (const key of indexKeys(model, definition, row)) await deleteKv(namespace, key);
+  await deleteKv(namespace, rowKey(model, rowId));
+  return true;
+}
+
 /** `matches` re-checks the row under the lock; a row that no longer matches is kept. */
 export function deleteAppRow(
   appId: string,
@@ -636,15 +682,30 @@ export function deleteAppRow(
   rowId: string,
   matches?: (row: AppRow) => boolean,
 ): Promise<boolean> {
+  return deleteAppRows(appId, model, _definition, [rowId], matches).then((count) => count > 0);
+}
+
+/**
+ * Delete rows under one lock and in one transaction; returns how many went.
+ * `matches` re-checks each row under the lock; a row that no longer matches is kept.
+ */
+export function deleteAppRows(
+  appId: string,
+  model: string,
+  _definition: ModelDef,
+  rowIds: readonly string[],
+  matches?: (row: AppRow) => boolean,
+): Promise<number> {
   return withMutationLock(appId, model, async () => {
     const currentDefinition = await currentModelDefinition(appId, model);
-    if (!currentDefinition) return false;
-    const namespace = appsNamespace(appId);
-    const row = await getAppRow(appId, model, rowId);
-    if (!row || (matches && !matches(row))) return false;
-    for (const key of indexKeys(model, currentDefinition, row)) await deleteKv(namespace, key);
-    await deleteKv(namespace, rowKey(model, rowId));
-    return true;
+    if (!currentDefinition) return 0;
+    return inRowTransaction(async () => {
+      let deleted = 0;
+      for (const rowId of rowIds) {
+        if (await deleteRowUnlocked(appId, model, currentDefinition, rowId, matches)) deleted++;
+      }
+      return deleted;
+    });
   });
 }
 
@@ -659,13 +720,28 @@ const PURGE_BATCH_SIZE = 1000;
 async function purgeNamespace(appId: string): Promise<void> {
   const namespace = appsNamespace(appId);
   while (true) {
-    const result = await getDbClient().run(
-      `DELETE FROM kv_entries
-          WHERE namespace = ?
-            AND key IN (SELECT key FROM kv_entries WHERE namespace = ? ORDER BY key LIMIT ?)`,
-      [namespace, namespace, PURGE_BATCH_SIZE],
+    const changes = await getStorage().repos.kv.deleteNamespaceBatch(namespace, PURGE_BATCH_SIZE);
+    if (changes === 0) return;
+    await yieldToEventLoop();
+  }
+}
+
+/**
+ * Drops the app's page presence rooms (`presence:app:<appId>:<page>`): the
+ * live rooms first, so no pending flush writes a row back, then every
+ * persisted room row. Run it after the app row is gone, so no new join passes
+ * the app check.
+ */
+export async function purgeAppPresenceRooms(appId: string): Promise<void> {
+  const prefix = `presence:app:${appId}:`;
+  removeNamespaceFamilyRooms(prefix);
+  const pattern = literalPrefixPattern(prefix);
+  while (true) {
+    const changes = await getStorage().repos.kv.deleteNamespacesLikeBatch(
+      pattern,
+      PURGE_BATCH_SIZE,
     );
-    if (result.changes === 0) return;
+    if (changes === 0) return;
     await yieldToEventLoop();
   }
 }

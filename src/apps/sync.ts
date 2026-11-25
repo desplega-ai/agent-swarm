@@ -1,8 +1,9 @@
 import * as z from "zod";
-import { deleteKv, getAllTasks, getDbClient, getKv, type TaskFilters, upsertKv } from "../be/db";
+import { deleteKv, getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
+import { getStorage } from "../be/storage";
 import { withSpan } from "../otel";
 import { type AgentTask, AgentTaskStatusSchema } from "../types";
 import { createSweepScrubber, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
@@ -274,7 +275,7 @@ async function pullFromScript(args: {
   // Re-run the definition-time connection check at runtime: a connection
   // disabled after the write must fail the pass before the script is invoked.
   if (source.connection !== undefined) {
-    const reachable = listScriptConnections({ agentId });
+    const reachable = await listScriptConnections({ agentId });
     if (!reachable.some((connection) => connection.slug === source.connection)) {
       throw new SyncPassError(
         `connection "${source.connection}" not found or disabled for the sync run-as identity`,
@@ -602,14 +603,28 @@ export const RECONCILE_CHUNK_SIZE = 200;
  * after it commits, so a failing chunk rolls back its writes and its counts
  * together while earlier chunks stay committed and counted.
  */
+/**
+ * In-memory state that chunk writes change. A transaction attempt can roll back
+ * and run again (decision D6), so each attempt first undoes what the previous
+ * attempt of the same chunk changed, and a commit makes the changes final.
+ */
+interface ChunkState {
+  /** Called at the start of each attempt of a chunk transaction. */
+  attempt(): void;
+  /** Called once the chunk transaction committed. */
+  committed(): void;
+}
+
 async function writeInChunks<T>(
   items: readonly T[],
   counts: ReconcileCounts,
   write: (item: T, tally: ReconcileTally) => Promise<void>,
+  state?: ChunkState,
 ): Promise<void> {
   for (let start = 0; start < items.length; start += RECONCILE_CHUNK_SIZE) {
     const chunk = items.slice(start, start + RECONCILE_CHUNK_SIZE);
-    const tally = await getDbClient().transaction(async () => {
+    const tally = await getStorage().transaction(async () => {
+      state?.attempt();
       const chunkTally: ReconcileTally = {
         created: 0,
         updated: 0,
@@ -620,6 +635,7 @@ async function writeInChunks<T>(
       for (const item of chunk) await write(item, chunkTally);
       return chunkTally;
     });
+    state?.committed();
     counts.created += tally.created;
     counts.updated += tally.updated;
     counts.refreshed += tally.refreshed;
@@ -685,44 +701,73 @@ function reconcile(args: {
     const actor = `sync:${sourceName}`;
     const seen = new Set<string>();
 
-    await writeInChunks(pull.records, counts, async (record, tally) => {
-      if (seen.has(record.key)) {
-        warn(warnings, `source returned duplicate key "${record.key}"; the last record wins`);
-      }
-      seen.add(record.key);
-      const values = projectRecord({ record, bindings, joinKey, warnings });
-      const envelope = { source: sourceName, syncedAt: now, stale: false };
-      const existing = mine.get(record.key);
-      if (!existing) {
-        // No adoption: a row with no source of its own is not ours to take.
-        const created = await createAppRowUnlocked(appId, model, modelDef, values, {
+    // Undo journal for `seen`, `mine` and `warnings` (see ChunkState).
+    const undo: (() => void)[] = [];
+    let warningsAtChunk = warnings.length;
+    const chunkState: ChunkState = {
+      attempt() {
+        while (undo.length > 0) undo.pop()?.();
+        warnings.length = warningsAtChunk;
+      },
+      committed() {
+        undo.length = 0;
+        warningsAtChunk = warnings.length;
+      },
+    };
+    const markSeen = (key: string) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      undo.push(() => seen.delete(key));
+    };
+    const setMine = (key: string, row: AppRow) => {
+      const previous = mine.get(key);
+      mine.set(key, row);
+      undo.push(() => (previous === undefined ? mine.delete(key) : mine.set(key, previous)));
+    };
+
+    await writeInChunks(
+      pull.records,
+      counts,
+      async (record, tally) => {
+        if (seen.has(record.key)) {
+          warn(warnings, `source returned duplicate key "${record.key}"; the last record wins`);
+        }
+        markSeen(record.key);
+        const values = projectRecord({ record, bindings, joinKey, warnings });
+        const envelope = { source: sourceName, syncedAt: now, stale: false };
+        const existing = mine.get(record.key);
+        if (!existing) {
+          // No adoption: a row with no source of its own is not ours to take.
+          const created = await createAppRowUnlocked(appId, model, modelDef, values, {
+            allowSourceManaged: true,
+            envelope,
+            actor,
+          });
+          setMine(record.key, created);
+          tally.created += 1;
+          return;
+        }
+        const differs = Object.entries(values).some(
+          ([name, value]) => !sameValue(modelDef.columns[name], existing[name], value),
+        );
+        const updated = await patchAppRowUnlocked(appId, model, modelDef, existing.id, values, {
           allowSourceManaged: true,
           envelope,
           actor,
+          // Freshness must be meaningful: syncedAt advances on every confirmed
+          // row, updatedAt only when projected data actually moved.
+          ...(differs ? {} : { skipUpdatedAt: true }),
         });
-        mine.set(record.key, created);
-        tally.created += 1;
-        return;
-      }
-      const differs = Object.entries(values).some(
-        ([name, value]) => !sameValue(modelDef.columns[name], existing[name], value),
-      );
-      const updated = await patchAppRowUnlocked(appId, model, modelDef, existing.id, values, {
-        allowSourceManaged: true,
-        envelope,
-        actor,
-        // Freshness must be meaningful: syncedAt advances on every confirmed
-        // row, updatedAt only when projected data actually moved.
-        ...(differs ? {} : { skipUpdatedAt: true }),
-      });
-      if (!updated) {
-        warn(warnings, `row "${existing.id}" vanished before it could be updated`);
-        return;
-      }
-      mine.set(record.key, updated);
-      if (differs) tally.updated += 1;
-      else tally.refreshed += 1;
-    });
+        if (!updated) {
+          warn(warnings, `row "${existing.id}" vanished before it could be updated`);
+          return;
+        }
+        setMine(record.key, updated);
+        if (differs) tally.updated += 1;
+        else tally.refreshed += 1;
+      },
+      chunkState,
+    );
 
     const unseen = [...mine.entries()]
       .filter(([key]) => !seen.has(key))

@@ -16,9 +16,9 @@ const realtimeTicketRoute = route({
   summary: "Issue a one-shot dashboard realtime ticket",
   tags: ["Rooms"],
   description:
-    "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
+    "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`), sessions (`session.presence`) and app pages plus app event channels (`app.use`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
   // Comb presence came first; a role granting only `comb.presence` keeps its ticket.
-  rbac: { permission: "session.presence", alsoAdmits: ["comb.presence"] },
+  rbac: { permission: "session.presence", alsoAdmits: ["comb.presence", "app.use"] },
   responses: {
     200: {
       description: "One-shot realtime ticket",
@@ -60,10 +60,14 @@ export async function handleRealtimeTicket(
   );
   if (!auth) return true;
   const principal = (await requestPrincipal(req, undefined))!;
-  const allowed = (verb: "comb.presence" | "session.presence") =>
+  const allowed = (verb: "comb.presence" | "session.presence" | "app.use") =>
     can({ principal, verb, resource: { kind: "none" }, source: "http" }).allow;
-  if (!allowed("comb.presence") && !allowed("session.presence")) {
-    jsonError(res, "Presence requires the comb.presence or session.presence permission", 403);
+  if (!allowed("comb.presence") && !allowed("session.presence") && !allowed("app.use")) {
+    jsonError(
+      res,
+      "Presence requires the comb.presence, session.presence or app.use permission",
+      403,
+    );
     return true;
   }
   let dashboardUserId: string | undefined;

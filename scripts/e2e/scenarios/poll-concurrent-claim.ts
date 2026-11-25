@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 
@@ -61,8 +62,7 @@ export const pollConcurrentClaim: Scenario = {
       const won = winners.get(taskId) ?? [];
       expect(won.length === 1, `Task ${taskId} was handed to ${won.length} workers: ${won}`);
       const row = ctx.db.get<{ agentId: string | null; status: string }>(
-        "SELECT agentId, status FROM agent_tasks WHERE id = ?",
-        [taskId],
+        sql`SELECT "agentId", status FROM agent_tasks WHERE id = ${taskId}`,
       );
       expect(
         row?.agentId === won[0] && row?.status === "in_progress",

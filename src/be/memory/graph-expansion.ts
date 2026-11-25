@@ -18,10 +18,11 @@
  *
  * Plan: thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md Phase 4
  */
-import { getDbClient } from "@/be/db";
+import type { MemoryGraphNeighborRow } from "@desplega/storage";
+import { getStorage } from "@/be/storage";
 import type { AgentMemorySource } from "@/types";
 import { isGraphExpansionEnabled } from "./constants";
-import { type AgentMemoryRow, rowToCandidate } from "./providers/sqlite-store";
+import { rowToCandidate } from "./providers/storage-store";
 import { computeScore } from "./reranker";
 import type { MemoryCandidate } from "./types";
 
@@ -39,37 +40,7 @@ export interface GraphExpansionOptions {
   isLead?: boolean;
 }
 
-type NeighborRow = AgentMemoryRow & { fromMemoryId: string; linkStrength: number | null };
-
-/**
- * Mirrors `SqliteMemoryStore.addScopeConditions` (private) for the `m` alias:
- * non-lead callers see own-agent rows + swarm-scoped rows; leads see all.
- */
-function addNeighborScopeConditions(
-  conditions: string[],
-  params: (string | number)[],
-  agentId: string,
-  scope: "agent" | "swarm" | "all",
-  isLead: boolean,
-): void {
-  if (!isLead) {
-    if (scope === "agent") {
-      conditions.push("m.agentId = ? AND m.scope = 'agent'");
-      params.push(agentId);
-    } else if (scope === "swarm") {
-      conditions.push("m.scope = 'swarm'");
-    } else {
-      conditions.push("(m.agentId = ? OR m.scope = 'swarm')");
-      params.push(agentId);
-    }
-  } else {
-    if (scope === "agent") {
-      conditions.push("m.scope = 'agent'");
-    } else if (scope === "swarm") {
-      conditions.push("m.scope = 'swarm'");
-    }
-  }
-}
+type NeighborRow = MemoryGraphNeighborRow;
 
 export async function expandCandidatesWithGraph(
   candidates: MemoryCandidate[],
@@ -86,32 +57,16 @@ export async function expandCandidatesWithGraph(
   // Outgoing memory→memory links whose targetId JOINs to a live agent_memory
   // row. Unresolved wikilinks keep the raw `[[Name]]` text as targetId
   // (link-resolver.ts) and therefore never match an id — the JOIN skips them.
-  const conditions: string[] = [
-    `ml.from_memory_id IN (${parentIds.map(() => "?").join(", ")})`,
-    "ml.targetKind = 'memory'",
-    "(m.expiresAt IS NULL OR m.expiresAt > datetime('now'))",
-  ];
-  const params: (string | number)[] = [...parentIds];
-  addNeighborScopeConditions(conditions, params, agentId, scope, isLead);
-  if (source) {
-    conditions.push("m.source = ?");
-    params.push(source);
-  }
-  if (keyPrefix) {
-    // Literal prefix, not GLOB/LIKE: mirrors SqliteMemoryStore.addKeyPrefixCondition.
-    conditions.push("substr(m.key, 1, length(?)) = ?");
-    params.push(keyPrefix, keyPrefix);
-  }
-
+  // Visibility mirrors the search ACL; the key prefix is literal.
   let rows: NeighborRow[];
   try {
-    rows = await getDbClient().query<NeighborRow>(
-      `SELECT m.*, ml.from_memory_id AS fromMemoryId, ml.strength AS linkStrength
-         FROM memory_link ml
-         JOIN agent_memory m ON m.id = ml.targetId
-         WHERE ${conditions.join(" AND ")}`,
-      params,
-    );
+    rows = await getStorage().repos.memory.listGraphNeighbors(parentIds, {
+      agentId,
+      scope,
+      isLead,
+      source,
+      keyPrefix,
+    });
   } catch (err) {
     // Best-effort: a graph-expansion failure must never poison search.
     console.warn("[memory-graph] expansion query failed:", (err as Error).message);

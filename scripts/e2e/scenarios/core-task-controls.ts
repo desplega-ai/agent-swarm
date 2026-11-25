@@ -1,3 +1,4 @@
+import { sql } from "../db";
 import { asRecord, asRecords, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -37,8 +38,7 @@ async function taskMetadata(ctx: ScenarioContext, agentId: string, otherId: stri
   );
   expect(
     ctx.db.get<{ claudeSessionId: string }>(
-      "SELECT claudeSessionId FROM agent_tasks WHERE id = ?",
-      [taskId],
+      sql`SELECT "claudeSessionId" FROM agent_tasks WHERE id = ${taskId}`,
     )?.claudeSessionId === `claude-${ctx.nonce}`,
     "agent_tasks row lacks the session id",
   );
@@ -240,9 +240,9 @@ async function contextSnapshots(ctx: ScenarioContext, agentId: string) {
   response = await ctx.api("GET", `/api/tasks/${taskId}/context?limit=1`);
   expect(asRecords(response.json, "snapshots").length === 1, "limit=1 returned more than one row");
   expect(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM task_context_snapshots WHERE taskId = ?", [
-      taskId,
-    ])?.n === 2,
+    ctx.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM task_context_snapshots WHERE "taskId" = ${taskId}`,
+    )?.n === 2,
     "task_context_snapshots does not hold both rows",
   );
 
@@ -330,9 +330,9 @@ async function requestComposition(ctx: ScenarioContext, agentId: string, otherId
   response = await ctx.api("GET", `${path}?limit=1`);
   expect(asRecords(response.json, "manifests").length === 1, "limit=1 returned more than one row");
   expect(
-    ctx.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM request_composition WHERE taskId = ?", [
-      taskId,
-    ])?.n === 2,
+    ctx.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM request_composition WHERE "taskId" = ${taskId}`,
+    )?.n === 2,
     "request_composition does not hold both rows",
   );
 

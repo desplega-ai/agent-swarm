@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDbClient, upsertSwarmConfig } from "../be/db";
+import { upsertSwarmConfig } from "../be/db";
+import { getStorage } from "../be/storage";
 import {
   buildListing,
   PUBLIC_RANKING_ENABLED_KEY,
@@ -294,9 +295,9 @@ export async function handleRanking(
       return true;
     }
 
-    const db = getDbClient();
+    const storage = getStorage();
     // The listing and the flag land together, and the event fires only after both commit.
-    const built = await db.transaction(async () => {
+    const built = await storage.transaction(async () => {
       let listing: TelemetryRanking;
       try {
         listing = buildListing(identity, parsed.body);
@@ -309,7 +310,7 @@ export async function handleRanking(
         value: JSON.stringify(listing),
       });
       await setEnabled(true);
-      db.afterCommit(() => emitOptedIn(listing));
+      storage.afterCommit(() => emitOptedIn(listing));
       return { ok: true as const, listing };
     });
     if (!built.ok) {

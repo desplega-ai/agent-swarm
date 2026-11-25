@@ -6,21 +6,22 @@ declare module "swarm-extension" {
     creatorAgentId?: string | undefined;
     source?:
       | "chat"
-      | "workflow"
-      | "schedule"
-      | "system"
-      | "slack"
-      | "agentmail"
       | "mcp"
+      | "slack"
       | "api"
       | "ui"
       | "github"
       | "gitlab"
       | "azure-devops"
       | "bitbucket"
+      | "agentmail"
+      | "system"
+      | "schedule"
+      | "workflow"
       | "linear"
       | "jira"
       | "comb"
+      | "alert"
       | undefined;
     routingReason?:
       | "skill"
@@ -45,7 +46,7 @@ declare module "swarm-extension" {
       | {
           people: {
             slackUserId: string;
-            trust: "external" | "unknown" | "internal";
+            trust: "unknown" | "external" | "internal";
             userId?: string | undefined;
             starter?: boolean | undefined;
             newest?: boolean | undefined;
@@ -143,36 +144,37 @@ declare module "swarm-extension" {
     agentId: string | null;
     task: string;
     status:
-      | "skipped"
+      | "pending"
+      | "failed"
       | "draft"
       | "backlog"
       | "unassigned"
       | "offered"
       | "reviewing"
-      | "pending"
       | "in_progress"
       | "paused"
       | "completed"
-      | "failed"
       | "cancelled"
-      | "superseded";
+      | "superseded"
+      | "skipped";
     source:
       | "chat"
-      | "workflow"
-      | "schedule"
-      | "system"
-      | "slack"
-      | "agentmail"
       | "mcp"
+      | "slack"
       | "api"
       | "ui"
       | "github"
       | "gitlab"
       | "azure-devops"
       | "bitbucket"
+      | "agentmail"
+      | "system"
+      | "schedule"
+      | "workflow"
       | "linear"
       | "jira"
-      | "comb";
+      | "comb"
+      | "alert";
     tags: string[];
     priority: number;
     dependsOn: string[];
@@ -201,14 +203,14 @@ declare module "swarm-extension" {
     notifiedAt?: string | undefined;
     statusKind?:
       | "error"
-      | "workflow"
-      | "external"
       | "agent"
+      | "system"
+      | "workflow"
+      | "user"
+      | "external"
       | "runner"
       | "deferred"
       | "cascade"
-      | "user"
-      | "system"
       | "graceful_shutdown"
       | "context_limits"
       | "manual_supersede"
@@ -227,7 +229,7 @@ declare module "swarm-extension" {
       | {
           people: {
             slackUserId: string;
-            trust: "external" | "unknown" | "internal";
+            trust: "unknown" | "external" | "internal";
             userId?: string | undefined;
             starter?: boolean | undefined;
             newest?: boolean | undefined;
@@ -364,7 +366,7 @@ declare module "swarm-extension" {
 
   export type SteerMode = "steer" | "queue";
 
-  export type SteeringSource = "chat" | "script" | "slack" | "mcp" | "api" | "ui" | "app-page";
+  export type SteeringSource = "chat" | "mcp" | "slack" | "api" | "ui" | "script" | "app-page";
 
   export type RequestInfo = {
     sessionId: string | undefined;

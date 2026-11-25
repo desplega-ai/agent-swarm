@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.14.4",
+    "version": "2.15.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -175,7 +175,8 @@
               "linear",
               "jira",
               "comb",
-              "chat"
+              "chat",
+              "alert"
             ],
             "default": "mcp"
           },
@@ -1043,6 +1044,12 @@
           },
           "opencodeGo": {
             "$ref": "#/components/schemas/AgentOpencodeGoStatus"
+          },
+          "piModelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "acp": {
             "$ref": "#/components/schemas/AgentAcpStatus"
@@ -6339,8 +6346,52 @@
                       "enum": [
                         "slack.message",
                         "azure-devops.work_item.assigned",
-                        "azure-devops.work_item.commented"
+                        "azure-devops.work_item.commented",
+                        "github.pull_request.opened",
+                        "github.pull_request.ready_for_review",
+                        "github.pull_request.synchronize",
+                        "github.pull_request.closed",
+                        "github.issue.opened",
+                        "github.issue.assigned",
+                        "github.issue.labeled",
+                        "github.issue_comment.created",
+                        "github.check_suite.completed",
+                        "jira.issue.assigned",
+                        "jira.issue.commented",
+                        "jira.issue.transitioned"
                       ]
+                    },
+                    "match": {
+                      "type": "object",
+                      "properties": {
+                        "repo": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                        },
+                        "project": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira project key (payload `project`). Compared case-insensitively."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                        },
+                        "assignee": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                        },
+                        "status": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                     }
                   },
                   "required": [
@@ -7221,8 +7272,52 @@
                       "enum": [
                         "slack.message",
                         "azure-devops.work_item.assigned",
-                        "azure-devops.work_item.commented"
+                        "azure-devops.work_item.commented",
+                        "github.pull_request.opened",
+                        "github.pull_request.ready_for_review",
+                        "github.pull_request.synchronize",
+                        "github.pull_request.closed",
+                        "github.issue.opened",
+                        "github.issue.assigned",
+                        "github.issue.labeled",
+                        "github.issue_comment.created",
+                        "github.check_suite.completed",
+                        "jira.issue.assigned",
+                        "jira.issue.commented",
+                        "jira.issue.transitioned"
                       ]
+                    },
+                    "match": {
+                      "type": "object",
+                      "properties": {
+                        "repo": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                        },
+                        "project": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira project key (payload `project`). Compared case-insensitively."
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                        },
+                        "assignee": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                        },
+                        "status": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                     }
                   },
                   "required": [
@@ -12321,6 +12416,14 @@
                         "number",
                         "null"
                       ]
+                    },
+                    "dialect": {
+                      "type": "string",
+                      "enum": [
+                        "sqlite",
+                        "postgres"
+                      ],
+                      "description": "SQL dialect of the storage engine that ran the query"
                     }
                   },
                   "required": [
@@ -12329,7 +12432,8 @@
                     "elapsed",
                     "total",
                     "truncated",
-                    "rowLimit"
+                    "rowLimit",
+                    "dialect"
                   ]
                 }
               }
@@ -19882,6 +19986,218 @@
                   "required": [
                     "results"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/codex-oauth/slots/{slot}/credentials": {
+      "put": {
+        "summary": "Persist refreshed Codex OAuth credentials for a pool slot",
+        "description": "Writes the global secret codex_oauth_<slot>. The caller must hold the slot's refresh lock (lockOwner). Open to registered agents so a worker can persist the tokens it just rotated; no other config key is writable here.",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "slot",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lockOwner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot>"
+                  },
+                  "credentials": {
+                    "type": "object",
+                    "properties": {
+                      "access": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "refresh": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "expires": {
+                        "type": "number"
+                      },
+                      "accountId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "access",
+                      "refresh",
+                      "expires",
+                      "accountId"
+                    ]
+                  }
+                },
+                "required": [
+                  "lockOwner",
+                  "credentials"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credentials stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "key"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not the operator or a registered agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Caller does not hold the slot's refresh lock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Quarantine a Codex OAuth pool slot after a failed persist",
+        "description": "Deletes the global secret codex_oauth_<slot> so no caller replays a consumed refresh token. The caller must hold the slot's refresh lock (lockOwner).",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "slot",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lockOwner": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Owner token returned by POST /api/oauth/refresh-locks/codex_oauth_<slot>"
+                  }
+                },
+                "required": [
+                  "lockOwner"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slot quarantined (deleted is false when no row existed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slot": {
+                      "type": "number"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "key",
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not the operator or a registered agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Caller does not hold the slot's refresh lock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -29497,6 +29813,16 @@
           },
           "400": {
             "description": "Missing query or agent ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory search failed (never sent as an empty result list)",
             "content": {
               "application/json": {
                 "schema": {
@@ -39742,6 +40068,16 @@
           {
             "schema": {
               "type": "string",
+              "description": "Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all."
+            },
+            "required": false,
+            "description": "Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all.",
+            "name": "tags",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "minLength": 1
             },
             "required": false,
@@ -39904,7 +40240,8 @@
                                   "linear",
                                   "jira",
                                   "comb",
-                                  "chat"
+                                  "chat",
+                                  "alert"
                                 ],
                                 "default": "mcp"
                               },
@@ -40281,7 +40618,8 @@
                       "linear",
                       "jira",
                       "comb",
-                      "chat"
+                      "chat",
+                      "alert"
                     ]
                   },
                   "outputSchema": {
@@ -41633,7 +41971,8 @@
                               "linear",
                               "jira",
                               "comb",
-                              "chat"
+                              "chat",
+                              "alert"
                             ],
                             "default": "mcp"
                           },
@@ -47014,7 +47353,7 @@
     "/api/realtime/ticket": {
       "post": {
         "summary": "Issue a one-shot dashboard realtime ticket",
-        "description": "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
+        "description": "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`), sessions (`session.presence`) and app pages plus app event channels (`app.use`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
         "tags": [
           "Rooms"
         ],
@@ -60429,7 +60768,8 @@
                                       "linear",
                                       "jira",
                                       "comb",
-                                      "chat"
+                                      "chat",
+                                      "alert"
                                     ],
                                     "default": "mcp"
                                   },
@@ -69649,6 +69989,16 @@
               }
             }
           },
+          "400": {
+            "description": "Signed body is not valid JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Invalid signature",
             "content": {
@@ -75577,8 +75927,52 @@
                               "enum": [
                                 "slack.message",
                                 "azure-devops.work_item.assigned",
-                                "azure-devops.work_item.commented"
+                                "azure-devops.work_item.commented",
+                                "github.pull_request.opened",
+                                "github.pull_request.ready_for_review",
+                                "github.pull_request.synchronize",
+                                "github.pull_request.closed",
+                                "github.issue.opened",
+                                "github.issue.assigned",
+                                "github.issue.labeled",
+                                "github.issue_comment.created",
+                                "github.check_suite.completed",
+                                "jira.issue.assigned",
+                                "jira.issue.commented",
+                                "jira.issue.transitioned"
                               ]
+                            },
+                            "match": {
+                              "type": "object",
+                              "properties": {
+                                "repo": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                                },
+                                "project": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira project key (payload `project`). Compared case-insensitively."
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                                },
+                                "assignee": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                             }
                           },
                           "required": [
@@ -76122,8 +76516,52 @@
                               "enum": [
                                 "slack.message",
                                 "azure-devops.work_item.assigned",
-                                "azure-devops.work_item.commented"
+                                "azure-devops.work_item.commented",
+                                "github.pull_request.opened",
+                                "github.pull_request.ready_for_review",
+                                "github.pull_request.synchronize",
+                                "github.pull_request.closed",
+                                "github.issue.opened",
+                                "github.issue.assigned",
+                                "github.issue.labeled",
+                                "github.issue_comment.created",
+                                "github.check_suite.completed",
+                                "jira.issue.assigned",
+                                "jira.issue.commented",
+                                "jira.issue.transitioned"
                               ]
+                            },
+                            "match": {
+                              "type": "object",
+                              "properties": {
+                                "repo": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "GitHub repository `owner/name` (payload `repo`). Compared case-insensitively."
+                                },
+                                "project": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira project key (payload `project`). Compared case-insensitively."
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Label. On a `labeled` event, the label the event added; otherwise any current label (payload `labels`). Compared case-insensitively."
+                                },
+                                "assignee": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Assignee. On an `assigned` event, the new assignee (GitHub login, Jira display name or accountId); otherwise any current assignee. Compared case-insensitively."
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Jira status the issue moved to (payload `status`). Compared case-insensitively."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Start a run only when every given field matches the event payload. A field the payload lacks never matches."
                             }
                           },
                           "required": [

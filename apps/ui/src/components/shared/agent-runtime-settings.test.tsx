@@ -462,7 +462,7 @@ const ALL_KEYS = {
   DEEPSEEK_API_KEY: true,
 };
 
-async function mountSettings(harness: string) {
+async function mountSettings(harness: string, credStatus?: Agent["credStatus"]) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -477,6 +477,7 @@ async function mountSettings(harness: string) {
               isLead: false,
               status: "idle",
               harnessProvider: harness,
+              credStatus,
               createdAt: "",
               lastUpdatedAt: "",
             } as Agent
@@ -735,13 +736,66 @@ describe("AgentRuntimeSettings reasoning effort", () => {
     ];
     const view = await mountSettings("claude");
     expect(active(view.container)).toEqual(["X-High"]);
-    // Pi lands on its default OpenRouter model, which has no x-high.
     await pickSelect(view.container, "Claude", "Pi-Mono");
+    expect(view.container.textContent).toContain(
+      "Pi model options appear after the worker reports its catalog.",
+    );
     expect(active(view.container)).toEqual(["Auto"]);
     expect(enabled(view.container)).not.toContain("X-High");
     await save(view.container);
-    expect(saves.at(-1)).toMatchObject({ harnessProvider: "pi", reasoningEffort: null });
+    expect(saves.at(-1)).toMatchObject({
+      harnessProvider: "pi",
+      model: null,
+      reasoningEffort: null,
+    });
     await view.unmount();
+  });
+
+  test.each([
+    ["claude", "Claude Opus 5.5", "claude-opus-5-5"],
+    ["opencode", "DeepSeek V4.1 Flash", "openrouter/deepseek/deepseek-v4.1-flash"],
+  ])("%s keeps its own model options when the agent has a Pi catalog", async (harness, label, model) => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: model }];
+    const view = await mountSettings(harness, {
+      ready: true,
+      missing: [],
+      reportedAt: 1,
+      piModelIds: ["openrouter/google/gemini-3-flash-preview"],
+    });
+    try {
+      await pickModel(view.container, label, model);
+      await save(view.container);
+      expect(saves.at(-1)).toMatchObject({ harnessProvider: harness, model });
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  test("switching to Pi immediately uses the worker's reported model catalog", async () => {
+    const reportedModel = "openrouter/google/gemini-3-flash-preview";
+    const view = await mountSettings("claude", {
+      ready: true,
+      missing: [],
+      reportedAt: 1,
+      piModelIds: [reportedModel],
+    });
+    try {
+      await pickSelect(view.container, "Claude", "Pi-Mono");
+      expect(view.container.textContent).not.toContain(
+        "Pi model options appear after the worker reports its catalog.",
+      );
+      const trigger = [...view.container.querySelectorAll('button[role="combobox"]')].find(
+        (button) => button.textContent?.includes("Gemini 3 Flash"),
+      );
+      await click(trigger);
+      const options = [...document.querySelectorAll("[cmdk-item]")]
+        .map((option) => option.textContent ?? "")
+        .filter((option) => option.includes("openrouter/"));
+      expect(options).toHaveLength(1);
+      expect(options[0]).toContain(reportedModel);
+    } finally {
+      await view.unmount();
+    }
   });
 
   test("switching the harness keeps an effort the new pair still takes", async () => {
