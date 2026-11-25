@@ -2545,9 +2545,10 @@ export function validatePage(
       // shortcut: element-mode template reads get only the /user and /app bans, not the
       // /props/<declared> check. Widen if a typo'd element template prop shows up.
       stateIssue = null;
-    } else if (ref.bare && inRepeatScope(ref.path)) {
+    } else if (ref.bare && !options?.elementMode && inRepeatScope(ref.path)) {
       // json-render reads a bare `${name}` from the repeat item first, and the item's fields are
-      // not known statically, so it falls back to `/<name>` only at runtime.
+      // not known statically, so it falls back to `/<name>` only at runtime. Element mode keeps
+      // its /user and /app bans: an item without the field falls back to the consumer's state.
       stateIssue = null;
     } else if (options?.elementMode && ref.write) {
       stateIssue = issue(

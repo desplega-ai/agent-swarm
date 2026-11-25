@@ -294,6 +294,44 @@ export const knowledgeAppsPrimitives: Scenario = {
           );
         }
       }
+      // A bare `${app/x}` or `${user/x}` under a repeat falls back to /app or /user state when the
+      // item lacks the field, so the element-mode bans hold inside a repeat too.
+      for (const mode of ["bound", "pure"] as const) {
+        for (const [template, message] of [
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: $template interpolation syntax under test
+          ["w=${app/window}", "elements cannot read /app state"],
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: $template interpolation syntax under test
+          ["t=${user/theme}", "elements cannot read /user state"],
+        ] as const) {
+          const definition = structuredClone(provider);
+          definition.elements.rows = {
+            mode,
+            root: "list",
+            elements: {
+              list: {
+                type: "Stack",
+                props: {},
+                repeat: { statePath: "/props/window" },
+                children: ["row"],
+              },
+              row: { type: "OnEnter", props: { deps: { $template: template } } },
+            },
+            props: { window: { kind: "string", required: true } },
+          };
+          const rejected = await ctx.api("PUT", `/api/apps/${providerId}`, {
+            body: { definition },
+          });
+          expectStatus(rejected, [400], `${mode} element repeat read ${template}`);
+          expect(
+            asRecords(rejected.json, "issues").some(
+              (found) =>
+                found.path === "elements.rows.elements.row.props.deps.$template" &&
+                String(found.message).includes(message),
+            ),
+            `${mode} element repeat read ${template}: got ${JSON.stringify(rejected.json).slice(0, 400)}`,
+          );
+        }
+      }
     } finally {
       for (const id of created) await ctx.api("DELETE", `/api/apps/${id}`);
     }
