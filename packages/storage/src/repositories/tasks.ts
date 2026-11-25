@@ -308,6 +308,15 @@ export type TaskListFields = "full" | "slim" | "timeline";
 
 /** Every list row carries the summed session cost of its task. */
 type TaskListCost = { totalCostUsd: number | null };
+
+/** Same ordering as the session-cost list. Used only after selecting the task page. */
+export function taskRunModelColumn(rowId: "rowid" | "_rowid"): SqlQuery {
+  return sql`, (SELECT model FROM session_costs
+    WHERE "taskId" = agent_tasks.id
+      AND COALESCE(kind, 'harness') <> 'system-one'
+      AND model NOT IN ('', 'default')
+    ORDER BY "createdAt" DESC, ${sqlIdent(rowId)} ASC LIMIT 1) AS "runModel"`;
+}
 /** The slim and timeline `task`: the UTF-8 byte prefix the list projection cuts. */
 type TaskListPreview = Omit<TaskRow, "task" | "totalCostUsd"> & { task: Uint8Array };
 
@@ -369,7 +378,7 @@ export type TaskTimelineListRow = Pick<
 
 /** The row `listTasks` returns for a projection: only the selected columns. */
 export type TaskListRow<F extends TaskListFields> = F extends "slim"
-  ? TaskSlimListRow
+  ? TaskSlimListRow & { runModel: string | null }
   : F extends "timeline"
     ? TaskTimelineListRow
     : Omit<TaskRow, "totalCostUsd"> & TaskListCost;

@@ -624,6 +624,7 @@ export function TasksTable({
       {
         _id: "model",
         field: "model",
+        valueGetter: ({ data }) => (data ? taskDisplayModel(data) : undefined),
         headerName: "Model",
         width: 200,
         ...fixed,

@@ -16495,6 +16495,8 @@ export interface paths {
                                 statusKind?: "agent" | "runner" | "deferred" | "error" | "cascade" | "external" | "user" | "workflow" | "system" | "graceful_shutdown" | "context_limits" | "manual_supersede" | "crash_recovery" | "provider_fallback" | "workflow_retry";
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
+                                /** @description Latest named model reported by a harness session. */
+                                runModel?: string;
                             }[] | {
                                 /** Format: uuid */
                                 id: string;
