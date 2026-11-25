@@ -4370,6 +4370,8 @@ export interface AppDefinition {
   icon?: AppIcon;
   /** `sidebar` renders the app shell: page sidebar plus sticky page header. */
   layout?: "sidebar";
+  /** App-wide state: initial values, read and written at `/app/<name>` from every page. */
+  state?: Record<string, unknown>;
 }
 
 /**

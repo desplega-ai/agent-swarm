@@ -54,7 +54,7 @@ model" is a failure, not a pass.
 
 ```bash
 bun run e2e --strict                               # the whole contract in one process
-bun run e2e --shard 1/4 --json shard-1.json        # one CI shard (bands fixed by order)
+bun run e2e --shard 1/6 --json shard-1.json        # one CI shard (bands fixed by order)
 bun scripts/e2e/merge.ts --strict shard-*.json     # what the "E2E Contract" job runs on the shards
 bun run e2e                                        # same scenarios, report only, no gate
 bun run e2e --only <name>,<name>                   # a subset while debugging
@@ -113,20 +113,52 @@ Download two reports and compare them locally with `bun run e2e:bench`.
 Use runs from the same environment because timing depends on runner load.
 The job uses only `contents: read` permission.
 
+### Commit budget
+
+`.github/workflows/nightly-commit-budget.yml` checks the PostgreSQL commit budget
+(`scripts/e2e/bench-budget.json`). An external scheduler dispatches it on `main` daily. Six
+`measure` jobs run one Merge Gate band each, on SQLite and on PostgreSQL 16 with pgvector.
+The `report` job compares, per scenario, the most PostgreSQL commits and write statements of
+one HTTP request with the budget. The budget guards the slow path: one commit per row costs
+one WAL flush per row on PostgreSQL and nearly nothing on SQLite. Scenario totals are no gate:
+pollers and timers make them change with time. The job summary also has the PostgreSQL / SQLite
+duration ratio per scenario, for information only.
+
+On `main`, a failure opens the issue "Nightly PostgreSQL commit budget exceeded" (label
+`bug`), or comments on the open one. The first green run closes it. A dispatch on another
+branch only reports in its summary.
+
+To read a failure, open the job summary. Each row is a scenario over budget: the request
+with the most commits, and measured / budget for commits and write statements. Reproduce it
+locally:
+
+```bash
+bun run e2e:bench --check --only <scenario>
+```
+
+Then find the change that added commits to that request, usually a loop that commits once
+per row. When
+the new count is intended, regenerate the entry in the same PR:
+`bun run e2e:bench --write-budget --only <scenario>`. To regenerate the whole budget from CI,
+dispatch the workflow with `write_budget=true` and commit the `bench-budget` artifact.
+"Not checked" scenarios had no passing first attempt. "Not measured" means a band left no
+result, which fails the check. "No budget yet" lists new scenarios: regenerate to add them.
+Authoring details: [scripts/e2e/README.md](../scripts/e2e/README.md#commit-budget).
+
 ## CI
 
-`.github/workflows/merge-gate.yml` runs the suite as three **E2E Contract (shard i/3)** jobs,
+`.github/workflows/merge-gate.yml` runs the suite as six **E2E Contract (shard i/6)** jobs,
 each on its own runner with its own API process, database, ports and mocks. Shard 1 also runs
 `check-e2e-boundary.sh` and `e2e:tsc`. A shard fails only on its own scenarios and the
 quarantine file. It does not gate coverage: alone it covers part of the surface.
 
-The **E2E Contract** job then runs `bun scripts/e2e/merge.ts --strict` on the three shard
+The **E2E Contract** job then runs `bun scripts/e2e/merge.ts --strict` on the six shard
 results. It unions their calls, tools, node types and state values and computes coverage
 once, so a surface covered in any shard counts. It applies `--strict` and the minimums,
 carries `flaky` and quarantined rows into its summary, and fails when a shard result is
 missing, duplicated or red. It needs no `bun install`. The Merge Gate needs both jobs.
 
-To reproduce a red merge locally, download the four `e2e-contract-shard-<i>` artifacts and
+To reproduce a red merge locally, download the six `e2e-contract-shard-<i>` artifacts and
 run the same `merge.ts` command on them. The nightly workflow runs unsharded, plus real
 harness legs.
 

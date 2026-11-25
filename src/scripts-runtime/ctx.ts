@@ -8,6 +8,12 @@ import type {
 import type { ScriptAgentFsDescriptor, ScriptCaller } from "./executors/types";
 import { createMcpRegistryClient } from "./mcp-client";
 import {
+  createScriptDb,
+  DEFAULT_SCRIPT_DB_DIALECT,
+  type ScriptDb,
+  type ScriptDbDialect,
+} from "./script-db";
+import {
   createScriptFs,
   type ScriptFs,
   type ScriptShOptions,
@@ -25,6 +31,7 @@ export type RuntimeCtx = {
   mcp: ScriptMcpRegistryClient;
   fs: ScriptFs;
   sh: (command: string, options?: ScriptShOptions) => Promise<ScriptShResult>;
+  db: ScriptDb;
   stdlib: typeof stdlib;
   logger: {
     log: (...args: unknown[]) => void;
@@ -40,6 +47,7 @@ export function buildCtx({
   apiConnections,
   mcpConnections,
   agentFs,
+  dbDialect = DEFAULT_SCRIPT_DB_DIALECT,
   caller = null,
   signal,
   namespaces,
@@ -48,6 +56,8 @@ export function buildCtx({
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
   agentFs?: ScriptAgentFsDescriptor;
+  /** `ctx.db.dialect`, from the run's config payload. */
+  dbDialect?: ScriptDbDialect;
   caller?: ScriptCaller;
   /** Aborts in-flight `ctx.sh` commands when the run ends (quickjs passes its run signal). */
   signal?: AbortSignal;
@@ -65,6 +75,8 @@ export function buildCtx({
     mcp: createMcpRegistryClient(mcpConnections, swarmConfig),
     fs,
     sh,
+    // ctx.swarm is a Proxy: every string key is a tool call, so db_query is always defined.
+    db: createScriptDb(dbDialect, swarm.db_query as (args: unknown) => Promise<unknown>),
     stdlib,
     logger: console,
   };

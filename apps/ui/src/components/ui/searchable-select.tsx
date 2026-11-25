@@ -1,5 +1,6 @@
 "use client";
 
+import { defaultFilter } from "cmdk";
 import { Check, ChevronsUpDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -42,6 +43,8 @@ interface SearchableSelectBaseProps {
   "aria-label"?: string;
   /** Attributes for the portalled list, e.g. an app surface's `data-theme`. */
   contentAttrs?: { "data-theme"?: string };
+  /** Called with the typed search text, e.g. to load options from the server. */
+  onSearchChange?: (search: string) => void;
 }
 
 export interface SearchableSelectProps extends SearchableSelectBaseProps {
@@ -55,12 +58,18 @@ export interface SearchableMultiSelectProps extends SearchableSelectBaseProps {
   onChange: (next: string[]) => void;
 }
 
-/** Tokenized AND match, so "lea" + " worker" both narrow. The phone Add people list shares it. */
+/**
+ * Ranked match. Every search token found as a substring ranks first ("lea" +
+ * "worker" both narrow); a fuzzy subsequence match (cmdk scoring, "tmln" finds
+ * "timeline") ranks below it. Within each band, cmdk's score orders the list.
+ */
 export function tokenFilter(itemValue: string, search: string): number {
-  const haystack = itemValue.toLowerCase();
   const needle = search.toLowerCase().trim();
   if (!needle) return 1;
-  return needle.split(/\s+/).every((token) => haystack.includes(token)) ? 1 : 0;
+  const haystack = itemValue.toLowerCase();
+  const fuzzy = defaultFilter(haystack, needle);
+  const allTokens = needle.split(/\s+/).every((token) => haystack.includes(token));
+  return allTokens ? 0.5 + fuzzy / 2 : fuzzy / 2;
 }
 
 /**
@@ -133,6 +142,7 @@ function OptionsCombobox({
   id,
   "aria-label": ariaLabel,
   contentAttrs,
+  onSearchChange,
   isSelected,
   onPick,
   closeOnPick = false,
@@ -167,7 +177,9 @@ function OptionsCombobox({
         align="start"
       >
         <Command filter={tokenFilter}>
-          {searchable ? <CommandInput placeholder={searchPlaceholder} /> : null}
+          {searchable ? (
+            <CommandInput placeholder={searchPlaceholder} onValueChange={onSearchChange} />
+          ) : null}
           <CommandList className="max-h-72">
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             <CommandGroup>

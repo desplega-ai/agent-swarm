@@ -18,6 +18,7 @@ type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 interface RouteResponseDef {
   description: string;
   schema?: z.ZodType;
+  headers?: z.ZodObject;
   /**
    * Reason this response intentionally carries no JSON schema — SSE stream,
    * binary download, HTML, redirect, proxied upstream body, intentionally

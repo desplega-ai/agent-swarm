@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.14.5",
+    "version": "2.15.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -175,7 +175,8 @@
               "linear",
               "jira",
               "comb",
-              "chat"
+              "chat",
+              "alert"
             ],
             "default": "mcp"
           },
@@ -8795,6 +8796,27 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Liveness update conflicted after retries. Retry after the delay in `Retry-After`.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Seconds to wait before retrying the ping."
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying the ping."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -11986,6 +12008,17 @@
                         },
                         "durationMs": {
                           "type": "number"
+                        },
+                        "run": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ]
                         }
                       },
                       "required": [
@@ -12023,12 +12056,24 @@
                             "superseded",
                             "skipped"
                           ]
+                        },
+                        "run": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ]
                         }
                       },
                       "required": [
                         "ok",
                         "taskId",
-                        "status"
+                        "status",
+                        "run"
                       ]
                     },
                     {
@@ -12177,6 +12222,174 @@
           },
           "409": {
             "description": "App definition needs repair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/{id}/action-runs/{runId}": {
+      "get": {
+        "summary": "Read or wait on an app action run",
+        "description": "`runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 25
+            },
+            "required": false,
+            "name": "waitSeconds",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Action run state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "succeeded",
+                        "failed"
+                      ]
+                    },
+                    "settled": {
+                      "type": "boolean"
+                    },
+                    "runs": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "running": {
+                          "type": "number"
+                        },
+                        "completed": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "running",
+                        "completed",
+                        "failed",
+                        "truncated"
+                      ]
+                    },
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "scriptName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "scriptName",
+                          "error"
+                        ]
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "elapsedMs": {
+                      "type": "number"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state",
+                    "settled",
+                    "elapsedMs"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "App or action run not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -40100,6 +40313,16 @@
           {
             "schema": {
               "type": "string",
+              "description": "Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all."
+            },
+            "required": false,
+            "description": "Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all.",
+            "name": "tags",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "minLength": 1
             },
             "required": false,
@@ -40262,7 +40485,8 @@
                                   "linear",
                                   "jira",
                                   "comb",
-                                  "chat"
+                                  "chat",
+                                  "alert"
                                 ],
                                 "default": "mcp"
                               },
@@ -40639,7 +40863,8 @@
                       "linear",
                       "jira",
                       "comb",
-                      "chat"
+                      "chat",
+                      "alert"
                     ]
                   },
                   "outputSchema": {
@@ -41991,7 +42216,8 @@
                               "linear",
                               "jira",
                               "comb",
-                              "chat"
+                              "chat",
+                              "alert"
                             ],
                             "default": "mcp"
                           },
@@ -47372,7 +47598,7 @@
     "/api/realtime/ticket": {
       "post": {
         "summary": "Issue a one-shot dashboard realtime ticket",
-        "description": "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
+        "description": "The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`), sessions (`session.presence`) and app pages plus app event channels (`app.use`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.",
         "tags": [
           "Rooms"
         ],
@@ -55851,7 +56077,14 @@
                 "properties": {
                   "source": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "Inline TypeScript source. Pass this or `name`."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent."
                   },
                   "args": {},
                   "background": {
@@ -55870,11 +56103,12 @@
                   },
                   "requestedByUserId": {
                     "type": "string"
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
-                },
-                "required": [
-                  "source"
-                ]
+                }
               }
             }
           }
@@ -55925,8 +56159,28 @@
               }
             }
           },
+          "403": {
+            "description": "A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Global script not found, or parentScriptRunId names no running run of the calling agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "Existing idempotent run returned",
+            "description": "Existing idempotent run returned. A key another caller used answers 409 with an error and no run.",
             "content": {
               "application/json": {
                 "schema": {
@@ -56237,6 +56491,16 @@
         "responses": {
           "204": {
             "description": "Script run cancelled, or already terminal"
+          },
+          "403": {
+            "description": "A scoped user may cancel only the runs it launched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Script run not found",
@@ -60989,7 +61253,8 @@
                                       "linear",
                                       "jira",
                                       "comb",
-                                      "chat"
+                                      "chat",
+                                      "alert"
                                     ],
                                     "default": "mcp"
                                   },

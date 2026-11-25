@@ -8,6 +8,7 @@ import {
   createAppRow,
   createAppRows,
   deleteAppRow,
+  deleteAppRows,
   getAppRow,
   patchAppRow,
   validValue,
@@ -230,9 +231,13 @@ export function registerAppRowTools(server: McpServer) {
       );
       // Re-check under the row lock: a row patched out of the filter since the select is kept.
       const matches = (row: AppRow) => rowMatchesFilters(row, filters);
-      let deleted = 0;
-      for (const row of rows)
-        if (await deleteAppRow(args.appId, args.model, model, row.id, matches)) deleted++;
+      const deleted = await deleteAppRows(
+        args.appId,
+        args.model,
+        model,
+        rows.map((row) => row.id),
+        matches,
+      );
       return toolOk(`Deleted ${deleted} row(s).`, { data: { deleted } });
     },
   );

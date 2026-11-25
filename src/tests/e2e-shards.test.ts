@@ -5,21 +5,21 @@ import { type E2eResult, markdownSummary, parseOptions } from "../../scripts/e2e
 import { bandOf, bandProblems, type Observations, parseShard } from "../../scripts/e2e/shard";
 
 describe("shard bands", () => {
-  test("cuts at 130, 140 and 190", () => {
-    expect([10, 126, 129.5, 130, 136.5, 139, 140, 180, 190, 690].map(bandOf)).toEqual([
-      1, 1, 1, 2, 2, 2, 3, 3, 4, 4,
-    ]);
+  test("cuts at 130, 140, 190, 500 and 9006", () => {
+    expect(
+      [10, 126, 129.5, 130, 136.5, 139, 140, 180, 190, 499, 500, 9005, 9006, 9446].map(bandOf),
+    ).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6]);
   });
 
-  test("--shard takes i/4 only", () => {
-    expect(parseShard("2/4")).toEqual({ index: 2, total: 4 });
-    for (const bad of ["0/4", "5/4", "1/3", "1", "a/4"]) expect(() => parseShard(bad)).toThrow();
+  test("--shard takes i/6 only", () => {
+    expect(parseShard("2/6")).toEqual({ index: 2, total: 6 });
+    for (const bad of ["0/6", "7/6", "1/4", "1", "a/6"]) expect(() => parseShard(bad)).toThrow();
   });
 
   test("a shard cannot gate coverage or run harness legs", () => {
-    expect(() => parseOptions(["--shard", "1/4", "--strict"], [])).toThrow();
-    expect(() => parseOptions(["--shard", "1/4", "--min-route-coverage", "5"], [])).toThrow();
-    expect(() => parseOptions(["--shard", "1/4", "--harness", "pi"], [])).toThrow();
+    expect(() => parseOptions(["--shard", "1/6", "--strict"], [])).toThrow();
+    expect(() => parseOptions(["--shard", "1/6", "--min-route-coverage", "5"], [])).toThrow();
+    expect(() => parseOptions(["--shard", "1/6", "--harness", "pi"], [])).toThrow();
     expect(parseOptions([], []).shard).toBeUndefined();
   });
 

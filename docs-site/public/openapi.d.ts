@@ -710,6 +710,17 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Liveness update conflicted after retries. Retry after the delay in `Retry-After`. */
+                503: {
+                    headers: {
+                        /** @description Seconds to wait before retrying the ping. */
+                        "Retry-After": number;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -2237,12 +2248,18 @@ export interface paths {
                             stdout: string;
                             error?: string;
                             durationMs: number;
+                            run?: {
+                                id: string;
+                            };
                         } | {
                             /** @enum {boolean} */
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
                             status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded" | "skipped";
+                            run: {
+                                id: string;
+                            };
                         } | {
                             ok: boolean;
                             result: {
@@ -2311,6 +2328,89 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apps/{id}/action-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read or wait on an app action run
+         * @description `runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    waitSeconds?: number | null;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                    runId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Action run state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            taskId?: string;
+                            /** @enum {string} */
+                            state: "running" | "succeeded" | "failed";
+                            settled: boolean;
+                            runs?: {
+                                total: number;
+                                running: number;
+                                completed: number;
+                                failed: number;
+                                truncated: boolean;
+                            };
+                            failures?: {
+                                id: string;
+                                scriptName: string | null;
+                                error: string | null;
+                            }[];
+                            status?: string;
+                            elapsedMs: number;
+                            next?: string;
+                        };
+                    };
+                };
+                /** @description Permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description App or action run not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -16236,6 +16336,8 @@ export interface paths {
                     createdAfter?: string;
                     createdBefore?: string;
                     source?: string;
+                    /** @description Comma-separated tags (e.g. `alert:abc123,obs-lite`). Returns tasks that carry any of them, matched case-insensitively. Omit to include all. */
+                    tags?: string;
                     requestedByUserId?: string;
                     orderBy?: "lastUpdatedAt" | "createdAt";
                     limit?: number | null;
@@ -16273,7 +16375,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -16381,7 +16483,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -17263,7 +17365,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -20375,7 +20477,7 @@ export interface paths {
         put?: never;
         /**
          * Issue a one-shot dashboard realtime ticket
-         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`) and sessions (`session.presence`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
+         * @description The ticket authorizes one dashboard socket for presence rooms: Comb drives (`comb.presence`), sessions (`session.presence`) and app pages plus app event channels (`app.use`). An operator-key tab's picked user (`X-Swarm-User-Id`) rides on the ticket so session presence can check that user's access.
          */
         post: {
             parameters: {
@@ -23957,7 +24059,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -32983,7 +33085,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -37425,13 +37527,17 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    source: string;
+                    /** @description Inline TypeScript source. Pass this or `name`. */
+                    source?: string;
+                    /** @description A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent. */
+                    name?: string;
                     args?: unknown;
                     /** @default true */
                     background?: boolean;
                     idempotencyKey?: string;
                     scriptName?: string;
                     requestedByUserId?: string;
+                    parentScriptRunId?: string;
                 };
             };
         };
@@ -37460,7 +37566,25 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Existing idempotent run returned */
+            /** @description A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Global script not found, or parentScriptRunId names no running run of the calling agent */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Existing idempotent run returned. A key another caller used answers 409 with an error and no run. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -37537,6 +37661,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description A scoped user may cancel only the runs it launched */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Script run not found */
             404: {

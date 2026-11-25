@@ -519,6 +519,8 @@ export const AppDefinitionSchema = z
     userConfig: UserConfigSchema.optional(),
     pages: z.record(AppNameSchema, AppPageSchema),
     defaultPage: AppNameSchema,
+    /** App-wide state: initial JSON values, read and written at `/app/<name>` from every page. */
+    state: z.record(AppNameSchema, z.unknown()).optional(),
     theme: AppThemeIdSchema.optional(),
     /**
      * `sidebar` wraps every page in the app shell: a left sidebar listing the
@@ -686,6 +688,7 @@ const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
   "theme",
   "icon",
   "layout",
+  "state",
 ]);
 
 const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
