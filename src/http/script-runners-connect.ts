@@ -72,6 +72,10 @@ export function attachScriptRunnerTransport(server: Server): () => void {
     if (req.url?.split("?")[0] !== SCRIPT_RUNNER_PATH) return;
     const reject = (code: number, reason: string) =>
       socket.end(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\n\r\n${reason}`);
+    if (closing) {
+      reject(503, "Service Unavailable");
+      return;
+    }
     if (!getStorage().capabilities.scriptRunners) {
       reject(409, "script_runners_need_postgres");
       return;
@@ -99,7 +103,7 @@ export function attachScriptRunnerTransport(server: Server): () => void {
               clearTimeout(helloTimeout);
               if (!current) ws.close(1008, "Credential expired or revoked");
               else if (ws.readyState === WebSocket.OPEN)
-                helloTimeout = setTimeout(() => ws.close(1008, "Hello required"), 5000);
+                helloTimeout = setTimeout(() => ws.close(1011, "Hello timed out"), 5000);
               return !!current;
             })
             .catch(() => {
@@ -241,7 +245,8 @@ export function attachScriptRunnerTransport(server: Server): () => void {
   return () => {
     closing = true;
     setHeldScriptRunnerPicker(undefined);
-    server.off("upgrade", upgrade);
+    // The HTTP listener still accepts connections while other services drain.
+    server.once("close", () => server.off("upgrade", upgrade));
     setRemoteScriptRunnerPicker(undefined);
     for (const ws of wss.clients) ws.terminate();
     wss.close();
