@@ -106,7 +106,7 @@ On a codex, opencode or pi bump, run `bun scripts/probe-tool-schema-tokens.ts --
 
 Embedded OpenCode supports opt-in, exact-route LiteLLM limit discovery through
 the resolved `PROVIDER_MODEL_DISCOVERY` JSON config. Discovery runs after the
-existing per-task key splice and before host creation. The pinned SDK 2.4.1's
+existing per-task key splice and before host creation. The pinned SDK 2.4.2's
 model registry activates asynchronously: startup waits up to five seconds for
 the selected model, verifies injected bounds and uses smaller runtime limits
 before prompting. Unknown or larger runtime bounds fail session preparation.

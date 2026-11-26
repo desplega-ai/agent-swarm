@@ -102,7 +102,7 @@ test("real pinned host preserves separate input/output/context facts before the 
           output: 128000,
           context: semantics === "conservative" ? 922000 : 1050000,
         });
-        // Pinned 2.4.1 compaction inputWindow uses min(input, context), not
+        // Pinned 2.4.2 compaction inputWindow uses min(input, context), not
         // context-output. Sum interpretation must not enlarge the input budget.
         expect(Math.min(actual?.limit.input ?? Infinity, actual?.limit.context ?? Infinity)).toBe(
           922000,

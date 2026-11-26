@@ -1181,7 +1181,7 @@ export class OpencodeAdapter implements ProviderAdapter {
     let sessionId: string;
     try {
       if (effectiveLimits) {
-        // Pinned SDK 2.4.1: model.list returns the post-transform model facts.
+        // Pinned SDK 2.4.2: model.list returns the post-transform model facts.
         // An unexpectedly higher/missing enforced bound cannot be fixed by a
         // different gauge. Refuse before any prompt; smaller runtime limits win.
         const deadline = Date.now() + 5000;

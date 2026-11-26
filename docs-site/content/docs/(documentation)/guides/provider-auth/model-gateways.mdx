@@ -90,7 +90,7 @@ By default, input is the conservative combined context. For input `922000` and
 output `128000`, host limits and telemetry context are `922000`, not `200000`,
 `128000` or an unverified sum. Set `"semantics":"input-plus-output"` only after
 confirming that gateway's semantics; this yields `1050000` with a derived basis.
-OpenCode 2.4.1 compacts against `min(input, context)` with a safety reserve and
+OpenCode 2.4.2 compacts against `min(input, context)` with a safety reserve and
 fits output within context. Conservative context may compact early. Swarm's
 usage numerator stays input + cache read + cache create + output; no second
 output subtraction is made.
