@@ -27,7 +27,8 @@ async function inviteRequester(ctx: ScenarioContext): Promise<{ token: string; u
 /**
  * Flow `rbac-integration-role`: a scoped user token (primary `requester`) is refused on the
  * workflow trigger, workflow event and durable script-run routes, and admitted once the extra
- * `obs-lite-integration` role is attached. A user may launch only the global scripts listed in
+ * `obs-lite-integration` role is attached. The same holds for binding a new task to a Slack thread
+ * (`task.slack.thread.bind`); only one of the two thread fields is a 400. A user may launch only the global scripts listed in
  * `SCRIPT_RUN_USER_ALLOWLIST`, and each runs as the script's owning agent; its idempotency keys do not collide with an agent's; it cancels only
  * its own runs. The operator key and agents keep the routes as before.
  */
@@ -110,6 +111,17 @@ export const rbacIntegrationRole: Scenario = {
       expectStatus(response, [403], `a requester-only user on ${method} ${path}`);
       expect(response.text.includes(verb), `the 403 names ${verb}: ${response.text}`);
     }
+    // POST /api/tasks itself is open to a requester; binding a Slack thread is not.
+    const slackThread = { slackChannelId: `C0E2E${ctx.nonce}`, slackThreadTs: "1700000000.000100" };
+    const threadRefused = await ctx.api("POST", "/api/tasks", {
+      ...asUser,
+      body: { task: `obs-int-thread ${ctx.nonce}`, ...slackThread },
+    });
+    expectStatus(threadRefused, [403], "a requester-only user binding a Slack thread");
+    expect(
+      threadRefused.text.includes("task.slack.thread.bind"),
+      `the 403 names task.slack.thread.bind: ${threadRefused.text}`,
+    );
 
     // Requester + obs-lite-integration.
     expectStatus(
@@ -119,6 +131,26 @@ export const rbacIntegrationRole: Scenario = {
       [200],
       "attach the integration role",
     );
+    expectStatus(
+      await ctx.api("POST", "/api/tasks", {
+        ...asUser,
+        body: { task: `obs-int-half ${ctx.nonce}`, slackChannelId: slackThread.slackChannelId },
+      }),
+      [400],
+      "a Slack channel without a thread ts",
+    );
+    const bound = await ctx.api("POST", "/api/tasks", {
+      ...asUser,
+      body: { task: `obs-int-thread ${ctx.nonce}`, ...slackThread },
+    });
+    expectStatus(bound, [201], "the integration user binds a task to a Slack thread");
+    const boundTask = asRecord(bound.json);
+    expect(
+      boundTask.slackChannelId === slackThread.slackChannelId &&
+        boundTask.slackThreadTs === slackThread.slackThreadTs,
+      `the task stores the thread: ${bound.text.slice(0, 400)}`,
+    );
+    await cancelTask(ctx, asString(boundTask.id, "bound task id"));
     const triggered = await ctx.api("POST", `/api/workflows/${workflowId}/trigger`, {
       ...asUser,
       body: {},

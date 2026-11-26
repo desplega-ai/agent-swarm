@@ -41163,6 +41163,16 @@
                   },
                   "draft": {
                     "type": "boolean"
+                  },
+                  "slackChannelId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Slack channel the task's progress and outcome post to. Set together with `slackThreadTs`. Needs `task.slack.thread.bind`."
+                  },
+                  "slackThreadTs": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Slack thread ts in `slackChannelId` the task posts into."
                   }
                 },
                 "required": [
@@ -41194,7 +41204,7 @@
             }
           },
           "403": {
-            "description": "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
+            "description": "Parent/session access denied, unauthorized chat-thread or Slack-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
             "content": {
               "application/json": {
                 "schema": {
