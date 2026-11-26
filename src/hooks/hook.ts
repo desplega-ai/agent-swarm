@@ -774,7 +774,11 @@ export async function handleHook(): Promise<void> {
 
     const synced: Record<string, string> = {};
     for (const [field, value] of Object.entries(updates)) {
-      const [payload] = buildIndependentIdentityPayloads({ [field]: value }, changeSource);
+      const [payload] = buildIndependentIdentityPayloads(
+        { [field]: value },
+        changeSource,
+        baselines,
+      );
       if (!payload) continue;
       const ok = await postHookProfileUpdate({
         url: `${getBaseUrl()}/api/agents/${agentId}/profile`,

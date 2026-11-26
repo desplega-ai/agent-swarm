@@ -104,8 +104,12 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
       async fetch(req) {
         if (req.method !== "PUT") return new Response("not found", { status: 404 });
         const body = (await req.json()) as Record<string, string>;
+        const expected = (body.expectedHashes ?? {}) as unknown as Record<string, string>;
         for (const [field, value] of Object.entries(body)) {
-          if (field !== "changeSource") db[field] = value;
+          if (field === "changeSource") continue;
+          // As the API does: a field based on an older DB value is dropped.
+          if (expected[field] && expected[field] !== contentSha256(db[field] ?? "")) continue;
+          db[field] = value;
         }
         return Response.json({ ok: true });
       },
@@ -266,7 +270,10 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
       runnerSync(paired, { fields: ["identity"] }),
       syncSetupScriptToServer(config, "self_edit", paired),
     ]);
-    expect(db).toEqual({ identityMd: EDITED_IDENTITY, setupScript: "echo edited" });
+    expect({ identityMd: db.identityMd, setupScript: db.setupScript }).toEqual({
+      identityMd: EDITED_IDENTITY,
+      setupScript: "echo edited",
+    });
 
     db = { identityMd: "lead identity", setupScript: "echo lead" };
     await runnerSync(io, { fields: ["identity", "setup"] });
@@ -274,6 +281,17 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     await syncSetupScriptToServer(config, "session_sync", io);
 
     expect(db).toEqual({ identityMd: "lead identity", setupScript: "echo lead" });
+  });
+
+  test("an edited file is not sent over a DB edit made during the session", async () => {
+    db = { identityMd: BOOT_IDENTITY };
+    const io = bootedWorkspace({ identityMd: BOOT_IDENTITY });
+    io.files[IDENTITY_MD_PATH] = EDITED_IDENTITY;
+    db.identityMd = "dreaming edit";
+
+    await runnerSync(io, { fields: ["identity"] });
+
+    expect(db.identityMd).toBe("dreaming edit");
   });
 
   test("an empty HEARTBEAT.md that survives a restart is not sent over a later DB edit", async () => {
@@ -289,10 +307,10 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     await runnerSync(io, { fields: ["identity"] });
     expect(db.heartbeatMd).toBe("- check the queue");
 
-    // A real edit of the empty file still syncs.
+    // An edit of the stale empty file doesn't replace the DB edit it never saw.
     io.files[HEARTBEAT_MD_PATH] = "- agent checklist";
     await runnerSync(io, { fields: ["identity"] });
-    expect(db.heartbeatMd).toBe("- agent checklist");
+    expect(db.heartbeatMd).toBe("- check the queue");
   });
 });
 
@@ -319,7 +337,11 @@ describe("collectProfilePayloads (claude hook + runner)", () => {
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
 
     expect(payloads.map((payload) => payload.body)).toEqual([
-      { heartbeatMd: "heartbeat, edited", changeSource: "self_edit" },
+      {
+        heartbeatMd: "heartbeat, edited",
+        changeSource: "self_edit",
+        expectedHashes: { heartbeatMd: contentSha256("heartbeat") },
+      },
     ]);
   });
 

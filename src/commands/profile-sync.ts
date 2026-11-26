@@ -718,11 +718,20 @@ export interface ProfilePayload {
 export function buildIndependentIdentityPayloads(
   updates: Record<string, string>,
   changeSource: ProfileChangeSource,
+  baselines?: IdentityBaselines | null,
 ): ProfilePayload[] {
-  return Object.entries(updates).map(([field, value]) => ({
-    label: `identity.${field}`,
-    body: { [field]: value, changeSource },
-  }));
+  return Object.entries(updates).map(([field, value]) => {
+    // The baseline is the DB value this file derives from: a newer DB value (a Lead or dreaming edit) wins.
+    const base = baselines?.[field];
+    return {
+      label: `identity.${field}`,
+      body: {
+        [field]: value,
+        changeSource,
+        ...(base ? { expectedHashes: { [field]: base } } : {}),
+      },
+    };
+  });
 }
 
 /**
@@ -931,7 +940,7 @@ export async function collectProfilePayloads(
       baselines,
       agentId,
     );
-    payloads.push(...buildIndependentIdentityPayloads(updates, changeSource));
+    payloads.push(...buildIndependentIdentityPayloads(updates, changeSource, baselines));
   }
 
   if (fields.includes("claude")) {
