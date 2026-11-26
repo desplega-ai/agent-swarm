@@ -164,4 +164,37 @@ describe("full-text indexes [postgres]", () => {
     );
     expect(left?.n).toBe(0);
   });
+
+  test("a compare-and-set rewrite of a task text rewrites its search document", async () => {
+    await storage.repos.tasks.insertSimpleTask({
+      id: "scrub",
+      key: "shared/task:scrub/",
+      agentId: "a1",
+      task: "deploy with token quokkasecret now",
+      status: "pending",
+      source: "api",
+      slackChannelId: null,
+      slackThreadTs: null,
+      slackUserId: null,
+      swarmVersion: "1.0.0",
+      isHumanFree: false,
+    });
+    const search = (term: string) => storage.repos.tasks.countTasks({ search: term });
+    expect(await search("quokkasecret")).toBe(1);
+    const tasks = { table: "agent_tasks", idColumn: "id" };
+    const before = "deploy with token quokkasecret now";
+    const after = "deploy with token [REDACTED] now";
+    // A stale expectation writes nothing, and the document stays.
+    expect(
+      await storage.repos.maintenance.compareAndSetRow(tasks, "scrub", { task: after }, { task: "other" }, []),
+    ).toBe(false);
+    expect(await search("quokkasecret")).toBe(1);
+    expect(
+      await storage.repos.maintenance.compareAndSetRow(tasks, "scrub", { task: after }, { task: before }, []),
+    ).toBe(true);
+    // The redacted word is gone from the search, and the rest still matches.
+    expect(await search("quokkasecret")).toBe(0);
+    expect(await search("deploy with token")).toBe(1);
+    await storage.repos.tasks.deleteTask("scrub");
+  });
 });

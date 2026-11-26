@@ -1029,7 +1029,7 @@ httpServer
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
 
-    // Index the task rows migration 256 (SQLite) or 389 (Postgres) left out,
+    // Index the task rows migration 256 (SQLite) or 391 (Postgres) left out,
     // in batches. Until it finishes, SQLite search stays on LIKE and Postgres
     // search matches those rows through the expression indexes of 368. See
     // src/be/db/tasks/search-index.ts.

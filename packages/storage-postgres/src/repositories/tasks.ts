@@ -113,7 +113,7 @@ export const TASK_TITLE_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tas
  * is the expression of 368. A task row without a document row is written by
  * the backfill or by db-copy.
  */
-const UPSERT_TASK_SEARCH = `INSERT INTO agent_tasks_search (task_id, task_doc, title_doc)
+export const UPSERT_TASK_SEARCH = `INSERT INTO agent_tasks_search (task_id, task_doc, title_doc)
   SELECT id, task_search_document(task), task_search_document(title) FROM written
   ON CONFLICT (task_id) DO UPDATE SET task_doc = EXCLUDED.task_doc, title_doc = EXCLUDED.title_doc`;
 
