@@ -214,6 +214,43 @@ export const scriptCredentialBindings: Scenario = {
         `the refusal must not echo the secret: ${embedded.text.slice(0, 300)}`,
       );
 
+      // ── a failed fetch reports the caller's URL, not the substituted one ──
+      // The binding matches the hostname only, so a closed port on the same host still
+      // substitutes. The script returns the error reversed, so the run-output scrubber
+      // (exact-string match) cannot hide a substituted value that reached it. Native only:
+      // the quickjs egress guard refuses a loopback host before any connection.
+      const refusedHref = new URL(`http://${stub.hostname}:1/refused?access_token=${placeholder}`)
+        .href;
+      const refusedRun = await runScript(ctx, workerId, {
+        source: `export default async function () {
+  const reverse = (text: string) => text.split("").reverse().join("");
+  try {
+    await fetch("${refusedHref}");
+    return { fetched: true };
+  } catch (err) {
+    const error = err as Error & Record<string, unknown>;
+    const fields = Object.fromEntries(Object.keys(error).map((key) => [key, String(error[key])]));
+    return {
+      path: reverse(String(error.path)),
+      dump: reverse(JSON.stringify({ ...fields, message: error.message, text: String(error) })),
+    };
+  }
+}`,
+        executor: "native",
+        intent: `e2e broker refused ${ctx.nonce}`,
+      });
+      const refused = asRecord(refusedRun.result);
+      const readBack = (field: string) => String(refused[field]).split("").reverse().join("");
+      expect(
+        readBack("path") === refusedHref,
+        `error.path must keep the placeholder, got ${readBack("path")} (${JSON.stringify(refusedRun).slice(0, 300)})`,
+      );
+      expect(
+        !readBack("dump").includes(secretValue) &&
+          !readBack("dump").includes(encodeURIComponent(secretValue)),
+        `the fetch error must not carry the secret, got ${readBack("dump")}`,
+      );
+
       // ── list shows both bindings; managed (connection-owned) ones are opt-in ──
       const listed = await ctx.api("GET", "/api/credential-bindings");
       const mine = asRecords(listed.json, "bindings").filter(
