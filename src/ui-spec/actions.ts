@@ -45,7 +45,7 @@ export async function runTaskUiAction({
   actorUserId: string | undefined;
   slackUserId?: string;
 }): Promise<TaskUiActionResult> {
-  if (!isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false)) return { status: "disabled" };
+  if (!isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", true)) return { status: "disabled" };
 
   const task = await getTaskById(taskId);
   const stored = task ? await getTaskUiSpec(taskId) : null;

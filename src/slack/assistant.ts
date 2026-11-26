@@ -35,7 +35,7 @@ import { bufferThreadMessage, getBufferMessageCount } from "./thread-buffer";
 import "./templates";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 
-const isAdditiveSlack = () => isEnvFlagEnabled("ADDITIVE_SLACK", false);
+const isAdditiveSlack = () => isEnvFlagEnabled("ADDITIVE_SLACK", true);
 
 // Cache the bot's own Slack user ID so we can suppress messages that @-mention
 // a different agent (e.g. Devin) rather than our bot.

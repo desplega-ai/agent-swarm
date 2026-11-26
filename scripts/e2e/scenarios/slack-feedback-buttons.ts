@@ -94,10 +94,10 @@ async function vote(
 }
 
 /**
- * `SLACK_FEEDBACK_BUTTONS=true` puts Slack's 👍/👎 under the final outcome card, carrying the
- * task id. A click stores one vote per person per task in the `slack-feedback` KV namespace
- * (the last click wins), and agents cannot write that namespace. With the flag off, the card has
- * no buttons.
+ * `SLACK_FEEDBACK_BUTTONS` (on by default) puts Slack's 👍/👎 under the final outcome card,
+ * carrying the task id. A click stores one vote per person per task in the `slack-feedback` KV
+ * namespace (the last click wins), and agents cannot write that namespace. With an explicit
+ * `false`, the card has no buttons.
  */
 export const slackFeedbackButtons: Scenario = {
   name: "slack-feedback-buttons",
@@ -105,128 +105,130 @@ export const slackFeedbackButtons: Scenario = {
   groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
-    await ctx.restartSut({ env: { SLACK_FEEDBACK_BUTTONS: "true", UI_SPEC_ENABLED: "true" } });
-    try {
-      const leadId = await registerLead(ctx, `e2e-lead-feedback-${ctx.nonce}`);
-      const card = await answer(ctx, "feedback-on");
-      const feedback = card.blocks.find((block) => block.type === "context_actions");
-      const rendered = JSON.stringify(feedback ?? {});
-      expect(
-        card.blocks.at(-1) === feedback &&
-          rendered.includes('"feedback_buttons"') &&
-          rendered.includes(`"up:${card.taskId}"`) &&
-          rendered.includes(`"down:${card.taskId}"`),
-        `The outcome does not end with feedback buttons for its task: ${JSON.stringify(card.blocks)}`,
-      );
+    // Unset on the SUT: both flags are on by default.
+    const leadId = await registerLead(ctx, `e2e-lead-feedback-${ctx.nonce}`);
+    const card = await answer(ctx, "feedback-on");
+    const feedback = card.blocks.find((block) => block.type === "context_actions");
+    const rendered = JSON.stringify(feedback ?? {});
+    expect(
+      card.blocks.at(-1) === feedback &&
+        rendered.includes('"feedback_buttons"') &&
+        rendered.includes(`"up:${card.taskId}"`) &&
+        rendered.includes(`"down:${card.taskId}"`),
+      `The outcome does not end with feedback buttons for its task: ${JSON.stringify(card.blocks)}`,
+    );
 
-      await vote(ctx, card, "up", "alice");
-      const [first] = await votesOf(ctx, card.taskId, card.leadId);
-      expect(
-        first?.value.taskId === card.taskId &&
-          first.value.agentId === card.leadId &&
-          first.value.messageTs === card.cardTs &&
-          typeof first.value.slackUserId === "string" &&
-          first.key === `${card.taskId}/${first.value.slackUserId}`,
-        `The vote row misses the task, agent or message: ${JSON.stringify(first)}`,
-      );
+    await vote(ctx, card, "up", "alice");
+    const [first] = await votesOf(ctx, card.taskId, card.leadId);
+    expect(
+      first?.value.taskId === card.taskId &&
+        first.value.agentId === card.leadId &&
+        first.value.messageTs === card.cardTs &&
+        typeof first.value.slackUserId === "string" &&
+        first.key === `${card.taskId}/${first.value.slackUserId}`,
+      `The vote row misses the task, agent or message: ${JSON.stringify(first)}`,
+    );
 
-      // The same person changes their mind: one row, now down. Another person adds a row.
-      await vote(ctx, card, "down", "alice");
-      const changed = await votesOf(ctx, card.taskId, card.leadId);
-      expect(
-        changed.length === 1 && changed[0]?.value.vote === "down",
-        `A second click by the same person did not replace the vote: ${JSON.stringify(changed)}`,
-      );
-      await vote(ctx, card, "up", "bob");
-      const both = await votesOf(ctx, card.taskId, card.leadId);
-      expect(
-        both.length === 2 && both.filter((row) => row.value.vote === "up").length === 1,
-        `Two people should hold one vote each: ${JSON.stringify(both)}`,
-      );
+    // The same person changes their mind: one row, now down. Another person adds a row.
+    await vote(ctx, card, "down", "alice");
+    const changed = await votesOf(ctx, card.taskId, card.leadId);
+    expect(
+      changed.length === 1 && changed[0]?.value.vote === "down",
+      `A second click by the same person did not replace the vote: ${JSON.stringify(changed)}`,
+    );
+    await vote(ctx, card, "up", "bob");
+    const both = await votesOf(ctx, card.taskId, card.leadId);
+    expect(
+      both.length === 2 && both.filter((row) => row.value.vote === "up").length === 1,
+      `Two people should hold one vote each: ${JSON.stringify(both)}`,
+    );
 
-      // A value that names no task of this channel stores nothing.
-      await ctx.slack.clickButton({
-        channel: "general",
-        ts: card.cardTs,
-        action_id: "task_feedback",
-        value: "up:00000000-0000-4000-8000-000000000000",
-        user: "alice",
-      });
-      const stray = await votesOf(ctx, "00000000-0000-4000-8000-000000000000", card.leadId);
-      expect(
-        stray.length === 0,
-        `A click for an unknown task stored a vote: ${JSON.stringify(stray)}`,
-      );
+    // A value that names no task of this channel stores nothing.
+    await ctx.slack.clickButton({
+      channel: "general",
+      ts: card.cardTs,
+      action_id: "task_feedback",
+      value: "up:00000000-0000-4000-8000-000000000000",
+      user: "alice",
+    });
+    const stray = await votesOf(ctx, "00000000-0000-4000-8000-000000000000", card.leadId);
+    expect(
+      stray.length === 0,
+      `A click for an unknown task stored a vote: ${JSON.stringify(stray)}`,
+    );
 
-      // Only a Slack click writes votes: an agent's KV write is refused.
-      const forged = await ctx.api("PUT", `/api/kv/_/${NAMESPACE}/forged-${card.taskId}`, {
-        body: { value: { vote: "up" } },
-        headers: { "X-Agent-ID": leadId },
-      });
-      expectStatus(forged, [403], "an agent write to the slack-feedback namespace");
+    // Only a Slack click writes votes: an agent's KV write is refused.
+    const forged = await ctx.api("PUT", `/api/kv/_/${NAMESPACE}/forged-${card.taskId}`, {
+      body: { value: { vote: "up" } },
+      headers: { "X-Agent-ID": leadId },
+    });
+    expectStatus(forged, [403], "an agent write to the slack-feedback namespace");
 
-      // Votes name the voter and the task's channel: a worker, or a call with no agent, reads nothing.
-      const workerId = await registerWorker(ctx, `e2e-worker-feedback-${ctx.nonce}`);
-      for (const [label, headers] of [
-        ["a worker", { "X-Agent-ID": workerId }],
-        ["a call with no agent", {}],
-      ] as const) {
-        const list = await ctx.api("GET", `/api/kv/_/${NAMESPACE}`, { headers });
-        expectStatus(list, [403], `${label} listing the slack-feedback namespace`);
-        const get = await ctx.api(
-          "GET",
-          `/api/kv/_/${NAMESPACE}/${encodeURIComponent(String(both[0]?.key))}`,
-          { headers },
-        );
-        expectStatus(get, [403], `${label} reading a slack-feedback vote`);
-      }
-      const leadGet = await ctx.api(
+    // Votes name the voter and the task's channel: a worker, or a call with no agent, reads nothing.
+    const workerId = await registerWorker(ctx, `e2e-worker-feedback-${ctx.nonce}`);
+    for (const [label, headers] of [
+      ["a worker", { "X-Agent-ID": workerId }],
+      ["a call with no agent", {}],
+    ] as const) {
+      const list = await ctx.api("GET", `/api/kv/_/${NAMESPACE}`, { headers });
+      expectStatus(list, [403], `${label} listing the slack-feedback namespace`);
+      const get = await ctx.api(
         "GET",
         `/api/kv/_/${NAMESPACE}/${encodeURIComponent(String(both[0]?.key))}`,
-        {
-          headers: { "X-Agent-ID": leadId },
-        },
+        { headers },
       );
-      expectStatus(leadGet, [200], "the Lead reading a slack-feedback vote");
-      const mcp = await ctx.connectMcp(workerId);
-      try {
-        const listed = await callTool(mcp, "kv-list", { namespace: NAMESPACE });
-        expect(
-          listed.isError === true && listed.text.includes("readable only by a Lead agent"),
-          `A worker's kv_list read the slack-feedback votes: ${JSON.stringify(listed)}`,
-        );
-      } finally {
-        await mcp.close();
-      }
-
-      // Slack refuses the blocks once: the buttons go first, so the task's card and footer stay.
-      ctx.slack.injectFault({ method: "chat.stopStream", error: "invalid_blocks" });
-      const rejected = await answer(ctx, "feedback-rejected", {
-        spec: {
-          root: "card",
-          elements: {
-            card: { type: "Card", props: { title: "Preserve this card" }, children: ["text"] },
-            text: { type: "Text", props: { content: "Valuable structured answer" }, children: [] },
-          },
-        },
-      });
-      const kept = JSON.stringify(rejected.blocks);
+      expectStatus(get, [403], `${label} reading a slack-feedback vote`);
+    }
+    const leadGet = await ctx.api(
+      "GET",
+      `/api/kv/_/${NAMESPACE}/${encodeURIComponent(String(both[0]?.key))}`,
+      {
+        headers: { "X-Agent-ID": leadId },
+      },
+    );
+    expectStatus(leadGet, [200], "the Lead reading a slack-feedback vote");
+    const mcp = await ctx.connectMcp(workerId);
+    try {
+      const listed = await callTool(mcp, "kv-list", { namespace: NAMESPACE });
       expect(
-        !kept.includes("feedback_buttons") &&
-          kept.includes("Preserve this card") &&
-          kept.includes("Valuable structured answer") &&
-          kept.includes(rejected.taskId.slice(0, 8)),
-        `The card after a block rejection should keep its uiSpec card and footer and drop the buttons: ${kept}`,
+        listed.isError === true && listed.text.includes("readable only by a Lead agent"),
+        `A worker's kv_list read the slack-feedback votes: ${JSON.stringify(listed)}`,
+      );
+    } finally {
+      await mcp.close();
+    }
+
+    // Slack refuses the blocks once: the buttons go first, so the task's card and footer stay.
+    ctx.slack.injectFault({ method: "chat.stopStream", error: "invalid_blocks" });
+    const rejected = await answer(ctx, "feedback-rejected", {
+      spec: {
+        root: "card",
+        elements: {
+          card: { type: "Card", props: { title: "Preserve this card" }, children: ["text"] },
+          text: { type: "Text", props: { content: "Valuable structured answer" }, children: [] },
+        },
+      },
+    });
+    const kept = JSON.stringify(rejected.blocks);
+    expect(
+      !kept.includes("feedback_buttons") &&
+        kept.includes("Preserve this card") &&
+        kept.includes("Valuable structured answer") &&
+        kept.includes(rejected.taskId.slice(0, 8)),
+      `The card after a block rejection should keep its uiSpec card and footer and drop the buttons: ${kept}`,
+    );
+
+    // An explicit false wins over the default: the same card, with no buttons. The pair is the
+    // visual proof.
+    await ctx.restartSut({ env: { SLACK_FEEDBACK_BUTTONS: "false" } });
+    try {
+      const off = await answer(ctx, "feedback-off");
+      expect(
+        !JSON.stringify(off.blocks).includes("feedback_buttons"),
+        `The outcome has feedback buttons with the setting off: ${JSON.stringify(off.blocks)}`,
       );
     } finally {
       await ctx.restartSut();
     }
-
-    // The default setting: the same card, with no buttons. The pair is the visual proof.
-    const off = await answer(ctx, "feedback-off");
-    expect(
-      !JSON.stringify(off.blocks).includes("feedback_buttons"),
-      `The outcome has feedback buttons with the setting off: ${JSON.stringify(off.blocks)}`,
-    );
   },
 };

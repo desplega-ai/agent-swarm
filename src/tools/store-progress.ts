@@ -419,7 +419,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       // lock. The transaction re-checks only the pins, with bounded work, so a
       // pin removed in between refuses the card instead of storing it.
       const uiSpecScriptIssues =
-        uiSpec && status === "completed" && isEnvFlagEnabled("UI_SPEC_ENABLED", false)
+        uiSpec && status === "completed" && isEnvFlagEnabled("UI_SPEC_ENABLED", true)
           ? await scriptActionIssues(uiSpec.actions)
           : [];
 
@@ -637,7 +637,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // uiSpec: stored only with a completion, and only when the flag is on.
         // An invalid spec refuses the first completion, like citations above.
         let uiSpecToStore: Parameters<typeof upsertTaskUiSpec>[1] | undefined;
-        if (uiSpec && !isEnvFlagEnabled("UI_SPEC_ENABLED", false)) {
+        if (uiSpec && !isEnvFlagEnabled("UI_SPEC_ENABLED", true)) {
           attempt.uiSpecNote = "uiSpec ignored: UI_SPEC_ENABLED is off.";
         } else if (uiSpec && status !== "completed") {
           attempt.uiSpecNote = 'uiSpec is stored only with status "completed".';
@@ -652,7 +652,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
               ? { ok: false as const, issues: scriptIssues }
               : validateTaskUiSpec(uiSpec, {
                   taskId,
-                  actionsEnabled: isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false),
+                  actionsEnabled: isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", true),
                 });
           if (validation.ok) {
             uiSpecToStore = {

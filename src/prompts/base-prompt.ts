@@ -347,7 +347,7 @@ export const getBasePromptWithParts = async (
 
   // Rich cards (task uiSpec). Read the flag here, never in a module-level
   // const: the worker layers swarm_config rows into process.env at runtime.
-  if (hasMcp && !scriptsOnlyMode && isEnvFlagEnabled("UI_SPEC_ENABLED", false)) {
+  if (hasMcp && !scriptsOnlyMode && isEnvFlagEnabled("UI_SPEC_ENABLED", true)) {
     const uiSpecResult = await resolveTemplateAsync("system.agent.ui_spec", {});
     prompt += uiSpecResult.text;
     section("system.agent.ui_spec", grown());

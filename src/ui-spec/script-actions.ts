@@ -141,7 +141,7 @@ export async function scriptActionIssues(
   let lookups: ScriptActionLookups | undefined;
   for (const [actionId, action] of Object.entries(actions ?? {})) {
     if (action.kind !== "script") continue;
-    if (!isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", false)) {
+    if (!isEnvFlagEnabled("UI_SPEC_ACTIONS_ENABLED", true)) {
       issues.push(`Action "${actionId}" needs UI_SPEC_ACTIONS_ENABLED=true.`);
       continue;
     }

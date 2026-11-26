@@ -2,7 +2,7 @@
 
 A task result can carry a rich card next to the prose answer. You attach it with the `store-progress` input `uiSpec` when you complete the task. The card renders in the Slack outcome card, in the session view, on the task page and in Chat SDK channels. Surfaces that show only text (Linear, Jira, the legacy Slack card, Slack Work Objects) get the card's fallback text.
 
-The card is on only when the operator sets `UI_SPEC_ENABLED=true`. When the "Rich cards" section is in your system prompt, the flag is on.
+The card is on by default; the operator turns it off with `UI_SPEC_ENABLED=false`. When the "Rich cards" section is in your system prompt, the flag is on.
 
 ## When to make a card
 
@@ -76,7 +76,7 @@ The engine checks every spec when you store it. It refuses a spec that breaks a 
 
 ## Buttons
 
-A `Button` needs `UI_SPEC_ACTIONS_ENABLED=true`. When that flag is off, the engine refuses a spec with a `Button`. Use `LinkButton` instead.
+A `Button` needs `UI_SPEC_ACTIONS_ENABLED`, which is on by default. When the operator sets it to `false`, the engine refuses a spec with a `Button`. Use `LinkButton` instead.
 
 When the flag is on, each `Button.props.id` matches `^[a-z][a-z0-9_]{0,39}$` and names a key of `uiSpec.actions`. An action is one of:
 
