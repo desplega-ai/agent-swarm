@@ -1408,6 +1408,9 @@ declare module "swarm-sdk" {
    * task_get, schedule_*, workflow_*, script_run, ...) throws `invalid_args`. Durable runs
    * (`launch-script-run`) key every call from the run id, tool and call ordinal by
    * themselves, so a respawned run does not repeat its sends; pass a key to override that.
+   * A one-off run started with an `idempotencyKey` (`script-run` tool or API) does the
+   * same from that key, and hands a derived key to each nested `script_run` and
+   * `workflow_trigger` that sets none.
    */
   export interface SwarmCallOptions {
     idempotencyKey?: string;

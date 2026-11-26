@@ -651,6 +651,11 @@ type BridgeCallOptions = {
   signal?: AbortSignal;
   /** Sent as the MCP bridge's `Idempotency-Key`; see `SwarmCallOptions`. */
   idempotencyKey?: string;
+  /**
+   * The key a keyed run derived for this call. Unlike `idempotencyKey` it never
+   * throws: a REST-routed method has no dedupe point and simply sends none.
+   */
+  runIdempotencyKey?: string;
 };
 
 /** Per-call options: the second argument of `ctx.swarm.<tool>(args, options)`. */
@@ -698,8 +703,12 @@ async function callBridgeApi(
       );
     }
   }
+  const effectiveKey = idempotencyKey ?? (request ? undefined : options.runIdempotencyKey);
   try {
-    return await sendBridgeRequest(name, args, request, config, options);
+    return await sendBridgeRequest(name, args, request, config, {
+      ...options,
+      idempotencyKey: effectiveKey,
+    });
   } catch (error) {
     throw toSwarmToolError(name, error);
   }
@@ -789,16 +798,57 @@ async function sendBridgeRequest(
   return options.preserveData ? result : scrubObject(result);
 }
 
+/** REST-routed methods whose route takes an `idempotencyKey` body field of its own. */
+const RUN_KEYED_BODY_METHODS = new Set(["script_run", "workflow_trigger"]);
+
+const runCallOrdinals = new WeakMap<SwarmConfig, Map<string, number>>();
+
+/**
+ * The derived key of this call in a keyed run: the run's prefix, the method
+ * and the call's ordinal among this run's calls to that method. Numbered in
+ * call order, synchronously, so a re-run makes the same calls under the same
+ * keys. Every call takes an ordinal, an explicitly keyed one too, as in a
+ * durable run's guest ctx.
+ */
+function nextRunToolCallKey(config: SwarmConfig, method: string): string | undefined {
+  const prefix = config.toolCallKeyPrefix;
+  if (!prefix) return undefined;
+  let ordinals = runCallOrdinals.get(config);
+  if (!ordinals) {
+    ordinals = new Map();
+    runCallOrdinals.set(config, ordinals);
+  }
+  const ordinal = (ordinals.get(method) ?? 0) + 1;
+  ordinals.set(method, ordinal);
+  return `${prefix}:${method}:${ordinal}`;
+}
+
 async function callTool(
   name: string,
-  args: unknown,
+  rawArgs: unknown,
   config: SwarmConfig,
   signal: AbortSignal | undefined,
   callOptions?: SwarmCallOptions,
 ): Promise<unknown> {
   if (!isSdkToolAllowed(name)) throw unavailableSdkToolError(name);
   const keyed = callOptions?.idempotencyKey !== undefined;
-  const idempotencyKey = keyed ? { idempotencyKey: callOptions?.idempotencyKey } : {};
+  const runKey = nextRunToolCallKey(config, name);
+  const idempotencyKey = {
+    ...(keyed ? { idempotencyKey: callOptions?.idempotencyKey } : {}),
+    ...(runKey ? { runIdempotencyKey: runKey } : {}),
+  };
+  // These REST routes dedupe on their own body key: a keyed run hands its
+  // derived key down, so a nested script_run keys its own calls in turn.
+  const args =
+    runKey &&
+    !keyed &&
+    RUN_KEYED_BODY_METHODS.has(name) &&
+    rawArgs !== null &&
+    typeof rawArgs === "object" &&
+    !Array.isArray(rawArgs) &&
+    (rawArgs as Record<string, unknown>).idempotencyKey === undefined
+      ? { ...(rawArgs as Record<string, unknown>), idempotencyKey: runKey }
+      : rawArgs;
 
   if (name === "script_search" || name === "script_run") {
     return callBridgeApi(name, args, config, { throwOnError: true, signal, ...idempotencyKey });

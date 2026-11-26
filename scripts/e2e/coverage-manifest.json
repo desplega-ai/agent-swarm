@@ -633,7 +633,7 @@
       "scenarios": ["script-sdk-calls", "script-memory-rate", "script-tool-errors"]
     },
     "script-tool-idempotency": {
-      "description": "An Idempotency-Key on the scripts MCP bridge runs a write once and answers repeats from the first result; read-only tools, refusals and unkeyed calls run every time, and keys are scoped to the caller. One-off runs dedupe only with an explicit key. A durable run re-executed after an API restart repeats none of its ctx.swarm writes.",
+      "description": "An Idempotency-Key on the scripts MCP bridge runs a write once and answers repeats from the first result; read-only tools, refusals and unkeyed calls run every time, and keys are scoped to the caller. One-off runs dedupe with an explicit per-call key, or with a run-level idempotencyKey on the script-run tool or API that keys every call, nested script_run included. A durable run re-executed after an API restart repeats none of its ctx.swarm writes.",
       "scenarios": ["script-tool-idempotency"]
     },
     "session-sharing": {

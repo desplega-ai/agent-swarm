@@ -66,6 +66,17 @@ export const RESULT_OMITTED = {
     "This call already ran under the same Idempotency-Key. Its result was too large to keep, so it is not repeated here.",
 } as const;
 
+/**
+ * The base of the per-call keys of a script run started with an
+ * `idempotencyKey` (`script-run` tool, `POST /api/scripts/run`). The run's SDK
+ * appends `:<method>:<ordinal>`, so a re-run under the same key makes the same
+ * calls with the same keys and replays its writes. Hashed: the caller's key may
+ * hold any character and up to 200 of them, the bridge header takes 255 ASCII.
+ */
+export function runToolCallKeyPrefix(runKey: string): string {
+  return `script-run-key:${sha256(runKey)}`;
+}
+
 function recordKey(scope: ToolCallIdempotencyScope): string {
   return sha256(`${scope.principal}\0${scope.tool}\0${scope.key}`);
 }

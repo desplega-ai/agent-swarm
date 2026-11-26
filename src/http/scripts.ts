@@ -36,6 +36,7 @@ import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { runScriptWithRunCredential } from "../be/scripts/run-credential";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
+import { runToolCallKeyPrefix } from "../be/scripts/tool-call-idempotency";
 import {
   scriptSdkTypesWithGeneratedApis,
   scriptStdlibTypesWithGeneratedApis,
@@ -93,7 +94,13 @@ const runBodySchema = z
     scope: ScriptScopeSchema.optional(),
     fsMode: ScriptFsModeSchema.default("none"),
     executor: ScriptExecutorNameSchema.nullable().optional(),
-    idempotencyKey: z.string().max(200).optional(),
+    idempotencyKey: z
+      .string()
+      .max(200)
+      .optional()
+      .describe(
+        "Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again.",
+      ),
     /**
      * The run this one works for, so it joins that run's tree. A background
      * run's `ctx.step.swarmScript` and `ctx.swarm.script_run` set it; a run
@@ -937,6 +944,10 @@ export async function handleScripts(
       agentId: agent.id,
       runtimeInstanceId,
       sourceTaskId,
+      // A keyed run keys every ctx.swarm call it makes, nested script_run included.
+      ...(parsed.body.idempotencyKey
+        ? { toolCallKeyPrefix: runToolCallKeyPrefix(parsed.body.idempotencyKey) }
+        : {}),
       egressSecrets: credentials.egressSecrets,
       failedBindings: credentials.failedBindings,
       userConfig: credentials.userConfig,

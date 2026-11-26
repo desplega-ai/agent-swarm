@@ -1,7 +1,7 @@
 import { sql } from "../db";
 import { type ApiResponse, asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
-import { expectRunOk, registerAgent, runScript } from "./script-helpers";
+import { callToolOk, expectRunOk, registerAgent, runScript, withMcp } from "./script-helpers";
 
 const EXECUTORS = ["native", "quickjs"] as const;
 const REPLAYED = "idempotent-replayed";
@@ -48,6 +48,42 @@ const INLINE_SOURCE = `export default async function (args: any, ctx: any) {
   return { first, second, rest };
 }`;
 
+/** A child run: one unkeyed send. Started by RUN_KEYED_SOURCE through ctx.swarm.script_run. */
+const NESTED_SOURCE = `export default async function (args: any, ctx: any) {
+  await ctx.swarm.task_send({
+    task: args.task,
+    agentId: args.workerId,
+    routingReason: "human_pinned",
+    routingNote: "e2e run-keyed nested send to a fixed worker",
+    allowDuplicate: true,
+  });
+  return "nested";
+}`;
+
+/**
+ * A run started with a run-level idempotencyKey: two unkeyed sends, a nested
+ * script_run that sends, and a REST-routed write. None of them passes a key.
+ */
+const RUN_KEYED_SOURCE = `export default async function (args: any, ctx: any) {
+  const send = (suffix: string) =>
+    ctx.swarm.task_send({
+      task: args.task + " " + suffix,
+      agentId: args.workerId,
+      routingReason: "human_pinned",
+      routingNote: "e2e run-keyed send to a fixed worker",
+      allowDuplicate: true,
+    });
+  await send("a");
+  await send("b");
+  await ctx.swarm.script_run({
+    source: args.nested,
+    args: { task: args.task + " nested", workerId: args.workerId },
+    intent: "e2e run-keyed nested send",
+  });
+  await ctx.swarm.kv_incr({ namespace: args.ns, key: args.restKey });
+  return "parent";
+}`;
+
 function entryValue(response: ApiResponse): unknown {
   return asRecord(asRecord(response.json).entry).value;
 }
@@ -55,7 +91,8 @@ function entryValue(response: ApiResponse): unknown {
 /**
  * Flow `script-tool-idempotency`: an `Idempotency-Key` on the scripts MCP bridge runs a
  * write once and answers repeats from the first result; read-only tools, refusals and
- * calls without a key run every time. A durable run keys each ctx.swarm call from its run,
+ * calls without a key run every time. A one-off run started with an idempotencyKey (API or
+ * MCP tool) keys each ctx.swarm call from it, nested script_run included. A durable run keys each ctx.swarm call from its run,
  * tool and call ordinal, so the re-execution after an API restart repeats no write.
  */
 export const scriptToolIdempotency: Scenario = {
@@ -166,7 +203,12 @@ export const scriptToolIdempotency: Scenario = {
       );
     }
 
-    // ── C. a durable run re-executed after an API restart repeats none of its writes ──
+    // ── C. a run-level idempotencyKey keys every ctx.swarm call, nested script_run included ──
+    for (const executor of EXECUTORS) {
+      await runKeyedRerun(ctx, { agentId, workerId, ns, executor, bridge });
+    }
+
+    // ── D. a durable run re-executed after an API restart repeats none of its writes ──
     const durableWorker = await registerAgent(ctx, "idem-durable-worker");
     const fixedKey = `fixed-${ctx.nonce}`;
     const durableNs = `${ns}-durable`;
@@ -192,6 +234,85 @@ export const scriptToolIdempotency: Scenario = {
     }
   },
 };
+
+/**
+ * The same run under one run key, first through `POST /api/scripts/run`, then
+ * through the `script-run` MCP tool: the second repeats no bridge write, in the
+ * parent or in its nested run, while a REST-routed write runs again. A third
+ * run under another key repeats every write.
+ */
+async function runKeyedRerun(
+  ctx: ScenarioContext,
+  input: {
+    agentId: string;
+    workerId: string;
+    ns: string;
+    executor: (typeof EXECUTORS)[number];
+    bridge: (tool: string, args: Record<string, unknown>, key?: string) => Promise<ApiResponse>;
+  },
+): Promise<void> {
+  const { agentId, workerId, ns, executor, bridge } = input;
+  const task = `e2e run-keyed ${executor} ${ctx.nonce}`;
+  const restKey = `run-keyed-rest-${executor}`;
+  const body = (idempotencyKey: string) => ({
+    source: RUN_KEYED_SOURCE,
+    args: { task, workerId, ns, restKey, nested: NESTED_SOURCE },
+    executor,
+    intent: `e2e run-keyed ${executor} ${ctx.nonce}`,
+    idempotencyKey,
+  });
+  const counts = () =>
+    Object.fromEntries(
+      ["a", "b", "nested"].map((suffix) => [
+        suffix,
+        ctx.db.get<{ n: number }>(
+          sql`SELECT count(*) AS n FROM agent_tasks WHERE task = ${`${task} ${suffix}`}`,
+        )?.n,
+      ]),
+    );
+  const restValue = async () => entryValue(await bridge("kv-get", { namespace: ns, key: restKey }));
+
+  const runKey = `run-${executor}-${ctx.nonce}`;
+  const first = await runScript(ctx, agentId, body(runKey), `run-keyed first (${executor})`);
+  expectRunOk(first, `run-keyed first (${executor})`);
+  const afterFirst = counts();
+  expect(
+    afterFirst.a === 1 && afterFirst.b === 1 && afterFirst.nested === 1,
+    `the first keyed run must send each task once (${executor}): ${JSON.stringify(afterFirst)}`,
+  );
+
+  // The same run key through the MCP tool: the api derives the same per-call keys.
+  const viaTool = await withMcp(ctx, agentId, (mcp) =>
+    callToolOk(mcp, "script-run", body(runKey)),
+  );
+  const toolRun = asRecord(asRecord(viaTool.structuredContent).data ?? viaTool.structuredContent);
+  expect(
+    toolRun.exitCode === undefined || toolRun.exitCode === 0,
+    `the keyed re-run through the MCP tool must succeed (${executor}): ${JSON.stringify(viaTool).slice(0, 500)}`,
+  );
+  const afterRerun = counts();
+  expect(
+    afterRerun.a === 1 && afterRerun.b === 1 && afterRerun.nested === 1,
+    `a re-run under the same run key must repeat no send, nested ones included (${executor}): ${JSON.stringify(afterRerun)}`,
+  );
+  expect(
+    (await restValue()) === 2,
+    `the re-run must execute, and its REST-routed write runs again (${executor})`,
+  );
+
+  const other = await runScript(
+    ctx,
+    agentId,
+    body(`other-${executor}-${ctx.nonce}`),
+    `run-keyed other key (${executor})`,
+  );
+  expectRunOk(other, `run-keyed other key (${executor})`);
+  const afterOther = counts();
+  expect(
+    afterOther.a === 2 && afterOther.b === 2 && afterOther.nested === 2,
+    `another run key must send every task again (${executor}): ${JSON.stringify(afterOther)}`,
+  );
+}
 
 async function runDurableAcrossRestart(
   ctx: ScenarioContext,
