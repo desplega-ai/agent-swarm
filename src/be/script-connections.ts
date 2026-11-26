@@ -1,4 +1,5 @@
 import type {
+  ScriptConnectionCatalogRow,
   ScriptConnectionRow,
   ScriptConnectionWrite,
   ScriptCredentialBindingRow,
@@ -2011,7 +2012,10 @@ export async function deleteScriptConnection(id: string): Promise<ScriptConnecti
 /** The fields the run-time descriptor loaders read, one entry per connection row. */
 export type ScriptConnectionCatalog = ReadonlyArray<
   Readonly<
-    Pick<ScriptConnectionRecord, "kind" | "scope" | "scopeId" | "enabled" | "generatedRuntimeJson">
+    Pick<
+      ScriptConnectionRecord,
+      "slug" | "kind" | "scope" | "scopeId" | "enabled" | "generatedRuntimeJson"
+    >
   >
 >;
 
@@ -2033,7 +2037,9 @@ let cachedCatalog: {
 export async function loadScriptConnectionCatalog(): Promise<ScriptConnectionCatalog> {
   const storage = getStorage();
   // Inside a transaction the caller may read its own uncommitted writes: never cache those.
-  if (storage.inTransaction()) return catalogFromRows(await scriptsRepo().listConnections());
+  if (storage.inTransaction()) {
+    return catalogFromRows(await scriptsRepo().listConnectionCatalog());
+  }
   const now = Date.now();
   const generation = getScriptConnectionCatalogGeneration();
   if (
@@ -2048,7 +2054,7 @@ export async function loadScriptConnectionCatalog(): Promise<ScriptConnectionCat
     client: storage,
     generation,
     at: now,
-    catalog: scriptsRepo().listConnections().then(catalogFromRows),
+    catalog: scriptsRepo().listConnectionCatalog().then(catalogFromRows),
   };
   cachedCatalog = entry;
   entry.catalog.catch(() => {
@@ -2057,8 +2063,9 @@ export async function loadScriptConnectionCatalog(): Promise<ScriptConnectionCat
   return entry.catalog;
 }
 
-function catalogFromRows(rows: ConnectionRow[]): ScriptConnectionCatalog {
+function catalogFromRows(rows: ScriptConnectionCatalogRow[]): ScriptConnectionCatalog {
   return rows.map((row) => ({
+    slug: row.slug,
     kind: row.kind as ScriptConnectionKind,
     scope: row.scope as ScriptConnectionScope,
     scopeId: row.scope_id,
@@ -2109,6 +2116,23 @@ export async function getScriptMcpConnectionDescriptors(
     catalog ?? (await loadScriptConnectionCatalog()),
     ["mcp"],
     context,
+  );
+}
+
+/**
+ * True when an enabled connection with this slug applies to the context: the
+ * `listScriptConnections(context)` check, read from the run-time catalog
+ * instead of every column of every row.
+ */
+export async function isScriptConnectionReachable(
+  slug: string,
+  context: { agentId?: string; repoId?: string },
+): Promise<boolean> {
+  return (await loadScriptConnectionCatalog()).some(
+    (connection) =>
+      connection.slug === slug &&
+      connection.enabled &&
+      applies(connection.scope, connection.scopeId, context),
   );
 }
 
