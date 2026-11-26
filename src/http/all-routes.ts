@@ -26,6 +26,7 @@ import "./context";
 import "./core";
 import "./db-query";
 import "./design-system";
+import "./link-preview";
 
 import "./api-keys";
 import "./events";

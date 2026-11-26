@@ -24,6 +24,7 @@ export interface SpanOptions {
   kind?: SwarmSpanKind;
 }
 
+import type { PostgresStats } from "@desplega/storage";
 // eslint-disable-next-line import/no-duplicates -- type-only import, no side-effects
 import type { SessionCostMetric } from "./otel-impl";
 export type { SessionCostMetric };
@@ -106,6 +107,9 @@ let realRecordDbRetentionStatement:
 let realRecordSlackReactionInvalidName: ((event: string) => void) | undefined;
 let realRecordDbStatement: ((m: DbStatementMetric) => void) | undefined;
 let realRecordDbTransaction: ((m: DbTransactionMetric) => void) | undefined;
+let realStartPostgresStatsMetrics:
+  | ((read: () => Promise<PostgresStats | null>) => void)
+  | undefined;
 
 export function isOtelEnabled(): boolean {
   return otelConfigured();
@@ -130,6 +134,15 @@ export function isApiLogExportEnabled(): boolean {
   return envFlagEnabled("OTEL_EXPORT_API_LOGS");
 }
 
+/**
+ * The API's Postgres `pg_stat_*` gauges. On by default: only `OTEL_PG_METRICS`
+ * set to false, 0, no or off turns them off. A no-op on SQLite either way.
+ */
+export function isPgMetricsEnabled(): boolean {
+  const v = (process.env.OTEL_PG_METRICS ?? "").trim().toLowerCase();
+  return !(v === "0" || v === "false" || v === "no" || v === "off");
+}
+
 export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): Promise<void> {
   if (!otelConfigured() || initialized) return;
   initialized = true;
@@ -151,6 +164,7 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realRecordSlackReactionInvalidName = impl.recordSlackReactionInvalidName;
     realRecordDbStatement = impl.recordDbStatement;
     realRecordDbTransaction = impl.recordDbTransaction;
+    realStartPostgresStatsMetrics = impl.startPostgresStatsMetrics;
     console.log(`[OTel] enabled for ${impl.resolveServiceName(serviceRole)} (${serviceRole})`);
   } catch (error) {
     console.warn(`[OTel] disabled after initialization failure: ${error}`);
@@ -242,6 +256,12 @@ export function recordDbTransaction(m: DbTransactionMetric): void {
   realRecordDbTransaction(m);
 }
 
+/** Register the Postgres gauges over `read` (called once per metric export). No-op without OTLP. */
+export function startPostgresStatsMetrics(read: () => Promise<PostgresStats | null>): void {
+  if (!realStartPostgresStatsMetrics || !otelConfigured()) return;
+  realStartPostgresStatsMetrics(read);
+}
+
 export function _resetOtelForTests() {
   initialized = false;
   realWithSpan = undefined;
@@ -256,4 +276,5 @@ export function _resetOtelForTests() {
   realRecordSlackReactionInvalidName = undefined;
   realRecordDbStatement = undefined;
   realRecordDbTransaction = undefined;
+  realStartPostgresStatsMetrics = undefined;
 }

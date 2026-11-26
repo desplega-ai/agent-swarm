@@ -109,6 +109,7 @@ export const DB_RETENTION_TABLES = [
     table: "workflow_runs",
     policy: "workflowRuns",
     envKey: "WORKFLOW_RUNS_RETENTION_DAYS",
+    newInstallDefault: 30,
     metricsKey: "workflowRuns",
     initialBatchSize: 10,
     minBatchSize: 1,

@@ -633,8 +633,8 @@
       "scenarios": ["script-saved-lifecycle"]
     },
     "script-sdk-calls": {
-      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
-      "scenarios": ["script-sdk-calls", "script-memory-rate"]
+      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API. Failed calls throw a typed SwarmToolError, and an unknown ctx.swarm method names the closest exposed ones.",
+      "scenarios": ["script-sdk-calls", "script-memory-rate", "script-tool-errors"]
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
@@ -896,8 +896,8 @@
       "scenarios": ["platform-checklist"]
     },
     "outbound-url-guards": {
-      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, and discovered OAuth endpoints are validated",
-      "scenarios": ["platform-outbound-url-guards"]
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, discovered OAuth endpoints are validated, and the link-preview route refuses private hosts",
+      "scenarios": ["platform-outbound-url-guards", "link-preview"]
     },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",
@@ -913,6 +913,10 @@
         "cli-api",
         "cli-controller"
       ]
+    },
+    "ui-dev-tooling": {
+      "description": "`bun run ui:dev` against a running swarm as a black box: ready line, same-origin proxy, slug lookup, usage errors and teardown",
+      "scenarios": ["ui-dev-remote"]
     }
   }
 }

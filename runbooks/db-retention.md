@@ -11,8 +11,9 @@ A new install starts with retention on. On the boot that creates the database, t
 | `EVENTS_RETENTION_DAYS` | 90 | Telemetry events older than 90 days |
 | `AGENT_LOG_RETENTION_DAYS` | 90 | Task and agent history older than 90 days |
 | `CONTEXT_VERSIONS_KEEP_LATEST` | 100 | Profile versions beyond the newest 100 per agent and field |
+| `WORKFLOW_RUNS_RETENTION_DAYS` | 30 | Terminal workflow run trees finished more than 30 days ago, with their steps and unreferenced snapshots |
 
-`WORKFLOW_RUNS_RETENTION_DAYS` is not in this table. Terminal workflow runs stay until an operator sets it, on a new install and on an existing one.
+The same boot also stores `WORKTREE_REAPER_MODE=on`, which is not a retention key (see [worktree-reaper.md](./worktree-reaper.md)).
 
 These defaults delete for real: `DB_RETENTION_DRY_RUN` stays `false`. The sections below describe what each table loses.
 
@@ -69,7 +70,7 @@ An incoming foreign key needs extra care. With `foreign_keys = ON`, SQLite looks
 ### Workflow run policy
 
 `WORKFLOW_RUNS_RETENTION_DAYS` accepts 1 to 1,000,000 whole days and is disabled
-when unset. Age is measured from `finishedAt`, not start time: a long-running job
+when unset (a new install stores 30). Age is measured from `finishedAt`, not start time: a long-running job
 gets the full window after it finishes. Only `completed`, `failed`, `skipped` and
 `cancelled` runs with a known finish time qualify. The cutoff uses SQLite's
 space-separated datetime format, so legacy timestamps compare correctly; an ISO

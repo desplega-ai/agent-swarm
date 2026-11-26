@@ -76,6 +76,9 @@ function turnRetentionOffForSpawnedServers(): void {
   for (const { envKey } of DB_RETENTION_TABLES) {
     process.env[envKey] = "0";
   }
+  // The same seed stores WORKTREE_REAPER_MODE=on; keep the pre-seed dry-run
+  // so a worker the suite spawns never removes a worktree.
+  process.env.WORKTREE_REAPER_MODE = "dry-run";
 }
 turnRetentionOffForSpawnedServers();
 

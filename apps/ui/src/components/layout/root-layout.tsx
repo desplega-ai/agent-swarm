@@ -21,6 +21,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { useLaterNotifier } from "@/hooks/use-later-notifier";
 import { CREDENTIAL_URL_PARAMS, withoutConnectionParams } from "@/lib/connection-url-params";
+import { isAgentPreview } from "@/lib/deployment-config";
 import { GitHubStarNudge } from "@/lib/github-star-nudge-toast";
 import { MAIN_GUTTER } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
@@ -158,12 +159,18 @@ export function RootLayout() {
         <IdentityGate />
         <ConnectionParamsCleanup />
         <LaterNotifier />
-        <GitHubStarNudge />
         <NameConnectionModal />
-        <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
-        <LeadCredentialDialog key={config.apiUrl} />
-        <FeedbackDialog key={`feedback:${config.apiUrl}`} />
-        <FirstTaskInvitePrompt key={`first-task-invite:${config.apiUrl}`} />
+        {/* Nudges and popups that open on their own. An agent preview load (`bun run ui:dev`)
+            skips them, so screenshots show only the page under test. */}
+        {!isAgentPreview && (
+          <>
+            <GitHubStarNudge />
+            <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
+            <LeadCredentialDialog key={config.apiUrl} />
+            <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+            <FirstTaskInvitePrompt key={`first-task-invite:${config.apiUrl}`} />
+          </>
+        )}
       </AgentFsProvider>
     </StatusProvider>
   );

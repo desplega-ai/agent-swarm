@@ -392,6 +392,15 @@ function slackConclusionSettleSeconds(): number {
   return positiveEnvNumber(process.env.SLACK_CONCLUSION_SETTLE_SEC, 10);
 }
 
+/**
+ * A Lead follow-up that finishes within this long of the previous card's first
+ * post edits that card. Slack sends no notification for an edit, so a later
+ * one posts its answer as a new reply and the previous card is deleted.
+ */
+function slackCardMergeWindowMs(): number {
+  return positiveEnvNumber(process.env.SLACK_CARD_MERGE_WINDOW_SEC, 120) * 1000;
+}
+
 function slackConclusionTimeoutMinutes(): number {
   return positiveEnvNumber(process.env.SLACK_CONCLUSION_TIMEOUT_MIN, 240);
 }
@@ -1561,7 +1570,7 @@ type OutcomeUiSpec = { blocks: unknown[]; fallbackText: string };
  * `blocks` is empty when the stored spec no longer converts.
  */
 async function outcomeUiSpec(task: AgentTask): Promise<OutcomeUiSpec | null> {
-  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", false)) return null;
+  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", true)) return null;
   const stored = await getTaskUiSpec(task.id);
   if (!stored) return null;
   return { blocks: taskUiSpecSlackBlocks(stored, task.id), fallbackText: stored.fallbackText };
@@ -2183,42 +2192,40 @@ async function updateOutcomeGroupCard(
   return true;
 }
 
+/** The previous card a Lead follow-up may merge into, and the tasks that card shows. */
+type LeadFollowUpMergeTarget = { group: SlackOutcomeGroupHost; members: AgentTask[] };
+
 /**
- * Merges a Lead follow-up's answer into the previous card in the thread, so
- * one ask keeps one live card: the newest follow-up replaces the older one's
- * answer (see renderOutcomeGroup), however long the worker took. The edit
- * sends no notification, so the merge is only allowed when all of these are
- * true:
- * - the task is a completed Lead follow-up or resume that did not defer,
+ * The card a Lead follow-up's answer would merge into, so one ask keeps one
+ * live card: the newest follow-up replaces the older one's answer (see
+ * renderOutcomeGroup). Null unless all of these are true:
+ * - the task is a completed or failed Lead follow-up or resume that did not defer,
  * - the newest card in the thread is from the same agent, completed, not a
  *   deferral, conclusion or delegation child card,
  * - both answer the same Slack ask,
  * - no message (a person's or a bot's) came after that card, so the card is
  *   still the last thing in the thread,
- * - neither task has a ui-spec card, and the merged text fits one card.
- *
- * Returns false, with nothing changed, when the merge does not apply or the
- * edit fails: the caller then posts a card as usual. An error after the edit
- * propagates, and the next tick merges again: the edit is idempotent.
+ * - neither task has a ui-spec card.
+ * The edit sends no notification, so the caller merges only a quick completed
+ * follow-up (see isQuickLeadFollowUp): a failure always posts its own card,
+ * and a slow follow-up's new reply replaces the card (deletes it).
  */
-async function mergeLeadFollowUpCard(
+async function leadFollowUpMergeTarget(
   task: AgentTask,
   tasks: AgentTask[],
-  statusBudget: StatusBudget,
-): Promise<boolean> {
+): Promise<LeadFollowUpMergeTarget | null> {
   if (task.source !== "system" || !SLACK_LEAD_FOLLOW_UP_TYPES.has(task.taskType ?? "")) {
-    return false;
+    return null;
   }
-  if (task.status !== "completed" || isDeferredTask(task)) return false;
+  if ((task.status !== "completed" && task.status !== "failed") || isDeferredTask(task)) {
+    return null;
+  }
   const app = getSlackApp();
   const { agentId, slackChannelId: channelId, slackThreadTs: threadTs } = task;
-  if (!app || !agentId || !channelId || !threadTs) return false;
-
-  let group: SlackOutcomeGroupHost;
-  let members: AgentTask[];
+  if (!app || !agentId || !channelId || !threadTs) return null;
   try {
     const host = await getLatestSlackOutcomeGroupHost(channelId, threadTs);
-    if (!host || host.conclusionKind) return false;
+    if (!host || host.conclusionKind) return null;
     const existing = await outcomeGroupMembers(host, tasks);
     const hostTask = existing[0];
     if (
@@ -2232,21 +2239,43 @@ async function mergeLeadFollowUpCard(
       (await outcomeUiSpec(hostTask)) ||
       (await outcomeUiSpec(task))
     ) {
-      return false;
+      return null;
     }
     const ask = await slackAskOf(task, tasks);
-    if (!ask || ask !== (await slackAskOf(hostTask, tasks))) return false;
-    if (await slackThreadHasMessageAfter(app.client, channelId, threadTs, host.ts)) return false;
-    group = host;
-    members = [...existing, task];
+    if (!ask || ask !== (await slackAskOf(hostTask, tasks))) return null;
+    if (await slackThreadHasMessageAfter(app.client, channelId, threadTs, host.ts)) return null;
+    return { group: host, members: [...existing, task] };
   } catch (error) {
     console.error(
       `[Slack] Could not check a card merge for task ${task.id}; posting a new card:`,
       scrubSecrets(String(error)),
     );
-    return false;
+    return null;
   }
+}
 
+/** True when `task` finished within the merge window of `group`'s first post. */
+function isQuickLeadFollowUp(task: AgentTask, group: SlackOutcomeGroupHost): boolean {
+  const finishedAt = Date.parse(task.finishedAt ?? task.lastUpdatedAt);
+  return finishedAt - Date.parse(group.postedAt) < slackCardMergeWindowMs();
+}
+
+/**
+ * Merges a quick Lead follow-up's answer into the card `target` names.
+ * Returns false, with nothing changed, when the merged text does not fit one
+ * card or the edit fails: the caller then posts a card as usual. An error
+ * after the edit propagates, and the next tick merges again: the edit is
+ * idempotent.
+ */
+async function mergeLeadFollowUpCard(
+  task: AgentTask,
+  { group, members }: LeadFollowUpMergeTarget,
+  tasks: AgentTask[],
+  statusBudget: StatusBudget,
+): Promise<boolean> {
+  const app = getSlackApp();
+  const { slackChannelId: channelId, slackThreadTs: threadTs } = task;
+  if (!app || !channelId || !threadTs) return false;
   try {
     if (!(await updateOutcomeGroupCard(app.client, channelId, group, members, tasks))) {
       return false;
@@ -2264,6 +2293,51 @@ async function mergeLeadFollowUpCard(
     `[Slack] Merged the card of task ${task.id.slice(0, 8)} into the card of task ${group.taskId.slice(0, 8)}`,
   );
   return true;
+}
+
+/**
+ * Removes the card a slow Lead follow-up skipped, once the follow-up's new
+ * reply is posted, so the thread does not end on a stale answer. When Slack
+ * refuses the delete, the card is edited down to a pointer at the new reply
+ * instead. Best effort: the new reply already carries the answer, so a
+ * failure only logs.
+ */
+async function retireCardSkippedByNewReply(
+  task: AgentTask,
+  group: SlackOutcomeGroupHost,
+): Promise<void> {
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId) return;
+  try {
+    await callSlackWithRetry(app.client, "chat.delete", {
+      channel: task.slackChannelId,
+      ts: group.ts,
+    });
+    console.log(
+      `[Slack] Deleted the card of task ${group.taskId}: the reply of task ${task.id} replaces it`,
+    );
+    return;
+  } catch (error) {
+    if (isSlackMessageNotFound(error)) return;
+    console.warn(
+      `[Slack] Could not delete the card of task ${group.taskId}; pointing it at the reply of task ${task.id} instead:`,
+      slackErrorSummary(error),
+    );
+  }
+  const text = task.status === "failed" ? "❌ Failed ↓" : "✅ Done ↓";
+  try {
+    await callSlackWithRetry(app.client, "chat.update", {
+      channel: task.slackChannelId,
+      ts: group.ts,
+      text,
+      blocks: [{ type: "markdown", text }],
+    });
+  } catch (error) {
+    console.error(
+      `[Slack] Could not point the card of task ${group.taskId} at the reply of task ${task.id}:`,
+      scrubSecrets(String(error)),
+    );
+  }
 }
 
 function onTaskUiSpecUpdated(data: unknown): void {
@@ -2661,7 +2735,16 @@ async function processSlackThread(
       }
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
-        if (!card && (await mergeLeadFollowUpCard(task, tasks, statusTick.budget))) {
+        // shortcut: only a first attempt looks for the previous card, so a retried
+        // slow follow-up leaves that card in place; check pending cards too if that shows up.
+        const mergeTarget = card ? null : await leadFollowUpMergeTarget(task, tasks);
+        const quick = !!mergeTarget && isQuickLeadFollowUp(task, mergeTarget.group);
+        if (
+          mergeTarget &&
+          quick &&
+          task.status === "completed" &&
+          (await mergeLeadFollowUpCard(task, mergeTarget, tasks, statusTick.budget))
+        ) {
           noteOutcomeDeliverySuccess(task.id);
           await finalizeTerminalSlackReactions([task]);
           outcomeCreated = true;
@@ -2671,6 +2754,7 @@ async function processSlackThread(
         if (outcome) {
           noteOutcomeDeliverySuccess(task.id);
           await finalizeTerminalSlackReactions([task]);
+          if (mergeTarget && !quick) await retireCardSkippedByNewReply(task, mergeTarget.group);
         }
         outcomeCreated ||= !!outcome;
       } catch (error) {

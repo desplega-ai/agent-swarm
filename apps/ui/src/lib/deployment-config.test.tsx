@@ -8,6 +8,7 @@ describe("parseUiDeploymentConfig", () => {
       apiKey: null,
       userId: null,
       demoMode: false,
+      agentPreview: false,
     });
   });
 
@@ -24,11 +25,19 @@ describe("parseUiDeploymentConfig", () => {
       apiKey: "demo-key",
       userId: "user-123",
       demoMode: true,
+      agentPreview: false,
     });
   });
 
   test("accepts the numeric demo flag", () => {
     expect(parseUiDeploymentConfig({ VITE_DEMO_MODE: "1" }).demoMode).toBe(true);
+  });
+
+  test("turns on agent preview only for the ui:dev flag", () => {
+    expect(parseUiDeploymentConfig({ VITE_AGENT_PREVIEW: "1" }).agentPreview).toBe(true);
+    expect(parseUiDeploymentConfig({ VITE_AGENT_PREVIEW: "true" }).agentPreview).toBe(true);
+    expect(parseUiDeploymentConfig({ VITE_AGENT_PREVIEW: "0" }).agentPreview).toBe(false);
+    expect(parseUiDeploymentConfig({ VITE_DEMO_MODE: "1" }).agentPreview).toBe(false);
   });
 
   test("rejects an incomplete fixed connection", () => {

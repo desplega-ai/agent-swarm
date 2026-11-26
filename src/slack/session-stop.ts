@@ -18,7 +18,7 @@ import { reconcileSlackSessionStatus } from "./session-status";
  * Slack's native Stop button (`agent_session_stopped`). Slack shows it in the
  * "Working…" line while a thread's session is `processing`, but only to apps
  * subscribed to the event, and it does not end the session itself: the app
- * stops the work and moves the status on. Off by default.
+ * stops the work and moves the status on. On by default; `false` turns it off.
  */
 const SLACK_STOP_BUTTON_KEY = "SLACK_STOP_BUTTON_ENABLED";
 
@@ -30,7 +30,7 @@ const STOP_PASSES = 2;
 let warnedDisabled = false;
 
 function isSlackStopButtonEnabled(): boolean {
-  return isEnvFlagEnabled(SLACK_STOP_BUTTON_KEY, false);
+  return isEnvFlagEnabled(SLACK_STOP_BUTTON_KEY, true);
 }
 
 /**

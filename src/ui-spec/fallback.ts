@@ -10,7 +10,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
  * The appended fallback goes through `scrubSecrets`.
  */
 export async function withUiSpecFallback(taskId: string, body: string): Promise<string> {
-  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", false)) return body;
+  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", true)) return body;
   const stored = await getTaskUiSpec(taskId);
   if (!stored?.fallbackText) return body;
   // Stored scrubbed; scrubbed again at egress, since these sends post it as is.

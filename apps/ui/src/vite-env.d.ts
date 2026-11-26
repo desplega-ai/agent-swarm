@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_API_KEY?: string;
   readonly VITE_USER_ID?: string;
   readonly VITE_DEMO_MODE?: string;
+  /** "1" when `bun run ui:dev` serves the dashboard: no UI telemetry, no nudges. */
+  readonly VITE_AGENT_PREVIEW?: string;
 }
 
 interface ImportMeta {

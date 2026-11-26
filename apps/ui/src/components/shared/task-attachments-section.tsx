@@ -7,7 +7,6 @@ import {
   File,
   FileText,
   Film,
-  Github,
   Image as ImageIcon,
   Link2,
   PanelsTopLeft,
@@ -23,7 +22,7 @@ import { useLinkPreviewClick } from "@/components/link-preview/link-preview-stat
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { InAppOrExternalLink } from "@/components/shared/in-app-or-external-link";
-import { useSwarmLinkOrigins } from "@/components/shared/markdown-link-chip";
+import { SwarmLinkView, useSwarmLinkOrigins } from "@/components/shared/markdown-link-chip";
 import {
   type AgentFsLinkContext,
   AttachmentName,
@@ -53,7 +52,7 @@ import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { formatBytes } from "@/lib/format-bytes";
 import { scrubSecretText } from "@/lib/scrub-secrets";
-import { githubHostOf } from "@/lib/swarm-links";
+import { parseSwarmLink, withoutLinkedUrls } from "@/lib/swarm-links";
 import { cn } from "@/lib/utils";
 
 /**
@@ -169,7 +168,7 @@ function PreviewIcon({ kind }: { kind: PreviewKind | null }) {
   return <File className="h-4 w-4 text-muted-foreground" />;
 }
 
-/** A list row's icon: the link's provider, a page, or the file's type. */
+/** A list row's icon: a page, or the file's type. Links render as chips (`UrlAttachmentChip`). */
 function KindIcon({
   attachment,
   previewKind,
@@ -178,13 +177,6 @@ function KindIcon({
   previewKind: PreviewKind | null;
 }) {
   const className = "size-4";
-  if (attachment.kind === "url") {
-    return attachment.providerId === "github" ? (
-      <Github className={className} />
-    ) : (
-      <Link2 className={className} />
-    );
-  }
   if (attachment.kind === "page") return <PanelsTopLeft className={className} />;
   if (previewKind === "image") return <ImageIcon className={className} />;
   if (previewKind === "video") return <Film className={className} />;
@@ -210,63 +202,27 @@ function hostOf(url: string | undefined): string | null {
 }
 
 /**
- * A GitHub or GitLab PR, MR or issue link, read from its URL: a short label
- * ("PR #2593") and the repo. Null for any other link.
- */
-function vcsRef(
-  url: string | undefined,
-  githubWebUrl: string | null | undefined,
-): { label: string; repo: string } | null {
-  let path: string;
-  let host: string;
-  try {
-    ({ pathname: path, host } = new URL(url ?? ""));
-  } catch {
-    return null;
-  }
-  const gitlab = /^\/(.+?)\/-\/(merge_requests|issues)\/(\d+)/.exec(path);
-  if (gitlab) {
-    const label = gitlab[2] === "issues" ? `Issue #${gitlab[3]}` : `MR !${gitlab[3]}`;
-    return { label, repo: gitlab[1] };
-  }
-  // GitLab's `/-/` paths are its own on any host; the GitHub shape is not
-  // (Sentry has `/organizations/<org>/issues/<n>`), so it needs GitHub's host.
-  const github =
-    host === githubHostOf(githubWebUrl)
-      ? /^\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/.exec(path)
-      : null;
-  if (github) {
-    const label = github[2] === "pull" ? `PR #${github[3]}` : `Issue #${github[3]}`;
-    return { label, repo: github[1] };
-  }
-  return null;
-}
-
-/**
- * A list row's one meta line: what the row is (a PR's repo, the link's
- * host, "Page", or the file's type), its size, and a short intent ("Task
+ * A list row's one meta line: what the row is ("Page" or the file's
+ * type), its size, and a short intent ("Task
  * deliverable"). A longer intent or description goes on its own line
  * (`note`).
  */
 function rowMeta(
   attachment: TaskAttachment,
   previewKind: PreviewKind | null,
-  ref: { repo: string } | null,
 ): { meta: string; note: string | null } {
   // A file named without an extension ("Research report") keeps it in its path.
   const extension = getExtension(attachment.name) || getExtension(attachment.path ?? "");
   const what =
-    attachment.kind === "url"
-      ? (ref?.repo ?? hostOf(attachment.url) ?? "Link")
-      : attachment.kind === "page"
-        ? "Page"
-        : extension
-          ? extension.toUpperCase()
-          : previewKind === "pdf"
-            ? "PDF"
-            : previewKind
-              ? previewKind.charAt(0).toUpperCase() + previewKind.slice(1)
-              : "File";
+    attachment.kind === "page"
+      ? "Page"
+      : extension
+        ? extension.toUpperCase()
+        : previewKind === "pdf"
+          ? "PDF"
+          : previewKind
+            ? previewKind.charAt(0).toUpperCase() + previewKind.slice(1)
+            : "File";
   const descriptor = attachment.intent || attachment.description || null;
   const shortIntent = descriptor && SLUG_RE.test(descriptor) ? humanizeSlug(descriptor) : null;
   const meta = [
@@ -533,17 +489,20 @@ function AttachmentRow({
               </a>
             </Button>
           )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="mr-1 shrink-0 border-l border-border-subtle rounded-l-none text-muted-foreground"
-            onClick={() => onDownload(attachment)}
-            aria-label={`Download ${attachment.name}`}
-            title={`Download ${attachment.name}`}
-          >
-            <Download className="h-3.5 w-3.5" />
-          </Button>
+          {/* A page has no bytes: the raw route serves only drive files. */}
+          {isFile ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="mr-1 shrink-0 border-l border-border-subtle rounded-l-none text-muted-foreground"
+              onClick={() => onDownload(attachment)}
+              aria-label={`Download ${attachment.name}`}
+              title={`Download ${attachment.name}`}
+            >
+              <Download className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
         </div>
       );
     }
@@ -615,10 +574,8 @@ function AttachmentRow({
     );
   }
 
-  // A PR or issue link reads "PR #2593"; the stored name is its tooltip.
-  const ref = attachment.kind === "url" ? vcsRef(attachment.url, origins.github) : null;
-  const name = ref?.label ?? attachment.name;
-  const { meta, note } = rowMeta(attachment, previewKind, ref);
+  const name = attachment.name;
+  const { meta, note } = rowMeta(attachment, previewKind);
   return (
     // One calm row: a kind icon, the name, one meta line. The actions show on
     // hover or focus over the row's end. A touch screen shows them under the
@@ -631,7 +588,7 @@ function AttachmentRow({
         >
           <KindIcon attachment={attachment} previewKind={previewKind} />
         </span>
-        <div className="min-w-0 flex-1" title={pathDisplay ?? (ref ? attachment.name : undefined)}>
+        <div className="min-w-0 flex-1" title={pathDisplay ?? undefined}>
           <div className="flex min-w-0 items-center gap-1.5">
             {attachment.isPrimary && (
               <Star
@@ -701,35 +658,12 @@ function AttachmentRow({
               </Button>
             ) : null}
             {onDelete ? (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-6 text-muted-foreground hover:text-status-error-strong"
-                    disabled={deleting}
-                    aria-label={`Delete ${name}`}
-                    title="Delete"
-                  >
-                    {deleting ? <Spinner className="size-3" /> : <Trash2 />}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete attachment</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This removes {name} from the task. This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Keep</AlertDialogCancel>
-                    <AlertDialogAction variant="destructive" onClick={() => onDelete(attachment)}>
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <DeleteAttachmentButton
+                attachment={attachment}
+                name={name}
+                deleting={deleting}
+                onDelete={onDelete}
+              />
             ) : null}
           </div>
         </div>
@@ -802,6 +736,103 @@ function AttachmentRow({
   );
 }
 
+/** The trash button with its confirm dialog, shared by file rows and link chips. */
+function DeleteAttachmentButton({
+  attachment,
+  name,
+  deleting,
+  onDelete,
+}: {
+  attachment: TaskAttachment;
+  name: string;
+  deleting?: boolean;
+  onDelete: (attachment: TaskAttachment) => void;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          className="size-6 text-muted-foreground hover:text-status-error-strong"
+          disabled={deleting}
+          aria-label={`Delete ${name}`}
+          title="Delete"
+        >
+          {deleting ? <Spinner className="size-3" /> : <Trash2 />}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete attachment</AlertDialogTitle>
+          <AlertDialogDescription>
+            This removes {name} from the task. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={() => onDelete(attachment)}>
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * A link attachment as a chip, never a file card: a PR, an issue or a swarm
+ * link reads as its smart chip (`SwarmLinkView`, with its hover card), any
+ * other URL as a plain link chip with the attachment's name.
+ */
+function UrlAttachmentChip({
+  attachment,
+  onDelete,
+  deleting,
+}: {
+  attachment: TaskAttachment;
+  /** Task page only: the prompt bubble's chips stay read-only. */
+  onDelete?: (attachment: TaskAttachment) => void;
+  deleting?: boolean;
+}) {
+  const origins = useSwarmLinkOrigins();
+  const url = attachment.url ?? "";
+  const link = url ? parseSwarmLink(url, origins) : null;
+  const chip = link ? (
+    <SwarmLinkView link={link} className="text-sm" />
+  ) : (
+    <PlainUrlChip attachment={attachment} url={url} />
+  );
+  if (!onDelete) return chip;
+  return (
+    <span className="inline-flex max-w-full items-center gap-0.5">
+      {chip}
+      <DeleteAttachmentButton
+        attachment={attachment}
+        name={attachment.name || hostOf(url) || url}
+        deleting={deleting}
+        onDelete={onDelete}
+      />
+    </span>
+  );
+}
+
+function PlainUrlChip({ attachment, url }: { attachment: TaskAttachment; url: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={url}
+      className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-1.5 text-sm font-medium text-primary transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      <Link2 aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 truncate">{attachment.name || hostOf(url) || url}</span>
+    </a>
+  );
+}
+
 /**
  * A file the person sent with their message: a dashboard composer upload, or
  * a file shared with the bot in Slack or a chat channel. A legacy row with
@@ -820,6 +851,7 @@ export function TaskPromptAttachments({
   status,
   attachments,
   from,
+  linkedText,
   className,
 }: {
   taskId: string;
@@ -831,13 +863,16 @@ export function TaskPromptAttachments({
    * bubble) or the agent's (left-aligned, with its reply). Omitted: all.
    */
   from?: "person" | "agent";
+  /** The message text: a link attachment it already links is left out. */
+  linkedText?: string | null;
   className?: string;
 }) {
   const listQuery = useTaskAttachments(taskId, attachments, { status });
   const rows = useMemo(() => {
     const all = listQuery.data?.attachments ?? attachments ?? [];
-    return from ? all.filter((a) => isPersonUpload(a) === (from === "person")) : all;
-  }, [attachments, from, listQuery.data?.attachments]);
+    const mine = from ? all.filter((a) => isPersonUpload(a) === (from === "person")) : all;
+    return withoutLinkedUrls(mine, linkedText);
+  }, [attachments, from, linkedText, listQuery.data?.attachments]);
 
   if (rows.length === 0) return null;
 
@@ -862,15 +897,19 @@ export function TaskPromptAttachments({
       )}
       aria-label={from === "agent" ? "Reply attachments" : "Prompt attachments"}
     >
-      {rows.map((a) => (
-        <AttachmentRow
-          key={a.id}
-          attachment={a}
-          onDownload={handleDownload}
-          taskId={taskId}
-          variant="prompt"
-        />
-      ))}
+      {rows.map((a) =>
+        a.kind === "url" ? (
+          <UrlAttachmentChip key={a.id} attachment={a} />
+        ) : (
+          <AttachmentRow
+            key={a.id}
+            attachment={a}
+            onDownload={handleDownload}
+            taskId={taskId}
+            variant="prompt"
+          />
+        ),
+      )}
     </section>
   );
 }
@@ -950,20 +989,23 @@ export function TaskAttachmentsSection({
   taskId,
   attachments,
   variant = "card",
+  linkedText,
   className,
 }: {
   taskId: string;
   attachments: TaskAttachment[] | undefined;
   /** `plain`: the rows only (the task page's details card names the list). */
   variant?: "card" | "plain";
+  /** The task's output: a link attachment it already links is left out. */
+  linkedText?: string | null;
   className?: string;
 }) {
   const listQuery = useTaskAttachments(taskId, attachments);
   const remove = useDeleteAttachment(taskId);
 
   const rows = useMemo(
-    () => listQuery.data?.attachments ?? attachments ?? [],
-    [attachments, listQuery.data?.attachments],
+    () => withoutLinkedUrls(listQuery.data?.attachments ?? attachments ?? [], linkedText),
+    [attachments, linkedText, listQuery.data?.attachments],
   );
 
   if (rows.length === 0) {
@@ -986,20 +1028,39 @@ export function TaskAttachmentsSection({
     remove.mutate(attachment.id);
   };
 
+  // Links read as chips on one wrapping line; files keep their rows.
+  const links = rows.filter((a) => a.kind === "url");
+  const files = rows.filter((a) => a.kind !== "url");
   const list = (
-    <ul className={cn("space-y-0.5", variant === "plain" && className)}>
-      {rows.map((a) => (
-        <li key={a.id}>
-          <AttachmentRow
-            attachment={a}
-            onDownload={handleDownload}
-            onDelete={handleDelete}
-            deleting={remove.isPending && remove.variables === a.id}
-            taskId={taskId}
-          />
-        </li>
-      ))}
-    </ul>
+    <div className={cn("space-y-1", variant === "plain" && className)}>
+      {links.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5 px-2 py-1">
+          {links.map((a) => (
+            <UrlAttachmentChip
+              key={a.id}
+              attachment={a}
+              onDelete={handleDelete}
+              deleting={remove.isPending && remove.variables === a.id}
+            />
+          ))}
+        </div>
+      ) : null}
+      {files.length > 0 ? (
+        <ul className="space-y-0.5">
+          {files.map((a) => (
+            <li key={a.id}>
+              <AttachmentRow
+                attachment={a}
+                onDownload={handleDownload}
+                onDelete={handleDelete}
+                deleting={remove.isPending && remove.variables === a.id}
+                taskId={taskId}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
   if (variant === "plain") return list;
 

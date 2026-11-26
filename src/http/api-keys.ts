@@ -438,7 +438,7 @@ const getAvailable = route({
          * (most under even use) among `availableIndices`. It never excludes a key.
          */
         keyPace: z.array(z.number()),
-        /** How the worker ranks keys: `CREDENTIAL_SELECTION_STRATEGY` (default `usage`). */
+        /** How the worker ranks keys: `CREDENTIAL_SELECTION_STRATEGY` (default `pace`). */
         selectionStrategy: z.enum(CREDENTIAL_SELECTION_STRATEGIES),
         /**
          * Running sessions per pool position: `in_progress` tasks whose credential is this

@@ -344,7 +344,7 @@ completion, foreach drives and restart recovery.
 - `deleteWorkflow` collects the distinct hashes of its runs before deleting them. In the
   same transaction, it checks only those snapshots in batches of 100 and removes each one
   only if no remaining run references it, regardless of status. Shared snapshots and
-  unrelated orphans stay untouched. Opt-in `WORKFLOW_RUNS_RETENTION_DAYS` applies the same cleanup when terminal
+  unrelated orphans stay untouched. `WORKFLOW_RUNS_RETENTION_DAYS` (30 on a new install, off on an existing one) applies the same cleanup when terminal
   runs expire, measured from `finishedAt`. Entire trees must be expired before
   parents are removed, followed by children in bounded batches. Tasks and accepted
   trigger keys survive; deleted run links return 404. See [database retention](./db-retention.md)

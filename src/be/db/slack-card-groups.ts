@@ -22,6 +22,8 @@ export type SlackOutcomeGroupHost = {
   contextKey: string;
   permalink: string | null;
   conclusionKind: string | null;
+  /** When the card was first delivered to Slack. */
+  postedAt: string;
   /** Task ids merged into the card, oldest first. */
   mergedTaskIds: string[];
 };
@@ -33,6 +35,7 @@ type HostRow = {
   context_key: string;
   permalink: string | null;
   conclusion_kind: string | null;
+  finalized_at: string;
 };
 
 async function mergedTaskIds(hostId: string): Promise<string[]> {
@@ -48,6 +51,7 @@ async function toHost(row: HostRow): Promise<SlackOutcomeGroupHost> {
     contextKey: row.context_key,
     permalink: row.permalink,
     conclusionKind: row.conclusion_kind,
+    postedAt: row.finalized_at,
     mergedTaskIds: await mergedTaskIds(row.id),
   };
 }

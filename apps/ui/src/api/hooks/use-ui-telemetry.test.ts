@@ -49,6 +49,13 @@ describe("sendUiTelemetry", () => {
     ]);
   });
 
+  test("sends nothing on an agent preview load, even with telemetry on", () => {
+    expect(isUiTelemetryEnabled(status({ enabled: true }), true)).toBe(false);
+    sendUiTelemetry(status({ enabled: true }), shown, true);
+    sendUiTelemetry(null, shown, true);
+    expect(sent).toEqual([]);
+  });
+
   test("an older server without the telemetry field counts as on", () => {
     sendUiTelemetry(status(), shown);
     sendUiTelemetry(null, shown);
