@@ -48,6 +48,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { getSlackProcessingThreads } from "../be/db/slack-trees";
+import { getStorage } from "../be/storage";
 import { upsertTaskCitations } from "../be/task-citations";
 import { upsertTaskUiSpec } from "../be/task-ui-spec";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
@@ -3968,6 +3969,61 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
     await processSlackRenderV2();
 
     expect(await getSlackOutcomeMessage(child.id)).toBeNull();
+  });
+
+  test("a render pass reads the thread's outcome cards and tasks once, not once per member", async () => {
+    const lead = await createAgent({ name: "Batch Lead", isLead: true, status: "idle" });
+    const worker = await createAgent({ name: "Batch Worker", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_BATCH_READS");
+    const ask = await createTaskExtended("ask with many children", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    const children: AgentTask[] = [];
+    for (let i = 0; i < 8; i++) {
+      const child = await createTaskExtended(`child ${i}`, {
+        agentId: worker.id,
+        source: "mcp",
+        parentTaskId: ask.id,
+        followUpConfig: { disabled: true },
+      });
+      await startTask(child.id);
+      // Three finish (one tick's child-card cap), five keep running.
+      if (i < 3) await completeTask(child.id, `child ${i} result`);
+      children.push(child);
+    }
+    await processSlackRenderV2();
+    expect(await getSlackTreeMessageByThread(channelId, threadTs)).not.toBeNull();
+    for (const child of children.slice(0, 3)) {
+      expect((await getSlackOutcomeMessage(child.id))?.finalizedAt).toBeDefined();
+    }
+
+    const repos = getStorage().repos;
+    const perMemberCards = spyOn(repos.slack, "findSlackOutcomeByTask");
+    const batchedCards = spyOn(repos.slack, "findSlackOutcomesByTaskIds");
+    const taskReads = spyOn(repos.tasks, "findTaskById");
+    const threadListings = spyOn(repos.tasks, "listTasksInSlackThread");
+    const visibilityReads = spyOn(repos.slack, "getTreeVisibility");
+    try {
+      markSlackThreadDirty(channelId, threadTs);
+      await flushSlackRenderV2DirtyThreads();
+      // Before: one card read per member per loop, one task read per thread task,
+      // and the listing and visibility read again by the tree path.
+      expect(perMemberCards).not.toHaveBeenCalled();
+      expect(batchedCards).toHaveBeenCalledTimes(1);
+      expect(taskReads).not.toHaveBeenCalled();
+      // The second listing is the status sync after closeSlackTreeIfSettled, whose
+      // UPDATE names agent_tasks and so moves the task write epoch.
+      expect(threadListings).toHaveBeenCalledTimes(2);
+      expect(visibilityReads).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const spy of [perMemberCards, batchedCards, taskReads, threadListings, visibilityReads])
+        spy.mockRestore();
+    }
   });
 
   test("re-reads slackReplySent inside streamOutcomeCard so a child card doesn't duplicate a late Slack reply", async () => {

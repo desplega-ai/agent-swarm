@@ -23,16 +23,20 @@ const MEMO_TTL_MS = 250;
 // per kind (the map is cleared when full); upgrade to an LRU if a loop needs more.
 const MAX_ENTRIES = 1_000;
 
-type Kind = "task" | "agent";
+// "slack" (slack_messages) is never memoized here: it only keeps a write epoch for requestMemoEpoch.
+type Kind = "task" | "agent" | "slack";
 type Entry = { epoch: number; at: number; value: Promise<unknown> };
 type Scope = Record<Kind, Map<string, Entry>> & { hits: number; misses: number };
 
 const scopes = new AsyncLocalStorage<Scope>();
-const epochs: Record<Kind, number> = { task: 0, agent: 0 };
+const epochs: Record<Kind, number> = { task: 0, agent: 0, slack: 0 };
 
 /** Run `fn` with a fresh memo scope: one per HTTP request. */
 export function withRequestMemo<T>(fn: () => Promise<T>): Promise<T> {
-  return scopes.run({ task: new Map(), agent: new Map(), hits: 0, misses: 0 }, fn);
+  return scopes.run(
+    { task: new Map(), agent: new Map(), slack: new Map(), hits: 0, misses: 0 },
+    fn,
+  );
 }
 
 /** Reads served from (hits) and missed by (misses) the current scope's memo. */
@@ -72,7 +76,17 @@ export function requestMemoKindsWritten(sql: string): Kind[] {
   const kinds: Kind[] = [];
   if (/\bagent_tasks\b/i.test(sql)) kinds.push("task");
   if (/\b(agents|runtime_pools)\b/i.test(sql)) kinds.push("agent");
+  if (/\bslack_messages\b/i.test(sql)) kinds.push("slack");
   return kinds;
+}
+
+/**
+ * Bumped by every write to the kind's table in this process. A caller that keeps
+ * rows past one read compares it to the value taken before that read: equal means
+ * this process wrote nothing since.
+ */
+export function requestMemoEpoch(kind: Kind): number {
+  return epochs[kind];
 }
 
 export function invalidateRequestMemo(kinds: readonly Kind[]): void {

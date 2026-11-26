@@ -872,6 +872,14 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
   return row ? rowToSlackMessage(row) : null;
 }
 
+/** The outcome cards of `taskIds` in one read, keyed by task id. */
+export async function getSlackOutcomeMessages(
+  taskIds: readonly string[],
+): Promise<Map<string, SlackMessageRecord>> {
+  const rows = await getStorage().repos.slack.findSlackOutcomesByTaskIds(taskIds);
+  return new Map(rows.map((row) => [row.task_id as string, rowToSlackMessage(row)]));
+}
+
 /**
  * Deferral outcome cards whose wake-up task has since reached a terminal
  * state, and which have not been rewritten into that resolved state yet.
