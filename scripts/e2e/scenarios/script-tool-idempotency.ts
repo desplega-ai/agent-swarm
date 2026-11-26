@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { sql } from "../db";
 import { type ApiResponse, asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
@@ -346,6 +347,17 @@ async function runKeyedRerun(
   expect(
     afterFirst.a === 1 && afterFirst.b === 1 && afterFirst.nested === 1,
     `the first keyed run must send each task once (${executor}): ${JSON.stringify(afterFirst)}`,
+  );
+  // The run's own key saves its output to the shared script:executions namespace; the key it
+  // derives for the nested script_run must not, or every agent could read the nested output.
+  const savedOutputs = (key: string) =>
+    ctx.db.get<{ n: number }>(
+      sql`SELECT count(*) AS n FROM kv_entries WHERE namespace = 'script:executions' AND key LIKE ${key}`,
+    )?.n;
+  const derivedPrefix = `script-run-key:${createHash("sha256").update(runKey).digest("hex")}:%`;
+  expect(
+    savedOutputs(runKey) === 1 && savedOutputs(derivedPrefix) === 0,
+    `only the explicit run key may save output to script:executions (${executor}): own=${savedOutputs(runKey)} derived=${savedOutputs(derivedPrefix)}`,
   );
 
   // The same run key through the MCP tool: the api derives the same per-call keys.

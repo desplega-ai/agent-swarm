@@ -36,7 +36,7 @@ import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { runScriptWithRunCredential } from "../be/scripts/run-credential";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
-import { runToolCallKeyPrefix } from "../be/scripts/tool-call-idempotency";
+import { isDerivedRunToolCallKey, runToolCallKeyPrefix } from "../be/scripts/tool-call-idempotency";
 import {
   scriptSdkTypesWithGeneratedApis,
   scriptStdlibTypesWithGeneratedApis,
@@ -1034,7 +1034,7 @@ export async function handleScripts(
 
     // Persist output to KV when idempotencyKey is provided and run succeeded
     let kvSaved: { namespace: string; key: string } | undefined;
-    if (parsed.body.idempotencyKey && ok) {
+    if (parsed.body.idempotencyKey && ok && !isDerivedRunToolCallKey(parsed.body.idempotencyKey)) {
       const kvNamespace = `script:executions`;
       const kvKey = parsed.body.idempotencyKey;
       const kvValue = {

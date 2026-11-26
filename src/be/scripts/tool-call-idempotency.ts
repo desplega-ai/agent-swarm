@@ -81,6 +81,19 @@ export function runToolCallKeyPrefix(runKey: string): string {
   return `script-run-key:${sha256(runKey)}`;
 }
 
+const DERIVED_RUN_KEY_PATTERN = /^script-run-key:[0-9a-f]{64}:[A-Za-z_]+:\d+$/;
+
+/**
+ * True for the key a keyed run's SDK derives for a nested `script_run`
+ * (`<runToolCallKeyPrefix>:<method>:<ordinal>`). Its output is not saved to the
+ * shared `script:executions` KV namespace: the caller never asked for that, and
+ * every agent can read the namespace.
+ * shortcut: a caller who types a key of this exact shape also gets no KV copy; upgrade to a separate body field if one needs it.
+ */
+export function isDerivedRunToolCallKey(key: string): boolean {
+  return DERIVED_RUN_KEY_PATTERN.test(key);
+}
+
 function recordKey(scope: ToolCallIdempotencyScope): string {
   return sha256(`${scope.principal}\0${scope.tool}\0${scope.key}`);
 }
