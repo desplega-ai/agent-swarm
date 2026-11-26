@@ -370,6 +370,8 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
   if (!args.message.trim()) {
     throw new SteeringRequestError("Steering message must not be empty", 400);
   }
+  // Before any side effect: a bad id must not resume a paused task.
+  const attachments = await resolveSteeringAttachments(task.id, args.attachmentIds);
 
   const requestedMode = args.mode ?? "queue";
   const onUnsupported = args.onUnsupported ?? "degrade";
@@ -419,7 +421,6 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
   }
 
   const body = scrubSecrets(preSteer.action === "modify" ? preSteer.data.message : args.message);
-  const attachments = await resolveSteeringAttachments(activeTask.id, args.attachmentIds);
   // A task whose session hasn't started yet can still accept queued steering:
   // the row stays `pending` and the worker delivers it once the session is
   // live (the dispatch poll covers every active task). Interrupting a session
