@@ -24723,6 +24723,94 @@
         }
       }
     },
+    "/api/link-preview": {
+      "get": {
+        "summary": "Get the Open Graph preview of an external link",
+        "description": "Fetches the page server-side (cached) and returns its title, description, image and site name. `ok: false` when the page could not be read. Loopback and private hosts are refused with 400.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "required": true,
+            "name": "url",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The preview, or `ok: false` with empty fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "image": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "siteName": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "ok",
+                    "title",
+                    "description",
+                    "image",
+                    "siteName"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing, malformed or refused URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "post": {
         "summary": "Store a single event",

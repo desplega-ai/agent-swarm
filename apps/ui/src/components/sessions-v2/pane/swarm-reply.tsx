@@ -53,7 +53,8 @@ export function MessageTime({ at, focusable = true }: { at: string; focusable?: 
  * shows its live activity and any files the agent attached so far (the
  * person's bubble never shows them). A finished one keeps that work folded behind
  * "Worked for", as a worker step does, then the text (`TaskOutcome`, without
- * its hover Copy), the files the agent attached, then a footer with the time, an always-visible Copy of the
+ * its hover Copy), the files the agent attached (a link the text already
+ * names is left out; other links read as chips), then a footer with the time, an always-visible Copy of the
  * same text, and a link to the task. A failed or cancelled one keeps the
  * tinted frame. `earlier` holds the tries a deploy or a crash cut before
  * `task` took the work over: they fold under the same "Worked for".
@@ -65,6 +66,7 @@ export function SwarmReply({ task, earlier }: { task: AgentTask; earlier?: Agent
       status={task.status}
       attachments={task.attachments}
       from="agent"
+      linkedText={task.output}
     />
   );
   if (!TERMINAL_STATUSES.has(task.status)) {

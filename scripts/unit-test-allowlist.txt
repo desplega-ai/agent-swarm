@@ -58,6 +58,7 @@ src/be/migrations/  # migration runner and SQL files
 
 # Escape hatch: races and budgets that need injected readers and limits no route exposes.
 src/tests/primitives-object-webhooks.test.ts  # interleaved applyFileChange races, reindex byte/time budgets and replica ensure races need injected readers, gates and limits; the HTTP paths are in scripts/e2e/scenarios/knowledge-objects.ts
+src/tests/link-preview.test.ts  # fetch failures, a DNS answer that rebinds to a private address and a redirect to loopback need an injected fetch and resolver no route exposes; the route's literal-host refusals are in scripts/e2e/scenarios/link-preview.ts
 src/tests/spend-cap-credentials.test.ts  # resolveCredentialPools runs only inside the worker harness, which the contract e2e suite never starts
 src/tests/key-usage-selection.test.ts  # selectCredential and resolveCredentialPools run only inside the worker harness; tie-breaking and window expiry need many enumerated cases
 

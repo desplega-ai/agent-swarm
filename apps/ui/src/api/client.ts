@@ -84,6 +84,7 @@ import type {
   InboxStateUpsertResponse,
   IntegrationsCatalogResponse,
   IntegrationsSurfaceResponse,
+  LinkPreview,
   LogsResponse,
   McpOAuthMetadataResponse,
   McpOAuthStatusResponse,
@@ -4376,6 +4377,16 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/pages/${encodeURIComponent(id)}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`getPage ${id}: ${res.status}`);
+    return res.json();
+  }
+
+  /** The Open Graph preview of an external link, fetched and cached by the API. */
+  async getLinkPreview(url: string): Promise<LinkPreview> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/link-preview?url=${encodeURIComponent(url)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`getLinkPreview: ${res.status}`);
     return res.json();
   }
 
