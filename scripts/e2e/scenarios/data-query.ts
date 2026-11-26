@@ -28,6 +28,20 @@ const WRITES = [
   `SELECT * FROM '/${CSV}'; DELETE FROM t`,
   "WITH x AS (SELECT 1) DELETE FROM t",
   "SELECT E'\\''; DELETE FROM t; --'",
+  "SELECT e'\\''; DELETE FROM t; --'",
+  // One case per scanner branch, each refused only while that branch matches DuckDB's lexer.
+  "SELECT 1; DROP TABLE t",
+  "SELECT 1 -- $$\n; DELETE FROM t; -- $$",
+  "WITH x AS (SELECT 1) --\rDELETE FROM t",
+  "SELECT E'a''\\''; DELETE FROM t; --'",
+  "SELECT $$'$$; DELETE FROM t; SELECT '",
+  "SELECT $é$ ' $é$; DELETE FROM t; --'",
+  "SELECT $aé$ ' $aé$; DELETE FROM t; --'",
+  "SELECT 1 AS a$$; DELETE FROM t; SELECT 1 AS a$$",
+  "SELECT 1 AS é$$; CREATE TABLE p AS SELECT 1; SELECT 1 AS é$$",
+  "SELECT 'x' LIKE 'x' ESCAPE'\\'; DELETE FROM t; --'",
+  "SELECT 1 AS éE'\\'; DELETE FROM t; --'",
+  "/* /* */ ' */ DELETE FROM t; --'",
 ];
 const RESULT = {
   columns: [
@@ -165,6 +179,7 @@ export const dataQuery: Scenario = {
         for (const read of [
           `WITH t AS (SELECT * FROM '/${CSV}') SELECT 'delete; drop' AS note, "update" FROM t`,
           `DESCRIBE SELECT * FROM '/${CSV}'`,
+          "SELECT $é$x$é$ AS v",
         ]) {
           await callToolOk(mcp, "data-query", { sql: read, origin: "e2e" });
           expect(sqlCalls.at(-1)?.query === read, `read reaches agent-fs: ${read}`);
@@ -215,10 +230,10 @@ export const dataQuery: Scenario = {
       }));
       const ok = parsed.filter((e) => e.status === "ok");
       expect(
-        parsed.length === 12 + WRITES.length + 2 + 2 &&
-          ok.length === 7 &&
+        parsed.length === 13 + WRITES.length + 2 + 2 &&
+          ok.length === 8 &&
           JSON.stringify(ok.map((e) => e.data.output).sort()) ===
-            `["card","rows","rows","rows","rows","rows","sheet"]` &&
+            `["card","rows","rows","rows","rows","rows","rows","sheet"]` &&
           parsed.filter((e) => e.data.errorCode === "READ_ONLY").length === WRITES.length + 2 &&
           ok.filter((e) => e.data.callOrigin === "script-sdk").length === 2 &&
           parsed.every((e) => e.data.origin === "e2e") &&
