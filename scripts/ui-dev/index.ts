@@ -245,6 +245,8 @@ export async function main(argv: string[]): Promise<number> {
         VITE_API_KEY: apiKey,
         VITE_USER_ID: user.id,
         VITE_PROXY_TARGET: options.apiUrl,
+        // Agent preview load: no UI telemetry, no nudge or popup overlays.
+        VITE_AGENT_PREVIEW: "1",
       },
       stdin: "ignore",
       stdout: "pipe",
