@@ -184,6 +184,7 @@ import {
   OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+  type SteeringAttachment,
   type UserAvatar,
 } from "../types";
 import {
@@ -301,6 +302,7 @@ import {
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
+import { parseSteeringAttachments } from "./db/tasks/steering-attachments";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
@@ -1546,6 +1548,7 @@ function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
     deliveredAt: row.delivered_at ?? undefined,
     handledAt: row.handled_at ?? undefined,
     handledNote: row.handled_note ?? undefined,
+    attachments: parseSteeringAttachments(row.attachments),
   };
 }
 
@@ -1557,6 +1560,7 @@ export interface CreateSteeringMessageArgs {
   createdByKind: SteeringMessage["createdByKind"];
   createdByUserId?: string;
   createdByAgentId?: string;
+  attachments?: SteeringAttachment[];
 }
 
 export async function createSteeringMessage(
@@ -1572,6 +1576,7 @@ export async function createSteeringMessage(
     created_by_kind: args.createdByKind,
     created_by_user_id: args.createdByUserId ?? null,
     created_by_agent_id: args.createdByAgentId ?? null,
+    attachments: args.attachments?.length ? JSON.stringify(args.attachments) : null,
   });
   if (!row) throw new Error("Failed to create steering message");
 
@@ -1590,6 +1595,7 @@ export async function createSteeringMessage(
         steeringMessageId: id,
         mode: args.mode,
         source: args.source,
+        ...(args.attachments?.length ? { attachmentCount: args.attachments.length } : {}),
       },
     });
   } catch {}

@@ -577,6 +577,8 @@ export type TaskSteeringMessageRow = {
   delivered_at: string | null;
   handled_at: string | null;
   handled_note: string | null;
+  /** JSON array of attachment refs (migration 394); NULL for a text-only message. */
+  attachments?: string | null;
 };
 
 export type NewSteeringMessage = {
@@ -588,6 +590,7 @@ export type NewSteeringMessage = {
   created_by_kind: string;
   created_by_user_id: string | null;
   created_by_agent_id: string | null;
+  attachments: string | null;
 };
 
 /** The columns `createTaskExtended` writes on a new `agent_tasks` row (flags as JS booleans). */
@@ -3113,9 +3116,10 @@ export abstract class BaseTasksRepository implements TasksRepository {
   insertSteeringMessage(r: NewSteeringMessage): Promise<TaskSteeringMessageRow | null> {
     return this.db.get<TaskSteeringMessageRow>(sql`
       INSERT INTO task_steering_messages
-        (id, task_id, body, mode, source, created_by_kind, created_by_user_id, created_by_agent_id)
+        (id, task_id, body, mode, source, created_by_kind, created_by_user_id, created_by_agent_id,
+          attachments)
       VALUES (${r.id}, ${r.task_id}, ${r.body}, ${r.mode}, ${r.source}, ${r.created_by_kind},
-        ${r.created_by_user_id}, ${r.created_by_agent_id})
+        ${r.created_by_user_id}, ${r.created_by_agent_id}, ${r.attachments})
       RETURNING *`);
   }
 

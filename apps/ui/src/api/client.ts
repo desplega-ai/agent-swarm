@@ -959,6 +959,8 @@ class ApiClient {
       mode: SteerMode;
       requestedByUserId?: string;
       source?: SteeringSource;
+      /** Attachments already uploaded to this task. */
+      attachmentIds?: string[];
     },
   ): Promise<SteerResult> {
     const url = `${this.getBaseUrl()}/api/tasks/${id}/steer`;
