@@ -29,7 +29,14 @@ export const scriptCredentialBindings: Scenario = {
     const configKey = `E2E_CRED_${ctx.nonce.toUpperCase()}`;
     const secretValue = `e2e-broker-secret-${ctx.nonce}-4242`;
     const placeholder = `[REDACTED:${configKey}]`;
-    const stub = startStub(() => Response.json({ ok: true }));
+    const stub = startStub((request) =>
+      new URL(request.url).pathname === "/loop"
+        ? new Response(null, {
+            status: 302,
+            headers: { location: `/loop?access_token=${placeholder}` },
+          })
+        : Response.json({ ok: true }),
+    );
     const bindingIds: string[] = [];
     let configId: string | undefined;
     let oauthProvider: string | undefined;
@@ -186,10 +193,19 @@ export const scriptCredentialBindings: Scenario = {
       const queryBindingId = asString(asRecord(asRecord(queryBinding.json).binding).id, "id");
       bindingIds.push(queryBindingId);
       expect(queryBindingId !== headerId, "a different template is a different binding");
-      await runScript(ctx, workerId, {
+      // The script returns what it can read back reversed, so the run-output scrubber
+      // (exact-string match) cannot hide a substituted value that reached it.
+      const queryRun = await runScript(ctx, workerId, {
         source: `export default async function () {
+  const reverse = (text: string) => text.split("").reverse().join("");
   const response = await fetch("${stub.origin}/query?access_token=${placeholder}");
-  return response.status;
+  let error = "";
+  try {
+    await fetch("${stub.origin}/loop?access_token=${placeholder}");
+  } catch (err) {
+    error = String((err as Error).message);
+  }
+  return { status: response.status, url: reverse(response.url), error: reverse(error) };
 }`,
         intent: `e2e broker query ${ctx.nonce}`,
       });
@@ -197,6 +213,16 @@ export const scriptCredentialBindings: Scenario = {
       expect(
         queryRequest?.path === `/query?access_token=${secretValue}`,
         `the query placeholder must be substituted, got ${queryRequest?.path}`,
+      );
+      const queryResult = asRecord(queryRun.result);
+      const readBack = (field: string) => String(queryResult[field]).split("").reverse().join("");
+      expect(
+        readBack("url") === `${stub.origin}/query?access_token=${placeholder}`,
+        `response.url must keep the placeholder, got ${readBack("url")}`,
+      );
+      expect(
+        readBack("error").includes("redirects") && !readBack("error").includes(secretValue),
+        `the redirect-cap error must not carry the substituted value, got ${readBack("error")}`,
       );
 
       // ── a source that embeds the registered secret is refused ──
