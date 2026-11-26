@@ -136,6 +136,7 @@ mock.module("@/api/fs", () => ({
     uploads.push(input);
     return {};
   },
+  deleteTaskAttachment: async () => {},
 }));
 // The person using the tab; a test switches it mid-send.
 let viewerId = "u1";
@@ -151,12 +152,16 @@ mock.module("@/components/steering/steer-composer", () => ({
     placeholder,
     routeDetail,
     source,
+    attachments,
+    onAttachmentsChange,
   }: {
     extraActions?: React.ReactNode;
     sendLabel?: string;
     placeholder?: string;
     routeDetail?: string;
     source?: string;
+    attachments?: File[];
+    onAttachmentsChange?: (files: File[]) => void;
   }) => (
     <div
       data-testid="steer-composer"
@@ -164,6 +169,7 @@ mock.module("@/components/steering/steer-composer", () => ({
       data-placeholder={placeholder}
       data-route-detail={routeDetail}
       data-source={source}
+      data-files={onAttachmentsChange ? (attachments ?? []).map((f) => f.name).join(",") : undefined}
     >
       {extraActions}
     </div>
@@ -195,6 +201,8 @@ const completedWorkerTask = {
 const screenshot = new File([new Uint8Array([1, 2, 3])], "screenshot-x.png", {
   type: "image/png",
 });
+// A voice clip: only a draft task transcribes it, so it always sends a follow-up.
+const clip = new File([new Uint8Array([4, 5, 6])], "clip.webm", { type: "audio/webm" });
 
 async function mount(node: React.ReactNode) {
   const container = document.createElement("div");
@@ -313,7 +321,9 @@ const textOf = (container: HTMLElement) =>
   (container.querySelector("textarea") as HTMLTextAreaElement).value;
 
 const fileInBox = (container: HTMLElement) =>
-  container.querySelector('button[aria-label="Remove screenshot-x.png"]') !== null;
+  container.querySelector(
+    'button[aria-label="Remove screenshot-x.png"], button[aria-label="Remove clip.webm"]',
+  ) !== null;
 
 /** Adds the test file through the extra action, types a message and sends it. */
 async function attachAndSend(container: HTMLElement) {
@@ -339,14 +349,14 @@ describe("TaskComposer on Sessions", () => {
     await unmount();
   });
 
-  test("a file added while steering is up switches to a follow-up task that carries it", async () => {
+  test("a voice clip added while steering is up switches to a follow-up task that carries it", async () => {
     const { container, unmount } = await mount(
       <TaskComposer
         rootTaskId="root-1"
         targetTask={runningLeadTask}
         canSteer
         renderActions={(add) => (
-          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          <button type="button" aria-label="Add test file" onClick={() => add(clip)} />
         )}
       />,
     );
@@ -358,7 +368,7 @@ describe("TaskComposer on Sessions", () => {
 
     // The attachment moves the composer to the follow-up path, with a preview.
     expect(container.querySelector('[data-testid="steer-composer"]')).toBeNull();
-    expect(container.querySelector('button[aria-label="Remove screenshot-x.png"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Remove clip.webm"]')).not.toBeNull();
 
     await type(container, "see the screenshot");
     await send(container);
@@ -376,7 +386,7 @@ describe("TaskComposer on Sessions", () => {
     // Sessions never pins an agent: the server routes the follow-up to the Lead.
     expect(createdTasks[0]).not.toHaveProperty("agentId");
     expect(createdTasks[0]).not.toHaveProperty("routingReason");
-    expect(uploads).toEqual([{ taskId: "follow-up", file: screenshot, intent: "user-upload" }]);
+    expect(uploads).toEqual([{ taskId: "follow-up", file: clip, intent: "user-upload" }]);
     for (let i = 0; i < 50 && promoted.length === 0; i++) {
       await act(async () => new Promise((r) => setTimeout(r, 10)));
     }
@@ -801,7 +811,7 @@ describe("TaskComposer on Sessions, while files upload", () => {
   const boxLocked = (container: HTMLElement) =>
     (container.querySelector("textarea") as HTMLTextAreaElement | null)?.disabled === true;
 
-  test("a file sent to a running lead keeps the locked dock until the upload settles, even when the task ends", async () => {
+  test("a clip sent to a running lead keeps the locked dock until the upload settles, even when the task ends", async () => {
     let release = () => {};
     uploadGate = new Promise((resolve) => {
       release = resolve;
@@ -812,7 +822,7 @@ describe("TaskComposer on Sessions, while files upload", () => {
         targetTask={task}
         canSteer={canSteer}
         renderActions={(add) => (
-          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          <button type="button" aria-label="Add test file" onClick={() => add(clip)} />
         )}
       />
     );
@@ -838,7 +848,7 @@ describe("TaskComposer on Sessions, while files upload", () => {
     await unmount();
   });
 
-  test("a failed file send to a running lead puts its text and file back in the dock", async () => {
+  test("a failed clip send to a running lead puts its text and clip back in the dock", async () => {
     let release = () => {};
     uploadGate = new Promise((resolve) => {
       release = resolve;
@@ -850,7 +860,7 @@ describe("TaskComposer on Sessions, while files upload", () => {
         targetTask={runningLeadTask}
         canSteer
         renderActions={(add) => (
-          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          <button type="button" aria-label="Add test file" onClick={() => add(clip)} />
         )}
       />,
     );
@@ -881,7 +891,7 @@ describe("TaskComposer on Sessions, while files upload", () => {
         canSteer
         draftKey="task:b1-swap"
         renderActions={(add) => (
-          <button type="button" aria-label="Add test file" onClick={() => add(screenshot)} />
+          <button type="button" aria-label="Add test file" onClick={() => add(clip)} />
         )}
       />
     );
@@ -1056,7 +1066,29 @@ describe("TaskComposer mode", () => {
     await unmount();
   });
 
-  test("a file switches a steer box to Follow up, and removing it switches back", async () => {
+  test("a voice clip switches a steer box to Follow up, and removing it switches back", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={runningLeadTask}
+        canSteer
+        renderActions={(add) => (
+          <button type="button" aria-label="Add test file" onClick={() => add(clip)} />
+        )}
+      />,
+    );
+    expect(sendLabelOf(container)).toBe("Steer");
+    const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
+    await act(async () => add.click());
+    expect(sendLabelOf(container)).toBe("Follow up");
+    const remove = container.querySelector(
+      'button[aria-label="Remove clip.webm"]',
+    ) as HTMLButtonElement;
+    await act(async () => remove.click());
+    expect(sendLabelOf(container)).toBe("Steer");
+    await unmount();
+  });
+
+  test("a screenshot stays on the steer box, which takes it with the message", async () => {
     const { container, unmount } = await mount(
       <TaskComposer
         targetTask={runningLeadTask}
@@ -1066,15 +1098,28 @@ describe("TaskComposer mode", () => {
         )}
       />,
     );
-    expect(sendLabelOf(container)).toBe("Steer");
+    const steer = () =>
+      container.querySelector('[data-testid="steer-composer"]') as HTMLElement | null;
+    expect(steer()?.dataset.files).toBe("");
     const add = container.querySelector('button[aria-label="Add test file"]') as HTMLButtonElement;
     await act(async () => add.click());
-    expect(sendLabelOf(container)).toBe("Follow up");
-    const remove = container.querySelector(
-      'button[aria-label="Remove screenshot-x.png"]',
-    ) as HTMLButtonElement;
-    await act(async () => remove.click());
     expect(sendLabelOf(container)).toBe("Steer");
+    expect(steer()?.dataset.files).toBe("screenshot-x.png");
+    expect(createdTasks).toEqual([]);
+    await unmount();
+  });
+
+  test("an app page's steer box takes no files: a file sends its follow-up", async () => {
+    const { container, unmount } = await mount(
+      <TaskComposer
+        targetTask={runningLeadTask}
+        canSteer
+        onFollowUp={async () => {}}
+        followUpAttachments={{ accept: [".png"], maxBytes: 1024 }}
+      />,
+    );
+    const steer = container.querySelector('[data-testid="steer-composer"]') as HTMLElement;
+    expect(steer.dataset.files).toBeUndefined();
     await unmount();
   });
 

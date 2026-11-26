@@ -636,6 +636,8 @@ export interface SteeringMessage {
   createdAt: string;
   deliveredAt?: string;
   handledAt?: string;
+  /** Files sent with the message: task attachments of `taskId` (each names its own task). */
+  attachments?: { id: string; taskId: string; name: string; mimeType?: string; sizeBytes?: number }[];
 }
 
 export interface SteeringMessagesResponse {

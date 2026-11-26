@@ -145,6 +145,7 @@ export async function collectDeliverableSteering(
         message.id,
         message.body,
         message.senderLabel ?? message.createdByKind,
+        message.attachments,
       ),
     );
   }

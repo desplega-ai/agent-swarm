@@ -3,9 +3,11 @@ import type { TaskSteerEvent } from "../extensions/contract";
 import {
   type Agent,
   type AgentTask,
+  MAX_STEERING_ATTACHMENTS,
   type OnUnsupported,
   PROVIDER_STEER_CAPABILITIES,
   type ProviderName,
+  type SteeringAttachment,
   type SteeringMessage,
   type SteeringSource,
   type SteerMode,
@@ -13,6 +15,7 @@ import {
 } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { isSteeringEnabled as readSteeringEnabled } from "../utils/steering-enabled";
+import { steeringAttachmentsSection } from "../utils/task-attachment-links";
 import {
   createLogEntry,
   createSteeringMessage,
@@ -20,6 +23,7 @@ import {
   getAgentById,
   getPendingSteeringForTask,
   getSteeringMessageById,
+  getTaskAttachments,
   getTaskById,
   markSteeringPromoted,
   resumeTask,
@@ -69,6 +73,47 @@ export interface RequestSteeringArgs {
   createdByAgentId?: string;
   messageTimestamps?: string[];
   slack?: TaskSteerEvent["slack"];
+  /**
+   * Ids of attachments already uploaded to the task (`POST
+   * /api/fs/tasks/{id}/files`). The message carries a snapshot of each.
+   */
+  attachmentIds?: string[];
+}
+
+/**
+ * Resolve attachment ids against the task's own attachments. An id the task
+ * does not have is a 400: a steer never points at another task's files.
+ */
+async function resolveSteeringAttachments(
+  taskId: string,
+  attachmentIds: string[] | undefined,
+): Promise<SteeringAttachment[] | undefined> {
+  const ids = [...new Set(attachmentIds ?? [])];
+  if (ids.length === 0) return undefined;
+  if (ids.length > MAX_STEERING_ATTACHMENTS) {
+    throw new SteeringRequestError(
+      `A steering message carries at most ${MAX_STEERING_ATTACHMENTS} attachments`,
+      400,
+    );
+  }
+  const byId = new Map((await getTaskAttachments(taskId)).map((a) => [a.id, a]));
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    throw new SteeringRequestError(
+      `Attachment(s) not found on this task: ${missing.join(", ")}`,
+      400,
+    );
+  }
+  return ids.map((id) => {
+    const a = byId.get(id)!;
+    return {
+      id: a.id,
+      taskId: a.taskId,
+      name: a.name,
+      ...(a.mimeType ? { mimeType: a.mimeType } : {}),
+      ...(a.sizeBytes !== undefined ? { sizeBytes: a.sizeBytes } : {}),
+    };
+  });
 }
 
 /**
@@ -166,7 +211,8 @@ export async function promoteSteeringToTask(
   task: AgentTask,
   message: SteeringMessage,
 ): Promise<AgentTask> {
-  return await createTaskExtended(message.body, {
+  // The follow-up's text names the files, so its worker can fetch them.
+  return await createTaskExtended(message.body + steeringAttachmentsSection(message.attachments), {
     agentId: task.agentId,
     routingReason: task.agentId ? "continuity" : undefined,
     routingSource: task.agentId ? "engine_default" : undefined,
@@ -373,6 +419,7 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
   }
 
   const body = scrubSecrets(preSteer.action === "modify" ? preSteer.data.message : args.message);
+  const attachments = await resolveSteeringAttachments(activeTask.id, args.attachmentIds);
   // A task whose session hasn't started yet can still accept queued steering:
   // the row stays `pending` and the worker delivers it once the session is
   // live (the dispatch poll covers every active task). Interrupting a session
@@ -403,6 +450,7 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
     createdByKind: args.createdByKind ?? "system",
     createdByUserId: args.createdByUserId,
     createdByAgentId: args.createdByAgentId,
+    attachments,
   });
 
   const canReachLiveSession =

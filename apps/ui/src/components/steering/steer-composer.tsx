@@ -15,8 +15,11 @@
  *   - `[]`                → no toggle at all; the send action is labelled for
  *                           what actually happens: a follow-up task (codex)
  *
- * Attachments are deliberately absent: steering carries text only. The
- * attachment path stays on `TaskComposer`'s follow-up branch.
+ * Files are opt-in: a caller that passes `attachments` and
+ * `onAttachmentsChange` gets the dock's picker, paste and drop. A send
+ * uploads them to the steered task first, then steers with their ids. It is
+ * all or nothing: if one upload fails, nothing is sent, the files already
+ * uploaded are deleted (best effort), and the text and files stay in the box.
  *
  * The draft can be **controlled** (`value` + `onValueChange`). Callers that
  * swap this component in and out (`TaskComposer` flips between the follow-up
@@ -31,8 +34,10 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { deleteTaskAttachment } from "@/api/fs";
 import { useSteerTask } from "@/api/hooks/use-tasks";
 import type { AgentTaskStatus, SteeringSource, SteerMode, SteerResult } from "@/api/types";
+import { uploadComposeAttachments } from "@/components/sessions/compose-attachment-upload";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { type ComposerCitations, messageWithCitations } from "@/lib/composer-citations";
@@ -80,6 +85,12 @@ export interface SteerComposerProps {
    * `"ui"`. A json-render app page sends `"app-page"`.
    */
   source?: SteeringSource;
+  /**
+   * Files to send with the message, controlled by the caller. Omit both to
+   * keep the box text only.
+   */
+  attachments?: File[];
+  onAttachmentsChange?: (files: File[]) => void;
   className?: string;
 }
 
@@ -121,6 +132,8 @@ export function SteerComposer({
   sendLabel,
   routeDetail,
   source,
+  attachments,
+  onAttachmentsChange,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -130,6 +143,10 @@ export function SteerComposer({
   const steerTask = useSteerTask();
   const [internalDraft, setInternalDraft] = useState("");
   const [mode, setMode] = useState<SteerMode>("queue");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const files = attachments ?? [];
+  const isPending = steerTask.isPending || uploading;
 
   // Controlled when the caller supplies `value`; the internal state is then
   // never read, so there's no second source of truth to drift.
@@ -155,9 +172,7 @@ export function SteerComposer({
   // us (task moves to a different agent): never submit an unsupported mode.
   const effectiveMode: SteerMode = canInterrupt ? mode : "queue";
 
-  const submit = () => {
-    const message = messageWithCitations(draft, citations);
-    if (message.length === 0 || steerTask.isPending) return;
+  const send = (message: string, sentFiles: File[], attachmentIds: string[]) => {
     steerTask.mutate(
       {
         id: taskId,
@@ -165,6 +180,7 @@ export function SteerComposer({
         mode: effectiveMode,
         requestedByUserId: userId ?? undefined,
         source,
+        attachmentIds,
       },
       {
         onSuccess: (result) => {
@@ -182,9 +198,42 @@ export function SteerComposer({
           );
           setDraft("");
           citations?.clear();
+          // The box takes no file while a send is pending, so every file went.
+          if (sentFiles.length > 0) onAttachmentsChange?.([]);
         },
       },
     );
+  };
+
+  const submit = async () => {
+    const message = messageWithCitations(draft, citations);
+    if (message.length === 0 || isPending) return;
+    setUploadError(null);
+    if (files.length === 0) return send(message, [], []);
+    const sentFiles = files;
+    setUploading(true);
+    try {
+      const result = await uploadComposeAttachments({ taskId, files: sentFiles });
+      if (result.failed.length > 0) {
+        // All or nothing: a steer that silently drops a screenshot misleads
+        // the agent. Withdraw what did upload; a leftover is only an unused
+        // attachment on the task.
+        await Promise.allSettled(
+          result.attachments.map((a) => deleteTaskAttachment(taskId, a.id)),
+        );
+        const label =
+          result.failed.length === 1 ? result.failed[0].file.name : `${result.failed.length} files`;
+        setUploadError(`${label} failed to upload, so nothing was sent. Send again to retry.`);
+        return;
+      }
+      send(
+        message,
+        sentFiles,
+        result.attachments.map((a) => a.id),
+      );
+    } finally {
+      setUploading(false);
+    }
   };
 
   const routeLabel = !hasLiveDelivery
@@ -205,11 +254,23 @@ export function SteerComposer({
       value={draft}
       onChange={setDraft}
       citations={citations}
-      onSubmit={submit}
-      isPending={steerTask.isPending}
+      onSubmit={() => void submit()}
+      isPending={isPending}
       isError={steerTask.isError}
       errorMessage={steerTask.error instanceof Error ? steerTask.error.message : "Failed to send"}
-      pendingLabel={hasLiveDelivery ? "Sending…" : "Creating follow-up task…"}
+      pendingLabel={
+        uploading ? "Uploading files…" : hasLiveDelivery ? "Sending…" : "Creating follow-up task…"
+      }
+      attachments={onAttachmentsChange ? files : undefined}
+      onAttachmentsChange={
+        onAttachmentsChange
+          ? (next) => {
+              onAttachmentsChange(next);
+              setUploadError(null);
+            }
+          : undefined
+      }
+      attachmentErrorMessage={uploadError}
       // Short and calm: the routing label says when the message lands.
       placeholder={
         placeholder ??
@@ -237,7 +298,7 @@ export function SteerComposer({
                 ? "This task hasn't started. Your message queues until the session begins."
                 : `Interrupt isn't supported on ${harness}. Messages queue at the next turn boundary.`
             }
-            disabled={!userId || steerTask.isPending}
+            disabled={!userId || isPending}
             // 44 px options: the control's 2 px padding and border sit outside them.
             className={bar ? "h-12.5" : undefined}
           />

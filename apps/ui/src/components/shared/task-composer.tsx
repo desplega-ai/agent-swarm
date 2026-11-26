@@ -43,14 +43,13 @@
  * every box on the draft stays the locked follow-up dock, even when the task
  * ends or starts meanwhile, so nothing is typed that the outcome would erase.
  *
- * Attachments go out on the follow-up path only: steering carries text. They
- * also survive the swap, and so does focus: the incoming box takes it when
- * the outgoing one had it (a task that ends under a typing user). A file
- * added through `renderActions` (the session panel's "Add screenshot") while
- * steering is up switches to the follow-up path, so the message goes out as
- * a follow-up task with the file. A clip
- * from the mic button is one such file: its upload to the draft task puts its
- * transcript in the task text.
+ * Attachments ride on both paths. A steer uploads them to the steered task
+ * and sends their ids with the message (`SteerComposer`); a follow-up uploads
+ * them to its draft. They survive the swap, and so does focus: the incoming
+ * box takes it when the outgoing one had it (a task that ends under a typing
+ * user). A clip from the mic button is the exception: only an upload to a
+ * draft task puts its transcript in the task text, so a box holding a clip
+ * switches to the follow-up path.
  *
  * In Sessions (`rootTaskId` set) a text-only follow-up is optimistic: the box
  * clears at once and stays editable, and `SessionConversation` shows the
@@ -61,7 +60,8 @@
  * runs the page's action chain instead of `POST /api/tasks`, so the box drops
  * the mic, and drops attachments unless the page passes
  * `followUpAttachments`: then the files go to `onFollowUp`, which uploads
- * them itself. Its steers carry `steerSource: "app-page"`.
+ * them itself. Its steers carry `steerSource: "app-page"` and no files: a
+ * file in its box sends a follow-up.
  */
 
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
@@ -178,9 +178,9 @@ interface SendInput {
 const SEND_KEY = (draftKey: string) => ["task-composer", "send", draftKey] as const;
 
 /**
- * The mode the composer is in. Files force a follow-up (steering carries
- * text), and so does a harness with no live delivery: its steer box creates
- * a follow-up task.
+ * The mode the composer is in. A voice clip forces a follow-up (its
+ * transcript needs a draft task), and so does a harness with no live
+ * delivery: its steer box creates a follow-up task.
  */
 export function composerMode(
   steerTarget: Pick<AgentTask, "supportedSteerModes"> | null,
@@ -542,10 +542,15 @@ export function TaskComposer({
         ? `Uploading ${uploadedCount}/${ownFiles}…`
         : "Creating task…";
 
-  // Steering carries text only, so a message with attachments goes out as a
-  // follow-up task instead.
+  // A voice clip is transcribed only on a draft task, so a message with one
+  // goes out as a follow-up task instead. Other files ride on the steer,
+  // except on an app page: its files go through the page's own follow-up.
+  const steerTakesFiles = !onFollowUp;
+  const filesAllowSteer = steerTakesFiles
+    ? !attachments.some((file) => file.type.startsWith("audio/"))
+    : attachments.length === 0;
   const steerTarget =
-    attachments.length === 0 && !holdingFiles && canSteer && maySteer ? targetTask : null;
+    filesAllowSteer && !holdingFiles && canSteer && maySteer ? targetTask : null;
 
   const addAttachment = useCallback((file: File) => {
     setAttachments((current) => [...current, file]);
@@ -607,6 +612,15 @@ export function TaskComposer({
           sendLabel={sendLabel}
           routeDetail={routeDetail}
           source={steerSource}
+          attachments={steerTakesFiles ? attachments : undefined}
+          onAttachmentsChange={
+            steerTakesFiles
+              ? (files) => {
+                  setAttachments(files);
+                  setAttachmentError(null);
+                }
+              : undefined
+          }
           className={className}
           autoFocus={shown.focus}
         />
