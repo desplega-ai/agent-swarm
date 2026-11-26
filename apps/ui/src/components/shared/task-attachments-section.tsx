@@ -368,7 +368,10 @@ function AttachmentRow({
           return;
         }
         previewStateRef.current = "url";
-        setPreview({ kind: "url", url: URL.createObjectURL(blob), contentType: previewKind });
+        // The iframe renders by the blob's type, which comes from the raw route and
+        // can differ from the stored mimeType that chose "pdf": frame only a PDF.
+        const framed = previewKind === "pdf" ? new Blob([blob], { type: "application/pdf" }) : blob;
+        setPreview({ kind: "url", url: URL.createObjectURL(framed), contentType: previewKind });
       })
       .catch((error) => {
         if (cancelled) return;
