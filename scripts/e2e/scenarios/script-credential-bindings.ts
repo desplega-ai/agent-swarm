@@ -221,8 +221,9 @@ export const scriptCredentialBindings: Scenario = {
         `response.url must keep the placeholder, got ${readBack("url")}`,
       );
       expect(
-        readBack("error").includes("redirects") && !readBack("error").includes(secretValue),
-        `the redirect-cap error must not carry the substituted value, got ${readBack("error")}`,
+        readBack("error") ===
+          `fetch exceeded 5 redirects: ${stub.origin}/loop?access_token=${placeholder}`,
+        `the redirect-cap error must report the placeholder URL, got ${readBack("error")}`,
       );
 
       // ── a source that embeds the registered secret is refused ──
