@@ -117,6 +117,16 @@ const UPSERT_TASK_SEARCH = `INSERT INTO agent_tasks_search (task_id, task_doc, t
   SELECT id, task_search_document(task), task_search_document(title) FROM written
   ON CONFLICT (task_id) DO UPDATE SET task_doc = EXCLUDED.task_doc, title_doc = EXCLUDED.title_doc`;
 
+/**
+ * The backfill's write: only the tasks that have no document yet. A document
+ * that exists came from the statement that wrote the task text, so it is
+ * current. An update here could replace it with the older text of the
+ * backfill's snapshot.
+ */
+const INSERT_MISSING_TASK_SEARCH = `INSERT INTO agent_tasks_search (task_id, task_doc, title_doc)
+  SELECT id, task_search_document(task), task_search_document(title) FROM written
+  ON CONFLICT (task_id) DO NOTHING`;
+
 const HUMAN_FREE_TAG_SQL = HUMAN_FREE_TAGS.map(
   (tag) => `COALESCE(CAST(task.tags AS text), '[]') ILIKE '%"${tag}"%' ESCAPE ''`,
 ).join("\n        OR ");
@@ -333,7 +343,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
    * Writes the stored search documents of the next `batchSize` tasks past the
    * backfill mark, in insertion order, and advances the mark past them in the
    * same transaction. A task written since has its document already: the
-   * batch writes it again from the same row. The last batch sets the mark to
+   * batch keeps that document. The last batch sets the mark to
    * TASK_FTS_COMPLETE, which ends the expression arm of the search.
    */
   async indexTaskFtsBatch(batchSize: number): Promise<{ changes: number; done: boolean }> {
@@ -349,7 +359,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
       WITH written AS (
         SELECT id, task, title FROM agent_tasks
         WHERE "_rowid" > ${indexedThrough} AND "_rowid" <= ${through}
-      ) ${raw(UPSERT_TASK_SEARCH)}`);
+      ) ${raw(INSERT_MISSING_TASK_SEARCH)}`);
     await this.db.run(
       sql`UPDATE agent_tasks_fts_state SET "indexedThrough" = ${through} WHERE id = 1`,
     );
