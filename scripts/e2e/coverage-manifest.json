@@ -907,7 +907,8 @@
         "cli-provider-setup",
         "cli-database-commands",
         "cli-api",
-        "cli-controller"
+        "cli-controller",
+        "cli-app-shot"
       ]
     }
   }

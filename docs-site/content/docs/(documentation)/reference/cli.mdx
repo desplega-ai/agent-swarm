@@ -297,7 +297,7 @@ See [The `x` command](/docs/reference/x-command) for the Composio workflow,
 
 ### app-shot
 
-Render a swarm app in headless Chromium as the calling agent and report what it shows. It opens `$APP_URL/apps/<appId>`, forwards the dashboard's API calls to `MCP_BASE_URL` with the agent's key (the page never holds the key), waits until the app's API reads settle, and prints screenshots, console errors, failed requests and `render ok` or `render FAILED`. Screenshots upload to agent-fs when the `agent-fs` CLI is on `PATH`. Needs Playwright with Chromium (the `worker-full` image).
+Render a swarm app in headless Chromium and report what it shows. It views the app as the first user with an email; pass `--as-email` to pick a user. It opens `$APP_URL/apps/<appId>`, forwards the dashboard's API calls to `MCP_BASE_URL` with the agent's key (the page never holds the key), waits until the app's API reads settle, and prints screenshots, console errors, failed requests and `render ok` or `render FAILED`. Screenshots upload to agent-fs when the `agent-fs` CLI is on `PATH`. Needs Playwright with Chromium (the `worker-full` image).
 
 ```bash
 agent-swarm app-shot <appId>

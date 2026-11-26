@@ -134,7 +134,10 @@ type PwRequest = {
   allHeaders(): Promise<Record<string, string>>;
   response(): Promise<PwResponse | null>;
   failure(): { errorText: string } | null;
+  frame(): PwFrame;
+  isNavigationRequest(): boolean;
 };
+type PwFrame = { url(): string };
 type PwRoute = {
   request(): PwRequest;
   fetch(options: {
@@ -169,6 +172,7 @@ type PwPage = {
   getByText(text: string, options: { exact: boolean }): PwLocator;
   screenshot(options: { path: string }): Promise<unknown>;
   url(): string;
+  mainFrame(): PwFrame;
 };
 type PwBrowser = {
   newContext(options: {
@@ -334,6 +338,9 @@ export async function runAppShot(
     await page.route(`${PROXY_ORIGIN}/**`, async (route) => {
       const req = route.request();
       if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+      // The key rides only the dashboard's own calls: main frame, still on the dashboard
+      // origin. A page iframe (or a frame navigated to the fake origin) is forwarded bare.
+      const trusted = fromDashboard(req, page, pageOrigin);
       const target = apiBase + req.url().slice(PROXY_ORIGIN.length);
       const {
         authorization: _a,
@@ -345,10 +352,10 @@ export async function runAppShot(
       try {
         const response = await route.fetch({
           url: target,
-          headers: { ...headers, ...auth },
+          headers: trusted ? { ...headers, ...auth } : headers,
           maxRedirects: 0,
         });
-        if (new URL(target).pathname === appPath && req.method() === "GET")
+        if (trusted && new URL(target).pathname === appPath && req.method() === "GET")
           appStatus = response.status();
         await route.fulfill({ response, headers: { ...response.headers(), ...cors } });
       } catch (err) {
@@ -480,6 +487,18 @@ export async function runAppShot(
   }
   if (opts.uploadDir) await upload(result.shots, opts.uploadDir, appUrl, env, result.warnings);
   return result;
+}
+
+/** True for a request the dashboard itself makes: its main frame, on the dashboard origin. */
+export function fromDashboard(req: PwRequest, page: PwPage, dashboardOrigin: string): boolean {
+  try {
+    const main = page.mainFrame();
+    if (req.frame() !== main || req.isNavigationRequest()) return false;
+    return new URL(main.url()).origin === dashboardOrigin;
+  } catch {
+    // Service-worker requests have no frame: never trusted.
+    return false;
+  }
 }
 
 function printHuman(r: AppShotResult, log: (s: string) => void): void {

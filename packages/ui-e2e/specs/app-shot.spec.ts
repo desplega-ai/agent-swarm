@@ -94,3 +94,82 @@ test("app-shot renders an app as the calling agent and reports failures", async 
     await api.delete(`/api/apps/${app.id}`);
   }
 });
+
+test("app-shot forwards page iframe calls without the agent key", async ({
+  api,
+  seed,
+  swarm,
+  baseURL,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  test.setTimeout(120_000);
+  // The embedded page calls the fake API origin itself. Forwarded with the key it would
+  // read 404 (an unknown app); forwarded bare it must read 401.
+  const probe = "00000000-0000-4000-8000-0000000000a1";
+  const pageRes = await fetch(`${swarm.apiUrl}/api/pages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${swarm.apiKey}`,
+      "Content-Type": "application/json",
+      "X-Agent-ID": seed?.agents.lead ?? "",
+    },
+    body: JSON.stringify({
+      title: "e2e app-shot iframe probe",
+      contentType: "text/html",
+      authMode: "public",
+      body: `<!doctype html><html><body><p id="s">probe running</p><script>
+fetch("/api/apps/${probe}").then((r) => { document.getElementById("s").textContent = "probe done " + r.status; });
+</script></body></html>`,
+    }),
+  });
+  expect(pageRes.status).toBe(201);
+  const { id: pageId } = (await pageRes.json()) as { id: string };
+  const { app } = await api.post<{ app: { id: string } }>("/api/apps", {
+    name: "e2e-app-shot-iframe",
+    definition: {
+      models: {},
+      queries: {},
+      defaultPage: "main",
+      pages: {
+        main: {
+          root: "frame",
+          elements: { frame: { type: "PageFrame", props: { pageId } } },
+        },
+      },
+    },
+  });
+  const out = mkdtempSync(join(tmpdir(), "app-shot-"));
+  try {
+    const shot = await appShot(
+      [
+        app.id,
+        "--out",
+        out,
+        "--wait-for",
+        "iframe >> internal:control=enter-frame >> text=/probe done/",
+        "--timeout",
+        "20000",
+      ],
+      {
+        APP_URL: baseURL ?? "",
+        MCP_BASE_URL: swarm.apiUrl,
+        API_KEY: swarm.apiKey,
+        AGENT_SWARM_API_KEY: swarm.apiKey,
+        // A worker's own AGENT_ID would scope the page read to that agent (403 here).
+        AGENT_ID: "",
+      },
+    );
+    // The dashboard's own calls still carry the key: the app loads.
+    expect(shot.result.problems).toEqual([]);
+    expect(shot.result.ok).toBe(true);
+    expect(shot.result.failedRequests).toContain(`GET /api/apps/${probe}: HTTP 401`);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+    await api.delete(`/api/apps/${app.id}`);
+    // 204, no JSON body for the api fixture to parse.
+    await fetch(`${swarm.apiUrl}/api/pages/${pageId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${swarm.apiKey}`, "X-Agent-ID": seed?.agents.lead ?? "" },
+    });
+  }
+});
