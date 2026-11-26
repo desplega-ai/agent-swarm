@@ -11,6 +11,7 @@ import {
   setSlackMessageTracking,
 } from "../be/db";
 import { bindLoopPath } from "../be/event-loop-lag";
+import { runDetached } from "../otel";
 import type { AgentTask } from "../types";
 import { finalizeTerminalSlackReactions } from "./ack";
 import { getSlackApp } from "./app";
@@ -881,7 +882,10 @@ export async function startTaskWatcher(intervalMs = slackTaskWatcherIntervalMs()
     }
   };
   // Name the entry point for the event-loop stall line.
-  watcherInterval = setInterval(bindLoopPath("slack.watcher.tick", watcherTick), intervalMs);
+  // Detached: the watcher can be started from a request (an integrations reload).
+  watcherInterval = runDetached(() =>
+    setInterval(bindLoopPath("slack.watcher.tick", watcherTick), intervalMs),
+  );
 
   console.log(`[Slack] Task watcher started (interval: ${intervalMs}ms)`);
 }

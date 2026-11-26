@@ -41,6 +41,7 @@ import { initGitLab, isGitLabEnabled, resetGitLab } from "../gitlab";
 import { restartChatSdkIfConfigChanged } from "../integrations/chat-sdk/runtime";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
+import { runDetached } from "../otel";
 import { can, decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackAppUnderLifecycleLock } from "../slack";
 import { runSlackLifecycleExclusive } from "../slack/lifecycle-lock";
@@ -323,29 +324,33 @@ export function scheduleIntegrationsReload(delayMs = AUTO_RELOAD_DEBOUNCE_MS): v
   if (pendingReloadTimer) {
     clearTimeout(pendingReloadTimer);
   }
-  pendingReloadTimer = setTimeout(() => {
-    pendingReloadTimer = null;
-    autoReloadInvocations += 1;
-    inFlightReload = reloadGlobalConfigsAndIntegrations()
-      .then((r) => {
-        console.log(
-          `[auto-reload] Loaded ${r.configsLoaded} config(s), re-initialized: ${r.integrationsReinitialized.join(", ") || "none"}`,
-        );
-        return r;
-      })
-      .catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error("[auto-reload] Failed:", message);
-        return undefined;
-      })
-      .finally(() => {
-        inFlightReload = null;
-        if (reloadRerunRequested) {
-          reloadRerunRequested = false;
-          scheduleIntegrationsReload(delayMs);
-        }
-      });
-  }, delayMs);
+  // Detached: the reload starts the Slack watcher and other long-lived loops,
+  // which would otherwise parent every span they emit to this request's trace.
+  pendingReloadTimer = runDetached(() =>
+    setTimeout(() => {
+      pendingReloadTimer = null;
+      autoReloadInvocations += 1;
+      inFlightReload = reloadGlobalConfigsAndIntegrations()
+        .then((r) => {
+          console.log(
+            `[auto-reload] Loaded ${r.configsLoaded} config(s), re-initialized: ${r.integrationsReinitialized.join(", ") || "none"}`,
+          );
+          return r;
+        })
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error("[auto-reload] Failed:", message);
+          return undefined;
+        })
+        .finally(() => {
+          inFlightReload = null;
+          if (reloadRerunRequested) {
+            reloadRerunRequested = false;
+            scheduleIntegrationsReload(delayMs);
+          }
+        });
+    }, delayMs),
+  );
 }
 
 /**
