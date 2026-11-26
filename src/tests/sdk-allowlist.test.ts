@@ -60,9 +60,18 @@ describe("script SDK allowlist", () => {
 
   test("runtime proxy rejects non-allowlisted tools before fetch", async () => {
     const sdk = createSwarmSdk({} as SwarmConfig);
-    await expect(sdk.join_swarm({})).rejects.toThrow(
-      "Tool 'join_swarm' is not exposed to scripts (lifecycle/cred tool)",
-    );
+    await expect(sdk.get_oauth_access_token({})).rejects.toMatchObject({
+      name: "SwarmToolError",
+      code: "not_exposed",
+      message: expect.stringContaining(
+        "Tool 'get_oauth_access_token' is not exposed to scripts (lifecycle/cred tool)",
+      ),
+    });
+    // A respelled exposed tool is unknown, not excluded, and names the method to call.
+    await expect(sdk.join_swarm({})).rejects.toMatchObject({
+      code: "unknown_tool",
+      suggestions: ["agent_join"],
+    });
   });
 
   test("savings calibration is REST-only: reachable from scripts, not an MCP tool or bridge entry", async () => {

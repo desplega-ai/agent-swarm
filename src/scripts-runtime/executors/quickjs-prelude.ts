@@ -1,4 +1,5 @@
 import { DURABLE_OBJECT_RESERVED_METHODS } from "../durable-object-base";
+import { SWARM_TOOL_ERROR_JS } from "../swarm-tool-error";
 
 /**
  * JavaScript that the quickjs runner evaluates inside the sandbox before the
@@ -22,11 +23,21 @@ export const SANDBOX_PRELUDE = String.raw`(() => {
 "use strict";
 const shape = globalThis.__swarm_shape;
 
+const SwarmToolError = ${SWARM_TOOL_ERROR_JS};
 const unwrap = (json) => {
   const envelope = JSON.parse(json);
   if (envelope.error !== undefined) {
-    const error = new Error(envelope.error.message);
-    if (envelope.error.name) error.name = envelope.error.name;
+    const payload = envelope.error;
+    if (payload.name === "SwarmToolError") {
+      throw new SwarmToolError(payload.message, {
+        code: payload.code,
+        tool: payload.tool,
+        status: payload.status,
+        suggestions: payload.suggestions,
+      });
+    }
+    const error = new Error(payload.message);
+    if (payload.name) error.name = payload.name;
     throw error;
   }
   return envelope.value;
