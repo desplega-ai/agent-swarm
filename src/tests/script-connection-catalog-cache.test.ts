@@ -43,7 +43,7 @@ test("script runs share one cached connection catalog until a connection write",
     await getScriptMcpConnectionDescriptors({}, catalog);
     return api.map((descriptor) => descriptor.slug);
   };
-  const listConnections = spyOn(getStorage().repos.scripts, "listConnections");
+  const listConnections = spyOn(getStorage().repos.scripts, "listConnectionCatalog");
   try {
     const [first, second] = await Promise.all([loadForRun(), loadForRun()]);
     expect(await loadForRun()).toEqual(first);

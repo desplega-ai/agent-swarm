@@ -522,7 +522,8 @@ export function createGuardedFetch(
         ? await baseFetch(...pinToAddress(url, address, hopInit))
         : await baseFetch(url, hopInit);
       // A pinned request reports the address it connected to; show the name.
-      if (address) Object.defineProperty(response, "url", { value: url.href });
+      // Configurable, so a wrapper (the credential broker) can report its own URL.
+      if (address) Object.defineProperty(response, "url", { value: url.href, configurable: true });
       if (!REDIRECT_STATUSES.has(response.status) || mode === "manual") return response;
       const location = response.headers.get("location");
       if (!location) return response;

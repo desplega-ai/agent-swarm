@@ -24,8 +24,8 @@ import { loadPostgresMigrations, runPostgresMigrations } from "./migrations";
  * target with any table is refused (2); user triggers are off during the copy (3);
  * each value is converted to the type of its target column (4); a value the
  * target cannot store is reported, never dropped (5); the vector table is built
- * from the copied embeddings and the task search documents from the copied
- * tasks; the other full-text search is an expression index (6); identity
+ * from the copied embeddings, the memory full-text table from the copied
+ * memories and the task search documents from the copied tasks (6); identity
  * sequences restart past the copied keys (7);
  * row counts and checksums of normalized values are compared per table (8); the
  * caller exits non-zero when `ok` is false (9).
@@ -842,7 +842,7 @@ export async function copyIntoPostgres(
 
         const sourceTables = source.tables();
         const sourceNames = new Set(sourceTables.map((t) => t.name));
-        const rebuiltTables = new Set(["memory_vec", "agent_tasks_search"]);
+        const rebuiltTables = new Set(["memory_vec", "memory_fts", "agent_tasks_search"]);
         const missing = sourceTables.filter((t) => !targets.has(t.name)).map((t) => t.name);
         const extra = [...targets.keys()].filter(
           (name) => name !== "_migrations" && !sourceNames.has(name) && !rebuiltTables.has(name),
@@ -964,6 +964,22 @@ export async function copyIntoPostgres(
             table: "memory_vec",
             rows: vectors,
             reason: `vectors of the agent_memory embeddings with ${options.embeddingDimensions} dimensions`,
+          });
+        }
+        // The copy writes with user triggers off and the migration that fills
+        // memory_fts ran on empty tables: build one text-search document per
+        // copied memory, with the functions the memory store writes with.
+        if (targets.has("memory_fts")) {
+          log("[db-copy] building the full-text documents of agent_memory (memory_fts)");
+          const result = (await conn.unsafe(
+            `INSERT INTO memory_fts (memory_id, doc, doc_len)
+             SELECT s.id, s.doc, memory_fts_length(s.doc)
+               FROM (SELECT id, memory_fts_document(name, content) AS doc FROM agent_memory) s`,
+          )) as { count?: number };
+          report.rebuilt.push({
+            table: "memory_fts",
+            rows: Number(result.count ?? 0),
+            reason: "full-text documents of the copied agent_memory rows",
           });
         }
         // The copy writes with user triggers off, after the chain ran on empty

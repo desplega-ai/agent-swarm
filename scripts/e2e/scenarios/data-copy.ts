@@ -3,13 +3,36 @@ import { linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { runCli } from "../cli";
-import { type ApiClient, asRecord, asRecords, asString, expect, expectStatus } from "../http";
+import {
+  type ApiClient,
+  asRecord,
+  asRecords,
+  asString,
+  expect,
+  expectStatus,
+  pollUntil,
+} from "../http";
 import type { Scenario } from "../run";
 
 // Check 20 of the storage-engine brief (decision D11): fill a source API through the
 // public API, run `agent-swarm db-copy`, boot an API on the copy, and compare the
 // responses of a fixed list of GET routes. The copy runs the same way in every run of
 // the suite, so the scenario list stays the same on each engine.
+
+/** Memory ids that a keyword search for `query` returns, with the arm that found each. */
+async function searchMemory(api: ApiClient, agentId: string, query: string) {
+  const response = await api("POST", "/api/memory/search", {
+    agentId,
+    body: { query, limit: 20, scope: "agent" },
+  });
+  expectStatus(response, [200], `memory search "${query}"`);
+  return new Map(
+    asRecords(response.json, "results").map((row) => [
+      asString(row.id, "memory id"),
+      String(row.retrievalSource),
+    ]),
+  );
+}
 
 /**
  * Parsed JSON, compared with a strict deep-equal (jsonb key order, approved by Daniel).
@@ -95,6 +118,17 @@ export const dataCopy: Scenario = {
         },
       });
       expectStatus(memory, [202], "index memory");
+      const memoryIds = asRecord(memory.json).memoryIds;
+      const memoryId = asString(Array.isArray(memoryIds) ? memoryIds[0] : undefined, "memory id");
+      // Indexing is asynchronous: copy only once the source finds the memory.
+      expect(
+        await pollUntil(
+          async () => (await searchMemory(api, agentId, "violet heron")).has(memoryId),
+          20_000,
+          200,
+        ),
+        "the source never found its memory by keyword",
+      );
 
       const page = await api("POST", "/api/pages", {
         agentId,
@@ -146,6 +180,18 @@ export const dataCopy: Scenario = {
       expect(
         JSON.stringify(secret).includes("copy-secret-value"),
         `the source did not return the secret in clear: ${JSON.stringify(secret).slice(0, 400)}`,
+      );
+      // Full text on Postgres reads stored documents (memory_fts): the copy builds
+      // one for each copied memory, so a keyword search on the copy finds it.
+      const rebuiltFts = /\[db-copy\] rebuilt memory_fts: (\d+) rows/.exec(cli.stdout);
+      expect(
+        rebuiltFts !== null && Number(rebuiltFts[1]) >= 1,
+        `db-copy did not build the full-text documents: ${cli.stdout.slice(-1500)}`,
+      );
+      const keywordHits = await searchMemory(target, agentId, "violet heron");
+      expect(
+        keywordHits.has(memoryId),
+        `a keyword search on the copy did not find memory ${memoryId}: ${JSON.stringify([...keywordHits])}`,
       );
       const kvAfter = await target("GET", `/api/kv/${kvKey}`, { agentId });
       expect(
