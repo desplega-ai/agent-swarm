@@ -471,3 +471,9 @@ export async function expireStaleRuntimeInstances(): Promise<{
 export async function listRuntimeInstancesForPool(poolId: string): Promise<RuntimeInstance[]> {
   return (await runtimes().listRuntimesForPool(poolId)).map(rowToRuntimeInstance);
 }
+
+export async function listRuntimeInstancesForPools(
+  poolIds: readonly string[],
+): Promise<RuntimeInstance[]> {
+  return (await runtimes().listRuntimesForPools(poolIds)).map(rowToRuntimeInstance);
+}

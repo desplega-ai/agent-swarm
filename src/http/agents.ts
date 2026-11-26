@@ -6,6 +6,7 @@ import {
   createAgent,
   deleteSwarmConfigByKey,
   EXTENSION_AGENT_ROLE,
+  getActiveTaskCounts,
   getAgentById,
   getAgentDailyTaskCounts,
   getAgentWithTasks,
@@ -51,7 +52,7 @@ import {
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
 import { getPoolForAgent, resolvePoolDelivery } from "../be/runtime-pools/db";
-import { isAgentOnDemand } from "../be/runtime-pools/reachability";
+import { isAgentOnDemand, listOnDemandAgentIds } from "../be/runtime-pools/reachability";
 import { getStorage } from "../be/storage";
 import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
@@ -97,7 +98,7 @@ import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { readableByFor, resolveSessionActor } from "./session-access";
-import { agentWithCapacity, json, jsonError } from "./utils";
+import { agentWithCapacity, json, jsonError, withCapacity } from "./utils";
 
 function singleHeaderValue(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name];
@@ -395,14 +396,15 @@ const AgentListItemSchema = AgentWithCapacityAndTasksSchema.extend({
 });
 
 /** The list/detail extras: effective Claude transport and the on-demand flag, when set. */
-async function withListExtras<T extends Agent>(
+function withListExtras<T extends Agent>(
   agent: T,
   claudeTransport: ClaudeTransport | undefined,
-): Promise<T & { claudeTransport?: ClaudeTransport; onDemand?: true }> {
+  onDemand: boolean,
+): T & { claudeTransport?: ClaudeTransport; onDemand?: true } {
   return {
     ...agent,
     ...(claudeTransport ? { claudeTransport } : {}),
-    ...((await isAgentOnDemand(agent)) ? { onDemand: true as const } : {}),
+    ...(onDemand ? { onDemand: true as const } : {}),
   };
 }
 
@@ -948,13 +950,19 @@ export async function handleAgentsRest(
       : await getAllAgents({ slim });
     // Filtered before the per-agent capacity lookups.
     const agents = searchAgents(allAgents, parsed.query.q, parsed.query.limit);
-    const [agentsWithCapacity, transports] = await Promise.all([
-      Promise.all(agents.map(agentWithCapacity)),
+    // One read each for capacity, transports and on-demand flags, not one per agent.
+    const [activeCounts, transports, onDemand] = await Promise.all([
+      getActiveTaskCounts(agents.map((agent) => agent.id)),
       resolveListClaudeTransports(agents),
+      listOnDemandAgentIds(agents),
     ]);
     listAgents.respond(res, 200, {
-      agents: await Promise.all(
-        agentsWithCapacity.map((agent) => withListExtras(agent, transports.get(agent.id))),
+      agents: agents.map((agent) =>
+        withListExtras(
+          withCapacity(agent, activeCounts.get(agent.id) ?? 0),
+          transports.get(agent.id),
+          onDemand.has(agent.id),
+        ),
       ),
     });
     return true;
@@ -1682,11 +1690,12 @@ export async function handleAgentsRest(
       return true;
     }
 
-    const [agentWithCap, transports] = await Promise.all([
+    const [agentWithCap, transports, onDemand] = await Promise.all([
       agentWithCapacity(agent),
       resolveListClaudeTransports([agent]),
+      isAgentOnDemand(agent),
     ]);
-    getAgent.respond(res, 200, await withListExtras(agentWithCap, transports.get(agent.id)));
+    getAgent.respond(res, 200, withListExtras(agentWithCap, transports.get(agent.id), onDemand));
     return true;
   }
 

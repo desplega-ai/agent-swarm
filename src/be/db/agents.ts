@@ -490,6 +490,13 @@ export async function getActiveTaskCount(agentId: string): Promise<number> {
   return agentsRepo().countActiveTasks(agentId);
 }
 
+/** `getActiveTaskCount` for many agents in one query. An agent with no active task maps to absent. */
+export async function getActiveTaskCounts(
+  agentIds: readonly string[],
+): Promise<Map<string, number>> {
+  return agentsRepo().countActiveTasksByAgent(agentIds);
+}
+
 /**
  * Check if an agent has capacity to accept more tasks.
  */

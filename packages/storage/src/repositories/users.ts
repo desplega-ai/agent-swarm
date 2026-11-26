@@ -212,6 +212,10 @@ export interface UsersRepository {
   findUserByExternalId(kind: string, externalId: string): Promise<UserRow | null>;
   /** The user's `(kind, externalId)` pairs, by kind then externalId (the primary key). */
   listExternalIds(userId: string): Promise<{ kind: string; externalId: string }[]>;
+  /** `listExternalIds` for many users in one statement, by userId then the per-user order. */
+  listExternalIdsForUsers(
+    userIds: readonly string[],
+  ): Promise<{ userId: string; kind: string; externalId: string }[]>;
   /** Throws on a `(kind, externalId)` primary-key conflict. */
   insertExternalId(userId: string, kind: string, externalId: string): Promise<void>;
   deleteExternalId(userId: string, kind: string, externalId: string): Promise<void>;
@@ -226,11 +230,21 @@ export interface UsersRepository {
     userId: string,
     opts: { before: string | null; limit: number },
   ): Promise<IdentityEventRow[]>;
+  /**
+   * The newest `limitPerUser` events of each user in one statement, by userId,
+   * then in the `listIdentityEvents` order.
+   */
+  listRecentIdentityEventsForUsers(
+    userIds: readonly string[],
+    limitPerUser: number,
+  ): Promise<IdentityEventRow[]>;
 
   // ---- user_tokens ----
   insertUserToken(token: NewUserToken): Promise<void>;
   /** Tokens without an expiry (MCP tokens), newest first, ties in insertion order. */
   listUserTokens(userId: string): Promise<UserTokenSummaryRow[]>;
+  /** `listUserTokens` for many users in one statement, by userId, then in its order. */
+  listUserTokensForUsers(userIds: readonly string[]): Promise<UserTokenSummaryRow[]>;
   findUserTokenSummary(
     tokenId: string,
   ): Promise<{ userId: string; label: string | null; tokenPreview: string } | null>;
@@ -527,6 +541,15 @@ export abstract class BaseUsersRepository implements UsersRepository {
       WHERE "userId" = ${userId} ORDER BY kind, "externalId"`);
   }
 
+  async listExternalIdsForUsers(
+    userIds: readonly string[],
+  ): Promise<{ userId: string; kind: string; externalId: string }[]> {
+    if (userIds.length === 0) return [];
+    return this.db.query(sql`
+      SELECT "userId", kind, "externalId" FROM user_external_ids
+      WHERE "userId" IN (${sqlList(userIds)}) ORDER BY "userId", kind, "externalId"`);
+  }
+
   async insertExternalId(userId: string, kind: string, externalId: string): Promise<void> {
     await this.db.run(sql`
       INSERT INTO user_external_ids ("userId", kind, "externalId")
@@ -553,6 +576,11 @@ export abstract class BaseUsersRepository implements UsersRepository {
     opts: { before: string | null; limit: number },
   ): Promise<IdentityEventRow[]>;
 
+  abstract listRecentIdentityEventsForUsers(
+    userIds: readonly string[],
+    limitPerUser: number,
+  ): Promise<IdentityEventRow[]>;
+
   // ---- user_tokens ----
 
   async insertUserToken(t: NewUserToken): Promise<void> {
@@ -563,6 +591,8 @@ export abstract class BaseUsersRepository implements UsersRepository {
 
   /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
   abstract listUserTokens(userId: string): Promise<UserTokenSummaryRow[]>;
+
+  abstract listUserTokensForUsers(userIds: readonly string[]): Promise<UserTokenSummaryRow[]>;
 
   findUserTokenSummary(
     tokenId: string,

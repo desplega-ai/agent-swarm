@@ -114,6 +114,13 @@ export interface KvRepository {
   deleteEntries(namespace: string, keys: readonly string[]): Promise<number>;
   /** Insert, or overwrite an entry expired at `nowMs`; returns the change count. */
   claimEntry(row: KvRow, nowMs: number): Promise<number>;
+  /**
+   * Overwrite value, type and expiry only while the stored value equals
+   * `expectedValue`, expired or not (a compare-and-set); returns the change count.
+   */
+  replaceEntryIfValue(row: KvRow, expectedValue: string): Promise<number>;
+  /** Deletes the entry only while its value equals `expectedValue`; returns the change count. */
+  deleteEntryIfValue(namespace: string, key: string, expectedValue: string): Promise<number>;
   setEntryValue(
     namespace: string,
     key: string,
@@ -361,6 +368,21 @@ export abstract class BaseKvRepository implements KvRepository {
         expires_at = excluded.expires_at,
         updated_at = excluded.updated_at
       WHERE kv_entries.expires_at IS NOT NULL AND kv_entries.expires_at <= ${nowMs}`);
+    return result.changes;
+  }
+
+  async replaceEntryIfValue(r: KvRow, expectedValue: string): Promise<number> {
+    const result = await this.db.run(sql`
+      UPDATE kv_entries SET value = ${r.value}, value_type = ${r.value_type},
+        expires_at = ${r.expires_at}, updated_at = ${r.updated_at}
+      WHERE namespace = ${r.namespace} AND key = ${r.key} AND value = ${expectedValue}`);
+    return result.changes;
+  }
+
+  async deleteEntryIfValue(namespace: string, key: string, expectedValue: string): Promise<number> {
+    const result = await this.db.run(sql`
+      DELETE FROM kv_entries
+      WHERE namespace = ${namespace} AND key = ${key} AND value = ${expectedValue}`);
     return result.changes;
   }
 

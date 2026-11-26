@@ -8,6 +8,11 @@ import {
 } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { createServer } from "@/server";
+import {
+  runIdempotentToolCall,
+  TOOL_CALL_IDEMPOTENCY_TTL_MS,
+  ToolCallInFlightError,
+} from "../be/scripts/tool-call-idempotency";
 import { resolveBridgeCallOrigin } from "../extensions/dispatcher";
 import { isMcpToolAllowedForScripts } from "../scripts-runtime/sdk-allowlist";
 import {
@@ -16,6 +21,11 @@ import {
   type RequestInfo,
 } from "../tools/utils";
 import { runForBridgedScriptRun } from "../utils/request-auth-context";
+import {
+  IDEMPOTENCY_KEY_PATTERN,
+  IDEMPOTENT_REPLAYED_HEADER,
+  readIdempotencyKey,
+} from "./idempotency-key";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -41,9 +51,24 @@ type RegisteredTool = {
   handler: (argsOrExtra: unknown, extra?: unknown) => unknown | Promise<unknown>;
   inputSchema?: AnySchema;
   enabled?: boolean;
+  annotations?: { readOnlyHint?: boolean };
 };
 
 type ToolRegistry = Record<string, RegisteredTool>;
+
+async function registeredTools(): Promise<ToolRegistry> {
+  const server = await getBridgeServer();
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- the MCP SDK keeps its tool registry private.
+  return (server as unknown as { _registeredTools: ToolRegistry })._registeredTools;
+}
+
+/**
+ * A tool that declares `readOnlyHint: true`. The bridge never dedupes it:
+ * running a read twice changes nothing. A tool without the hint counts as a write.
+ */
+export async function isReadOnlyBridgeTool(toolName: string): Promise<boolean> {
+  return (await registeredTools())[toolName]?.annotations?.readOnlyHint === true;
+}
 
 export class InProcessToolInvocationError extends Error {
   constructor(
@@ -72,9 +97,7 @@ export async function invokeToolInProcess(args: {
     );
   }
 
-  const server = await getBridgeServer();
-  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- the MCP SDK keeps its tool registry private.
-  const tools = (server as unknown as { _registeredTools: ToolRegistry })._registeredTools;
+  const tools = await registeredTools();
   const tool = tools[args.toolName];
   if (!tool) {
     throw new InProcessToolInvocationError(
@@ -127,7 +150,22 @@ const mcpBridgeRoute = route({
   pattern: ["api", "mcp-bridge"],
   summary: "Generic MCP tool proxy for the scripts SDK bridge",
   tags: ["Scripts"],
-  headers: runtimeInstanceHeader("acquire work through bridged tools"),
+  headers: runtimeInstanceHeader("acquire work through bridged tools").extend({
+    "Idempotency-Key": z
+      .string()
+      .regex(IDEMPOTENCY_KEY_PATTERN)
+      .optional()
+      .describe(
+        "Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. " +
+          "The first successful call of a tool that is not read-only runs it and records its " +
+          "result; a later call with the same key and tool returns that result (with " +
+          `\`${IDEMPOTENT_REPLAYED_HEADER}: true\`) and runs nothing, whatever its args. A call ` +
+          "that fails or that the tool refuses records nothing. A second call while the first " +
+          "still runs waits for it, then gets a 409. Read-only tools ignore the key. Records " +
+          `expire after ${TOOL_CALL_IDEMPOTENCY_TTL_MS / 86_400_000} days. Durable script runs ` +
+          "send one on every ctx.swarm call.",
+      ),
+  }),
   body: z.object({
     tool: z.string().min(1).max(200),
     args: z.record(z.string(), z.unknown()).default({}),
@@ -143,6 +181,7 @@ const mcpBridgeRoute = route({
     400: { description: "Invalid tool name or args" },
     403: { description: "Tool not in SDK allowlist" },
     404: { description: "Tool not found" },
+    409: { description: "A call with the same Idempotency-Key is still running" },
   },
   rbac: { ungated: "scripts SDK bridge: each proxied MCP tool runs its own gates" },
 });
@@ -170,21 +209,37 @@ export async function handleMcpBridge(
   // Runtime identity rides the bridge like the agent identity so the
   // work-acquisition gates in bridged tools see the invoking worker process.
   const runtimeInstanceId = headerValue(req, "x-runtime-instance-id");
+  const idempotency = readIdempotencyKey(req, res, myAgentId);
+  if (idempotency === null) return true;
 
   try {
-    const result = await runForBridgedScriptRun(parentScriptRunId, () =>
-      invokeToolInProcess({
-        toolName,
-        args,
-        agentId: myAgentId,
-        sourceTaskId,
-        auditSourceTaskId: headerValue(req, "x-audit-source-task-id"),
-        runtimeInstanceId,
-        // The agent header is caller-controlled; the extension origin also needs the
-        // per-process token that only the in-process extension SDK holds.
-        callOrigin: resolveBridgeCallOrigin(myAgentId, headerValue(req, "x-extension-token")),
-      }),
-    );
+    const invoke = () =>
+      runForBridgedScriptRun(parentScriptRunId, () =>
+        invokeToolInProcess({
+          toolName,
+          args,
+          agentId: myAgentId,
+          sourceTaskId,
+          auditSourceTaskId: headerValue(req, "x-audit-source-task-id"),
+          runtimeInstanceId,
+          // The agent header is caller-controlled; the extension origin also needs the
+          // per-process token that only the in-process extension SDK holds.
+          callOrigin: resolveBridgeCallOrigin(myAgentId, headerValue(req, "x-extension-token")),
+        }),
+      );
+    let result: unknown;
+    if (idempotency && !(await isReadOnlyBridgeTool(toolName))) {
+      const outcome = await runIdempotentToolCall(
+        { principal: idempotency.principal, tool: toolName, key: idempotency.key },
+        invoke,
+        // A refusal (toolErr) changed nothing: let a retry run it again.
+        (value) => !(value && typeof value === "object" && "isError" in value && value.isError),
+      );
+      if (outcome.replayed) res.setHeader(IDEMPOTENT_REPLAYED_HEADER, "true");
+      result = outcome.result;
+    } else {
+      result = await invoke();
+    }
 
     if (result && typeof result === "object" && "structuredContent" in result) {
       json(res, result.structuredContent);
@@ -204,7 +259,13 @@ export async function handleMcpBridge(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    jsonError(res, message, err instanceof InProcessToolInvocationError ? err.status : 500);
+    const status =
+      err instanceof InProcessToolInvocationError
+        ? err.status
+        : err instanceof ToolCallInFlightError
+          ? 409
+          : 500;
+    jsonError(res, message, status);
   }
   return true;
 }

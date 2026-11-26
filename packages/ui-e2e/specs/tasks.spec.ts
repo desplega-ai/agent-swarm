@@ -221,8 +221,10 @@ test("a screenshot rides on a steer to the running task @local", async ({
     });
     await api.post("/api/config/reload", {});
     await page.goto(`/tasks/${taskId}`);
+    // The lazy editor replaces a textarea; filling that fallback mid-swap loses the draft.
     const box = page
       .getByRole("textbox", { name: "Steer the task…", exact: true })
+      .and(page.locator('[contenteditable="true"]'))
       .filter({ visible: true });
     const message = `see the screenshot ${crypto.randomUUID()}`;
     await box.fill(message);
