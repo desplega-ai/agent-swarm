@@ -28,6 +28,17 @@ const WRITES = [
   `SELECT * FROM '/${CSV}'; DELETE FROM t`,
   "WITH x AS (SELECT 1) DELETE FROM t",
   "SELECT E'\\''; DELETE FROM t; --'",
+  // One case per scanner branch, each refused only while that branch matches DuckDB's lexer.
+  "SELECT 1; DROP TABLE t",
+  "SELECT 1 -- $$\n; DELETE FROM t; -- $$",
+  "WITH x AS (SELECT 1) --\rDELETE FROM t",
+  "SELECT E'a''\\''; DELETE FROM t; --'",
+  "SELECT $$'$$; DELETE FROM t; SELECT '",
+  "SELECT 1 AS a$$; DELETE FROM t; SELECT 1 AS a$$",
+  "SELECT 1 AS é$$; CREATE TABLE p AS SELECT 1; SELECT 1 AS é$$",
+  "SELECT 'x' LIKE 'x' ESCAPE'\\'; DELETE FROM t; --'",
+  "SELECT 1 AS éE'\\'; DELETE FROM t; --'",
+  "/* /* */ ' */ DELETE FROM t; --'",
 ];
 const RESULT = {
   columns: [

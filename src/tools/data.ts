@@ -51,7 +51,8 @@ const WORD = /[A-Za-z_][\w$]*/y;
  */
 export function writeStatement(sql: string): string | null {
   const statements: string[][] = [[]];
-  const ident = (ch: string | undefined) => ch !== undefined && /[\w$]/.test(ch);
+  // DuckDB's lexer counts every byte >= 0x80 as an identifier character (`é$$` is one name).
+  const ident = (ch: string | undefined) => ch !== undefined && /[\w$\u0080-\uffff]/.test(ch);
   const match = (re: RegExp, at: number) => {
     re.lastIndex = at;
     return re.exec(sql)?.[0] ?? null;
@@ -61,13 +62,24 @@ export function writeStatement(sql: string): string | null {
     const c = sql[i] as string;
     const dollarTag = c === "$" && !ident(sql[i - 1]) ? match(DOLLAR_TAG, i) : null;
     if (sql.startsWith("--", i)) {
-      const end = sql.indexOf("\n", i);
-      i = end === -1 ? sql.length : end + 1;
+      // DuckDB ends a line comment at `\r` as well as `\n`.
+      const end = sql.slice(i).search(/[\r\n]/);
+      i = end === -1 ? sql.length : i + end + 1;
     } else if (sql.startsWith("/*", i)) {
-      // Not nested on purpose: if DuckDB nests, an inner `*/` only exposes more text to this scan.
-      const end = sql.indexOf("*/", i + 2);
-      if (end === -1) return "an unterminated /* comment";
-      i = end + 2;
+      // DuckDB nests block comments: `/* /* */ ' */` is one comment, not a comment then a quote.
+      let depth = 1;
+      let j = i + 2;
+      while (j < sql.length && depth > 0) {
+        if (sql.startsWith("/*", j)) depth++;
+        else if (sql.startsWith("*/", j)) depth--;
+        else {
+          j++;
+          continue;
+        }
+        j += 2;
+      }
+      if (depth > 0) return "an unterminated /* comment";
+      i = j;
     } else if (c === "'" || c === '"') {
       // E'...' strings take backslash escapes; other strings and identifiers only double the quote.
       const escapes = c === "'" && /[eE]/.test(sql[i - 1] ?? "") && !ident(sql[i - 2]);
