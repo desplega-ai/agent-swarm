@@ -1478,6 +1478,7 @@ export function tasksContract(engine: ContractEngine): void {
         source: "ui",
         created_by_user_id: null,
         created_by_agent_id: null,
+        attachments: null,
       };
       const m1 = await repo.insertSteeringMessage({
         ...base,
@@ -1492,8 +1493,15 @@ export function tasksContract(engine: ContractEngine): void {
         created_by_kind: "agent",
         created_by_agent_id: "ag",
       });
-      await repo.insertSteeringMessage({ ...base, id: "m3", created_by_kind: "system" });
+      await repo.insertSteeringMessage({
+        ...base,
+        id: "m3",
+        created_by_kind: "system",
+        attachments: '[{"id":"a1"}]',
+      });
       expect((await repo.findSteeringMessage("m1"))?.sender_name).toBe("Ann");
+      expect((await repo.findSteeringMessage("m1"))?.attachments).toBeNull();
+      expect((await repo.findSteeringMessage("m3"))?.attachments).toBe('[{"id":"a1"}]');
       expect((await repo.findSteeringMessage("m2"))?.sender_name).toBe("ag");
       expect((await repo.findSteeringMessage("m3"))?.sender_name).toBeNull();
       expect(ids(await repo.listPendingSteeringForAgent("ag"))).toEqual(["m1", "m2", "m3"]);

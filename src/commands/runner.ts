@@ -712,6 +712,7 @@ async function pollAndStartSteeringDispatches(
               message.id,
               message.body,
               message.senderLabel ?? message.createdByKind,
+              message.attachments,
             )
           : undefined;
     }

@@ -3708,6 +3708,12 @@
           },
           "handledNote": {
             "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SteeringAttachment"
+            }
           }
         },
         "required": [
@@ -3719,6 +3725,32 @@
           "source",
           "createdByKind",
           "createdAt"
+        ]
+      },
+      "SteeringAttachment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "name"
         ]
       },
       "AgentLog": {
@@ -41585,6 +41617,14 @@
                   },
                   "requestedByUserId": {
                     "type": "string"
+                  },
+                  "attachmentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 20
                   }
                 },
                 "required": [

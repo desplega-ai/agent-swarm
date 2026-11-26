@@ -1,4 +1,4 @@
-import type { TaskAttachment } from "../types";
+import type { SteeringAttachment, TaskAttachment } from "../types";
 import {
   agentFsFileLinkQuery,
   agentFsFileRoute,
@@ -27,6 +27,26 @@ export function taskAttachmentFetchCommand(
   const url = `$MCP_BASE_URL/api/fs/tasks/${taskId}/files/${attachmentId}/raw`;
   const outPath = shellQuote(`/tmp/attachments/${attachmentId}/${name.replace(/\//g, "_")}`);
   return `curl -s -H "Authorization: Bearer \${AGENT_SWARM_API_KEY:-$API_KEY}" -H "X-Agent-ID: $AGENT_ID" "${url}" --create-dirs -o ${outPath}`;
+}
+
+/**
+ * The file list appended to a steering message's text, one fetch command per
+ * file (the same recipe as a task's attachments section). Empty for a
+ * text-only message. Each file names its own task: a message carried to a
+ * successor task still points at the task it was uploaded to.
+ */
+export function steeringAttachmentsSection(
+  attachments: readonly SteeringAttachment[] | undefined,
+): string {
+  if (!attachments?.length) return "";
+  const lines = attachments.map((a) => {
+    const details = [a.mimeType, a.sizeBytes !== undefined ? `${a.sizeBytes} bytes` : undefined]
+      .filter(Boolean)
+      .join(", ");
+    const cmd = taskAttachmentFetchCommand(a.taskId, a.id, a.name);
+    return `- ${a.name}${details ? ` (${details})` : ""}: \`${cmd}\``;
+  });
+  return `\n\n📎 Attached file(s), fetch directly:\n${lines.join("\n")}`;
 }
 
 /**
