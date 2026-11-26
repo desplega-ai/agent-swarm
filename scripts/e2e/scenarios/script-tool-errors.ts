@@ -4,7 +4,13 @@ import { expectRunOk, registerAgent, runScript } from "./script-helpers";
 
 const EXECUTORS = ["native", "quickjs"] as const;
 
+/** A method name far longer than any tool: the suggestion lookup must not scale with it. */
+const LONG_NAME_LENGTH = 20_000;
+/** Before the length bound, a 20k-char name spent about 2 s in suggestion search on the host. */
+const LONG_NAME_BUDGET_MS = 500;
+
 const TOOL_ERRORS_SCRIPT = `import { SwarmToolError, SWARM_TOOL_ERROR_CODES } from "swarm-sdk";
+const LONG_NAME_LENGTH = ${LONG_NAME_LENGTH};
 export default async function (args: { missing: string }, ctx: any) {
   const probe = async (call: () => Promise<unknown>) => {
     try {
@@ -23,6 +29,11 @@ export default async function (args: { missing: string }, ctx: any) {
       };
     }
   };
+  const timed = async (call: () => Promise<unknown>) => {
+    const started = Date.now();
+    const result = await call();
+    return { result, ms: Date.now() - started };
+  };
   return {
     codes: SWARM_TOOL_ERROR_CODES,
     typo: await probe(() => ctx.swarm.db_qeury({ sql: "select 1" })),
@@ -34,6 +45,9 @@ export default async function (args: { missing: string }, ctx: any) {
     notFound: await probe(() => ctx.swarm.script_run({ name: args.missing, args: {} })),
     refused: await probe(() => ctx.objects.get({ id: args.missing })),
     sqlError: await probe(() => ctx.db.query("SELECT * FROM no_such_table_" + args.missing.replace(/\\W/g, "_"))),
+    nullSql: await probe(() => ctx.db.query(null)),
+    badSql: await probe(() => ctx.db.query({ sqlite: "select 1" })),
+    longName: await timed(() => probe(() => ctx.swarm["x".repeat(LONG_NAME_LENGTH)]({}))),
   };
 }`;
 
@@ -146,6 +160,33 @@ export const scriptToolErrors: Scenario = {
           sqlError.status === 400 &&
           String(sqlError.message).startsWith("ctx.db.query failed with"),
         show("sqlError"),
+      );
+
+      const sqlShape =
+        "ctx.db.query: sql must be a string or an object { sqlite: string; postgres: string }";
+      for (const key of ["nullSql", "badSql"]) {
+        const bad = probe(key);
+        expect(
+          bad.code === "invalid_args" &&
+            bad.tool === "db_query" &&
+            bad.status === null &&
+            bad.message === sqlShape,
+          show(key),
+        );
+      }
+
+      const longName = asRecord(out.longName);
+      const longError = asRecord(longName.result);
+      expect(
+        longError.name === "SwarmToolError" &&
+          longError.code === "unknown_tool" &&
+          JSON.stringify(longError.suggestions) === "[]" &&
+          String(longError.message).includes("No exposed tool has a similar name"),
+        `${label}: longName: ${JSON.stringify({ ...longError, message: undefined, tool: undefined })}`,
+      );
+      expect(
+        typeof longName.ms === "number" && longName.ms < LONG_NAME_BUDGET_MS,
+        `${label}: a ${LONG_NAME_LENGTH}-char method name must fail fast, took ${String(longName.ms)} ms`,
       );
     }
   },
