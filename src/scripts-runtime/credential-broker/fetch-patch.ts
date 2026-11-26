@@ -218,11 +218,14 @@ export function patchFetchWithCredentialBroker(
       return response;
     }
     if (redirectMode === "error")
-      throw new TypeError(`fetch redirect refused (redirect: "error"): ${url.href}`);
+      throw new TypeError(`fetch redirect refused (redirect: "error"): ${callerHref}`);
     if (hop >= MAX_REDIRECTS)
-      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${url.href}`);
+      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${callerHref}`);
     await response.body?.cancel().catch(() => {});
-    const next = new URL(location, url);
+    // Resolve against the caller's URL: a Location that keeps the query (a fragment,
+    // an empty path) then carries the placeholder, and the next hop substitutes it
+    // again only for an allowed host, so no later error or hop holds the value.
+    const next = new URL(location, callerHref);
     // Re-enter with the caller's placeholder headers, not the substituted ones.
     const hopRequest = nextHopRequest(response.status, url, next, {
       method: callerInit.method ?? "GET",
