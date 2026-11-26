@@ -2633,7 +2633,16 @@ class ApiClient {
       headers: this.getHeaders(),
       body: JSON.stringify({ sql, params }),
     });
-    if (!res.ok) throw new Error(`Failed to execute query: ${res.status}`);
+    if (!res.ok) {
+      // 400 answers { error: <text> }; 408 and 429 answer { error: <code>, message: <text> }.
+      const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      const detail = body.message || body.error;
+      throw new Error(
+        detail
+          ? `Query failed (${res.status}): ${detail}`
+          : `Failed to execute query: ${res.status}`,
+      );
+    }
     return res.json();
   }
 

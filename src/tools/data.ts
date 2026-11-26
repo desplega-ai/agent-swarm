@@ -27,6 +27,98 @@ const REFUSED_EXTENSION = /\.(db|sqlite|sqlite3|duckdb)$/i;
 // Same table-position rule as agent-fs (`FROM '/x.csv'`, `JOIN "/y.parquet"`), globs included.
 const PATH_LITERAL = /\b(?:from|join)\s+(['"])([^'"]+\.[A-Za-z0-9]+(?:\.gz)?)\1/gi;
 const GLOB = /[*?]/;
+// DuckDB statements that only read. DESCRIBE, SHOW and SUMMARIZE parse as SELECTs.
+const READ_STARTS = new Set([
+  "select",
+  "with",
+  "from",
+  "values",
+  "table",
+  "describe",
+  "show",
+  "summarize",
+  "pivot",
+  "unpivot",
+]);
+// A WITH clause can lead into a write (`WITH x AS (...) DELETE FROM t`).
+const WRITE_WORDS = new Set(["insert", "update", "delete", "merge"]);
+// DuckDB's lexer counts every byte >= 0x80 as an identifier character, in dollar tags
+// (`$é$`) and names (`é$$`) alike. UTF-16 surrogates fall inside \u0080-\uffff too.
+const IDENT_START = /[A-Za-z_\u0080-\uffff]/;
+const IDENT_CHAR = /[\w$\u0080-\uffff]/;
+const DOLLAR_TAG = /\$(?:[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/y;
+const WORD = /[A-Za-z_\u0080-\uffff][\w$\u0080-\uffff]*/y;
+
+/**
+ * The first reason `sql` is not read-only, or null. Splits on top-level `;` and skips strings,
+ * quoted identifiers and comments; anything it cannot scan to the end is refused.
+ */
+export function writeStatement(sql: string): string | null {
+  const statements: string[][] = [[]];
+  const ident = (ch: string | undefined) => ch !== undefined && IDENT_CHAR.test(ch);
+  const match = (re: RegExp, at: number) => {
+    re.lastIndex = at;
+    return re.exec(sql)?.[0] ?? null;
+  };
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql[i] as string;
+    const dollarTag = c === "$" && !ident(sql[i - 1]) ? match(DOLLAR_TAG, i) : null;
+    if (sql.startsWith("--", i)) {
+      // DuckDB ends a line comment at `\r` as well as `\n`.
+      const end = sql.slice(i).search(/[\r\n]/);
+      i = end === -1 ? sql.length : i + end + 1;
+    } else if (sql.startsWith("/*", i)) {
+      // DuckDB nests block comments: `/* /* */ ' */` is one comment, not a comment then a quote.
+      let depth = 1;
+      let j = i + 2;
+      while (j < sql.length && depth > 0) {
+        if (sql.startsWith("/*", j)) depth++;
+        else if (sql.startsWith("*/", j)) depth--;
+        else {
+          j++;
+          continue;
+        }
+        j += 2;
+      }
+      if (depth > 0) return "an unterminated /* comment";
+      i = j;
+    } else if (c === "'" || c === '"') {
+      // E'...' strings take backslash escapes; other strings and identifiers only double the quote.
+      const escapes = c === "'" && /[eE]/.test(sql[i - 1] ?? "") && !ident(sql[i - 2]);
+      let j = i + 1;
+      for (; j < sql.length; j++) {
+        if (escapes && sql[j] === "\\") j++;
+        else if (sql[j] === c) {
+          if (sql[j + 1] !== c) break;
+          j++;
+        }
+      }
+      if (j >= sql.length) return `an unterminated ${c} quote`;
+      i = j + 1;
+    } else if (dollarTag) {
+      const end = sql.indexOf(dollarTag, i + dollarTag.length);
+      if (end === -1) return `an unterminated ${dollarTag} string`;
+      i = end + dollarTag.length;
+    } else if (c === ";") {
+      statements.push([]);
+      i++;
+    } else if (IDENT_START.test(c)) {
+      const w = match(WORD, i) as string;
+      statements.at(-1)?.push(w.toLowerCase());
+      i += w.length;
+    } else {
+      i++;
+    }
+  }
+  for (const words of statements) {
+    const first = words[0];
+    if (first !== undefined && !READ_STARTS.has(first)) return `\`${first.toUpperCase()}\``;
+    const write = words.find((w) => WRITE_WORDS.has(w));
+    if (write) return `\`${write.toUpperCase()}\``;
+  }
+  return null;
+}
 
 const TableBinding = z.union([
   z.string().min(1),
@@ -217,6 +309,13 @@ export const registerDataQueryTool = (server: McpServer) => {
         return refuse(
           `maxRows: at most ${maxRowsCap} from ${fromScript ? "scripts" : "MCP"}.`,
           "VALIDATION_ERROR",
+        );
+      }
+      const write = writeStatement(input.sql);
+      if (write) {
+        return refuse(
+          `data-query is read-only: it runs only SELECT, WITH ... SELECT, DESCRIBE, SUMMARIZE and SHOW, and this query has ${write}. Double-quote a column named like a keyword ("delete").`,
+          "READ_ONLY",
         );
       }
       const refused =

@@ -122,13 +122,16 @@ export class PostgresRetentionRepository extends BaseRetentionRepository {
     const ids = JSON.stringify(runIds);
     const runIdsSql = () => sql`SELECT jsonb_array_elements_text(${jsonText(ids)})`;
     const stepIds = () => sql`SELECT id FROM workflow_run_steps WHERE "runId" IN (${runIdsSql()})`;
-    const taskWhere = () =>
-      sql`"workflowRunId" IN (${runIdsSql()}) OR "workflowRunStepId" IN (${stepIds()})`;
+    // A UNION of one lookup for each column: an OR of two IN subqueries cannot
+    // use an index, and each batch read all of agent_tasks twice. One UPDATE
+    // with RETURNING replaces the SELECT and UPDATE pair: at SERIALIZABLE both
+    // saw the same snapshot, so the returned ids are the same set.
     const tasks = await this.db.query<{ id: string }>(
-      sql`SELECT id FROM agent_tasks WHERE ${taskWhere()}`,
-    );
-    await this.db.run(
-      sql`UPDATE agent_tasks SET "workflowRunId" = NULL, "workflowRunStepId" = NULL WHERE ${taskWhere()}`,
+      sql`UPDATE agent_tasks SET "workflowRunId" = NULL, "workflowRunStepId" = NULL
+  WHERE id IN (
+    SELECT id FROM agent_tasks WHERE "workflowRunId" IN (${runIdsSql()})
+    UNION SELECT id FROM agent_tasks WHERE "workflowRunStepId" IN (${stepIds()})
+  ) RETURNING id`,
     );
     // These logical dependents have no ON DELETE action. Remove them before
     // their steps so pollers cannot keep trying to resume deleted history.

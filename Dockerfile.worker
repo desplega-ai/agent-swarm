@@ -209,7 +209,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.4.1
+ARG OPENCODE_VERSION=2.4.2
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -579,9 +579,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795608053-gcec25c
-ARG AMP_SHA512_AMD64=02e695249fd1c0c59c2d3f422f4ab7e91093cf14d9d6d0045e5b90fafdeff8c9783dfa5479eaf2940b1258d2009b442db0ccef1a6c3f6b6a54184db2157d0ba8
-ARG AMP_SHA512_ARM64=8056109872088789e47a11e968fa2e93bf20e9acc437e70167ecd26c637aaf6a0ac80ea4a344baedb584483c4ba1a2146abe3c0e9bd8a865d1483983ef075ae7
+ARG AMP_VERSION=0.0.1795665646-gb77778
+ARG AMP_SHA512_AMD64=1bb66fbe74866efc19500ae0b1600b9ae24983a4519dfc7ff198476ed4b0cf9e62e2d438dde1488f21f469fd731c546949e22969c316e04a11b0bb56bf03f7c4
+ARG AMP_SHA512_ARM64=38ed0d3a7282b3df64df1e4bdd888fb2f867177cbdc8a8af2cbe0a64edf745dd196e1a4d7c41fcf5088a3be37f35fdd9e28efc21cbd2a9a9e72938b33225cc65
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -597,7 +597,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.5.0
+ARG CURSOR_SDK_VERSION=1.5.2
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -629,7 +629,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.115
+ARG COPILOT_CLI_VERSION=1.0.116
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -639,8 +639,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.28.4), so none run as root.
-ARG QWEN_CODE_VERSION=0.28.4
+# scripts are not needed for ACP (verified on 0.28.6), so none run as root.
+ARG QWEN_CODE_VERSION=0.28.6
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -650,9 +650,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
 # from the GitHub release, verified against the release's SHA-256 digests.
 # Bump GOOSE_VERSION and both pins together.
-ARG GOOSE_VERSION=1.61.0
-ARG GOOSE_SHA256_AMD64=442bc7ce579e12f01bc9725295445bfc4ac50ee49a01331a31884abd6e59f7b7
-ARG GOOSE_SHA256_ARM64=ec0cbcb6676dcc4d138fa12ad4bafefdbb989d97734d62a7be91621ec879d3f9
+ARG GOOSE_VERSION=1.61.1
+ARG GOOSE_SHA256_AMD64=f578c76447adf07f561201f1984318accc8f907f53e8bc07c350fe31b9c4264b
+ARG GOOSE_SHA256_ARM64=f1ce19c3358df0b0270c844908bb08f5ca246f64692c5b95aeecbaa783dd925f
 RUN case "$TARGETARCH" in \
       amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
       arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
@@ -670,9 +670,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.6.0
-ARG KIRO_CLI_SHA256_AMD64=a9d356f0f1a127a2587f63e806fcec00b98b916b9e5cf61822f7e179d6f7c7ed
-ARG KIRO_CLI_SHA256_ARM64=6315df9c89a487caa6eba0d462181363332ed915dac4ca740e92592a6972bba4
+ARG KIRO_CLI_VERSION=3.6.2
+ARG KIRO_CLI_SHA256_AMD64=ffa5b53423a399249bbdbd69dc00686f60bbcf4637f59895796b81d401a1435f
+ARG KIRO_CLI_SHA256_ARM64=a957c6a92b1d58849e67a7e49c07f9c4f0344c1f07ce2b0d271c9d93415f5f01
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -711,9 +711,9 @@ RUN case "$TARGETARCH" in \
 # auto-upgrade per process (FX_AUTO_UPGRADE=0). The tarball's files are owned
 # by uid 1001, hence --no-same-owner. Bump FX_VERSION, both pins and
 # FX_PINNED_VERSION in src/providers/fx-adapter.ts together.
-ARG FX_VERSION=0.0.17
-ARG FX_SHA512_AMD64=8aa80856cb5d63f0b7e66809e4d56e911f0122e4c3bba7b340aa80b889ca752fe7b3b888ed958bc42ba5eb0b9669ac88e70aeae1693ba8a7e15cffb20c8830c7
-ARG FX_SHA512_ARM64=e882f68a0f56541065dc0b2d3c40460f139a4165ab3ef8f29ab925f9c8300dc69d30a4ab3a80c05923e736ca92e1045765d7e2bb88fa0699a4168961b7986aa9
+ARG FX_VERSION=0.0.18
+ARG FX_SHA512_AMD64=3be118424127b678cca5d3e207678c99b48a4b8fbcdf07750e4e67e27edec119b84769dc0deb9bf073556640e2172707e3a8fb8ec04b67436681548f80dd75a3
+ARG FX_SHA512_ARM64=d18ee33a3a7ce773a9481c6beaf046e7d806f4b1b825960504739f6a9c0b6b3855a29cbe29fff8d4d6e1a243dc5a7741dbc42c379911a1010ba0487e1ef136c7
 RUN case "$TARGETARCH" in \
       amd64) fx_arch=x86_64; fx_sha512="$FX_SHA512_AMD64" ;; \
       arm64) fx_arch=aarch64; fx_sha512="$FX_SHA512_ARM64" ;; \
@@ -746,7 +746,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.44.0",
+    "agent-browser": "0.45.0",
     "playwright": "1.63.0"
   },
   "overrides": {

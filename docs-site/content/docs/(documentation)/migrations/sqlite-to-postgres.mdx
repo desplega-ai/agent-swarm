@@ -1,0 +1,269 @@
+---
+title: Migrate a SQLite swarm to PostgreSQL
+description: Move a running swarm from SQLite to PostgreSQL with no data loss. Covers the SQL that lives outside the engine (scripts, dashboards, prompts, extensions), the rehearsal, the copy command, the switch window, the first hour, and rollback
+agent:
+  offer: true
+  when: "Someone plans or runs a move of an existing swarm from SQLite to PostgreSQL, or a script, dashboard or extension fails with a SQL error after such a move"
+---
+
+This page is the procedure for a swarm that already has data. For a new install on PostgreSQL, the [PostgreSQL storage engine guide](/docs/guides/postgres) is enough.
+
+We wrote it after we moved our own production swarm. Each warning here comes from something that failed for us in a rehearsal or in the first hour.
+
+## What moves and what does not
+
+`agent-swarm db-copy` moves every row. It does not move the SQL that your swarm stores as text. That text is the larger part of the work.
+
+| Part | Moved by `db-copy` | Your work |
+|---|---|---|
+| Rows of every table | Yes, with a row count and a checksum for each table | Repair the rows that PostgreSQL refuses |
+| Secrets | Yes, as ciphertext | Keep the same encryption key file |
+| Memory embeddings and full-text search | Yes, the indexes are rebuilt | Set `EMBEDDING_DIMENSIONS` to the API's value |
+| Stock dashboard queries | Yes, rewritten | None |
+| Seeded scripts, schedules and extensions | They carry SQL for both engines | Do not edit them. An edit forks them from the seed |
+| Your scripts that call `db-query` | No | Port the SQL |
+| Custom dashboard widgets | No. The copy lists each one | Port the SQL |
+| SQL inside schedule prompts, workflow nodes and agent instructions | No | Port the text |
+| Custom extensions that query the database | No | Port the SQL |
+| Pages and apps that call `db-query` | No | Port the SQL |
+
+Plan for a stop of the swarm: the copy needs the API to be down. The rehearsal in Step 4 gives you the duration for your database.
+
+## Timeline
+
+1. **Days before:** port the SQL, prepare PostgreSQL, rehearse the copy on a backup.
+2. **The window:** stop, back up, copy, verify, switch, start.
+3. **The first hour:** watch the logs for the errors in [The first hour](#the-first-hour).
+4. **The week after:** keep the SQLite file. Then remove it.
+
+## Step 1: find the SQL that lives as text
+
+Make the list while you are still on SQLite. These queries run through `db-query` on SQLite.
+
+Scripts that query the database:
+
+```sql
+SELECT name, scope, version FROM scripts
+WHERE source LIKE '%db_query%' OR source LIKE '%db-query%' OR source LIKE '%ctx.db%'
+ORDER BY name;
+```
+
+Schedules and workflows with SQL in their text:
+
+```sql
+SELECT name FROM scheduled_tasks
+WHERE enabled = 1 AND (taskTemplate LIKE '%SELECT %' OR taskTemplate LIKE '%db-query%');
+
+SELECT name FROM workflows
+WHERE enabled = 1 AND (definition LIKE '%SELECT %' OR definition LIKE '%db-query%');
+```
+
+Custom extensions:
+
+```sql
+SELECT e.name, f.path FROM extension_files f JOIN extensions e ON e.id = f.extensionId
+WHERE e.enabled = 1 AND (f.content LIKE '%db_query%' OR f.content LIKE '%db-query%');
+```
+
+Pages:
+
+```sql
+SELECT slug, title FROM pages WHERE body LIKE '%db-query%';
+```
+
+Dashboard widgets need no query: the rehearsal copy prints one `ATTENTION` line for each widget it cannot rewrite.
+
+Also search the instructions that you gave your agents (identity files, memory, skills) for SQL examples. An agent that learned `WHERE isLead = 1` writes it again after the move.
+
+## Step 2: port the SQL
+
+### Write SQL that runs on both engines
+
+Port before the window, not after it. A text that runs on both engines can go live while you are still on SQLite, and you can test it there.
+
+Most queries need only these four rules to be portable:
+
+- Use `$1`, `$2` for parameters. SQLite accepts them too.
+- Put double quotes around every identifier that has an uppercase letter: `"taskId"`, `"createdAt"`. Without the quotes PostgreSQL reads `taskid`, and the query fails with `column "taskid" does not exist`.
+- Put the same quotes around a camelCase alias: `AS "askHead"`. Without them the result column is `askhead`, and code that reads `row.askHead` gets `undefined`.
+- Read a JSON field with `->` and `->>`: `metadata ->> 'comms'`. Both engines support the operators.
+
+When one text cannot serve both engines, a script picks the text by dialect:
+
+```ts
+export default async function (args: unknown, ctx: ScriptContext) {
+  const rows = await ctx.db.query({
+    sqlite: `SELECT id FROM agent_tasks WHERE createdAt >= datetime('now', '-1 day')`,
+    postgres: `SELECT id FROM agent_tasks WHERE "createdAt" >= now() - interval '1 day'`,
+  });
+  return { dialect: ctx.db.dialect, n: rows.length };
+}
+```
+
+Code that calls `db_query` directly (an extension hook, an older script) reads the `dialect` field of any response and picks its text from that.
+
+### SQLite to PostgreSQL
+
+| SQLite | PostgreSQL | Note |
+|---|---|---|
+| `?` | `$1`, `$2` | `?` fails with `syntax error at end of input` |
+| `taskId` | `"taskId"` | Every identifier with an uppercase letter |
+| `isLead = 1` | `"isLead"` | Flags are `boolean`. `= 1` fails |
+| `sum(x > 0)` | `count(*) FILTER (WHERE x > 0)` | Or the portable `sum(CASE WHEN x > 0 THEN 1 ELSE 0 END)` |
+| `min(a, b)`, `max(a, b)` | `LEAST(a, b)`, `GREATEST(a, b)` | In PostgreSQL `min` and `max` are aggregates only |
+| `CAST(x AS INT)` | `trunc(x)::int` | A PostgreSQL cast rounds, SQLite cuts |
+| `json_extract(col, '$.a')` | `col ->> 'a'` (text) or `col -> 'a'` (JSON) | JSON columns are `jsonb` |
+| `json_each(?)` | `jsonb_array_elements_text($1::text::jsonb)` | Pass the list as JSON text |
+| `group_concat(x)` | `string_agg(x, ',')` | |
+| `instr(a, b) > 0` | `position(b in a) > 0` | The argument order changes |
+| `substr(x, -n)` | `right(x, n)` | A negative start does not count from the end |
+| `ifnull(a, b)` | `coalesce(a, b)` | Portable |
+| `x LIKE 'abc%'` | `x ILIKE 'abc%'` | `LIKE` is case-sensitive in PostgreSQL |
+| `x GLOB 'a*'` | `x LIKE 'a%'` or `x ~ '^a'` | |
+| `"some text"` | `'some text'` | Double quotes always name an identifier |
+| `datetime('now', '-1 day')` | `now() - interval '1 day'` | |
+| `strftime('%Y-%m-%d', t)` | `to_char(t, 'YYYY-MM-DD')` | |
+| `julianday(b) - julianday(a)` | `extract(epoch FROM b - a) / 86400` | |
+| `length(jsonCol)` | `length(jsonCol::text)` | `length` takes no `jsonb` |
+| `rowid` | `_rowid` | The copy keeps the SQLite value |
+| `SELECT a, count(*) ... GROUP BY b` | List every column that is not an aggregate | PostgreSQL refuses a loose `GROUP BY` |
+
+Three points have no syntax error to warn you:
+
+- **Timestamps are `timestamptz`.** A comparison with a string literal works: `"createdAt" >= '2026-01-01T00:00:00Z'`. A comparison with a text column or a `VALUES` list does not: cast it, `s::timestamptz`.
+- **Numbers can come back as strings.** `sum()` of a `bigint` is `numeric`. Wrap the values in `Number(...)` in your code.
+- **JSON keys change order.** `jsonb` does not keep the order of the keys. Do not compare JSON text byte for byte.
+
+A string parameter in a `jsonb` position must be JSON text. To pass a list, send `'["a","b"]'` with `$1::text::jsonb`.
+
+### Do not edit seeded items
+
+The built-in scripts, schedules and extensions carry SQL for both engines, and the seeder updates them at each start. An edit marks the item as yours, and the seeder then leaves it alone. If you edited one long ago, compare it with the current seed: your copy can still hold SQLite-only SQL.
+
+## Step 3: prepare PostgreSQL
+
+Follow [Requirements](/docs/guides/postgres#requirements): PostgreSQL 16, pgvector, and a database with the `C` collation. Create the database and stop there. `db-copy` refuses a database that already holds tables, so do not start an API on it.
+
+Set these before the window. Each one needs a server restart, which is free now and costs an API restart later.
+
+| Setting | Value | Why |
+|---|---|---|
+| `max_pred_locks_per_transaction` | `2048` | The API runs at `SERIALIZABLE`. The default (`64`) is small for it. One slow statement keeps the locks of every transaction that commits while it runs. For us the table filled soon after the switch, and writes failed with `out of shared memory` |
+| `max_connections` | At least 15 for the API role | 1 lock session, 10 for the pool, 4 for the `db-query` reader |
+| Shared memory of the container | At least 1 GB, or `dynamic_shared_memory_type=sysv` | Docker gives a container 64 MB of `/dev/shm`. Parallel queries and parallel `VACUUM` then fail with `could not resize shared memory segment`. Compose: `shm_size: 1g` |
+| Pooler | Session pooling, or none | The API holds a session advisory lock. Transaction pooling breaks it |
+
+The API must run under a supervisor that restarts it (`restart: unless-stopped` in Compose, a Deployment on Kubernetes). On PostgreSQL the API exits when it loses its database, and expects a restart.
+
+## Step 4: rehearse on a copy
+
+Do not skip this step. Each of our rehearsals found a problem that the one before did not.
+
+1. Deploy the build that you will run in the window, on SQLite. Let it start once, so the file is at that build's migration head.
+2. Take a backup of the SQLite file. Copy it to a place where the test cannot touch production.
+3. Create a scratch database and run the copy against the backup:
+
+   ```bash
+   docker run --rm -v <folder with the backup>:/app/data --network <network that reaches postgres> \
+     <api image>:<api tag> db-copy --from /app/data/agent-swarm-db.sqlite \
+     --to "postgres://swarm:<password>@<host>:5432/swarm_rehearsal" \
+     --json /app/data/db-copy-report.json
+   ```
+
+4. Read the output.
+   - `cannot store <table>.<column> (rowid N)` and `orphan row(s)`: SQLite accepted a value that PostgreSQL refuses. Run again with `--repair`. It fixes NUL bytes, invalid UTF-8, broken JSON escapes and orphan rows during the copy, lists each fix, and does not change the SQLite file. The kinds it does not fix are in the [operator runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/postgres.md).
+   - `ATTENTION`: a dashboard query that the copy cannot rewrite. Add it to your port list.
+   - `done: <n> tables, <m> rows, every count and checksum equal`: the copy passed.
+5. Write the duration. It is your downtime, plus about 15 minutes for the steps around it.
+6. Start a test API on the scratch database, with the reader role in `DATABASE_QUERY_URL` ([reader role](/docs/guides/postgres#db-query-reader-role)). Set `SLACK_DISABLE=true` and the other `*_DISABLE` flags, and start no workers, so the test swarm does not answer real events.
+7. Run every ported statement through `db-query` on the test API. A statement that parses can still fail on a stored value, so run it on the real data. Compare some results with SQLite.
+8. Open the dashboard: task list, one task, memory search, a secret config value.
+9. Drop the scratch database.
+
+A database with a long history often holds thousands of rows that need `--repair`. That is normal.
+
+## Step 5: the window
+
+Before you stop anything:
+
+- **Turn off automatic deploys.** A deploy in the middle of the copy starts the API on SQLite again.
+- **Let the running tasks end.** A clean stop is simpler than the recovery of a task that the stop cut.
+- **Do not set `DATABASE_URL` yet.** The API selects PostgreSQL the moment the variable is set.
+
+Then:
+
+1. Stop the API and the workers.
+2. Back up the SQLite file with its `-wal` and `-shm` files, and the encryption key file.
+3. Run the copy, from the same image tag as the API:
+
+   ```bash
+   docker run --rm -v <api data volume>:/app/data --network <network that reaches postgres> \
+     <api image>:<api tag> db-copy --from /app/data/agent-swarm-db.sqlite \
+     --to "postgres://swarm:<password>@<host>:5432/swarm" \
+     --repair --json /app/data/db-copy-report.json
+   ```
+
+   If your Compose service sets its own `entrypoint`, `docker compose run <api service> db-copy` boots the API. Use `docker run --entrypoint /usr/local/bin/agent-swarm-api <api image>:<api tag> db-copy ...`.
+
+4. Go on only if the exit code is 0 and the last line says `every count and checksum equal`. On any other result, start the swarm on SQLite and read the report. The target stays empty after a refused copy, so a second run works.
+5. Create the reader role for `db-query` ([reader role](/docs/guides/postgres#db-query-reader-role)).
+6. Take one `pg_dump` of the new database. It is your restore point for the first day.
+7. Set `DATABASE_URL` and `DATABASE_QUERY_URL`. Keep the same data volume: it holds the encryption key.
+8. Start the API, then the workers.
+9. Check: `[db] Postgres engine ready` in the log, `/health`, the task list, one secret config value, one memory search, and a `db-query` call that returns `"dialect": "postgres"`.
+10. Turn the automatic deploys on again.
+
+## The first hour
+
+Watch the PostgreSQL log and the API log. Search for these lines:
+
+| Log line | Meaning | Action |
+|---|---|---|
+| `out of shared memory` with a hint about `max_pred_locks_per_transaction` | The predicate lock table is full. Writes fail | Raise the setting ([Step 3](#step-3-prepare-postgresql)) and restart PostgreSQL. The API exits and restarts by itself |
+| `could not serialize access` | Two transactions raced. The API retries the transaction | None, at some retries a minute |
+| `column "taskid" does not exist`, `function sum(boolean) does not exist`, `syntax error at end of input` | SQLite SQL that you did not port | Find the caller (below) and port it |
+| `POST /api/db-query → 400` in the API log | The same, seen from the API | The same |
+| `lost the one-process lock`, then a restart | The API lost its database for 10 seconds | Check the database and the network |
+
+To find who sends a failing statement, read the `STATEMENT` line under the error in the PostgreSQL log. `db-query` statements start with `DECLARE swarm_db_query`. Search your scripts, extensions and prompts for a table name or an alias from that text.
+
+Two failures make no noise, so check them by hand:
+
+- **An extension whose query fails often lets the call pass.** A gate that reads the task from the database before it judges a message catches the error and continues. The log of extension runs shows `continue` for every call. Trigger each gate once on purpose.
+- **A workflow that publishes a snapshot stops updating.** The page shows old data and no error. Check the last run of each scheduled workflow.
+
+## Rollback
+
+Stop the swarm, unset `DATABASE_URL`, and start it. The API runs on the SQLite file, which the copy did not change.
+
+Every write made on PostgreSQL after the switch is lost in a rollback: nothing copies it back. Decide in the first hour. After a day of work on PostgreSQL, a fix forward is the better choice.
+
+## After the move
+
+- **Backups.** Litestream replicates SQLite only. Use your provider's backups or `pg_dump`. Run one full backup by hand and read its log. Then restore it once into a scratch database.
+- **The SQLite file.** Keep it for a week, then delete it with its Litestream replica.
+- **Planner statistics.** The copy runs `VACUUM (ANALYZE)` at its end. If it printed a `WARNING` for that step, run it by hand.
+- **Agent memory.** Tell your agents that the database changed. Update the instructions, skills and memories that hold SQLite examples.
+
+## Checklist
+
+1. Inventory of scripts, widgets, prompts, extensions and pages with SQL
+2. Every item ported to portable or dual-dialect SQL, live on SQLite
+3. PostgreSQL 16 + pgvector, `C` collation, the settings of Step 3
+4. Supervisor restarts the API
+5. Rehearsal passed with `every count and checksum equal`, duration known
+6. Ported statements ran on the rehearsal database
+7. Automatic deploys off, tasks drained, swarm stopped
+8. SQLite file and encryption key backed up
+9. Copy exit 0, counts and checksums equal
+10. Reader role created, `pg_dump` taken
+11. `DATABASE_URL` set, swarm started, checks of step 9 pass
+12. First hour: no `out of shared memory`, no `db-query` 400, gates and scheduled workflows checked
+13. Automatic deploys on, backups proven with one restore
+
+## Related
+
+- [PostgreSQL storage engine](/docs/guides/postgres): requirements, configuration, reader role
+- [`db-copy` in the CLI reference](/docs/reference/cli)
+- [Scripts runtime: `ctx.db`](/docs/guides/scripts-runtime)
+- [Operator runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/postgres.md): what the copy does step by step, refused rows, troubleshooting

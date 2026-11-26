@@ -12,6 +12,7 @@ import {
   readableSessionSql,
   SqlQuery,
   sql,
+  sqlJoin,
   sqlList,
   sqlWhere,
   TASK_FTS_COMPLETE,
@@ -102,8 +103,29 @@ function taskTsQuery(search: string): SqlQuery {
 // The agent_tasks_fts expressions of migration 368 (indexes agent_tasks_fts_task
 // and agent_tasks_fts_title), word for word: the planner uses an index only for
 // an equal expression. One vector per column, as an FTS5 phrase never spans two.
+// Search reads them only for the tasks past the backfill mark (migration 391).
 export const TASK_TEXT_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.task))`;
 export const TASK_TITLE_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.title))`;
+
+/**
+ * Writes the stored search documents (agent_tasks_search, migration 391) of
+ * the rows a statement returns, in the same statement. `task_search_document`
+ * is the expression of 368. A task row without a document row is written by
+ * the backfill or by db-copy.
+ */
+export const UPSERT_TASK_SEARCH = `INSERT INTO agent_tasks_search (task_id, task_doc, title_doc)
+  SELECT id, task_search_document(task), task_search_document(title) FROM written
+  ON CONFLICT (task_id) DO UPDATE SET task_doc = EXCLUDED.task_doc, title_doc = EXCLUDED.title_doc`;
+
+/**
+ * The backfill's write: only the tasks that have no document yet. A document
+ * that exists came from the statement that wrote the task text, so it is
+ * current. An update here could replace it with the older text of the
+ * backfill's snapshot.
+ */
+const INSERT_MISSING_TASK_SEARCH = `INSERT INTO agent_tasks_search (task_id, task_doc, title_doc)
+  SELECT id, task_search_document(task), task_search_document(title) FROM written
+  ON CONFLICT (task_id) DO NOTHING`;
 
 const HUMAN_FREE_TAG_SQL = HUMAN_FREE_TAGS.map(
   (tag) => `COALESCE(CAST(task.tags AS text), '[]') ILIKE '%"${tag}"%' ESCAPE ''`,
@@ -244,32 +266,45 @@ export class PostgresTasksRepository extends BaseTasksRepository {
     ORDER BY ${raw(order)}`);
   }
 
+  protected override writeTaskText(write: SqlQuery): SqlQuery {
+    return sql`WITH written AS (${write}), documents AS (${raw(UPSERT_TASK_SEARCH)})
+      SELECT * FROM written`;
+  }
+
   /**
-   * A phrase-prefix match on the task text and title, or a prefix of the task
-   * id. Until the backfill mark is complete it is the old substring LIKE, as on
-   * SQLite. The match uses the tsvector expression indexes of migration 368.
+   * A phrase-prefix match on the task text or title, or a prefix of the task
+   * id, as the set of matching ids. Every arm reads an index: the GIN indexes
+   * of the stored documents (migration 391), the expression indexes of 368 for
+   * the tasks past the backfill mark (none once it is complete), and the
+   * primary key for the id prefix. A phrase checks its word positions in the
+   * stored document, so no task text is parsed at query time.
+   *
+   * The set is MATERIALIZED: computed once, before the page or the count. The
+   * planner can not then read the tasks in list order and test the match on
+   * each one, which reads every task when few or none match.
    */
   protected async taskSearchCondition(
     search: string,
     _purpose: "page" | "count",
   ): Promise<SqlQuery> {
-    const indexedThrough = await this.getTaskFtsIndexedThrough();
-    if (indexedThrough === null || indexedThrough < TASK_FTS_COMPLETE) {
-      const pattern = sql`${`%${search}%`}`;
-      return sql`(${likeAsciiCi(sql`agent_tasks.task`, pattern)} OR ${likeAsciiCi(sql`agent_tasks.title`, pattern)} OR ${likeAsciiCi(sql`agent_tasks.id`, pattern)})`;
-    }
+    const indexedThrough = (await this.getTaskFtsIndexedThrough()) ?? 0;
     const idLow = search.trim().toLowerCase();
-    const terms: SqlQuery[] = [];
+    const arms: SqlQuery[] = [];
     if (/[\p{L}\p{N}]/u.test(search)) {
-      terms.push(
-        sql`(${TASK_TEXT_TSVECTOR} @@ ${taskTsQuery(search)} OR ${TASK_TITLE_TSVECTOR} @@ ${taskTsQuery(search)})`,
-      );
+      const query = taskTsQuery(search);
+      arms.push(sql`SELECT task_id AS id FROM agent_tasks_search
+        WHERE task_doc @@ ${query} OR title_doc @@ ${query}`);
+      if (indexedThrough < TASK_FTS_COMPLETE) {
+        arms.push(sql`SELECT id FROM agent_tasks WHERE "_rowid" > ${indexedThrough}
+          AND (${TASK_TEXT_TSVECTOR} @@ ${query} OR ${TASK_TITLE_TSVECTOR} @@ ${query})`);
+      }
     }
     if (idLow) {
-      terms.push(sql`(agent_tasks.id >= ${idLow} AND agent_tasks.id < ${`${idLow}\uffff`})`);
+      arms.push(sql`SELECT id FROM agent_tasks WHERE id >= ${idLow} AND id < ${`${idLow}\uffff`}`);
     }
-    if (terms.length === 0) return sql`false`;
-    return terms.length === 2 ? sql`(${terms[0]!} OR ${terms[1]!})` : sql`(${terms[0]!})`;
+    if (arms.length === 0) return sql`false`;
+    return sql`agent_tasks.id IN (
+      WITH hits AS MATERIALIZED (${sqlJoin(arms, sql` UNION `)}) SELECT id FROM hits)`;
   }
 
   listTaskDescendants(startId: string, maxDepth: number, limit: number): Promise<TaskLineageRow[]> {
@@ -305,8 +340,11 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   }
 
   /**
-   * Advances the backfill mark by `batchSize` rows in insertion order. The
-   * Postgres match reads `agent_tasks` itself, so there is no index row to write.
+   * Writes the stored search documents of the next `batchSize` tasks past the
+   * backfill mark, in insertion order, and advances the mark past them in the
+   * same transaction. A task written since has its document already: the
+   * batch keeps that document. The last batch sets the mark to
+   * TASK_FTS_COMPLETE, which ends the expression arm of the search.
    */
   async indexTaskFtsBatch(batchSize: number): Promise<{ changes: number; done: boolean }> {
     const indexedThrough = await this.getTaskFtsIndexedThrough();
@@ -317,12 +355,15 @@ export class PostgresTasksRepository extends BaseTasksRepository {
       SELECT "_rowid" AS rid FROM agent_tasks WHERE "_rowid" > ${indexedThrough}
       ORDER BY "_rowid" LIMIT 1 OFFSET ${batchSize - 1}`);
     const through = last?.rid ?? TASK_FTS_COMPLETE;
-    const counted = await this.db.get<{ n: number }>(sql`
-      SELECT COUNT(*) AS n FROM agent_tasks WHERE "_rowid" > ${indexedThrough} AND "_rowid" <= ${through}`);
+    const written = await this.db.run(sql`
+      WITH written AS (
+        SELECT id, task, title FROM agent_tasks
+        WHERE "_rowid" > ${indexedThrough} AND "_rowid" <= ${through}
+      ) ${raw(INSERT_MISSING_TASK_SEARCH)}`);
     await this.db.run(
       sql`UPDATE agent_tasks_fts_state SET "indexedThrough" = ${through} WHERE id = 1`,
     );
-    return { changes: Number(counted?.n ?? 0), done: through >= TASK_FTS_COMPLETE };
+    return { changes: written.changes, done: through >= TASK_FTS_COMPLETE };
   }
 
   /** No database file: the backfill's WAL-size throttle reads 0. */

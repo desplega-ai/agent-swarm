@@ -54,11 +54,15 @@ function laterRelease() {
   const migrations = files.filter((file) => /^\d+_.+\.sql$/.test(file)).sort();
   const ordinals = migrations.map((file) => Number.parseInt(file, 10));
   const head = Math.max(...ordinals);
-  // The tables the chain seeds: each top-level INSERT of a migration file.
+  // The tables the chain seeds: each top-level INSERT of a migration file. A table
+  // db-copy rebuilds from the copied rows holds derived data that grows with each
+  // write (memory_fts: one document per memory), so it is no seed even when a
+  // migration fills it for the rows that exist.
+  const rebuilt = new Set(["memory_fts", "memory_vec"]);
   const seeded = new Set<string>();
   for (const file of migrations) {
     for (const match of readFileSync(join(CHAIN, file), "utf8").matchAll(/^INSERT INTO "(\w+)"/gm))
-      seeded.add(match[1] as string);
+      if (!rebuilt.has(match[1] as string)) seeded.add(match[1] as string);
   }
   const added = [`${head + 1}_e2e_later_release_schema`, `${head + 2}_e2e_later_release_backfill`];
   writeFileSync(join(dir, `${added[0]}.sql`), LATER_SCHEMA);
