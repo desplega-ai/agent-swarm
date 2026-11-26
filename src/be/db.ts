@@ -28,6 +28,7 @@ import type {
   MetricColumnUpdate,
   MetricRow,
   MetricVersionRow,
+  NewSessionLog,
   PageColumnUpdate,
   PageRow,
   PageVersionRow,
@@ -4027,8 +4028,16 @@ export async function createSessionLogs(logs: {
       // Consecutive Claude thinking lines of one message just before the current line.
       let run = 0;
       let runMessageId: string | undefined;
+      // Rows are buffered and written as multi-row INSERTs. The buffer is
+      // flushed before each classifyClaudeUpdate, which reads the rows stored
+      // so far, so it sees exactly what the one-insert-per-line loop showed it.
+      const pending: NewSessionLog[] = [];
+      const flush = async () => {
+        if (pending.length === 0) return;
+        await getStorage().repos.sessions.insertLogs(pending.splice(0));
+      };
       for (const [index, { content, reasoning }] of batch.entries()) {
-        await getStorage().repos.sessions.insertLog({
+        pending.push({
           id: crypto.randomUUID(),
           taskId: logs.taskId ?? null,
           sessionId: logs.sessionId,
@@ -4045,6 +4054,7 @@ export async function createSessionLogs(logs: {
           // Only a run of 2+ can hold an update. A run that reaches the batch
           // start may continue in an earlier POST, so the DB decides that case.
           if (before >= 2 || before === index) {
+            await flush();
             await classifyClaudeUpdate(logs.sessionId, toolMessageId, lineNumber);
           }
         }
@@ -4058,6 +4068,7 @@ export async function createSessionLogs(logs: {
         }
         lineNumber++;
       }
+      await flush();
     });
   }
 }
