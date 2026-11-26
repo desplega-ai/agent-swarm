@@ -77,6 +77,8 @@ On Postgres, `db-query` runs Postgres SQL:
 
 `agent-swarm db-copy` copies the SQLite file into an empty Postgres database in one transaction, then compares the row count and a checksum of each table.
 
+This section is the short form. For a swarm with data, scripts and dashboards, follow [Migrate a SQLite swarm to PostgreSQL](/docs/migrations/sqlite-to-postgres): it covers the SQL that the copy does not move, the rehearsal, the first hour and rollback.
+
 Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API and run every custom dashboard against the copied data. Compare its results with SQLite. A query can pass the copy's planning check and still fail on a value in a stored row.
 
 1. Start the new version once on SQLite, so the file has the latest migrations. Stop it.

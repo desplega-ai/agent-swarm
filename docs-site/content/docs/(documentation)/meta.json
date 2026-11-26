@@ -11,6 +11,7 @@
     "apps",
     "ui",
     "playbooks",
+    "migrations",
     "guides",
     "integrations",
     "reference",
