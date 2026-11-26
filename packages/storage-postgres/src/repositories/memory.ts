@@ -17,59 +17,35 @@ import {
 /**
  * Memory search on Postgres (milestone M4, decision D15). SQLite keeps
  * `memory_fts` (FTS5) and `memory_vec` (sqlite-vec) as run-time tables outside
- * the migration chain; migration 369 gives Postgres:
+ * the migration chain; Postgres has both in the chain:
  *
- * - full text: an expression GIN index on agent_memory (`idx_agent_memory_fts`),
- *   which stays in sync by itself. There are no index rows of its own, so the
- *   FTS row writes are no-ops and the backfill scan finds nothing.
- * - vectors: the `memory_vec` table (pgvector, no fixed dimension), searched by
- *   exact k-NN on cosine distance, as sqlite-vec's brute force.
+ * - full text: the table `memory_fts` (migration 386), one stored tsvector and
+ *   token count per memory, GIN-indexed. The memory store writes it through the
+ *   FTS row methods below in the transaction that writes the memory, as on
+ *   SQLite; the foreign key drops a row with its memory. A search never runs
+ *   to_tsvector on stored text.
+ * - vectors: the `memory_vec` table (pgvector, no fixed dimension, migration
+ *   369), searched by exact k-NN on cosine distance, as sqlite-vec's brute force.
  */
-
-/** The indexed document: the expression of `idx_agent_memory_fts`, written exactly as the index. */
-function ftsDocument(alias: string): SqlQuery {
-  const p = alias ? `${alias}.` : "";
-  return new SqlQuery(
-    [
-      `(to_tsvector('memory_english'::regconfig, memory_fts_text(${p}"name"))
-        || to_tsvector('memory_english'::regconfig, memory_fts_text(${p}"content")))`,
-    ],
-    [],
-  );
-}
-
-/** One field's text vector (the index concatenates the name and content vectors). */
-function ftsField(alias: string, column: "name" | "content"): SqlQuery {
-  const p = alias ? `${alias}.` : "";
-  return new SqlQuery(
-    [`to_tsvector('memory_english'::regconfig, memory_fts_text(${p}"${column}"))`],
-    [],
-  );
-}
-
-/**
- * `query` matches one memory: the indexed concatenation prefilters (it uses
- * the GIN index), and the field recheck keeps a phrase inside one field, as
- * FTS5 does. The concatenation puts the first content word right after the
- * last name word, so a phrase alone would match across the boundary.
- */
-function ftsMatch(alias: string, query: SqlQuery): SqlQuery {
-  return sql`(${ftsDocument(alias)} @@ ${query} AND (${ftsField(alias, "name")} @@ ${query} OR ${ftsField(alias, "content")} @@ ${query}))`;
-}
 
 /** A query term with the punctuation of the indexed text turned into spaces. */
 function ftsTermText(term: string): SqlQuery {
   return sql`memory_fts_text(CAST(${term} AS text))`;
 }
 
-/** One term as a phrase query, as FTS5's `"term"`. */
-function phraseQuery(term: string): SqlQuery {
-  return sql`phraseto_tsquery('memory_english'::regconfig, ${ftsTermText(term)})`;
-}
+/** Each quoted lexeme of a tsquery's text form, for `regexp_replace` (a bound value). */
+const TSQUERY_LEXEME = "('(?:[^']|'')*')";
 
-/** Any of `terms`, each a phrase, as FTS5's `"t1" OR "t2"`. */
-function ftsQuery(terms: string[]): SqlQuery {
-  return sqlJoin(terms.map(phraseQuery), sql` || `);
+/**
+ * A phrase query restricted to one field: every word with the name weight (B)
+ * or every word with the content weight (D). The stored document puts the
+ * first content word right after the last name word, so an unweighted phrase
+ * would match across the boundary; FTS5 keeps a phrase inside one column.
+ */
+function fieldPhrase(query: SqlQuery): SqlQuery {
+  const weighted = (weight: string) =>
+    sql`regexp_replace(${query}::text, ${TSQUERY_LEXEME}, ${`\\1:${weight}`}, 'g')`;
+  return sql`(${weighted("B")} || ' | ' || ${weighted("D")})::tsquery`;
 }
 
 /** The float32 elements of a little-endian embedding blob. */
@@ -138,58 +114,79 @@ export class PostgresMemoryRepository extends BaseMemoryRepository {
     // FTS5's bm25() over the same statistics, so the order follows the same
     // rules (rare terms weigh more, term frequency saturates, long documents
     // weigh less): idf = ln((N - n + 0.5) / (n + 0.5)), floored at 1e-6, and
-    // k1 = 1.2, b = 0.75. N and each n count every memory, as FTS5 counts every
-    // index row. Two approximations: a multi-word term's frequency is the least
-    // frequency of its words, and the average length is over the matching rows
-    // (FTS5 keeps it for the whole index; reading every row here costs a full
-    // scan). rank is minus the score, so ascending is best first, as bm25();
-    // the id breaks rank ties.
-    const termRows = terms.map(
-      (term, i) =>
-        sql`(${i}, ${phraseQuery(term)}, tsvector_to_array(to_tsvector('memory_english'::regconfig, ${ftsTermText(term)})))`,
-    );
-    const conditions = this.searchConditions(
-      [ftsMatch("m", sql`(SELECT ${ftsQuery(terms)})`)],
-      filter,
-      "m",
-    );
+    // k1 = 1.2, b = 0.75, with the average document length of the whole index.
+    // N and each n count every indexed memory, as FTS5 counts every index row.
+    // One approximation: a multi-word term's frequency is the least frequency
+    // of its words. rank is minus the score, so ascending is best first, as
+    // bm25(); the id breaks rank ties.
+    //
+    // Cost: the GIN index finds the matching documents, and one setweight and
+    // ts_filter per document keeps only the query's lexemes, so the per-row
+    // work does not grow with the document. Set operations do the rest.
+    const termRows = terms.map((term, i) => sql`(${i}, ${ftsTermText(term)})`);
+    const conditions = this.searchConditions([sql`f.doc @@ q.query`], filter, "m");
+    const float = (value: SqlQuery) => sql`CAST(${value} AS double precision)`;
     return this.via(reader).query<AgentMemoryRow & { rank: number }>(sql`
-      WITH term AS MATERIALIZED (
-        SELECT t.i, t.query, t.lexemes,
-               (SELECT COUNT(*) FROM agent_memory a WHERE ${ftsMatch("a", sql`t.query`)}) AS n
-          FROM (VALUES ${sqlJoin(termRows, sql`, `)}) AS t(i, query, lexemes)
+      WITH parsed AS (
+        SELECT v.i, phraseto_tsquery('memory_english'::regconfig, v.text) AS query,
+               tsvector_to_array(to_tsvector('memory_english'::regconfig, v.text)) AS lexemes
+          FROM (VALUES ${sqlJoin(termRows, sql`, `)}) AS v(i, text)
       ),
-      matched AS MATERIALIZED (
-        SELECT m.id, ${ftsDocument("m")} AS doc, ${ftsField("m", "name")} AS name_doc,
-               ${ftsField("m", "content")} AS content_doc
-          FROM agent_memory m
-         WHERE ${sqlJoin(conditions, sql` AND `)}
+      term AS MATERIALIZED (
+        SELECT i, lexemes, numnode(query) > 1 AS phrase,
+               CASE WHEN numnode(query) > 1 THEN ${fieldPhrase(sql`query`)} ELSE query END AS query
+          FROM parsed
+         WHERE numnode(query) > 0
+      ),
+      df AS MATERIALIZED (
+        SELECT t.i, ${float(sql`(SELECT COUNT(*) FROM memory_fts a WHERE a.doc @@ t.query)`)} AS n
+          FROM term t
+      ),
+      stats AS MATERIALIZED (
+        SELECT ${float(sql`COUNT(*)`)} AS total, ${float(sql`AVG(doc_len)`)} AS avglen FROM memory_fts
+      ),
+      q AS MATERIALIZED (
+        SELECT (SELECT array_agg(DISTINCT l.lexeme) FROM term, unnest(term.lexemes) AS l(lexeme)) AS lexemes,
+               (SELECT string_agg('(' || CAST(query AS text) || ')', ' | ')::tsquery FROM term) AS query
       ),
       hit AS MATERIALIZED (
-        SELECT id, doc, name_doc, content_doc,
-               (SELECT SUM(COALESCE(array_length(u.positions, 1), 1)) FROM unnest(doc) u) AS len
-          FROM matched
+        SELECT f.memory_id, f.doc_len,
+               ts_filter(setweight(f.doc, 'A', q.lexemes), '{a}') AS lexemes
+          FROM q CROSS JOIN memory_fts f JOIN agent_memory m ON m.id = f.memory_id
+         WHERE ${sqlJoin(conditions, sql` AND `)}
       ),
-      stats AS (
-        SELECT (SELECT COUNT(*) FROM agent_memory) AS total,
-               (SELECT AVG(len) FROM hit) AS avglen
+      occurrence AS (
+        SELECT h.memory_id, h.doc_len, u.lexeme, COALESCE(array_length(u.positions, 1), 1) AS f
+          FROM hit h CROSS JOIN LATERAL unnest(h.lexemes) u
+      ),
+      phrase_hit AS (
+        SELECT o.memory_id, o.doc_len, t.i, MIN(o.f) AS f, COUNT(*) AS words
+          FROM occurrence o JOIN term t ON t.phrase AND o.lexeme = ANY (t.lexemes)
+         GROUP BY o.memory_id, o.doc_len, t.i
+      ),
+      tf AS (
+        SELECT o.memory_id, o.doc_len, t.i, o.f
+          FROM occurrence o JOIN term t ON NOT t.phrase AND o.lexeme = t.lexemes[1]
+        UNION ALL
+        SELECT p.memory_id, p.doc_len, p.i, p.f
+          FROM phrase_hit p
+          JOIN term t ON t.i = p.i AND p.words = cardinality(t.lexemes)
+          JOIN memory_fts f ON f.memory_id = p.memory_id AND f.doc @@ t.query
       ),
       score AS (
-        SELECT hit.id, SUM(
-                 GREATEST(ln((stats.total - term.n + 0.5) / (term.n + 0.5)), 1e-6)
-                 * tf.f * 2.2 / (tf.f + 1.2 * (0.25 + 0.75 * hit.len / stats.avglen))) AS score
-          FROM hit CROSS JOIN stats CROSS JOIN term
-          CROSS JOIN LATERAL (
-            SELECT CASE WHEN hit.name_doc @@ term.query OR hit.content_doc @@ term.query
-                     THEN COALESCE((SELECT MIN(COALESCE(array_length(u.positions, 1), 1))
-                                      FROM unnest(hit.doc) u WHERE u.lexeme = ANY (term.lexemes)), 0)
-                     ELSE 0 END AS f) tf
-         GROUP BY hit.id
+        SELECT tf.memory_id, SUM(
+                 GREATEST(ln((s.total - df.n + 0.5) / (df.n + 0.5)), 1e-6)
+                 * ${float(sql`tf.f`)} * 2.2
+                 / (${float(sql`tf.f`)} + 1.2 * (0.25 + 0.75 * ${float(sql`tf.doc_len`)} / s.avglen))) AS score
+          FROM tf JOIN df ON df.i = tf.i CROSS JOIN stats s
+         GROUP BY tf.memory_id
+      ),
+      top AS (
+        SELECT memory_id, score FROM score ORDER BY score DESC, memory_id LIMIT ${limit}
       )
-      SELECT m.*, -score.score AS rank
-        FROM score JOIN agent_memory m ON m.id = score.id
-       ORDER BY rank, m.id
-       LIMIT ${limit}`);
+      SELECT m.*, -top.score AS rank
+        FROM top JOIN agent_memory m ON m.id = top.memory_id
+       ORDER BY rank, m.id`);
   }
 
   searchVecRows(
@@ -275,7 +272,7 @@ export class PostgresMemoryRepository extends BaseMemoryRepository {
   async ftsTableSchema(): Promise<string | null> {
     const row = await this.db.get<{ definition: string }>(sql`
       SELECT indexdef AS definition FROM pg_indexes
-       WHERE schemaname = current_schema() AND indexname = 'idx_agent_memory_fts'`);
+       WHERE schemaname = current_schema() AND indexname = 'idx_memory_fts_doc'`);
     return row?.definition ?? null;
   }
 
@@ -291,14 +288,25 @@ export class PostgresMemoryRepository extends BaseMemoryRepository {
   }
 
   async scanFtsBatch(
-    _afterRowid: number,
-    _limit: number,
+    afterRowid: number,
+    limit: number,
   ): Promise<{ rowid: number; memoryId: string | null; orphan: number }[]> {
-    // The expression index has no rows of its own, so none is an orphan.
-    return [];
+    // memory_fts has no rowid of its own: its rows come in the order of their
+    // memory's rowid. The foreign key deletes a row with its memory, so none is
+    // an orphan.
+    const rows = await this.db.query<{ position: number; memoryId: string }>(sql`
+      SELECT m."_rowid" AS position, f.memory_id AS "memoryId"
+        FROM memory_fts f JOIN agent_memory m ON m.id = f.memory_id
+       WHERE m."_rowid" > ${afterRowid} ORDER BY m."_rowid" LIMIT ${limit}`);
+    return rows.map((row) => ({ rowid: row.position, memoryId: row.memoryId, orphan: 0 }));
   }
 
-  async deleteFtsRowsByRowid(_rowids: number[]): Promise<void> {}
+  async deleteFtsRowsByRowid(rowids: number[]): Promise<void> {
+    if (rowids.length === 0) return;
+    await this.db.run(sql`
+      DELETE FROM memory_fts WHERE memory_id IN (
+        SELECT id FROM agent_memory WHERE "_rowid" IN (${sqlList(rowids)}))`);
+  }
 
   async scanMemoryIdBatch(
     afterRowid: number,
@@ -310,15 +318,40 @@ export class PostgresMemoryRepository extends BaseMemoryRepository {
     return rows.map((row) => ({ rowid: row.position, id: row.id }));
   }
 
-  // The expression index indexes every agent_memory row as it is written, and
-  // drops it with the row: the FTS row writes have nothing to do.
-  async insertMissingFtsRows(_ids: string[]): Promise<void> {}
+  // The document functions are in migration 386: memory_fts_document builds
+  // the stored tsvector, memory_fts_length counts its tokens. db-copy fills
+  // memory_fts with the same functions.
 
-  async deleteFtsRow(_memoryId: string): Promise<void> {}
+  async insertMissingFtsRows(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await this.db.run(sql`
+      INSERT INTO memory_fts (memory_id, doc, doc_len)
+      SELECT s.id, s.doc, memory_fts_length(s.doc)
+        FROM (SELECT m.id, memory_fts_document(m.name, m.content) AS doc
+                FROM agent_memory m
+               WHERE m.id IN (${sqlList(ids)})
+                 AND NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)) s
+      ON CONFLICT (memory_id) DO NOTHING`);
+  }
 
-  async insertFtsRow(_memoryId: string, _name: string, _content: string): Promise<void> {}
+  async deleteFtsRow(memoryId: string): Promise<void> {
+    await this.db.run(sql`DELETE FROM memory_fts WHERE memory_id = ${memoryId}`);
+  }
 
-  async deleteFtsRows(_memoryIds: string[]): Promise<void> {}
+  async insertFtsRow(memoryId: string, name: string, content: string): Promise<void> {
+    // An upsert: the row replaces the document a concurrent backfill may have
+    // written for the old text.
+    await this.db.run(sql`
+      INSERT INTO memory_fts (memory_id, doc, doc_len)
+      SELECT ${memoryId}, s.doc, memory_fts_length(s.doc)
+        FROM (SELECT memory_fts_document(CAST(${name} AS text), CAST(${content} AS text)) AS doc) s
+      ON CONFLICT (memory_id) DO UPDATE SET doc = EXCLUDED.doc, doc_len = EXCLUDED.doc_len`);
+  }
+
+  async deleteFtsRows(memoryIds: string[]): Promise<void> {
+    if (memoryIds.length === 0) return;
+    await this.db.run(sql`DELETE FROM memory_fts WHERE memory_id IN (${sqlList(memoryIds)})`);
+  }
 
   async deleteVecRows(memoryIds: string[]): Promise<void> {
     if (memoryIds.length === 0) return;

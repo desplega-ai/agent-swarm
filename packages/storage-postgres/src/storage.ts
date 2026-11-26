@@ -62,7 +62,7 @@ export function createPostgresStorage(client: DbClient, options: PostgresStorage
     executor,
     client,
     ...(options.queryReader ? { queryReader: options.queryReader } : {}),
-    memoryIndexes: new PostgresMemoryIndexes(memory, options.vectorSearch),
+    memoryIndexes: new PostgresMemoryIndexes(memory, options.vectorSearch, client),
     repos: {
       extensions: new PostgresExtensionsRepository(executor),
       models: new PostgresModelsRepository(executor),
