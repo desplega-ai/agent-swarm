@@ -16958,6 +16958,7 @@ export interface paths {
                         /** @enum {string} */
                         source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
                         requestedByUserId?: string;
+                        attachmentIds?: string[];
                     };
                 };
             };
@@ -33956,6 +33957,14 @@ export interface components {
             /** Format: date-time */
             handledAt?: string;
             handledNote?: string;
+            attachments?: components["schemas"]["SteeringAttachment"][];
+        };
+        SteeringAttachment: {
+            id: string;
+            taskId: string;
+            name: string;
+            mimeType?: string;
+            sizeBytes?: number;
         };
         AgentLog: {
             /** Format: uuid */

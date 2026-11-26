@@ -90,6 +90,7 @@ import {
   AssetKeySchema,
   type FallbackHop,
   isTerminalTaskStatus,
+  MAX_STEERING_ATTACHMENTS,
   ModelProfileCredentialsSchema,
   ModelTierSchema,
   OnUnsupportedSchema,
@@ -544,6 +545,9 @@ const steerTaskRoute = route({
     // feed can say where a steer originated.
     source: SteeringSourceSchema.optional(),
     requestedByUserId: z.string().optional(),
+    // Files uploaded to this task first (`POST /api/fs/tasks/{id}/files`).
+    // The worker receives a fetch command for each one.
+    attachmentIds: z.array(z.string().min(1)).max(MAX_STEERING_ATTACHMENTS).optional(),
   }),
   rbac: { permission: "task.steer.own" },
   responses: {
@@ -1698,6 +1702,7 @@ export async function handleTasks(
           authUserId(auth) || requestedByUserId ? "user" : createdByAgentId ? "agent" : "system",
         createdByAgentId,
         createdByUserId: requestedByUserId,
+        attachmentIds: parsed.body.attachmentIds,
       });
       steerTaskRoute.respond(res, 200, result);
     } catch (error) {

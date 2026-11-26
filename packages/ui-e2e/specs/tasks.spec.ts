@@ -203,3 +203,67 @@ test("Claude SDK enables Interrupt and sends steer through the real API @local",
     await api.post("/api/config/reload", {});
   }
 });
+
+test("a screenshot rides on a steer to the running task @local", async ({
+  page,
+  seed,
+  api,
+  clean,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const taskId = seed!.tasks.inProgress;
+  try {
+    await api.put("/api/config", {
+      scope: "global",
+      key: "STEERING_ENABLED",
+      value: "true",
+      isSecret: false,
+    });
+    await api.post("/api/config/reload", {});
+    await page.goto(`/tasks/${taskId}`);
+    const box = page
+      .getByRole("textbox", { name: "Steer the task…", exact: true })
+      .filter({ visible: true });
+    const message = `see the screenshot ${crypto.randomUUID()}`;
+    await box.fill(message);
+    const name = `steer-shot-${crypto.randomUUID().slice(0, 8)}.png`;
+    await page
+      .locator("form")
+      .filter({ has: box })
+      .locator('input[type="file"]')
+      .setInputFiles({ name, mimeType: "image/png", buffer: Buffer.from([137, 80, 78, 71]) });
+    // The file stays on the steer box: no switch to a follow-up.
+    const steer = page
+      .getByRole("button", { name: "Steer", exact: true })
+      .filter({ visible: true });
+    await expect(steer).toBeVisible();
+    await expect(page.getByRole("button", { name: `Remove ${name}`, exact: true })).toBeVisible();
+    if (process.env.UI_E2E_SCREENSHOT_DIR) {
+      await page.screenshot({ path: `${process.env.UI_E2E_SCREENSHOT_DIR}/steer-with-file.png` });
+    }
+    const response = page.waitForResponse(
+      (r) => r.url().endsWith(`/api/tasks/${taskId}/steer`) && r.request().method() === "POST",
+    );
+    await steer.click();
+    const sent = await response;
+    expect(sent.ok()).toBeTruthy();
+    expect(sent.request().postDataJSON().attachmentIds).toHaveLength(1);
+    const history = await api.get<{
+      messages: Array<{ body: string; attachments?: Array<{ name: string }> }>;
+    }>(`/api/tasks/${taskId}/steering-messages`);
+    expect(history.messages).toContainEqual(
+      expect.objectContaining({ body: message, attachments: [expect.objectContaining({ name })] }),
+    );
+    // Sent: the box is empty again.
+    await expect(page.getByRole("button", { name: `Remove ${name}`, exact: true })).toHaveCount(0);
+    await clean.assertClean();
+  } finally {
+    await api.put("/api/config", {
+      scope: "global",
+      key: "STEERING_ENABLED",
+      value: "false",
+      isSecret: false,
+    });
+    await api.post("/api/config/reload", {});
+  }
+});
