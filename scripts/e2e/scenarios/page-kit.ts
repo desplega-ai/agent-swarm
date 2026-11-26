@@ -71,7 +71,7 @@ function storedKit(ctx: ScenarioContext, id: string): string | null {
 export const pageKit: Scenario = {
   name: "page-kit",
   // After design-system, which leaves the org on "declined": kit pages render on the default look.
-  order: 694,
+  order: 697,
   async run(ctx) {
     const agent = await registerAgent(ctx, "page-kit");
     const session = await ctx.connectMcp(agent);
