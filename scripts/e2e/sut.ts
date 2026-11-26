@@ -82,7 +82,7 @@ export function minimalEnv(): Record<string, string> {
 // only an explicit bind can.
 // shortcut: probes loopback only, so two runs sharing a host can still race; upgrade to a lock.
 const reserved = new Set<number>();
-async function reservedPort(): Promise<number> {
+export async function reservedPort(): Promise<number> {
   for (let attempt = 0; attempt < 50; attempt++) {
     const port = 20_000 + Math.floor(Math.random() * 10_000);
     if (reserved.has(port)) continue;
