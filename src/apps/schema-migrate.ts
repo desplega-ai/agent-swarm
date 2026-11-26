@@ -1036,6 +1036,35 @@ function withModelLocks<T>(
  * duration, and one that itself needs the DB lock hangs the process
  * permanently. Keep them pure-DB.
  */
+/**
+ * The migration plan `migrateAppSchema` would run, without writing a row,
+ * the snapshot or the definition. Throws `AppSchemaMigrationError` on the
+ * same issues the real write would.
+ */
+export async function planAppSchemaMigration(input: {
+  appId: string;
+  previousDefinition?: AppDefinition;
+  previousRawDefinition?: unknown;
+  nextDefinition: AppDefinition;
+  migration?: AppMigration;
+  forceElementBreak?: string[];
+}): Promise<AppMigrationReport> {
+  const migration = input.migration ?? {};
+  const modelNames = affectedModelNames(input.previousDefinition, input.nextDefinition, migration);
+  return withModelLocks(input.appId, modelNames, async () => {
+    const plan = await buildPlan(
+      input.appId,
+      input.previousDefinition,
+      input.previousRawDefinition,
+      input.nextDefinition,
+      migration,
+      input.forceElementBreak ?? [],
+    );
+    if (plan.issues.length > 0) throw new AppSchemaMigrationError(plan.issues);
+    return plan.report;
+  });
+}
+
 export async function migrateAppSchema<T>(input: {
   appId: string;
   previousDefinition?: AppDefinition;

@@ -742,8 +742,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "374_schedule_next_run_at_utc.sql");
       // 385 indexes script_runs, which this fixture does not create.
       markMigrationApplied(database, "385_script_runs_parent_started_index.sql");
-      // 386 alters pages, which this fixture does not create (see 269).
-      markMigrationApplied(database, "386_page_kit.sql");
+      // 389 alters pages, which this fixture does not create (see 269).
+      markMigrationApplied(database, "389_page_kit.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

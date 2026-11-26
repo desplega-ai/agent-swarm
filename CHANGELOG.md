@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-11-26
+
+### Added
+- Data: `data-query` MCP tool, read-only DuckDB SQL over csv, tsv, parquet, json, ndjson and xlsx files on an agent-fs drive (#3676).
+- Apps: `app-patch-node` edits one page or element node with JSON-pointer ops, and `app-get` reads a subtree (`path`) or an outline (#3678); `app-catalog` lists valid components, props and bindings (#3681); `app-action-run` waits on action runs and `app-action-status` reads them (#3658).
+- Slack: opt-in 👍/👎 feedback buttons on final outcome cards, `SLACK_FEEDBACK_BUTTONS` (#3670).
+- RBAC: scoped user-token verbs for workflow triggers, events and durable script runs (#3654).
+- Telemetry: API events report the storage engine (#3684).
+- Extensions: handler execution is traced with OpenTelemetry (#3672).
+
+### Changed
+- agent-fs pins bumped 0.18.38 -> 0.18.39 (worker image, chart, compose files, `@desplega.ai/agent-fs-just-bash`).
+- Performance: `getTaskById` and `getAgentById` are memoized per HTTP request (#3679), Slack activation reads are cached (#3677), a script run loads the connection catalog once (#3680), and app row KV writes are batched into multi-row statements (#3682).
+- Worker harness bumps: claude-code, anthropic sdk, cursor, amp, goose and kiro (#3665), then pi and amp (#3674).
+- CI: e2e fails fast on scenario order collisions (#3671) and a nightly PostgreSQL commit budget runs (#3664).
+- Specs: heartbeat spec synced with main (#3666).
+
+### Fixed
+- KV: reading an app namespace over `/api/kv` requires `app.use` (#3685).
+- OTel: `POST /mcp` spans nest under `worker.session` in every harness (#3675).
+- Scripts: every run a background script run starts links back to it (#3673).
+- db-query: JSON-text string params read as JSON on Postgres (#3683).
+- Apps: `$template` reads are validated on ordinary pages (#3650).
+- Internal AI: internal LLM calls no longer route to OpenRouter unless opted in (#3669).
+- Models: the open-harness smart tier points at Kimi K3.1 Pro, and cursor smol is refreshed (#3668).
+- Seed: seeded schedule prompts keep updating after an operator toggle (#3652).
+- API: ping serialization conflicts return a retryable response (#3657).
+- UI: the task list shows the recorded model (#3686).
+
 ## [2.15.0] - 2026-11-25
 
 ### Added

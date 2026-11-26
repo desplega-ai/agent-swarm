@@ -51,6 +51,8 @@ export const SDK_TOOL_NAME_MAP = {
   sheets_addTab: "sheet-add-tab",
   sheets_importXlsx: "sheet-import-xlsx",
   sheets_exportXlsx: "sheet-export-xlsx",
+  // ── data (also ctx.data, see SDK_NAMESPACES) ──
+  data_query: "data-query",
   // ── boards (also ctx.boards, see SDK_NAMESPACES) ──
   boards_create: "board-create",
   boards_get: "board-get",
@@ -201,11 +203,13 @@ export const SDK_TOOL_NAME_MAP = {
   mcpServer_uninstall: "mcp-server-uninstall", // destructive
 
   // ── pages & metrics ──
+  app_catalog: "app-catalog",
   app_get: "app-get",
   app_history: "app-history",
   app_diff: "app-diff",
   app_list: "app-list",
   app_patch: "app-patch",
+  app_patchNode: "app-patch-node",
   app_query: "app-query",
   app_rows_list: "app-rows-list",
   app_row_get: "app-row-get",
@@ -285,6 +289,7 @@ export const SDK_NAMESPACES: SdkNamespaceRegistry = Object.freeze({
     "exportXlsx",
   ],
   boards: ["create", "get", "list", "addElements", "updateElements", "removeElements"],
+  data: ["query"],
 });
 
 /** ctx keys a namespace may never shadow. */

@@ -66,10 +66,14 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/runtime-pool-bind-agent.ts": "proxies to HTTP routes enforcing runtime_pool.bind",
   "src/tools/runtime-pool-create-agent.ts": "proxies to HTTP routes enforcing runtime_pool.bind",
   "src/tools/app-list.ts": "app summaries are list-level; per-app filtering is future work",
+  "src/tools/app-catalog.ts":
+    "read-only static catalog of the app component/action vocabulary; takes no app id and returns no app data",
   "src/tools/objects.ts":
     "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
   "src/tools/sheets.ts":
     "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
+  "src/tools/data.ts":
+    "own-scoped: reads only through the caller's own agent-scoped agent-fs key (its default drive or a drive that key can read), and agent-fs enforces drive permissions",
   "src/tools/boards.ts":
     "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
   "src/tools/chat-reply.ts":

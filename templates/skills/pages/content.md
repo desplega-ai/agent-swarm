@@ -20,6 +20,8 @@ styling. Write free HTML only for interactive pages no template covers.
 | Research notes, code, binaries (PNG, MP4), long-lived docs | The `agent-fs` skill |
 
 For a research memo, put the source in agent-fs and the summary in a page.
+Data from CSV, Parquet or xlsx files on the drive: query it with `data-query`
+(the `data` skill), save the result with `sheet: {path}`, then embed that sheet.
 Never publish in-flight progress (`store-progress`), secrets or raw logs.
 
 ## Examples

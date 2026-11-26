@@ -445,6 +445,46 @@ declare module "swarm-sdk" {
     removeElements(args: BoardRemoveArgs): Promise<BoardResult & { removed: string[] }>;
   }
 
+  export type DataQueryTable = string | { path: string; format?: string };
+
+  export interface DataQueryArgs {
+    /** One read-only DuckDB query. Name a file in table position: `FROM '/shared/x/sales.csv'`. */
+    sql: string;
+    /** Table name -> drive path, or {path, format} to override format detection. */
+    tables?: Record<string, DataQueryTable>;
+    /** Default 1,000, at most 10,000. Aggregate in SQL rather than raising it. */
+    maxRows?: number;
+    /** Another drive your agent-fs key can read. Default: your default drive. */
+    driveId?: string;
+    /** Also return `card`: a uiSpec spec with the first 100 rows as a Table. */
+    card?: boolean;
+    /** Save the result as a new sheet (create-only). */
+    sheet?: { path: string; title?: string; tab?: string };
+    /** Label for the usage event (e.g. `workflow`, `qa`). */
+    origin?: string;
+  }
+
+  export interface DataQueryResult {
+    message: string;
+    columns: Array<{ name: string; type: string }>;
+    rows: Array<Record<string, unknown>>;
+    rowCount: number;
+    truncated: boolean;
+    files: Array<{ table: string; path: string; format: string }>;
+    elapsedMs: number;
+    output: "rows" | "card" | "sheet";
+    card?: { root: string; elements: Record<string, unknown> };
+    sheet?: { object: PrimitiveObject; link: string | null };
+  }
+
+  /**
+   * SQL over tabular files (csv, tsv, parquet, json, ndjson, xlsx) on your agent-fs drive, as your
+   * own agent-fs identity. Throws on a refusal. Big scans: raise the script `timeout` (agent-fs stops at 30 s).
+   */
+  export interface DataNamespace {
+    query(args: DataQueryArgs): Promise<DataQueryResult>;
+  }
+
   export interface SwarmSdk {
     // --- memory ---
     memory_search(args: {
@@ -568,6 +608,8 @@ declare module "swarm-sdk" {
     sheets_addTab(args: SheetRef & { name: string; after?: string }): Promise<unknown>;
     sheets_importXlsx(args: SheetImportXlsxArgs): Promise<unknown>;
     sheets_exportXlsx(args: SheetExportXlsxArgs): Promise<unknown>;
+    // --- data (prefer ctx.data.*, which unwraps and throws) ---
+    data_query(args: DataQueryArgs): Promise<unknown>;
     // --- boards (prefer ctx.boards.*, which unwraps and throws) ---
     boards_create(args: BoardCreateArgs): Promise<unknown>;
     boards_get(args: BoardRef & { detail?: "summary" | "full" }): Promise<unknown>;
@@ -969,7 +1011,13 @@ declare module "swarm-sdk" {
     mcpServer_uninstall(args: Record<string, unknown>): Promise<unknown>;
 
     // --- pages & metrics ---
-    app_get(args: { appId: string }): Promise<unknown>;
+    app_catalog(args?: {
+      component?: string;
+      prop?: string;
+      action?: string;
+      topic?: "expressions";
+    }): Promise<unknown>;
+    app_get(args: { appId: string; path?: string; outline?: boolean }): Promise<unknown>;
     app_history(args: { appId: string; limit?: number }): Promise<unknown>;
     app_diff(args: { appId: string; from?: number; to?: number }): Promise<unknown>;
     app_list(args?: Record<string, never>): Promise<unknown>;
@@ -980,6 +1028,21 @@ declare module "swarm-sdk" {
       definition?: Record<string, unknown>;
       migration?: Record<string, unknown>;
       forceElementBreak?: string[];
+      ops?: Array<{ op: "add" | "replace" | "remove" | "test"; path: string; value?: unknown }>;
+      dryRun?: boolean;
+      includeApp?: boolean;
+    }): Promise<unknown>;
+    app_patchNode(args: {
+      appId: string;
+      page?: string;
+      element?: string;
+      nodeId: string;
+      props?: Record<string, unknown>;
+      set?: Record<string, unknown>;
+      remove?: true;
+      create?: { parentId: string; index?: number; node: Record<string, unknown> };
+      dryRun?: boolean;
+      includeApp?: boolean;
     }): Promise<unknown>;
     app_query(args: {
       appId: string;
@@ -1271,6 +1334,8 @@ declare module "swarm-sdk" {
     sheets: SheetsNamespace;
     /** Excalidraw boards on your default agent-fs drive (board-* tools). */
     boards: BoardsNamespace;
+    /** SQL over tabular files on your agent-fs drive (data-query tool). */
+    data: DataNamespace;
   }
 
   /**

@@ -44,6 +44,11 @@ import { getSlackConnectionState } from "../slack/connection-state";
 import { isTelemetryEnabled } from "../telemetry";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { resolveGitHubHost } from "../utils/github-host";
+import {
+  INTERNAL_LLM_PROVIDER_ENV,
+  internalProviderOrder,
+  MEMORY_RATER_MODEL_ENV,
+} from "../utils/internal-ai/models";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { resolveAppUrl } from "./config-values";
 import { route } from "./route-def";
@@ -234,6 +239,21 @@ export type StatusGitHub = z.infer<typeof StatusGitHubSchema>;
 
 export const StatusRuntimePoolsSchema = z.object({ enabled: z.boolean(), supervisor: z.string() });
 
+/**
+ * Provider policy for platform-internal LLM calls (task titles, session
+ * summaries, `llm` memory ratings), from this server's config. `order` is the
+ * credential kinds tried, first match wins; a pinned model moves its own kind
+ * first. Which credentials exist is per process (workers differ), so this
+ * reports the policy, not a probe.
+ */
+export const StatusInternalAiSchema = z.object({
+  provider: z.string(),
+  order: z.array(z.string()),
+  task_title_model: z.string().nullable(),
+  memory_rater_model: z.string().nullable(),
+});
+export type StatusInternalAi = z.infer<typeof StatusInternalAiSchema>;
+
 export const StatusResponseSchema = z.object({
   runtime_pools: StatusRuntimePoolsSchema,
   identity: StatusIdentitySchema,
@@ -249,6 +269,8 @@ export const StatusResponseSchema = z.object({
   instance: StatusInstanceSchema.optional(),
   /** Additive: absent on servers that predate it, or when `GITHUB_URL` is invalid. */
   github: StatusGitHubSchema.optional(),
+  /** Additive: absent on servers that predate it. */
+  internal_ai: StatusInternalAiSchema.optional(),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
@@ -788,6 +810,16 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     telemetry: { enabled: isTelemetryEnabled() },
     instance,
     ...githubStatus(),
+    internal_ai: internalAiStatus(),
+  };
+}
+
+function internalAiStatus(env: NodeJS.ProcessEnv = process.env): StatusInternalAi {
+  return {
+    provider: env[INTERNAL_LLM_PROVIDER_ENV]?.trim().toLowerCase() || "auto",
+    order: internalProviderOrder(env),
+    task_title_model: env.TASK_AUTO_TITLE_MODEL?.trim() || null,
+    memory_rater_model: env[MEMORY_RATER_MODEL_ENV]?.trim() || null,
   };
 }
 
@@ -838,7 +870,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; internal_ai reports the provider policy for task titles, session summaries and llm memory ratings (INTERNAL_LLM_PROVIDER, the credential kinds tried in order, and the TASK_AUTO_TITLE_MODEL and MEMORY_RATER_MODEL pins); github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

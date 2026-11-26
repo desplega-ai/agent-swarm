@@ -158,6 +158,11 @@ drift "extension catalog and manifest schema" \
   "src/extensions/catalog.generated.json templates/extensions/manifest.schema.json" \
   bash -c 'bun run build:extension-catalog && bun run build:extension-schema'
 
+if grep -q '^scripts/e2e/scenarios/' <<<"$changed"; then
+  step "e2e scenario orders (vs origin/main and open PRs)"
+  bun scripts/check-scenario-orders.ts --open-prs
+fi
+
 step "test:root (affected tests)"
 PRE_PUSH_TESTS_INCLUDE_WORKTREE=1 bash scripts/pre-push-tests.sh
 

@@ -15,11 +15,13 @@ import { isSlackLeaveThreadDisabled } from "./slack/left-threads";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
 import { registerAppActionRunTool } from "./tools/app-action-run";
 import { registerAppActionStatusTool } from "./tools/app-action-status";
+import { registerAppCatalogTool } from "./tools/app-catalog";
 import { registerAppDiffTool } from "./tools/app-diff";
 import { registerAppGetTool } from "./tools/app-get";
 import { registerAppHistoryTool } from "./tools/app-history";
 import { registerAppListTool } from "./tools/app-list";
 import { registerAppPatchTool } from "./tools/app-patch";
+import { registerAppPatchNodeTool } from "./tools/app-patch-node";
 import { registerAppQueryTool } from "./tools/app-query";
 import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppRowTools } from "./tools/app-rows";
@@ -45,6 +47,7 @@ import { registerCreateChannelTool } from "./tools/create-channel";
 import { registerCreateMetricTool } from "./tools/create-metric";
 import { registerCreatePageTool } from "./tools/create-page";
 import { registerCredentialBindingsTool } from "./tools/credential-bindings";
+import { registerDataQueryTool } from "./tools/data";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeferTaskTool } from "./tools/defer-task";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
@@ -543,6 +546,9 @@ export async function createServer(
     registerDbQueryTool(server);
     registerGetOauthAccessTokenTool(server);
 
+    // SQL over the agent's own agent-fs drive files; refuses at call time without an agent-fs key.
+    registerDataQueryTool(server);
+
     // Steering acknowledgement must ship with core: steering delivery works on
     // directly-assigned tasks (no task-pool capability required), and without
     // accept-steer every delivered message would be stuck at `delivered`.
@@ -693,6 +699,8 @@ export async function createServer(
     registerAppDiffTool(server);
     registerAppListTool(server);
     registerAppPatchTool(server);
+    registerAppPatchNodeTool(server);
+    registerAppCatalogTool(server);
     registerAppQueryTool(server);
     registerAppRollbackTool(server);
     registerAppSyncTool(server);

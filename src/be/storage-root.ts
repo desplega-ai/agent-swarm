@@ -64,6 +64,7 @@ import {
   resolveSqliteVecExtensionPath,
 } from "./db/runtime";
 import { currentLoopPath, recordStatement } from "./event-loop-lag";
+import { invalidateRequestMemo, requestMemoKindsWritten } from "./request-memo";
 import {
   recordStatementForWriteStats,
   recordTransactionForWriteStats,
@@ -143,6 +144,32 @@ function transactionStatsSink(): ((info: TransactionEndInfo) => void) | undefine
 export const TX_REPLAY_BANNER =
   "[storage] tx-replay on: every transaction callback runs twice, the first run rolled back";
 
+/**
+ * A write to a memoized table invalidates every request memo now, and again at
+ * COMMIT when it ran in a transaction (src/be/request-memo.ts). The second bump
+ * is an `onCommit` hook, which runs before `transaction()` resolves: a
+ * deferred `afterCommit` hook left a window where a reader that cached the old
+ * committed row during the transaction kept it after the commit returned. A
+ * fenced Postgres autocommit write runs in its own transaction, so it takes the
+ * same path.
+ */
+function withRequestMemoInvalidation(
+  observer: StatementObserver,
+  client: () => DbClient,
+): StatementObserver {
+  return {
+    ...observer,
+    onStatement: (sql, durationMs) => {
+      observer.onStatement?.(sql, durationMs);
+      const kinds = requestMemoKindsWritten(sql);
+      if (kinds.length === 0) return;
+      invalidateRequestMemo(kinds);
+      const db = client();
+      if (db.inTransaction()) db.onCommit(() => invalidateRequestMemo(kinds));
+    },
+  };
+}
+
 /** Params are never logged: they can carry secrets and user content. */
 const serverObserver: StatementObserver = {
   onStatement: (sql, durationMs) => {
@@ -189,7 +216,13 @@ export function createSqliteClient(
   // Test-only switch set by `bun run e2e --tx-replay` (Postgres brief D6).
   const txReplay = process.env.STORAGE_TX_REPLAY === "1";
   if (txReplay) console.log(TX_REPLAY_BANNER);
-  return createBunSqliteClient(getDatabase, busyRetry, serverObserver, { txReplay });
+  const client: DbClient = createBunSqliteClient(
+    getDatabase,
+    busyRetry,
+    withRequestMemoInvalidation(serverObserver, () => client),
+    { txReplay },
+  );
+  return client;
 }
 
 export function isInTransaction(): boolean {
@@ -411,7 +444,7 @@ export async function openPostgresEngine(
               if (bench) recordTransactionForWriteStats(info);
             }
           : undefined,
-      observer: postgresObserver,
+      observer: withRequestMemoInvalidation(postgresObserver, () => client),
       // Writes check that this process still owns the database (D16 write fence).
       fence: { ownerPid: lock.pid, ownerBackendStart: lock.backendStart },
     });

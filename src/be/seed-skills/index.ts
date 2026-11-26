@@ -78,6 +78,8 @@ import composioGoogleDocsConfig from "../../../templates/skills/composio-google-
 import composioGoogleDocsContent from "../../../templates/skills/composio-google-docs/content.md" with {
   type: "text",
 };
+import dataConfig from "../../../templates/skills/data/config.json" with { type: "text" };
+import dataContent from "../../../templates/skills/data/content.md" with { type: "text" };
 import dbQueryGuidanceConfig from "../../../templates/skills/db-query-guidance/config.json" with {
   type: "text",
 };
@@ -364,6 +366,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: composioGmailConfig, body: composioGmailContent },
   { config: composioGoogleCalendarConfig, body: composioGoogleCalendarContent },
   { config: composioGoogleDocsConfig, body: composioGoogleDocsContent },
+  { config: dataConfig, body: dataContent },
   { config: dbQueryGuidanceConfig, body: dbQueryGuidanceContent },
   { config: delegateWorkConfig, body: delegateWorkContent },
   { config: designDocsConfig, body: designDocsContent },

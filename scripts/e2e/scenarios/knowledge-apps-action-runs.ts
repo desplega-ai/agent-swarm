@@ -128,10 +128,11 @@ export const knowledgeAppsActionRuns: Scenario = {
           `the tree settles in one wait: ${JSON.stringify(run)}`,
         );
         const runs = asRecord(run.runs);
-        // The action's run, its inline nested run and the orchestrator it launched.
+        // The action's run, its inline nested run, the orchestrator it launched and the
+        // orchestrator's own nested run.
         expect(
-          runs.total === 3 && runs.running === 0,
-          `run tree has 3 runs: ${JSON.stringify(runs)}`,
+          runs.total === 4 && runs.running === 0,
+          `run tree has 4 runs: ${JSON.stringify(runs)}`,
         );
         expect(doneMs < 12_000, `the tree settles within 12 s (${doneMs} ms)`);
         ctx.log(`calls_to_done=${calls} ms_to_done=${doneMs}`);
@@ -169,7 +170,7 @@ export const knowledgeAppsActionRuns: Scenario = {
         response = await ctx.api("GET", `/api/apps/${appId}/action-runs/${runId}`);
         expect(
           asRecord(response.json).state === "succeeded" &&
-            asRecord(asRecord(response.json).runs).total === 3,
+            asRecord(asRecord(response.json).runs).total === 4,
           `the tree is unchanged: ${JSON.stringify(response.json)}`,
         );
 
@@ -240,7 +241,7 @@ export const knowledgeAppsActionRuns: Scenario = {
         });
         run = runOf(result);
         expect(
-          run.settled === true && run.state === "succeeded" && asRecord(run.runs).total === 3,
+          run.settled === true && run.state === "succeeded" && asRecord(run.runs).total === 4,
           `the held action's tree settles: ${JSON.stringify(run)}`,
         );
 

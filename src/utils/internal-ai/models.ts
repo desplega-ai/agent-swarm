@@ -12,6 +12,8 @@
  *   - {@link MEMORY_RATER_DEFAULT_MODEL}: the pinned judge for session
  *     summaries and `llm` memory ratings. Override via `MEMORY_RATER_MODEL`
  *     env (kept for backwards-compat with the claude hook).
+ *
+ * {@link internalProviderOrder} picks WHICH kind serves an internal call.
  */
 
 /**
@@ -82,15 +84,105 @@ export const MEMORY_RATER_DEFAULT_MODEL: Record<CredentialKind, string> = {
   "amazon-bedrock": "amazon-bedrock/global.anthropic.claude-haiku-5-5",
 };
 
+/** Env var that pins the session-summary + `llm` memory rater model. */
+export const MEMORY_RATER_MODEL_ENV = "MEMORY_RATER_MODEL";
+
 /**
  * Resolve the model string the session-summary + `llm` memory rater uses for
- * a credential kind. `MEMORY_RATER_MODEL` env wins (it pre-dates the per-kind
- * registry and applies to every kind); otherwise the pinned
- * {@link MEMORY_RATER_DEFAULT_MODEL}. Not for other callers: they read
- * {@link DEFAULT_MODEL}.
+ * a credential kind. `MEMORY_RATER_MODEL` wins for the kind its provider
+ * prefix names (`haiku` is a `claude -p` alias, so it pins `claude-cli`);
+ * every other kind keeps the pinned {@link MEMORY_RATER_DEFAULT_MODEL}, so a
+ * `claude -p` alias is never sent to an API provider. Not for other callers:
+ * they read {@link DEFAULT_MODEL}.
  */
-export function resolveRaterModelString(kind: CredentialKind): string {
-  return process.env.MEMORY_RATER_MODEL ?? MEMORY_RATER_DEFAULT_MODEL[kind];
+export function resolveRaterModelString(
+  kind: CredentialKind,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const pinned = env[MEMORY_RATER_MODEL_ENV]?.trim();
+  return pinned && kindForModelString(pinned) === kind ? pinned : MEMORY_RATER_DEFAULT_MODEL[kind];
+}
+
+/**
+ * Env var that selects the credential kind for platform-internal LLM calls
+ * (task titles, session summaries, the `llm` memory rater): `auto` (default)
+ * or one {@link CredentialKind}.
+ */
+export const INTERNAL_LLM_PROVIDER_ENV = "INTERNAL_LLM_PROVIDER";
+
+/**
+ * Kinds `auto` tries, in order: the Claude subscription first, then
+ * first-party keys. OpenRouter is left out on purpose: a key that exists for
+ * one workflow node is not consent to send internal traffic to a third-party
+ * router (#3667). It needs `INTERNAL_LLM_PROVIDER=openrouter`, a pinned
+ * `openrouter/…` model, or a harness that runs on OpenRouter (`pi`, `opencode`).
+ */
+export const INTERNAL_AUTO_PROVIDER_ORDER: readonly CredentialKind[] = [
+  "claude-cli",
+  "anthropic",
+  "openai",
+  "openai-codex",
+  "fireworks",
+  "amazon-bedrock",
+];
+
+/**
+ * Kinds a harness itself runs on, moved first under `auto`. `pi` and
+ * `opencode` run on OpenRouter, so for them OpenRouter is the configured
+ * provider rather than a key that merely exists. Claude and unset harnesses
+ * already lead with the Claude kinds.
+ */
+const HARNESS_KINDS: Record<string, readonly CredentialKind[]> = {
+  codex: ["openai-codex", "openai"],
+  pi: ["openrouter"],
+  opencode: ["openrouter"],
+};
+
+/** Values `INTERNAL_LLM_PROVIDER` accepts. */
+export const INTERNAL_LLM_PROVIDER_OPTIONS = [
+  "auto",
+  "openrouter",
+  ...INTERNAL_AUTO_PROVIDER_ORDER,
+] as const;
+
+function isCredentialKind(value: string): value is CredentialKind {
+  return value !== "auto" && (INTERNAL_LLM_PROVIDER_OPTIONS as readonly string[]).includes(value);
+}
+
+export interface InternalProviderOrderOptions {
+  /** A pinned model (`TASK_AUTO_TITLE_MODEL`, `MEMORY_RATER_MODEL`): its kind goes first. */
+  pinnedModel?: string;
+  /** Harness of the calling session. Defaults to `env.HARNESS_PROVIDER`. */
+  harness?: string;
+}
+
+/**
+ * The one provider order for every platform-internal LLM call (task titles,
+ * session summaries, `llm` memory ratings). Callers walk it and use the first
+ * kind with a credential.
+ *
+ * - `INTERNAL_LLM_PROVIDER=<kind>` allows only that kind.
+ * - `auto` (unset, or an unknown value): {@link INTERNAL_AUTO_PROVIDER_ORDER},
+ *   with the calling harness's own kinds moved first (`HARNESS_KINDS`).
+ * - A pinned model selects its provider: that kind goes first, even when the
+ *   setting would not allow it (pinning `openrouter/…` is the opt-in).
+ */
+export function internalProviderOrder(
+  env: Record<string, string | undefined> = process.env,
+  opts: InternalProviderOrderOptions = {},
+): CredentialKind[] {
+  const setting = env[INTERNAL_LLM_PROVIDER_ENV]?.trim().toLowerCase() ?? "";
+  let order: CredentialKind[];
+  if (isCredentialKind(setting)) {
+    order = [setting];
+  } else {
+    const harness = (opts.harness ?? env.HARNESS_PROVIDER ?? "").trim().toLowerCase();
+    const first = HARNESS_KINDS[harness] ?? [];
+    order = [...first, ...INTERNAL_AUTO_PROVIDER_ORDER.filter((kind) => !first.includes(kind))];
+  }
+  const pinned = opts.pinnedModel?.trim();
+  const pinnedKind = pinned ? kindForModelString(pinned) : null;
+  return pinnedKind ? [pinnedKind, ...order.filter((kind) => kind !== pinnedKind)] : order;
 }
 
 const PROVIDER_TO_KIND: Record<string, CredentialKind> = {

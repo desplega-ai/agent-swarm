@@ -34,6 +34,11 @@ import {
   type ProviderName,
 } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import {
+  TELEMETRY_OMITTED,
+  telemetryOmitsToolResult,
+  telemetryToolArgs,
+} from "../utils/tool-telemetry-redaction";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -134,21 +139,27 @@ function previewValue(value: unknown): string | undefined {
   }
 }
 
-function toolRequestAttributes(name: string, requestInfo: RequestInfo, args?: unknown) {
+function toolRequestAttributes(name: string, requestInfo: RequestInfo, meta: Meta, args?: unknown) {
+  // Claude Code names the tool_use in `_meta`; the worker's `worker.mcp.tool`
+  // span carries the same id, so a trace view can stack the two.
+  const toolUseId = meta._meta?.["claudecode/toolUseId"];
   return {
     "mcp.tool.name": name,
     "mcp.session.id": requestInfo.sessionId,
     "agent.id": requestInfo.agentId,
     "agentswarm.task.id": requestInfo.sourceTaskId,
-    "agentswarm.tool.args_preview": previewValue(args),
+    "agentswarm.tool.call_id": typeof toolUseId === "string" ? toolUseId : undefined,
+    "agentswarm.tool.args_preview": previewValue(telemetryToolArgs(name, args)),
   };
 }
 
-function toolResultAttributes(result: CallToolResult) {
+function toolResultAttributes(name: string, result: CallToolResult) {
   return {
     "mcp.tool.result_content_count": Array.isArray(result.content) ? result.content.length : 0,
     "mcp.tool.is_error": result.isError ?? false,
-    "agentswarm.tool.result_preview": previewValue(result.content),
+    "agentswarm.tool.result_preview": telemetryOmitsToolResult(name)
+      ? TELEMETRY_OMITTED
+      : previewValue(result.content),
   };
 }
 
@@ -184,9 +195,10 @@ export type SwarmToolResult<TData extends SwarmToolData = SwarmToolData> = {
   /** Ctx-control metadata attached centrally when the full wire result is spilled. */
   truncation?: SwarmToolTruncation;
   /**
-   * Set by ctx-control only. Keeps `details` out of structuredContent when
-   * that channel already carries `data` verbatim and the duplicate rendering
-   * is what pushes it over the size budget. The text channel keeps `details`.
+   * Keeps `details` out of structuredContent when that channel already
+   * carries `data` verbatim. ctx-control sets it when the duplicate rendering
+   * is what pushes a result over the size budget; a tool may set it when its
+   * `details` is only the compact JSON of `data`. The text channel keeps `details`.
    */
   omitStructuredDetails?: boolean;
   /**
@@ -462,6 +474,15 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "update-schedule": modelTierDeprecatedNudge,
   "patch-schedule": modelTierDeprecatedNudge,
   "slack-read": slackReadNudge,
+  "data-query": (r) => {
+    if (!r.ok) return undefined;
+    const d = r.data as { truncated?: boolean; rowCount?: number; output?: string } | undefined;
+    if (d?.truncated)
+      return "Truncated: aggregate in SQL (GROUP BY, LIMIT) instead of raising maxRows.";
+    return d?.output === "rows" && (d.rowCount ?? 0) > 20
+      ? "Handing these rows to a person? Re-run with `card: true` or `sheet: {path}` instead of pasting them."
+      : undefined;
+  },
   create_page: createPageNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
@@ -1238,10 +1259,10 @@ export const createToolRegistrar = (server: McpServer) => {
             }
             const result = await finalizeSwarmToolResult(name, outcome, requestInfo);
             dispatchPostToolCall(pre.dispatcher, name, {}, outcome, requestInfo, durationMs);
-            span.setAttributes(toolResultAttributes(result));
+            span.setAttributes(toolResultAttributes(name, result));
             return result;
           },
-          toolRequestAttributes(name, requestInfo),
+          toolRequestAttributes(name, requestInfo, meta),
         );
       };
       // Name the entry point for the event-loop stall line.
@@ -1288,10 +1309,10 @@ export const createToolRegistrar = (server: McpServer) => {
             requestInfo,
             durationMs,
           );
-          span.setAttributes(toolResultAttributes(result));
+          span.setAttributes(toolResultAttributes(name, result));
           return result;
         },
-        toolRequestAttributes(name, requestInfo, args),
+        toolRequestAttributes(name, requestInfo, meta, args),
       );
     };
     return server.registerTool(

@@ -549,6 +549,7 @@ export class ACPAdapter implements ProviderAdapter {
             { name: "Authorization", value: `Bearer ${ephemeralToken.plaintext}` },
             { name: "X-Agent-ID", value: config.agentId },
             { name: "X-Source-Task-Id", value: config.taskId },
+            ...Object.entries(config.traceHeaders ?? {}).map(([name, value]) => ({ name, value })),
           ],
         },
         ...toAcpMcpServers(installedServers),

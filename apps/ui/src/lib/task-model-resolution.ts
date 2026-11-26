@@ -50,13 +50,13 @@ export function taskDisplayEffort(
  * reports costs, use the claim-time resolution or the requested model.
  */
 export function taskDisplayModel(
-  task: TaskModelFields,
+  task: TaskModelFields & Pick<AgentTask, "runModel">,
   costs?: readonly Pick<SessionCost, "model" | "kind">[],
 ): string | undefined {
   const run = costs?.find(
     (cost) => cost.kind !== "system-one" && cost.model && cost.model !== "default",
   );
-  return run?.model ?? task.resolvedModel ?? task.model ?? undefined;
+  return run?.model ?? task.runModel ?? task.resolvedModel ?? task.model ?? undefined;
 }
 
 /**

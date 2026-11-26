@@ -10,6 +10,7 @@ Sheets are spreadsheets with live formulas. Boards are Excalidraw diagrams. Both
 | A diagram or plan someone will move around (flow, architecture, rollout, mind map) | a board (`ctx.boards`) |
 | A static table the reader only reads once | a Markdown table in your reply or report |
 | A person asked for an Excel file, or sent one | a sheet, plus `importXlsx` / `exportXlsx` |
+| A question about a CSV, Parquet, JSON or xlsx file on the drive | `data-query` (the `data` skill); `sheet: {path}` fills a sheet from the result |
 | A designed report or snapshot to share by URL | a page (the `pages` skill); embed the sheet or board in it |
 | Records with queries, filters or action buttons | an app (the `apps` skill); embed the sheet or board in it |
 

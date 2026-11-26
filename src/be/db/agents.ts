@@ -14,6 +14,7 @@ import type {
 } from "../../types";
 import { AgentAvatarSchema, AgentSlackIconSchema } from "../../types";
 import { isEnvFlagEnabled } from "../../utils/env-flag";
+import { memoizedRead } from "../request-memo";
 import { getStorage } from "../storage";
 
 const agentsRepo = () => getStorage().repos.agents;
@@ -219,8 +220,10 @@ export async function createAgent(
 }
 
 export async function getAgentById(id: string): Promise<Agent | null> {
-  const row = await agentsRepo().findAgentById(id);
-  return row ? rowToAgent(row) : null;
+  return memoizedRead("agent", id, async () => {
+    const row = await agentsRepo().findAgentById(id);
+    return row ? rowToAgent(row) : null;
+  });
 }
 
 /**

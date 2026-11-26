@@ -23,6 +23,7 @@ import {
   type TaskListPage,
   type TaskListRow,
   type TaskRow,
+  taskRunModelColumn,
 } from "@desplega/storage";
 
 /** Raw SQL text written by this file (never input). */
@@ -238,7 +239,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
       SELECT agent_tasks."_rowid" AS rid FROM agent_tasks${sqlWhere(conditions)}
       ORDER BY ${raw(order)} LIMIT ${raw(String(page.limit))} OFFSET ${raw(String(page.offset))}
     )
-    SELECT ${raw(LIST_COLUMNS[fields])}, ${raw(TOTAL_COST_SQL)}
+    SELECT ${raw(LIST_COLUMNS[fields])}, ${raw(TOTAL_COST_SQL)}${fields === "slim" ? taskRunModelColumn("_rowid") : raw("")}
     FROM page JOIN agent_tasks ON agent_tasks."_rowid" = page.rid
     ORDER BY ${raw(order)}`);
   }

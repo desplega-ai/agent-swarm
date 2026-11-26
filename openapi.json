@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.15.0",
+    "version": "2.15.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2139,7 +2139,8 @@
               "system.profile_sync_reconciled",
               "system.profile_sync_conflict",
               "script.global_upsert",
-              "schedule.deleted"
+              "schedule.deleted",
+              "data.query"
             ]
           },
           "status": {
@@ -8701,6 +8702,10 @@
                     "type": "object",
                     "additionalProperties": {},
                     "default": {}
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -9495,6 +9500,96 @@
           },
           "403": {
             "description": "Permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/catalog": {
+      "get": {
+        "summary": "Read the app component catalog",
+        "description": "No query: every component (one line, child slots) and action type. `component` returns its props schema (`prop` drills into one prop), `action` an action step's params, `topic=expressions` the binding reference.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "component",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "prop",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "action",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "expressions"
+              ]
+            },
+            "required": false,
+            "name": "topic",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "More than one of component, action and topic, or prop without component",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown component, prop or action; names the closest",
             "content": {
               "application/json": {
                 "schema": {
@@ -10620,7 +10715,7 @@
       },
       "patch": {
         "summary": "Patch an app",
-        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.",
+        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries. `ops` applies JSON-pointer add/replace/remove/test ops instead; the first failing op stores nothing.",
         "tags": [
           "Apps"
         ],
@@ -10659,6 +10754,34 @@
                   "definition": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "ops": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "add",
+                            "replace",
+                            "remove",
+                            "test"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "op",
+                        "path"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
                   },
                   "migration": {
                     "type": "object",
@@ -24666,7 +24789,8 @@
                       "system.profile_sync_reconciled",
                       "system.profile_sync_conflict",
                       "script.global_upsert",
-                      "schedule.deleted"
+                      "schedule.deleted",
+                      "data.query"
                     ]
                   },
                   "status": {
@@ -24814,7 +24938,8 @@
                 "system.profile_sync_reconciled",
                 "system.profile_sync_conflict",
                 "script.global_upsert",
-                "schedule.deleted"
+                "schedule.deleted",
+                "data.query"
               ]
             },
             "required": false,
@@ -25046,7 +25171,8 @@
                             "system.profile_sync_reconciled",
                             "system.profile_sync_conflict",
                             "script.global_upsert",
-                            "schedule.deleted"
+                            "schedule.deleted",
+                            "data.query"
                           ]
                         },
                         "status": {
@@ -36977,7 +37103,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; internal_ai reports the provider policy for task titles, session summaries and llm memory ratings (INTERNAL_LLM_PROVIDER, the credential kinds tried in order, and the TASK_AUTO_TITLE_MODEL and MEMORY_RATER_MODEL pins); github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
         "tags": [
           "Status"
         ],
@@ -37467,6 +37593,38 @@
                       "required": [
                         "web_url",
                         "enterprise"
+                      ]
+                    },
+                    "internal_ai": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string"
+                        },
+                        "order": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "task_title_model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "memory_rater_model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "order",
+                        "task_title_model",
+                        "memory_rater_model"
                       ]
                     }
                   },
@@ -40641,6 +40799,10 @@
                               "totalCostUsd": {
                                 "type": "number",
                                 "minimum": 0
+                              },
+                              "runModel": {
+                                "type": "string",
+                                "description": "Latest named model reported by a harness session."
                               }
                             },
                             "required": [
@@ -65216,6 +65378,10 @@
                   "idempotencyKey": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 }
               }
@@ -65394,7 +65560,7 @@
             }
           },
           "404": {
-            "description": "Script not found",
+            "description": "Script not found, or parentScriptRunId names no running run of the calling agent",
             "content": {
               "application/json": {
                 "schema": {

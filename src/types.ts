@@ -140,27 +140,27 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     ultra: "gpt-6-astra",
   },
   pi: {
-    smol: "openrouter/deepseek/deepseek-v4.1-flash",
-    regular: "openrouter/deepseek/deepseek-v4.1-flash",
-    smart: "openrouter/deepseek/deepseek-v4-pro-0813",
+    smol: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    regular: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    smart: "openrouter/moonshotai/kimi-k3.1-pro",
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
   opencode: {
-    smol: "openrouter/deepseek/deepseek-v4.1-flash",
-    regular: "openrouter/deepseek/deepseek-v4.1-flash",
-    smart: "openrouter/deepseek/deepseek-v4-pro-0813",
+    smol: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    regular: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    smart: "openrouter/moonshotai/kimi-k3.1-pro",
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
   dsh: {
-    smol: "openrouter/deepseek/deepseek-v4.1-flash",
-    regular: "openrouter/deepseek/deepseek-v4.1-flash",
-    smart: "openrouter/deepseek/deepseek-v4-pro-0813",
+    smol: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    regular: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    smart: "openrouter/moonshotai/kimi-k3.1-pro",
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
   // Bare Cursor model ids (`Cursor.models.list()`); reasoning effort rides in
   // the model's own params (see src/providers/cursor-adapter.ts).
   cursor: {
-    smol: "gpt-5.4-mini",
+    smol: "gpt-5.6-luna",
     regular: "claude-sonnet-5-5",
     smart: "claude-opus-5-5",
     ultra: "claude-fable-5-1",
@@ -189,11 +189,12 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     ultra: "grok-4.7",
   },
   // fx runs these on its `openrouter` custom connection (OPENROUTER_API_KEY),
-  // pi's tested OpenRouter set; each ran under fx 0.0.15 (2026-10-29 probe).
+  // pi's OpenRouter set. The 2026-10-29 fx 0.0.15 probe ran the earlier
+  // deepseek-v4.1-flash / v4-pro pair, not kimi-k3.1-pro or the -1017 flash.
   fx: {
-    smol: "openrouter/deepseek/deepseek-v4.1-flash",
-    regular: "openrouter/deepseek/deepseek-v4.1-flash",
-    smart: "openrouter/deepseek/deepseek-v4-pro-0813",
+    smol: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    regular: "openrouter/deepseek/deepseek-v4.1-flash-1017",
+    smart: "openrouter/moonshotai/kimi-k3.1-pro",
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
@@ -2287,6 +2288,8 @@ export const EventNameSchema = z.enum([
   "script.global_upsert",
   // Schedule events
   "schedule.deleted",
+  // Data events (data-query; the adoption metric reads these)
+  "data.query",
 ]);
 
 export const SwarmEventSchema = z
