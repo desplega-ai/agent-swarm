@@ -15,6 +15,7 @@ import {
 import { validateBundle } from "../be/extensions/validate";
 import { getCatalogEntry, getExtensionCatalog } from "../extensions/catalog";
 import { EXTENSION_TYPE_DEFINITIONS } from "../extensions/contract-types.generated";
+import { ExtensionIdentityConflictError } from "../extensions/identity";
 import {
   activateVersion,
   disableExtension,
@@ -115,6 +116,10 @@ const installRoute = route({
     },
     403: { description: "Permission denied, including inline bundles from workers" },
     404: { description: "Template not found in the catalog" },
+    409: {
+      description:
+        "The ext:<name> agent name is held by an agent that is not an extension identity",
+    },
   },
   rbac: { permission: "extension.write" },
 });
@@ -303,6 +308,10 @@ const enableRoute = route({
     400: { description: "Extension load or config validation failed" },
     403: { description: "Permission denied" },
     404: { description: "Extension not found" },
+    409: {
+      description:
+        "The ext:<name> agent name is held by an agent that is not an extension identity",
+    },
   },
   rbac: { permission: "extension.activate" },
 });
@@ -340,6 +349,10 @@ const activateVersionRoute = route({
     400: { description: "Extension load or config validation failed" },
     403: { description: "Permission denied" },
     404: { description: "Extension or version not found" },
+    409: {
+      description:
+        "The ext:<name> agent name is held by an agent that is not an extension identity",
+    },
   },
   rbac: { permission: "extension.activate" },
 });
@@ -442,11 +455,13 @@ function respondLifecycleError(res: ServerResponse, error: unknown): void {
   const status =
     error instanceof ExtensionOwnershipError
       ? 403
-      : error instanceof ExtensionConfigError
-        ? 400
-        : error instanceof ExtensionLifecycleError
-          ? error.status
-          : 500;
+      : error instanceof ExtensionIdentityConflictError
+        ? 409
+        : error instanceof ExtensionConfigError
+          ? 400
+          : error instanceof ExtensionLifecycleError
+            ? error.status
+            : 500;
   jsonError(res, scrubSecrets(error instanceof Error ? error.message : String(error)), status);
 }
 
@@ -525,6 +540,10 @@ export async function handleExtensions(
         error instanceof ExtensionAssetConflictError
       ) {
         json(res, { error: "extension_validation_failed", diagnostics: error.diagnostics }, 400);
+        return true;
+      }
+      if (error instanceof ExtensionIdentityConflictError) {
+        jsonError(res, error.message, 409);
         return true;
       }
       if (!(error instanceof ExtensionOwnershipError)) throw error;
