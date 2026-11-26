@@ -1275,3 +1275,18 @@ its distinct-state count (distinct states at a violation vary with worker schedu
 | `Probe-orphan-sweep.cfg` | CX15 found | 7,186 | 36 |
 | `Probe-join-retry-sweep.cfg` | CX18 found | 17,844,527 | 42 |
 | other `Probe-*` | same verdicts; the holding ones keep their counts | - | - |
+
+## Sync with #3679 (`main` @ `680ee6320`)
+
+#3679 memoizes `getTaskById` and `getAgentById` per HTTP request. The memo is skipped inside a
+transaction, and every write to `agent_tasks` or `agents` bumps a process-wide epoch that
+invalidates it, so the reads the model encodes (the claim-time task binding check in
+`task-step-routing.ts`, which runs inside the claim transaction, and the scans that read SQL
+directly) see the same rows as before. The SQLite client gains `onCommit` hooks that run
+synchronously after COMMIT; their only caller bumps that epoch, so a committed attempt is still one
+atomic action. No guard, ordering or write path changes, and the `.tla` and `.cfg` files are
+unchanged. ACTIONS.md re-pins `runTransactionAttempt` (`client.ts:417`, +12) and notes the hook.
+
+Every config keeps its verdict and distinct-state count from the #3485 / #3494 / #3562 table above
+(tla2tools 2026.11.19, BFS, `-workers 4 -deadlock`, `-workers 8` for
+`Probe-join-retry-sweep.cfg`). The same ten test files: 168 pass / 0 fail / 0 `test.failing`.
