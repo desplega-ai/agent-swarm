@@ -691,6 +691,8 @@ const DB_OPERATIONS = new Set([
 // SQL parser only if a dashboard shows such a label.
 const MAIN_TABLE =
   /\b(?:from|into|update|join)\s+(?:only\s+)?((?:"?[A-Za-z_]\w*"?\.)?"?[A-Za-z_]\w*"?)/i;
+const LEADING_WRITE_CTE =
+  /^\s*with\s+(?:recursive\s+)?"?[A-Za-z_]\w*"?\s+as\s+(?:(?:not\s+)?materialized\s+)?\(\s*(insert|update|delete)\b/i;
 const PARSED_CACHE_MAX = 2000;
 const parsedStatements = new Map<string, ParsedStatement>();
 
@@ -702,7 +704,11 @@ const parsedStatements = new Map<string, ParsedStatement>();
 export function parseDbStatement(sql: string): ParsedStatement {
   const cached = parsedStatements.get(sql);
   if (cached) return cached;
-  const keyword = /^\s*([A-Za-z]+)/.exec(sql)?.[1]?.toUpperCase() ?? "";
+  const first = /^\s*([A-Za-z]+)/.exec(sql)?.[1]?.toUpperCase() ?? "";
+  // A statement whose first CTE writes (`WITH w AS (INSERT INTO t ...) ...`)
+  // is that write: the CTE only passes its rows on to the rest.
+  const keyword =
+    first === "WITH" ? (LEADING_WRITE_CTE.exec(sql)?.[1]?.toUpperCase() ?? first) : first;
   const operation = DB_OPERATIONS.has(keyword) ? keyword : "OTHER";
   const target = MAIN_TABLE.exec(sql)?.[1];
   const table = target
