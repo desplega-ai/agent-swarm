@@ -1,4 +1,5 @@
 export type { Capabilities, CapabilityName } from "./capabilities";
+export type { PostgresStats } from "./engine-stats";
 export {
   type DbClient,
   type DbExecutor,

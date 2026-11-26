@@ -10,6 +10,7 @@ import {
   type CopyReport,
   DB_QUERY_DENIED_TABLES,
   type DbClient,
+  type PostgresStats,
   type PromptTemplateFilters,
   type PromptTemplateHistoryRow,
   type PromptTemplateRecordUpdate,
@@ -34,6 +35,7 @@ import {
   openPostgresQueryReader,
   PostgresClient,
   type PostgresSealedColumn,
+  readPostgresStats,
   runPostgresMigrations,
   type TimestampFormats,
   type TransactionEndInfo,
@@ -481,6 +483,15 @@ export async function openPostgresEngine(
  */
 export function currentEngineHandle(): object {
   return isPostgresEngine() ? getDbClient() : getDb();
+}
+
+/**
+ * The Postgres server's `pg_stat_*` read for the API's OTel gauges, over the
+ * engine's own pool (one connection per call). Null on SQLite.
+ */
+export async function readEngineStats(): Promise<PostgresStats | null> {
+  if (!isPostgresEngine()) return null;
+  return readPostgresStats(getDbClient());
 }
 
 /**

@@ -25,11 +25,12 @@ type OtlpSpan = {
   endTimeUnixNano: string;
   attributes?: OtlpAttribute[];
 };
-type OtlpDataPoint = { attributes?: OtlpAttribute[] };
+type OtlpDataPoint = { attributes?: OtlpAttribute[]; asDouble?: number; asInt?: string | number };
 type OtlpMetric = {
   name: string;
   histogram?: { dataPoints: OtlpDataPoint[] };
   sum?: { dataPoints: OtlpDataPoint[] };
+  gauge?: { dataPoints: OtlpDataPoint[] };
 };
 
 const attr = (attributes: OtlpAttribute[] | undefined, key: string) => {
@@ -59,14 +60,15 @@ function metricsOf(bodies: string[]): OtlpMetric[] {
 const points = (metrics: OtlpMetric[], name: string) =>
   metrics
     .filter((m) => m.name === name)
-    .flatMap((m) => m.histogram?.dataPoints ?? m.sum?.dataPoints ?? []);
+    .flatMap((m) => m.histogram?.dataPoints ?? m.sum?.dataPoints ?? m.gauge?.dataPoints ?? []);
 
 /**
  * The storage StatementObserver exports database telemetry on both engines (issue #3582):
  * the statement duration histogram labelled with engine, operation and table, a child span
  * per statement under its request span when `OTEL_TRACE_DB_STATEMENTS` is on (statement
  * text only: the nonce bound as a parameter never reaches a span), and on PostgreSQL the
- * transaction outcome counter.
+ * transaction outcome counter. On PostgreSQL the API also exports the server's `pg_stat_*`
+ * gauges (`agentswarm.pg.*`); on SQLite it exports none.
  */
 export const platformOtelDbStatements: Scenario = {
   name: "platform-otel-db-statements",
@@ -166,6 +168,56 @@ export const platformOtelDbStatements: Scenario = {
         String(attr(child.attributes, "db.statement")).includes("agent_tasks"),
         "the statement span has no db.statement text",
       );
+
+      // Postgres server gauges, read from pg_stat_* once per export.
+      const pgMetrics = () =>
+        metricsOf(bodies("/v1/metrics")).filter((m) => m.name.startsWith("agentswarm.pg."));
+      if (system === "postgresql") {
+        const required = [
+          "agentswarm.pg.connections",
+          "agentswarm.pg.connections.max",
+          "agentswarm.pg.db.size",
+          "agentswarm.pg.commits",
+          "agentswarm.pg.cache.hit_ratio",
+          "agentswarm.pg.query.max_age",
+          "agentswarm.pg.table.dead_tuples",
+          "agentswarm.pg.stat_statements.available",
+        ];
+        const missing = () => {
+          const names = new Set(pgMetrics().map((m) => m.name));
+          return required.filter((name) => !names.has(name));
+        };
+        expect(
+          await pollUntil(() => missing().length === 0, 15_000, 100),
+          `missing Postgres gauges: ${missing().join(", ")}`,
+        );
+        const metricsNow = metricsOf(bodies("/v1/metrics"));
+        const value = (p: OtlpDataPoint | undefined) => Number(p?.asDouble ?? p?.asInt ?? 0);
+        expect(
+          value(points(metricsNow, "agentswarm.pg.db.size")[0]) > 0,
+          "agentswarm.pg.db.size is not positive",
+        );
+        expect(
+          points(metricsNow, "agentswarm.pg.connections").some(
+            (p) => typeof attr(p.attributes, "state") === "string" && value(p) > 0,
+          ),
+          "no agentswarm.pg.connections point with a state",
+        );
+        expect(
+          points(metricsNow, "agentswarm.pg.table.dead_tuples").every(
+            (p) => typeof attr(p.attributes, "table") === "string",
+          ),
+          "an agentswarm.pg.table.dead_tuples point has no table attribute",
+        );
+      } else {
+        // The statement metric above proved an export landed: none of it is Postgres.
+        expect(
+          pgMetrics().length === 0,
+          `SQLite exported Postgres gauges: ${pgMetrics()
+            .map((m) => m.name)
+            .join(", ")}`,
+        );
+      }
     } finally {
       if (restarted) await ctx.restartSut();
       collector.server.stop(true);

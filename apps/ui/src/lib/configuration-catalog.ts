@@ -2150,6 +2150,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
+        key: "OTEL_PG_METRICS",
+        label: "Postgres server metrics",
+        description:
+          "On the Postgres engine, export the server's pg_stat_* gauges (connections, database size, commits, cache hit ratio, deadlocks, oldest query, top tables) once per metric export. Requires the OTLP endpoint. No effect on SQLite.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/observability-opentelemetry`,
+      },
+      {
         key: "OTEL_EXPORT_API_LOGS",
         label: "Export API logs",
         description:

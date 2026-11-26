@@ -485,6 +485,29 @@ The API also logs any single synchronous SQLite statement that ran for 100 ms or
 
 The SQL is whitespace-collapsed, cut at 200 characters and passed through the secret scrubber. Parameters are never logged.
 
+### Postgres Server
+
+On the Postgres engine the API reads the server's `pg_stat_*` views once per metric export (60 s) and exports them as `agentswarm.pg.*`. The read is one read-only transaction on the API's own pool: one connection, no extra credential, each statement capped at 2 s. A read still running at the next export makes that export skip it. A failed read logs one `[OTel] Postgres stats read failed` line and the export carries no Postgres points. On by default; set `OTEL_PG_METRICS=false` to turn it off. SQLite exports none of these.
+
+| Metric | Instrument | Unit | Attributes | Meaning |
+| --- | --- | --- | --- | --- |
+| `agentswarm.pg.connections` | Gauge | `{connection}` | `state` | Client connections on the whole server, by `pg_stat_activity.state` (`unknown` when the role cannot see it). |
+| `agentswarm.pg.connections.max` | Gauge | `{connection}` | | `max_connections`. Alert on the sum of `connections` against it. |
+| `agentswarm.pg.query.max_age` | Gauge | `s` | | Oldest running statement on another connection. |
+| `agentswarm.pg.transaction.max_age` | Gauge | `s` | | Oldest open transaction on another connection (idle-in-transaction included). |
+| `agentswarm.pg.db.size` | Gauge | `By` | | `pg_database_size` of the swarm database. |
+| `agentswarm.pg.cache.hit_ratio` | Gauge | `1` | | `blks_hit / (blks_hit + blks_read)` since the last stats reset. |
+| `agentswarm.pg.commits`, `.rollbacks` | Counter | `{transaction}` | | `pg_stat_database` transaction counts. |
+| `agentswarm.pg.blocks.hit`, `.blocks.read` | Counter | `{block}` | | Shared-buffer hits and reads. |
+| `agentswarm.pg.deadlocks` | Counter | `{deadlock}` | | Deadlocks detected. |
+| `agentswarm.pg.temp.bytes` | Counter | `By` | | Bytes queries spilled to temporary files. |
+| `agentswarm.pg.table.seq_scans` | Counter | `{scan}` | `table` | Per table, for the 10 tables with the most sequential scans plus the 10 with the most dead tuples (at most 20). |
+| `agentswarm.pg.table.live_tuples`, `.dead_tuples` | Gauge | `{row}` | `table` | Same tables. Dead tuples that keep growing mean autovacuum is behind. |
+| `agentswarm.pg.stat_statements.available` | Gauge | `1` | | 1 when `pg_stat_statements` is created and in `shared_preload_libraries`, else 0. |
+| `agentswarm.pg.statements.calls`, `.exec_time` (`s`), `.rows` | Counter | | | Swarm-database totals from `pg_stat_statements`, only when it is available. |
+
+The counters are cumulative server counts read as observable counters, so a backend that prefers delta temporality receives the per-export increase.
+
 ### Metric Temporality
 
 Temporality is NOT hardcoded. Set the following for Datadog or any delta-preferred backend:
