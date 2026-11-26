@@ -270,7 +270,8 @@ export interface AgentFsMediaUrl {
  */
 export function useAgentFsMediaUrl(target: DrivePath, kind: MediaKind): AgentFsMediaUrl {
   const access = useAgentFsAccess();
-  const stat = useAgentFsStat(target).data;
+  const statQuery = useAgentFsStat(target);
+  const stat = statQuery.data;
   const revision = fileRevision(stat);
   const mediaKey = drivePathKey(access, target, "media");
   const enabled = access.client !== null && stat !== undefined;
@@ -338,7 +339,10 @@ export function useAgentFsMediaUrl(target: DrivePath, kind: MediaKind): AgentFsM
   if (presignedUrl) return { url: presignedUrl, tooLarge: false, error: null };
   if (tooLarge) return { url: null, tooLarge: true, error: null };
   if (blobUrl) return { url: blobUrl, tooLarge: false, error: null };
-  return { url: null, tooLarge: false, error: signed.error ?? raw.error };
+  // The URL queries wait on `stat`, so a failed `stat` (a 404 path, a 403
+  // role) is the error: without it the viewer would wait forever.
+  const statError = stat === undefined ? statQuery.error : null;
+  return { url: null, tooLarge: false, error: signed.error ?? raw.error ?? statError };
 }
 
 /**
