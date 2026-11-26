@@ -722,7 +722,6 @@ export function AppSurface({
   const { refetchModel, refetchQuery, refetchAll } = useAppQueryRefetch(definitionsByApp);
 
   const [actionError, setActionError] = useState<string | null>(null);
-  const [lastResponse, setLastResponse] = useState<unknown>(undefined);
 
   // This app's mount in the dashboard-global store. Every path the definition,
   // the components and the handlers below use is app-relative and gets
@@ -1008,7 +1007,7 @@ export function AppSurface({
       toast.error(message);
     };
     const swarmActions = createSwarmActionHandlers({
-      onResponse: (result) => setLastResponse(result),
+      onResponse: () => {},
       onError: (message) => setActionError(message),
       onFailure: reportStepFailure,
     });
@@ -1060,7 +1059,6 @@ export function AppSurface({
                 params.model,
                 params.values ?? {},
               );
-              setLastResponse(created);
               createdRowId = created.row.id;
               // The Form injects its own id, so a successful create resets the
               // fields the user just submitted. Inside an element instance
@@ -1068,17 +1066,10 @@ export function AppSurface({
               if (params.formId) ctx.store.set(`/forms/${params.formId}`, {});
             } else if (params.op === "update") {
               if (!params.rowId) throw new Error("app.mutate op=update requires rowId");
-              setLastResponse(
-                await api.updateAppRow(
-                  targetAppId,
-                  params.model,
-                  params.rowId,
-                  params.values ?? {},
-                ),
-              );
+              await api.updateAppRow(targetAppId, params.model, params.rowId, params.values ?? {});
             } else {
               if (!params.rowId) throw new Error("app.mutate op=delete requires rowId");
-              setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
+              await api.deleteAppRow(targetAppId, params.model, params.rowId);
             }
             await ctx.refetchModel(targetAppId, params.model);
             // A create also reports the new row's id: a Form publishes it to
@@ -1192,7 +1183,6 @@ export function AppSurface({
                 requestedByUserId: ctx.userId ?? undefined,
               },
             );
-            setLastResponse(response);
 
             if (response.taskId) {
               const running = {
@@ -1534,14 +1524,6 @@ export function AppSurface({
       >
         {shellSurface ?? surface}
       </div>
-      {lastResponse !== undefined && (
-        <details className="rounded-md border border-border bg-muted/40 p-3 text-xs">
-          <summary className="cursor-pointer text-muted-foreground">Last action response</summary>
-          <pre className="mt-2 max-h-48 overflow-auto" data-testid="app-last-action-response">
-            {JSON.stringify(lastResponse, null, 2)}
-          </pre>
-        </details>
-      )}
     </div>
   );
 }
