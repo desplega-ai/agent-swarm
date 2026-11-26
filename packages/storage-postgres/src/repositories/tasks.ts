@@ -94,7 +94,7 @@ function idRows(ids: readonly string[]): SqlQuery {
 export const TASK_TEXT_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.task))`;
 export const TASK_TITLE_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.title))`;
 // The adjacent word pairs of the task text, word for word the expression of
-// index agent_tasks_fts_task_pairs (migration 386). A pair lexeme is two words
+// index agent_tasks_fts_task_pairs (migration 390). A pair lexeme is two words
 // joined by PAIR_JOINER.
 export const TASK_PAIRS_TSVECTOR = sql`to_tsvector('simple', fts_word_pairs(agent_tasks.task))`;
 const PAIR_JOINER = "ǂ";
@@ -256,7 +256,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   /**
    * A phrase-prefix match on the task text and title, or a prefix of the task
    * id. Until the backfill mark is complete it is the old substring LIKE, as on
-   * SQLite. The match reads the GIN indexes of migrations 368 and 386 first and
+   * SQLite. The match reads the GIN indexes of migrations 368 and 390 first and
    * returns their rows as a `_rowid` set, as SQLite does. As a filter of the
    * page or count query, the planner walked the ORDER BY index or the table and
    * rebuilt the tsvector of every row it passed: milliseconds per task text.

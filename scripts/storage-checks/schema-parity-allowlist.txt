@@ -35,7 +35,7 @@ trigger:skills_meta_fts_update -- writes the FTS5 table skills_meta_fts; ported 
 index:skills_fts_search -- tsvector GIN expression index (name A, description B, content C), the Postgres counterpart of the FTS5 tables skills_fts and skills_meta_fts (migration 368)
 index:agent_tasks_fts_task -- tsvector GIN expression index on agent_tasks.task, with agent_tasks_fts_title the Postgres counterpart of the FTS5 table agent_tasks_fts (migration 368)
 index:agent_tasks_fts_title -- tsvector GIN expression index on agent_tasks.title, with agent_tasks_fts_task the Postgres counterpart of the FTS5 table agent_tasks_fts (migration 368)
-index:agent_tasks_fts_task_pairs -- tsvector GIN expression index of the adjacent word pairs of agent_tasks.task, so a phrase is an index lookup; FTS5 agent_tasks_fts stores word positions instead (migration 386)
+index:agent_tasks_fts_task_pairs -- tsvector GIN expression index of the adjacent word pairs of agent_tasks.task, so a phrase is an index lookup; FTS5 agent_tasks_fts stores word positions instead (migration 390)
 # Memory search (migration 369, M4). On SQLite memory_fts (FTS5) and memory_vec (sqlite-vec) are
 # run-time tables that src/be/memory/providers/sqlite-store.ts creates outside the migration chain.
 table:memory_vec -- Postgres form of the run-time sqlite-vec table memory_vec (pgvector, no fixed dimension); SQLite creates its memory_vec at run time outside the chain, sized from EMBEDDING_DIMENSIONS (migration 369)
