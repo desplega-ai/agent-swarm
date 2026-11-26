@@ -72,6 +72,7 @@ import { mirrorSessionPrompt } from "../slack/session-mirror";
 import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError, TaskRoutingAuthorizationError } from "../tasks/errors";
 import { prepareTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { finalizeSkippedTaskReaction, skipReasonFrom } from "../tasks/task-skip";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import {
@@ -1348,7 +1349,17 @@ export async function handleTasks(
       );
       return true;
     }
-    if (parsed.body.slackChannelId && !(await mayBindSlackThread(principal))) {
+    // createTaskExtended backfills the Slack fields from a slack-family contextKey, and its
+    // normalization keeps the contextKey's thread over explicit fields, so naming a Slack
+    // thread in the contextKey binds it as surely as the fields do. Only the parent's own
+    // thread is exempt: parent access is checked above.
+    const contextSlack = slackChannelFromContextKey(parsed.body.contextKey);
+    const bindsSlackThread =
+      Boolean(parsed.body.slackChannelId) ||
+      (contextSlack !== null &&
+        (contextSlack.channelId !== parentTask?.slackChannelId ||
+          contextSlack.threadTs !== parentTask?.slackThreadTs));
+    if (bindsSlackThread && !(await mayBindSlackThread(principal))) {
       jsonError(
         res,
         "Permission denied: binding a task to a Slack thread needs task.slack.thread.bind.",

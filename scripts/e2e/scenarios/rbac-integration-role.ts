@@ -28,7 +28,8 @@ async function inviteRequester(ctx: ScenarioContext): Promise<{ token: string; u
  * Flow `rbac-integration-role`: a scoped user token (primary `requester`) is refused on the
  * workflow trigger, workflow event and durable script-run routes, and admitted once the extra
  * `obs-lite-integration` role is attached. The same holds for binding a new task to a Slack thread
- * (`task.slack.thread.bind`); only one of the two thread fields is a 400. A user may launch only the global scripts listed in
+ * (`task.slack.thread.bind`), by the two thread fields or by a slack contextKey; only one of the two
+ * thread fields is a 400. A user may launch only the global scripts listed in
  * `SCRIPT_RUN_USER_ALLOWLIST`, and each runs as the script's owning agent; its idempotency keys do not collide with an agent's; it cancels only
  * its own runs. The operator key and agents keep the routes as before.
  */
@@ -122,6 +123,18 @@ export const rbacIntegrationRole: Scenario = {
       threadRefused.text.includes("task.slack.thread.bind"),
       `the 403 names task.slack.thread.bind: ${threadRefused.text}`,
     );
+    // A slack-family contextKey binds the thread too: task creation backfills the Slack
+    // fields from it.
+    const slackContextKey = `task:slack:C0E2EKEY${ctx.nonce}:1700000000.000200`;
+    const keyRefused = await ctx.api("POST", "/api/tasks", {
+      ...asUser,
+      body: { task: `obs-int-key ${ctx.nonce}`, contextKey: slackContextKey },
+    });
+    expectStatus(keyRefused, [403], "a requester-only user naming a Slack contextKey");
+    expect(
+      keyRefused.text.includes("task.slack.thread.bind"),
+      `the contextKey 403 names task.slack.thread.bind: ${keyRefused.text}`,
+    );
 
     // Requester + obs-lite-integration.
     expectStatus(
@@ -151,6 +164,18 @@ export const rbacIntegrationRole: Scenario = {
       `the task stores the thread: ${bound.text.slice(0, 400)}`,
     );
     await cancelTask(ctx, asString(boundTask.id, "bound task id"));
+    const keyBound = await ctx.api("POST", "/api/tasks", {
+      ...asUser,
+      body: { task: `obs-int-key ${ctx.nonce}`, contextKey: slackContextKey },
+    });
+    expectStatus(keyBound, [201], "the integration user binds a thread through a contextKey");
+    const keyBoundTask = asRecord(keyBound.json);
+    expect(
+      keyBoundTask.slackChannelId === `C0E2EKEY${ctx.nonce}` &&
+        keyBoundTask.slackThreadTs === "1700000000.000200",
+      `the contextKey task stores its thread: ${keyBound.text.slice(0, 400)}`,
+    );
+    await cancelTask(ctx, asString(keyBoundTask.id, "contextKey task id"));
     const triggered = await ctx.api("POST", `/api/workflows/${workflowId}/trigger`, {
       ...asUser,
       body: {},
