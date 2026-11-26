@@ -992,6 +992,15 @@ export type ScriptCaller =
 
 export type SwarmToolErrorCode = ${SWARM_TOOL_ERROR_CODES.map((code) => JSON.stringify(code)).join(" | ")};
 
+/** The second argument of \`new SwarmToolError(message, init)\`. */
+export interface SwarmToolErrorInit {
+  code: SwarmToolErrorCode;
+  tool: string;
+  status?: number;
+  suggestions?: string[];
+  cause?: unknown;
+}
+
 /**
  * What a failed \`ctx.swarm.*\`, \`ctx.<namespace>.*\` or \`ctx.db.query\` call throws.
  * Branch on \`code\` instead of matching the message:
@@ -1009,7 +1018,7 @@ export type SwarmToolErrorCode = ${SWARM_TOOL_ERROR_CODES.map((code) => JSON.str
 export class SwarmToolError extends Error {
   constructor(
     message: string,
-    init: { code: SwarmToolErrorCode; tool: string; status?: number; suggestions?: string[]; cause?: unknown },
+    init: SwarmToolErrorInit,
   );
   readonly name: "SwarmToolError";
   readonly code: SwarmToolErrorCode;

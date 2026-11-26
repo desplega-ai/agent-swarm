@@ -270,6 +270,13 @@ export function mcpToolNameForSdkMethod(name: string): string {
 
 const normalizeToolName = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+/**
+ * Longest `ctx.swarm.<name>` the name lookups read. Every SDK and MCP tool name
+ * is far shorter, so a longer name can match none of them; checking first keeps
+ * the host from normalizing or aligning a name of any size the script sends.
+ */
+const MAX_LOOKUP_NAME_LENGTH = 128;
+
 type ToolNameIndex = {
   /** Each callable SDK method with its normalized spellings: method, MCP tool name, method suffix. */
   methods: Array<{ method: string; forms: string[] }>;
@@ -323,13 +330,19 @@ const MAX_SUGGESTIONS = 3;
 
 /** Up to three exposed SDK methods whose name is closest to `name` (case, `-` and `_` ignored). */
 export function suggestSdkTools(name: string): string[] {
+  if (name.length > MAX_LOOKUP_NAME_LENGTH) return [];
   const wanted = normalizeToolName(name);
   if (!wanted) return [];
   const limit = Math.max(1, Math.min(3, Math.floor(wanted.length / 3)));
   const ranked = getToolNameIndex()
     .methods.map(({ method, forms }) => ({
       method,
-      distance: Math.min(...forms.map((form) => editDistance(wanted, form))),
+      // The distance is at least the length difference: skip forms that cannot be within `limit`.
+      distance: Math.min(
+        ...forms
+          .filter((form) => Math.abs(form.length - wanted.length) <= limit)
+          .map((form) => editDistance(wanted, form)),
+      ),
     }))
     .filter(({ distance }) => distance <= limit)
     .sort((a, b) => a.distance - b.distance || a.method.localeCompare(b.method));
@@ -345,7 +358,10 @@ export function suggestSdkTools(name: string): string[] {
  * exposed method (`db-query`, `dbQuery`) is `unknown_tool` and suggests it.
  */
 export function unavailableSdkToolError(name: string): SwarmToolError {
-  if (getToolNameIndex().excluded.has(normalizeToolName(name))) {
+  if (
+    name.length <= MAX_LOOKUP_NAME_LENGTH &&
+    getToolNameIndex().excluded.has(normalizeToolName(name))
+  ) {
     return new SwarmToolError(
       `Tool '${name}' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent`,
       { code: "not_exposed", tool: name },

@@ -1,4 +1,4 @@
-import { swarmToolHttpError } from "./swarm-tool-error";
+import { SwarmToolError, swarmToolHttpError } from "./swarm-tool-error";
 
 /** SQL dialect of the swarm database, the storage engine's `dbQueryDialect` capability. */
 export type ScriptDbDialect = "sqlite" | "postgres";
@@ -17,7 +17,7 @@ export type ScriptDb = {
 /** The dialect a run sees when the host sent none: the `db_query` response convention. */
 export const DEFAULT_SCRIPT_DB_DIALECT: ScriptDbDialect = "sqlite";
 
-/** The SQL text for `dialect`. Throws a TypeError on any other shape. */
+/** The SQL text for `dialect`. Throws an `invalid_args` SwarmToolError on any other shape. */
 export function selectDialectSql(sql: unknown, dialect: ScriptDbDialect): string {
   if (typeof sql === "string") return sql;
   if (sql !== null && typeof sql === "object" && !Array.isArray(sql)) {
@@ -26,12 +26,13 @@ export function selectDialectSql(sql: unknown, dialect: ScriptDbDialect): string
       return texts[dialect] as string;
     }
   }
-  throw new TypeError(
+  throw new SwarmToolError(
     "ctx.db.query: sql must be a string or an object { sqlite: string; postgres: string }",
+    { code: "invalid_args", tool: "db_query" },
   );
 }
 
-/** Rows of a `ctx.swarm.db_query` result as objects keyed by column name. Throws on a failed query. */
+/** Rows of a `ctx.swarm.db_query` result as objects keyed by column name. Throws a SwarmToolError on a failed query. */
 export function dbQueryRows(result: unknown): ScriptDbRow[] {
   const envelope = (result ?? {}) as { success?: unknown; status?: unknown; data?: unknown };
   const data = (envelope.data ?? null) as { error?: unknown; columns?: unknown; rows?: unknown };
@@ -45,8 +46,12 @@ export function dbQueryRows(result: unknown): ScriptDbRow[] {
       `ctx.db.query failed with ${String(envelope.status)}: ${reason}`,
     );
   }
-  if (!data || !Array.isArray(data.rows))
-    throw new Error("ctx.db.query: db_query returned no rows");
+  if (!data || !Array.isArray(data.rows)) {
+    throw new SwarmToolError("ctx.db.query: db_query returned no rows", {
+      code: "upstream",
+      tool: "db_query",
+    });
+  }
   const columns = Array.isArray(data.columns) ? (data.columns as string[]) : [];
   return data.rows.map((row: unknown) =>
     Array.isArray(row)

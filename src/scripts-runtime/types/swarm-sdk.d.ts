@@ -1308,6 +1308,15 @@ declare module "swarm-sdk" {
     | "refused"
     | "upstream";
 
+  /** The second argument of `new SwarmToolError(message, init)`. */
+  export interface SwarmToolErrorInit {
+    code: SwarmToolErrorCode;
+    tool: string;
+    status?: number;
+    suggestions?: string[];
+    cause?: unknown;
+  }
+
   /**
    * What a failed `ctx.swarm.*`, `ctx.<namespace>.*` or `ctx.db.query` call throws.
    * Branch on `code` instead of matching the message:
@@ -1323,16 +1332,7 @@ declare module "swarm-sdk" {
    * catch (err) { if (SwarmToolError.is(err) && err.code === "rate_limited") { ... } }
    */
   export class SwarmToolError extends Error {
-    constructor(
-      message: string,
-      init: {
-        code: SwarmToolErrorCode;
-        tool: string;
-        status?: number;
-        suggestions?: string[];
-        cause?: unknown;
-      },
-    );
+    constructor(message: string, init: SwarmToolErrorInit);
     readonly name: "SwarmToolError";
     readonly code: SwarmToolErrorCode;
     /** The SDK method called, e.g. `kv_get`. */
