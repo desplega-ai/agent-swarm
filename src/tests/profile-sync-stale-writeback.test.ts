@@ -111,7 +111,8 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
           if (expected[field] && expected[field] !== contentSha256(db[field] ?? "")) continue;
           db[field] = value;
         }
-        return Response.json({ ok: true });
+        // As the API does: the updated profile.
+        return Response.json({ id: "agent-1", ...db });
       },
     });
     config = {
@@ -292,6 +293,12 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     await runnerSync(io, { fields: ["identity"] });
 
     expect(db.identityMd).toBe("dreaming edit");
+    // The agent continues from the DB value, and a later edit of it syncs.
+    expect(io.files[IDENTITY_MD_PATH]).toBe("dreaming edit");
+    const next = `${EDITED_IDENTITY}\nA line the agent adds after the refresh.`;
+    io.files[IDENTITY_MD_PATH] = next;
+    await runnerSync(io, { fields: ["identity"] });
+    expect(db.identityMd).toBe(next);
   });
 
   test("an empty HEARTBEAT.md that survives a restart is not sent over a later DB edit", async () => {
@@ -311,6 +318,7 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     io.files[HEARTBEAT_MD_PATH] = "- agent checklist";
     await runnerSync(io, { fields: ["identity"] });
     expect(db.heartbeatMd).toBe("- check the queue");
+    expect(io.files[HEARTBEAT_MD_PATH]).toBe("- check the queue");
   });
 });
 

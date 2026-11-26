@@ -18,11 +18,13 @@ import {
 } from "../be/memory/raters/llm";
 import { materializeClaudeMd, stopClaudeMd } from "../commands/claude-md-session";
 import {
+  adoptDroppedIdentityFields,
   advanceIdentityBaselines,
   buildIndependentIdentityPayloads,
   contentSha256,
   fetchWithSyncTimeout,
   type ProfilePayload,
+  profileOf,
   readIdentityBaselines,
   warnProfileFileTooLarge,
 } from "../commands/profile-sync";
@@ -170,7 +172,7 @@ export async function postHookProfileUpdate({
   body: ProfilePayload["body"];
   label: string;
   fetchImpl?: typeof fetch;
-}): Promise<boolean> {
+}): Promise<false | Record<string, unknown>> {
   try {
     const response = await fetchImpl(url, {
       method: "PUT",
@@ -187,8 +189,9 @@ export async function postHookProfileUpdate({
           `[hook] ${label} profile sync failed: HTTP ${response.status}${responseBody ? ` — ${responseBody}` : ""}`,
         ),
       );
+      return false;
     }
-    return response.ok;
+    return await profileOf(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(scrubSecrets(`[hook] ${label} profile sync errored: ${message}`));
@@ -780,13 +783,13 @@ export async function handleHook(): Promise<void> {
         baselines,
       );
       if (!payload) continue;
-      const ok = await postHookProfileUpdate({
+      const profile = await postHookProfileUpdate({
         url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
         headers: mcpConfig.headers,
         body: payload.body,
         label: payload.label,
       });
-      if (ok) synced[field] = value;
+      if (profile) Object.assign(synced, await adoptDroppedIdentityFields(payload, profile));
     }
     await advanceIdentityBaselines(synced);
   };

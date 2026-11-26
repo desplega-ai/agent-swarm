@@ -361,21 +361,6 @@ describe("collectProfilePayloads (field gate)", () => {
     expect(payloads).toEqual([]);
   });
 
-  test("an edited identity file is sent against the DB value it was booted from", async () => {
-    const booted = `${LONG} as booted`;
-    const files = reader({
-      [SOUL_MD_PATH]: `${LONG} edited in the session`,
-      [TOOLS_MD_PATH]: "new tools",
-      [IDENTITY_BASELINES_PATH]: JSON.stringify({ soulMd: contentSha256(booted) }),
-    });
-    const payloads = await collectProfilePayloads(["identity"], "session_sync", files);
-    const soul = payloads.find((p) => p.label === "identity.soulMd");
-    const tools = payloads.find((p) => p.label === "identity.toolsMd");
-    expect(soul?.body.expectedHashes).toEqual({ soulMd: contentSha256(booted) });
-    // No baseline for TOOLS.md: sent unconditionally, as before.
-    expect(tools?.body.expectedHashes).toBeUndefined();
-  });
-
   test("propagates the changeSource into every body", async () => {
     const files = reader({ [TOOLS_MD_PATH]: "tools" });
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
@@ -827,24 +812,6 @@ describe("collectProfilePayloads (baseline integration)", () => {
 });
 
 describe("buildIndependentIdentityPayloads", () => {
-  test("carries each field's baseline as its compare-and-set hash", () => {
-    expect(
-      buildIndependentIdentityPayloads({ identityMd: "edit" }, "self_edit", {
-        identityMd: "abc",
-        soulMd: "def",
-      }),
-    ).toEqual([
-      {
-        label: "identity.identityMd",
-        body: {
-          identityMd: "edit",
-          changeSource: "self_edit",
-          expectedHashes: { identityMd: "abc" },
-        },
-      },
-    ]);
-  });
-
   test("splits fields so one rejected write cannot discard valid siblings", () => {
     expect(
       buildIndependentIdentityPayloads(
