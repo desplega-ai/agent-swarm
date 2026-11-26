@@ -278,8 +278,9 @@ export function usersContract(engine: ContractEngine): void {
       const events = await repo.listRecentIdentityEventsForUsers(ids, 2);
       const tokens = await repo.listUserTokensForUsers(ids);
       for (const userId of ids) {
-        expect(byUser(externalIds, userId).map(({ kind, externalId }) => ({ kind, externalId })))
-          .toEqual(await repo.listExternalIds(userId));
+        expect(
+          byUser(externalIds, userId).map(({ kind, externalId }) => ({ kind, externalId })),
+        ).toEqual(await repo.listExternalIds(userId));
         expect(byUser(events, userId)).toEqual(
           await repo.listIdentityEvents(userId, { before: null, limit: 2 }),
         );
