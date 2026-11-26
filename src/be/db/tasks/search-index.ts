@@ -48,12 +48,12 @@ export type TaskSearchBackfillOptions = {
  * The WHERE term of a task `search` (FTS5 MATCH on text and title, or an id
  * prefix; a substring LIKE until the backfill completes) is built by the tasks
  * repository (`taskSearchCondition` in the SQLite engine). On Postgres the
- * batches write the stored search documents of migration 389, and a row past
+ * batches write the stored search documents of migration 391, and a row past
  * the mark matches through the expression indexes of 368 until it is complete.
  */
 
 /**
- * Index the rows migration 256 (SQLite) or 389 (Postgres) left out, in rowid
+ * Index the rows migration 256 (SQLite) or 391 (Postgres) left out, in rowid
  * batches. Each batch and the
  * `indexedThrough` mark that admits it to the triggers commit together, so a
  * concurrent write is indexed exactly once: by its trigger when its row is

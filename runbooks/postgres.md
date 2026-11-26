@@ -150,10 +150,10 @@ Memory and batches: the copy process holds one batch of rows at a time (at most 
 
 ## Task search documents
 
-Task search (`GET /api/tasks?search=`, `get-tasks`) reads stored `tsvector` documents in `agent_tasks_search` (migration 389), one row per task. The tasks repository writes the row in the statement that writes the task text or title. A search takes its candidates from the GIN indexes of these documents and checks a phrase in the stored document, so it parses no task text.
+Task search (`GET /api/tasks?search=`, `get-tasks`) reads stored `tsvector` documents in `agent_tasks_search` (migration 391), one row per task. The tasks repository writes the row in the statement that writes the task text or title. A search takes its candidates from the GIN indexes of these documents and checks a phrase in the stored document, so it parses no task text.
 
-- After the upgrade to migration 389, the API builds the documents of the existing tasks in batches after the start (the task search backfill, mark `agent_tasks_fts_state.indexedThrough`). The log line `[task-fts] backfill indexed=<rows> ms=<ms>` tells you that it is complete. Until then, a task past the mark matches through the expression indexes of migration 368, so the results are correct, but a phrase search can be slower.
-- An image older than migration 389 does not write the documents. If one ran on the database after the upgrade, set `UPDATE agent_tasks_fts_state SET "indexedThrough" = 0 WHERE id = 1` and restart the API: the backfill writes every document again.
+- After the upgrade to migration 391, the API builds the documents of the existing tasks in batches after the start (the task search backfill, mark `agent_tasks_fts_state.indexedThrough`). The log line `[task-fts] backfill indexed=<rows> ms=<ms>` tells you that it is complete. Until then, a task past the mark matches through the expression indexes of migration 368, so the results are correct, but a phrase search can be slower.
+- An image older than migration 391 does not write the documents. If one ran on the database after the upgrade, set `UPDATE agent_tasks_fts_state SET "indexedThrough" = 0 WHERE id = 1` and restart the API: the backfill writes every document again.
 
 ## Known differences
 

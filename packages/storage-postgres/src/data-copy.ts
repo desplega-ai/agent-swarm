@@ -968,7 +968,7 @@ export async function copyIntoPostgres(
         }
         // The copy writes with user triggers off, after the chain ran on empty
         // tables: build one search document row per copied task (migration
-        // 389), with the function the tasks repository writes with.
+        // 391), with the function the tasks repository writes with.
         if (targets.has("agent_tasks_search")) {
           log("[db-copy] building the task search documents (agent_tasks_search)");
           const result = (await conn.unsafe(

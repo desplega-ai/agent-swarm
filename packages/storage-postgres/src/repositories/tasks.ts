@@ -103,12 +103,12 @@ function taskTsQuery(search: string): SqlQuery {
 // The agent_tasks_fts expressions of migration 368 (indexes agent_tasks_fts_task
 // and agent_tasks_fts_title), word for word: the planner uses an index only for
 // an equal expression. One vector per column, as an FTS5 phrase never spans two.
-// Search reads them only for the tasks past the backfill mark (migration 389).
+// Search reads them only for the tasks past the backfill mark (migration 391).
 export const TASK_TEXT_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.task))`;
 export const TASK_TITLE_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.title))`;
 
 /**
- * Writes the stored search documents (agent_tasks_search, migration 389) of
+ * Writes the stored search documents (agent_tasks_search, migration 391) of
  * the rows a statement returns, in the same statement. `task_search_document`
  * is the expression of 368. A task row without a document row is written by
  * the backfill or by db-copy.
@@ -264,7 +264,7 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   /**
    * A phrase-prefix match on the task text or title, or a prefix of the task
    * id, as the set of matching ids. Every arm reads an index: the GIN indexes
-   * of the stored documents (migration 389), the expression indexes of 368 for
+   * of the stored documents (migration 391), the expression indexes of 368 for
    * the tasks past the backfill mark (none once it is complete), and the
    * primary key for the id prefix. A phrase checks its word positions in the
    * stored document, so no task text is parsed at query time.
