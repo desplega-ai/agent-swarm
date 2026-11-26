@@ -766,7 +766,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `scope` | `unknown` | No | - | Optional scope for named script resolution. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
 | `executor` | `unknown` | No | - | Optional executor override ("native" or "quickjs"). When omitted, named scripts use their saved executor or SCRIPT_EXECUTOR. |
-| `idempotencyKey` | `string` | No | - | When set, output is auto-persisted to kv under script:executions/{key}. Re-running with the same key overwrites. Queryable via kv-get. |
+| `idempotencyKey` | `string` | No | - | Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again. |
 
 ### script-upsert
 
@@ -1652,7 +1652,7 @@ Send a state and typed questions (noul, choice, score) to a SystemOne decision h
 
 **Request human input**
 
-Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, boolean, and config. Returns the request ID and URL for the human to respond. config asks a person to set one swarm config key on the dashboard; secrets are stored encrypted and you receive only {key, scope, isSecret, status, updatedAt}, never the value. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. No Slack message is sent; share the URL yourself.
+Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, boolean, and config. Returns the request ID and URL for the human to respond. config asks a person to set one swarm config key on the dashboard; secrets are stored encrypted and you receive only {key, scope, isSecret, status, updatedAt}, never the value. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and link an image or video to show it inline (the URL path ends in .png, .jpg, .gif, .webp, .mp4, .webm or .mov; for a URL without one, such as an agent-fs share /raw link, make the label the file name: ![demo.mp4](url)). No Slack message is sent; share the URL yourself.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
