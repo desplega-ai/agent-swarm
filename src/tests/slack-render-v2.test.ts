@@ -5520,6 +5520,52 @@ describe("optional Slack V2 task tree", () => {
     expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
   });
 
+  test("an off/on during outcome delivery keeps the new tree cutoff, so no tree is backfilled", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    await syncSlackTreeVisibility();
+    const { task, channelId, threadTs } = await runningAsk("toggle during outcome");
+    await completeTask(task.id, "answer before toggle");
+    let toggled = false;
+    apiCallGate = async (method) => {
+      if (method !== "chat.startStream" || toggled) return;
+      toggled = true;
+      process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+      await syncSlackTreeVisibility();
+      await Bun.sleep(5);
+      process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+      expect(await syncSlackTreeVisibility()).not.toBeNull();
+    };
+    await processSlackRenderV2();
+    expect(toggled).toBe(true);
+    expect((await getSlackOutcomeMessage(task.id))?.finalizedAt).toBeDefined();
+    expect(await getSlackTreeMessageByThread(channelId, threadTs)).toBeNull();
+  });
+
+  test("an off/on while one thread delivers keeps the new cutoff for the next thread too", async () => {
+    process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+    await syncSlackTreeVisibility();
+    const first = await runningAsk("toggle first thread");
+    const second = await runningAsk("toggle second thread");
+    await completeTask(first.task.id, "first answer");
+    await completeTask(second.task.id, "second answer");
+    let toggled = false;
+    apiCallGate = async (method) => {
+      if (method !== "chat.startStream" || toggled) return;
+      toggled = true;
+      process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
+      await syncSlackTreeVisibility();
+      await Bun.sleep(5);
+      process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "true";
+      expect(await syncSlackTreeVisibility()).not.toBeNull();
+    };
+    await processSlackRenderV2();
+    expect(toggled).toBe(true);
+    for (const ask of [first, second]) {
+      expect((await getSlackOutcomeMessage(ask.task.id))?.finalizedAt).toBeDefined();
+      expect(await getSlackTreeMessageByThread(ask.channelId, ask.threadTs)).toBeNull();
+    }
+  });
+
   test("hidden delegation delivers child cards before conclusions", async () => {
     process.env.SLACK_RENDER_V2_TASK_TREE_ENABLED = "false";
     process.env.SLACK_RENDER_V2_DELEGATION = "true";

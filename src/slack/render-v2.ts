@@ -2565,6 +2565,8 @@ type RenderPassContext = {
   /** isSlackTaskTreeEnabled() and syncSlackTreeVisibility() at the start of the pass. */
   treeEnabled: boolean;
   treeCutoff: string | null;
+  /** slackTreeGeneration() when treeCutoff was taken: any later visibility transition moves it. */
+  treeGeneration: number;
 };
 
 /**
@@ -2573,15 +2575,23 @@ type RenderPassContext = {
  * server owns it), so a write epoch that has not moved means the rows are current.
  */
 type ThreadPassReads = SlackThreadAddress &
-  Pick<RenderPassContext, "activatedAt" | "treeEnabled" | "treeCutoff"> & {
+  Pick<RenderPassContext, "activatedAt" | "treeEnabled" | "treeCutoff" | "treeGeneration"> & {
     tasks: AgentTask[];
     /** requestMemoEpoch("task") taken before `tasks` was read. */
     tasksEpoch: number;
   };
 
-/** The pass's tree visibility, or a fresh read when the flag flipped since (that read also invalidates). */
+/**
+ * The pass's tree visibility, or a fresh read when the flag flipped since (that read also
+ * invalidates). The generation check catches an off/on that ends on the same boolean but
+ * persisted a new cutoff.
+ */
 function passTreeCutoff(reads: ThreadPassReads | undefined): Promise<string | null> {
-  if (reads && reads.treeEnabled === isSlackTaskTreeEnabled()) {
+  if (
+    reads &&
+    reads.treeEnabled === isSlackTaskTreeEnabled() &&
+    reads.treeGeneration === slackTreeGeneration()
+  ) {
     return Promise.resolve(reads.treeCutoff);
   }
   return syncSlackTreeVisibility();
@@ -2666,6 +2676,7 @@ async function processSlackThread(
     statusTick,
     treeEnabled,
     treeCutoff,
+    treeGeneration,
   }: RenderPassContext,
 ): Promise<"stop" | "open" | "closed"> {
   if (!isSlackRenderV2Enabled()) return "stop";
@@ -2897,6 +2908,7 @@ async function processSlackThread(
     activatedAt,
     treeEnabled,
     treeCutoff,
+    treeGeneration,
     tasks,
     tasksEpoch,
   };
@@ -3027,7 +3039,11 @@ function runExclusive(work: () => Promise<void>): Promise<void> {
 
 async function beginRenderPass(): Promise<RenderPassContext> {
   const treeEnabled = isSlackTaskTreeEnabled();
-  const treeCutoff = await syncSlackTreeVisibility();
+  const visibility = syncSlackTreeVisibility();
+  // Taken before the await: a transition queued behind this read moves it, so the
+  // cutoff is never reused past one.
+  const treeGeneration = slackTreeGeneration();
+  const treeCutoff = await visibility;
   const activatedAt = await ensureSlackRenderV2Activation();
   const delegationEnabled = isSlackDelegationEnabled();
   const delegationActivatedAt = delegationEnabled ? await ensureSlackDelegationActivation() : null;
@@ -3039,6 +3055,7 @@ async function beginRenderPass(): Promise<RenderPassContext> {
     statusTick: beginSlackStatusTick(),
     treeEnabled,
     treeCutoff,
+    treeGeneration,
   };
 }
 

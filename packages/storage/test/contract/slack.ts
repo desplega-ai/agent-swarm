@@ -558,9 +558,9 @@ export function slackContract(engine: ContractEngine): void {
       await seedTask(storage, { id: "task1" });
       await rec({ id: "o1", ts: "5.0", kind: "outcome", task_id: "task1" });
       expect((await repo.findSlackOutcomeByTask("task1"))?.id).toBe("o1");
-      expect((await repo.findSlackOutcomesByTaskIds(["task1", "missing"])).map((r) => r.id)).toEqual([
-        "o1",
-      ]);
+      expect(
+        (await repo.findSlackOutcomesByTaskIds(["task1", "missing"])).map((r) => r.id),
+      ).toEqual(["o1"]);
       expect(await repo.findSlackOutcomesByTaskIds([])).toEqual([]);
       expect(
         (await repo.noteSlackOutcomeDeliveryFailure("task1", "e1", T1))?.delivery_attempts,
