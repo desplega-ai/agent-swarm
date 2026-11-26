@@ -931,7 +931,9 @@ export function workflowsContract(engine: ContractEngine): void {
       await repo.insertApproval(approval("late", { expiresAt: T0, now: T1 }));
       await repo.insertApproval(approval("open", { now: T0 }));
       await repo.insertApproval(approval("future", { expiresAt: T2, now: T1 }));
-      await repo.insertApproval(approval("done", { status: "approved", now: "2026-11-21T09:00:00.000Z" }));
+      await repo.insertApproval(
+        approval("done", { status: "approved", now: "2026-11-21T09:00:00.000Z" }),
+      );
       expect(await repo.pendingApprovalStats(T1)).toEqual({
         pending: 3,
         oldestCreatedAt: T0,
