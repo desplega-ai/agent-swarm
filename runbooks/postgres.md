@@ -101,6 +101,8 @@ The defaults of Postgres fit a small test database. Set these on a production se
 | Stop grace period of the database container | 120 s or more | Postgres writes a checkpoint when it stops. A container that is killed after the default 10 s or 30 s recovers from the WAL at the next start. |
 | `max_connections` | At least 15 for the API process, plus the sessions that backups and operators open | A lower bound, not a value to copy. See "One process per database" for the budget of the API. A parallel `pg_dump -j 8` opens 9 sessions. |
 
+The API sets `jit = off` on its own connections, so the server's `jit` value does not matter to it. Leave `jit` on at the server for analytics sessions if you want them to use it. On the API's short statements, JIT compilation took 0.2-3.6 s where the statement itself ran in 50-150 ms.
+
 Check the first two after a change: `SHOW max_pred_locks_per_transaction` and `SHOW dynamic_shared_memory_type`. To see how full the predicate lock table is: `SELECT count(*) FROM pg_locks WHERE mode = 'SIReadLock'`. A count that stays in the thousands means a long statement runs: find it in `pg_stat_activity`.
 
 A restart of Postgres under a running API is safe: the API logs `lost the one-process lock`, exits, and its supervisor starts it again (see "When the database is unreachable"). Tasks that a worker runs at that moment can fail with `worker session not found after server restart`, as after any API restart.

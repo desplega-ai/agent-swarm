@@ -80,6 +80,20 @@ describe("postgres client", () => {
     ).toBe("read committed");
   });
 
+  test("JIT is off on every pooled connection, whatever the server default", async () => {
+    // The server default stays on (Postgres ships with jit = on): only the pool turns it off.
+    const raw = new Bun.SQL({ url: scratch.url, max: 1 });
+    try {
+      expect((await raw.unsafe(`SELECT current_setting('jit') AS j`))[0].j).toBe("on");
+    } finally {
+      await raw.close();
+    }
+    const jit = async () =>
+      String((await client.get<{ j: string }>(`SELECT current_setting('jit') AS j`))?.j);
+    const settings = await Promise.all([jit(), jit(), jit(), jit(), client.transaction(jit)]);
+    expect(settings).toEqual(["off", "off", "off", "off", "off"]);
+  });
+
   test("a nested transaction is a savepoint: its failure keeps the outer one usable", async () => {
     await client.transaction(async () => {
       await client.run(`INSERT INTO t VALUES ('s1', 'x', 0)`);
