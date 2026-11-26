@@ -119,7 +119,10 @@ export const slackTaskOutputUiSpec: Scenario = {
       expect(stopped.ok === true, "The card outcome did not finish streaming");
       const posted = ctx.slack.messages("general").find((entry) => entry.ts === outcome.ts);
       expect(posted, `The outcome ${outcome.ts} is not in the thread`);
-      const blocks = (posted.blocks ?? []) as Block[];
+      // The 👍/👎 row (SLACK_FEEDBACK_BUTTONS, on by default) follows the footer.
+      const blocks = ((posted.blocks ?? []) as Block[]).filter(
+        (block) => block.type !== "context_actions",
+      );
       const types = blocks.map((block) => String(block.type));
       const footer = JSON.stringify(blocks.at(-1));
       expect(

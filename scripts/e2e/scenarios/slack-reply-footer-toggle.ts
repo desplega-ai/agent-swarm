@@ -54,8 +54,13 @@ async function summarize(ctx: ScenarioContext, label: string) {
     where: (call) => call.args.ts === outcome.ts && call.args.channel === CHANNEL,
   });
   expect(stopped.ok, "The outcome did not finish streaming");
+  // The 👍/👎 row (SLACK_FEEDBACK_BUTTONS, on by default) carries the task id too; only the
+  // footer's id counts here.
   const blocks = JSON.stringify(
-    ctx.slack.messages("general").find((entry) => entry.ts === outcome.ts)?.blocks ?? [],
+    (
+      (ctx.slack.messages("general").find((entry) => entry.ts === outcome.ts)?.blocks ??
+        []) as Array<{ type?: unknown }>
+    ).filter((block) => block.type !== "context_actions"),
   );
   expect(blocks.includes("Sources:"), "The outcome lost its sources caption");
   await waitForReaction(ctx, automatic.threadTs, "white_check_mark");
