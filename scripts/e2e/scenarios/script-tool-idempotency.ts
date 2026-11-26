@@ -169,6 +169,39 @@ export const scriptToolIdempotency: Scenario = {
       asRecord(privateRead.json).success === false,
       `recorded results must not be readable through generic KV: ${privateRead.text}`,
     );
+    // A gated result recorded for a lead must not reach a worker refused that read, through
+    // db-query on kv_entries either.
+    const leadId = await registerAgent(ctx, "idem-lead", { lead: true });
+    const channel = ctx.slack.addChannel({ name: `idem-${ctx.nonce}`, withBot: true }).id;
+    const marker = `private-channel-note-${ctx.nonce}`;
+    await ctx.slack.postMessage({ channel, user: "alice", text: marker });
+    const slackRead = (as: string) =>
+      bridge("slack-read", { channelId: channel, includeFiles: false }, `slack-${ctx.nonce}`, as);
+    const slackRefused = await slackRead(agentId);
+    expect(
+      slackRefused.text.includes("Direct channel access requires lead privileges"),
+      `a worker must be refused the channel read: ${slackRefused.text}`,
+    );
+    const leadRead = await slackRead(leadId);
+    expectStatus(leadRead, [200], "lead keyed channel read");
+    expect(leadRead.text.includes(marker), `the lead must read the message: ${leadRead.text}`);
+    const leadReplay = await slackRead(leadId);
+    expect(
+      leadReplay.headers.get(REPLAYED) === "true" && leadReplay.text === leadRead.text,
+      `the lead's repeat must replay the recorded result: ${leadReplay.text}`,
+    );
+    const scan = await ctx.api("POST", "/api/db-query", {
+      agentId,
+      body: {
+        sql: "SELECT namespace, value FROM kv_entries WHERE value LIKE ?",
+        params: [`%${marker}%`],
+      },
+    });
+    expectStatus(scan, [200], "worker db-query over kv_entries");
+    expect(
+      !scan.text.includes(marker),
+      `a recorded gated result must not be readable through db-query: ${scan.text}`,
+    );
 
     // ── B. one-off runs: no key by default, an explicit key dedupes, REST methods refuse it ──
     const workerId = await registerAgent(ctx, "idem-worker");

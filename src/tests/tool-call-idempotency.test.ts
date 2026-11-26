@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { claimKv, closeDb, getKv, initDb } from "../be/db";
 import { sha256 } from "../be/db/workflow-idempotency";
 import {
+  RESULT_OMITTED,
   runIdempotentToolCall,
   TOOL_CALL_IDEMPOTENCY_LEASE_MS,
   TOOL_CALL_IDEMPOTENCY_NAMESPACE,
@@ -176,4 +177,36 @@ describe("runIdempotentToolCall claim ownership", () => {
       expect(repeat).toEqual({ result: { value: "takeover" }, replayed: true });
     });
   }
+});
+
+describe("runIdempotentToolCall recorded result", () => {
+  test("is sealed at rest, so a raw kv_entries read does not reveal it, and still replays", async () => {
+    const s = scope();
+    const marker = `private-note-${crypto.randomUUID()}`;
+    const first = await runIdempotentToolCall(s, async () => ({ text: marker }), always);
+    const row = await getStorage().repos.kv.findEntry(
+      TOOL_CALL_IDEMPOTENCY_NAMESPACE,
+      recordKeyOf(s),
+    );
+    expect(row?.value).toBeDefined();
+    expect(String(row?.value)).not.toContain(marker);
+    const repeat = await runIdempotentToolCall(s, async () => ({ text: "ran again" }), always);
+    expect(first).toEqual({ result: { text: marker }, replayed: false });
+    expect(repeat).toEqual({ result: { text: marker }, replayed: true });
+  });
+
+  test("a record that no longer opens replays as omitted and does not run again", async () => {
+    const s = scope();
+    await claimKv({
+      namespace: TOOL_CALL_IDEMPOTENCY_NAMESPACE,
+      key: recordKeyOf(s),
+      value: { state: "done", sealed: "sealed:v1:not-a-valid-payload" },
+      valueType: "json",
+      expiresAt: Date.now() + 60_000,
+    });
+    let invocations = 0;
+    const repeat = await runIdempotentToolCall(s, async () => ++invocations, always);
+    expect(invocations).toBe(0);
+    expect(repeat).toEqual({ result: RESULT_OMITTED, replayed: true });
+  });
 });

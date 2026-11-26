@@ -2,6 +2,7 @@ import { MAX_KV_BODY_BYTES } from "../../kv-limits";
 import { claimKv, getKv } from "../db";
 import { deleteKvIfValue, replaceKvIfValue } from "../db/kv";
 import { sha256 } from "../db/workflow-idempotency";
+import { openSealedJson, sealJson } from "../sealed-json";
 
 /**
  * Per-call idempotency for side-effecting tools called through the scripts
@@ -12,7 +13,10 @@ import { sha256 } from "../db/workflow-idempotency";
  * its body does not send, post or write twice.
  *
  * Records live in the private, reserved KV family below. A failed call (thrown
- * or a tool refusal) records nothing, so a retry runs it again.
+ * or a tool refusal) records nothing, so a retry runs it again. The recorded
+ * result is sealed (encrypted at rest): it can hold what only its caller may
+ * read, e.g. a lead's `slack-read`, and `kv_entries` is readable by any agent
+ * through `db-query`.
  */
 export const TOOL_CALL_IDEMPOTENCY_NAMESPACE = "tool-call-idempotency";
 
@@ -36,7 +40,7 @@ const IN_FLIGHT_WAIT_MS = 30_000;
 
 type Record_ =
   | { state: "pending"; token: string }
-  | { state: "done"; result: unknown }
+  | { state: "done"; sealed: string }
   | { state: "done"; resultOmitted: true };
 
 export interface ToolCallIdempotencyScope {
@@ -109,10 +113,7 @@ export async function runIdempotentToolCall<T>(
     }
     const existing = (await getKv(namespace, key))?.value as Record_ | undefined;
     if (existing?.state === "done") {
-      return {
-        result: "resultOmitted" in existing ? RESULT_OMITTED : (existing.result as T),
-        replayed: true,
-      };
+      return { result: openRecordedResult<T>(existing), replayed: true };
     }
     // Missing means the claim expired between the two reads: claim again.
     if (existing && Date.now() >= deadline) throw new ToolCallInFlightError(scope.tool);
@@ -157,10 +158,10 @@ export async function runIdempotentToolCall<T>(
     return { result, replayed: false };
   }
   await stopRenewing();
-  const encoded = JSON.stringify(result);
+  const sealed = JSON.stringify(result) === undefined ? undefined : sealJson(result);
   const done: Record_ =
-    encoded !== undefined && Buffer.byteLength(encoded, "utf8") <= MAX_KV_BODY_BYTES
-      ? { state: "done", result }
+    sealed !== undefined && Buffer.byteLength(sealed, "utf8") <= MAX_KV_BODY_BYTES
+      ? { state: "done", sealed }
       : { state: "done", resultOmitted: true };
   const record = {
     namespace,
@@ -173,4 +174,19 @@ export async function runIdempotentToolCall<T>(
   // A takeover's live claim or record keeps the key.
   if (!(await replaceKvIfValue({ ...record, expected: pending }))) await claimKv(record);
   return { result, replayed: false };
+}
+
+/**
+ * The recorded result. A record that no longer opens (the encryption key
+ * changed) still counts as done: the call ran, so it must not run again.
+ */
+function openRecordedResult<T>(
+  record: Extract<Record_, { state: "done" }>,
+): T | typeof RESULT_OMITTED {
+  if ("resultOmitted" in record) return RESULT_OMITTED;
+  try {
+    return openSealedJson(record.sealed) as T;
+  } catch {
+    return RESULT_OMITTED;
+  }
 }
