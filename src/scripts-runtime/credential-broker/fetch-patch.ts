@@ -134,6 +134,10 @@ export function patchFetchWithCredentialBroker(
       newHeaders.set(key, value);
     }
 
+    // The caller's URL, still holding its placeholders. Everything handed back to
+    // the caller (Response.url, error text, the base of a relative redirect) uses
+    // it, so a query-template value never travels back into script code.
+    const callerHref = url.href;
     const urlModified = applyQueryTemplates(url, bindings);
 
     // Once the broker follows a redirect it keeps following every later hop,
@@ -160,16 +164,18 @@ export function patchFetchWithCredentialBroker(
     };
     const nextUrl = urlModified ? url.href : input instanceof Request ? input.url : input;
     const response = await originalFetch(nextUrl, mergedInit);
+    if (urlModified)
+      Object.defineProperty(response, "url", { value: callerHref, configurable: true });
     const location = response.headers.get("location");
     if (redirectMode === "manual" || !REDIRECT_STATUSES.has(response.status) || !location) {
       return response;
     }
     if (redirectMode === "error")
-      throw new TypeError(`fetch redirect refused (redirect: "error"): ${url.href}`);
+      throw new TypeError(`fetch redirect refused (redirect: "error"): ${callerHref}`);
     if (hop >= MAX_REDIRECTS)
-      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${url.href}`);
+      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${callerHref}`);
     await response.body?.cancel().catch(() => {});
-    const next = new URL(location, url);
+    const next = new URL(location, callerHref);
     // Re-enter with the caller's placeholder headers, not the substituted ones.
     const hopRequest = nextHopRequest(response.status, url, next, {
       method: callerInit.method ?? "GET",
