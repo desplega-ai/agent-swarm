@@ -164,7 +164,7 @@ export const rbacIntegrationRole: Scenario = {
     for (const [channel, ts, label] of [
       [parentChannel, "1700000000.000400", "another thread in the parent's channel"],
       [`C0E2EPAR2${ctx.nonce}`, parentTs, "the parent's thread ts in another channel"],
-    ]) {
+    ] as const) {
       const refused = await childOf(channel, ts);
       expectStatus(refused, [403], `a child naming ${label}`);
       expect(
