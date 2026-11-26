@@ -54,31 +54,38 @@ Earlier releases of `docker-compose.postgres.yml` ran `pgvector/pgvector:pg16` w
 
 To stay on Postgres 16, keep your copy of the old overlay. Do not put a `pg16` image into the new overlay: Postgres 16 then starts a new, empty database in an anonymous volume, and the API starts on it.
 
-To move to Postgres 18, dump the database with the old overlay and restore it into the new one. Save the old overlay (release v2.15.1) next to the new one first:
+To move to Postgres 18, dump the database with the old overlay and restore it into the new one. `pg_dump` does not copy roles, so the steps also save the roles (for example the [db-query reader](#db-query-reader-role)) and create them first. Save the old overlay (release v2.15.1) next to the new one first:
 
 ```bash
 curl -fsSL -o docker-compose.postgres-16.yml \
   https://raw.githubusercontent.com/desplega-ai/agent-swarm/v2.15.1/docker-compose.postgres.yml
 OLD="docker compose -f docker-compose.example.yml -f docker-compose.postgres-16.yml --env-file .env"
 NEW="docker compose -f docker-compose.example.yml -f docker-compose.postgres.yml --env-file .env"
-# 1. Old overlay: start Postgres 16, stop the API, dump the database.
+V=<project>_swarm_postgres    # find it: docker volume ls --format '{{.Name}}' | grep swarm_postgres
+# 1. Old overlay: stop the API, save the roles (all except swarm), dump the database.
 $OLD up -d postgres
 $OLD stop api
+$OLD exec -T postgres pg_dumpall -U swarm --roles-only \
+  | grep -vE '^(CREATE|ALTER) ROLE swarm( |;)' > swarm-pg16-roles.sql
 $OLD exec -T postgres pg_dump -U swarm -d swarm -Fc > swarm-pg16.dump
 $OLD exec -T postgres pg_restore --list < swarm-pg16.dump | grep -c "TABLE DATA"   # about 140, not 0
-# 2. Remove the old volume. Keep swarm-pg16.dump until step 4 passes.
+# 2. Keep a copy of the old volume, then remove it.
 $OLD down
-docker volume ls --format '{{.Name}}' | grep swarm_postgres    # <project>_swarm_postgres
-docker volume rm <project>_swarm_postgres
-# 3. New overlay: start Postgres 18 alone, wait for the real server, restore.
+docker volume create "${V}_pg16"
+docker run --rm -v "$V":/from:ro -v "${V}_pg16":/to --entrypoint cp pgvector/pgvector:pg16 -a /from/. /to/
+docker volume rm "$V"
+# 3. New overlay: start Postgres 18 alone, wait for the real server, create the roles, restore.
 $NEW up -d postgres
 until $NEW exec -T postgres pg_isready -h 127.0.0.1 -U swarm -d swarm; do sleep 2; done
+$NEW exec -T postgres psql -U swarm -d postgres -v ON_ERROR_STOP=1 < swarm-pg16-roles.sql
 $NEW exec -T postgres pg_restore -U swarm -d swarm --exit-on-error < swarm-pg16.dump
 # 4. Start everything. The API log shows "[db] Postgres engine ready". Check your tasks.
 $NEW up -d
 ```
 
 Wait with `pg_isready -h 127.0.0.1`, not the socket: at its first start the image runs a short setup server on the socket only, and a restore into it fails.
+
+When the new install works, delete `${V}_pg16`, `swarm-pg16.dump` and `swarm-pg16-roles.sql`. The roles file holds password hashes. To go back before that: run `$NEW down`, empty `$V`, copy `${V}_pg16` back into it with the same `cp -a` command, and start `$OLD up -d`.
 
 ## db-query reader role
 
