@@ -857,6 +857,12 @@ export function runtimePoolsContract(engine: ContractEngine): void {
         "pool-active",
         "prov",
       ]);
+      expect((await repo.listRuntimesForPools(["p1", "p-none"])).map((r) => r.id)).toEqual([
+        "pool-off",
+        "pool-active",
+        "prov",
+      ]);
+      expect(await repo.listRuntimesForPools([])).toEqual([]);
       expect(await repo.pruneStaleRuntimes(T1)).toBe(3);
       const left = await storage.executor.query<{ id: string }>(
         sql`SELECT id FROM runtime_instances ORDER BY id`,

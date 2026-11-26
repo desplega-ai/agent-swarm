@@ -355,6 +355,7 @@ export {
   ExtensionAgentAssignmentError,
   extensionAgentAssignmentError,
   getActiveTaskCount,
+  getActiveTaskCounts,
   getAgentById,
   getAgentDailyTaskCounts,
   getAgentHarnessProviders,
