@@ -949,6 +949,8 @@ List app summaries. Use `app-get` to inspect a complete definition.
 
 Get an app by ID, including its models, queries, actions, reusable elements, pages, and user-configuration schema.
 
+Pass `path` (a dot path or JSON pointer) to read one definition subtree, or `outline: true` for the definition tree without props.
+
 ### app-upsert
 
 Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported. The optional top-level `icon` is `{ type: "lucide", icon, color? }`, `{ type: "url", url }` (https), or `{ type: "agent-fs", path }` (swarm drive; add `orgId` and `driveId` for another drive). The dashboard shows a glyph when an image cannot load.
@@ -956,6 +958,22 @@ Create or update an app definition. Updates pass schema-migration and exported-e
 ### app-patch
 
 Apply an RFC 7396 merge patch to an app. Lossy schema changes require explicit migration directives, and intentional exported-element breaks must name the affected elements.
+
+### app-patch-node
+
+Edit one node of a page or reusable element without resending the definition, like `patch-workflow-node`. `props` merges one level into the node's props (`null` deletes a prop); `set` replaces node keys whole; `remove` deletes the node and its unreachable subtree; `create` adds a node under a parent at an index. The result is validated like `app-patch` and snapshotted. It returns a compact summary of changed paths, issues and warnings; `includeApp` adds the whole app and `dryRun` stores nothing. A missing node returns the closest node ids.
+
+### app-catalog
+
+Describe what an app page may contain, from the catalog the server validates against. With no arguments it lists every component and action type. `component` (plus optional `prop`) returns a component's slots and props schema, `action` returns an action step's params, and `topic: "expressions"` returns the binding reference.
+
+### app-action-run
+
+Run a declared app action as an agent. A script or task action returns `run` with `settled`; `waitSeconds` (up to 25) waits for every run the action's script launched or called. Scripts and extensions cannot invoke this tool.
+
+### app-action-status
+
+Read or wait on the run an `app-action-run` call returned (`runId`). A script action's run settles when it and every run its script started have finished; a task action's run settles with its task. `waitSeconds` (up to 25) holds the call until the run settles.
 
 ### app-query
 
@@ -1418,6 +1436,19 @@ Execute a read-only SQL query against the swarm database. Available to all authe
 | `params` | array | No | Query parameters |
 
 Responses include `total`, `truncated`, and `rowLimit` so callers can distinguish a complete result set from one capped by the configured row limit.
+
+### data-query
+
+Run read-only DuckDB SQL over tabular files on your agent-fs drive (csv, tsv, parquet, json, ndjson, xlsx, and `.gz` variants), as your own agent-fs identity. Name a file in table position (`SELECT region, sum(amount) FROM '/shared/x/sales.csv' GROUP BY 1`) or bind it in `tables`. Not for the swarm database: use `db-query`. Limits: 30 s, 256 MB per file, 1,000 rows per call (10,000 from scripts).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sql` | string | Yes | One read-only DuckDB query |
+| `tables` | object | No | Table name to drive path, or `{path, format}` to override format detection |
+| `maxRows` | number | No | Rows to return: default 100 (scripts 1000), at most 1000 (scripts 10000) |
+| `driveId` | string | No | Another readable drive in your org. Default: your default drive |
+| `card` | boolean | No | Also return a uiSpec-ready card table (first 100 rows, 20 columns) |
+| `sheet` | object | No | Save the result as a new `.sheet.json` at this path (create-only) |
 
 ### get-oauth-access-token
 
