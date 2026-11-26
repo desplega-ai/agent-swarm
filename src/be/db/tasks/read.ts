@@ -768,11 +768,13 @@ function toListFilters(filters: TaskFilters | undefined): TaskListFilters {
   };
 }
 
+type AgentTaskListItem = AgentTaskSummary & { runModel?: string };
+
 export function getAllTasks(filters?: TaskFilters): Promise<AgentTask[]>;
 export function getAllTasks(
   filters: TaskFilters | undefined,
   opts: { slim: true },
-): Promise<AgentTaskSummary[]>;
+): Promise<AgentTaskListItem[]>;
 export function getAllTasks(
   filters: TaskFilters | undefined,
   opts: { fields: "timeline" },
@@ -780,7 +782,7 @@ export function getAllTasks(
 export async function getAllTasks(
   filters?: TaskFilters,
   opts?: { slim?: boolean; fields?: "timeline" },
-): Promise<AgentTask[] | AgentTaskSummary[] | AgentTaskTimelineItem[]> {
+): Promise<AgentTask[] | AgentTaskListItem[] | AgentTaskTimelineItem[]> {
   // One call per projection, so each branch sees the row type of its own fields value.
   const listFilters = toListFilters(filters);
   const page = {
@@ -810,7 +812,10 @@ export async function getAllTasks(
 
   if (opts?.slim) {
     const rows = await tasksRepo().listTasks(listFilters, page, "slim");
-    let tasks = rows.map(rowToAgentTaskSummary);
+    let tasks = rows.map((row) => ({
+      ...rowToAgentTaskSummary(row),
+      runModel: row.runModel ?? undefined,
+    }));
     if (filters?.readyOnly) tasks = await filterReady(tasks);
     return tasks;
   }

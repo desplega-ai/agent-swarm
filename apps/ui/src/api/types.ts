@@ -501,6 +501,8 @@ export interface AgentTask {
   output?: string;
   progress?: string;
   model?: string;
+  /** Latest named model reported by a harness session, on task-list rows. */
+  runModel?: string;
   modelTier?: ModelTier;
   /** Concrete model the server resolved when a worker claimed the task. */
   resolvedModel?: string;

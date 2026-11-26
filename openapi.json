@@ -40768,6 +40768,10 @@
                               "totalCostUsd": {
                                 "type": "number",
                                 "minimum": 0
+                              },
+                              "runModel": {
+                                "type": "string",
+                                "description": "Latest named model reported by a harness session."
                               }
                             },
                             "required": [

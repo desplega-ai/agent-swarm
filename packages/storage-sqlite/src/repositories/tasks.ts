@@ -20,6 +20,7 @@ import {
   type TaskListPage,
   type TaskListRow,
   type TaskRow,
+  taskRunModelColumn,
 } from "@desplega/storage";
 
 /** Raw SQL text written by this file (never input). */
@@ -274,6 +275,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     )
     SELECT ${raw(LIST_COLUMNS[fields])},
     (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = agent_tasks.id) AS "totalCostUsd"
+    ${fields === "slim" ? taskRunModelColumn("rowid") : raw("")}
     FROM page JOIN agent_tasks ON agent_tasks.rowid = page.rid
     ORDER BY ${raw(outerOrder)}`);
   }
