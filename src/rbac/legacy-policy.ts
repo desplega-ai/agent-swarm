@@ -280,6 +280,7 @@ export const LEGACY_POLICY = {
   "improvement.approve": operatorOrUser,
   "task.steer.any": leadOrTaskCreator,
   "task.create.own": anyAuthenticated,
+  "task.slack.thread.bind": operatorOnly,
   "task.requester.assign": leadOrOperatorOrUser,
   "task.read.own": requesterOwnsTask,
   "task.cancel.own": requesterOwnsTask,
