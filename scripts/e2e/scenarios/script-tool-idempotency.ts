@@ -1,7 +1,14 @@
 import { sql } from "../db";
 import { type ApiResponse, asRecord, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
-import { callToolOk, expectRunOk, registerAgent, runScript, withMcp } from "./script-helpers";
+import {
+  callToolOk,
+  expectRunOk,
+  registerAgent,
+  runScript,
+  upsertScript,
+  withMcp,
+} from "./script-helpers";
 
 const EXECUTORS = ["native", "quickjs"] as const;
 const REPLAYED = "idempotent-replayed";
@@ -233,6 +240,33 @@ export const scriptToolIdempotency: Scenario = {
           rest.tool === "kv_incr" &&
           String(rest.message).includes("does not take an idempotencyKey"),
         `a REST-routed method must refuse the option (${executor}): ${JSON.stringify(rest)}`,
+      );
+    }
+
+    // ── B'. the saved-script typecheck offers the options argument on bridge methods only ──
+    const typed = (call: string) =>
+      `import type { ScriptContext } from "swarm-sdk";\nexport default async function (args: unknown, ctx: ScriptContext) {\n  await ${call};\n}\n`;
+    await upsertScript(ctx, agentId, {
+      name: `e2e-idem-typed-bridge-${ctx.nonce}`,
+      source: typed(`ctx.swarm.task_send({ task: "t" }, { idempotencyKey: "k" })`),
+      intent: "a bridge method takes idempotencyKey",
+    });
+    const restProbes = [
+      `ctx.swarm.task_get({ taskId: "t" }, { idempotencyKey: "k" })`,
+      `ctx.swarm.kv_incr({ key: "c" }, { idempotencyKey: "k" })`,
+      `ctx.swarm.memory_search({ query: "q", intent: "i" }, { idempotencyKey: "k" })`,
+      `ctx.swarm.schedule_delete({ id: "s" }, { idempotencyKey: "k" })`,
+    ];
+    for (const [index, call] of restProbes.entries()) {
+      const refused = await ctx.api("POST", "/api/scripts/upsert", {
+        agentId,
+        body: { name: `e2e-idem-typed-rest-${index}-${ctx.nonce}`, source: typed(call) },
+      });
+      expectStatus(refused, [400], `a REST-routed method with options must not compile: ${call}`);
+      const body = asRecord(refused.json);
+      expect(
+        body.error === "typecheck_failed" && JSON.stringify(body.diagnostics).includes("TS2554"),
+        `${call} must fail with TS2554: ${refused.text.slice(0, 400)}`,
       );
     }
 

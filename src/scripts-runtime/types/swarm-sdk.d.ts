@@ -1362,8 +1362,9 @@ declare module "swarm-sdk" {
    * `idempotencyKey` runs a write at most once per key: a later call of the same tool with
    * the same key returns the first call's result and does nothing (args are not compared).
    * Keys are scoped to the calling agent and kept 7 days. Read-only tools ignore it. Only
-   * tools that go through the MCP bridge take it; a REST-routed method (kv_*, memory_search,
-   * task_get, schedule_*, workflow_*, script_run, ...) throws `invalid_args`. Durable runs
+   * tools that go through the MCP bridge take it: a REST-routed method (kv_*, memory_search,
+   * task_get, schedule_*, workflow_*, script_run, ...) has no options argument, and throws
+   * `invalid_args` if one is passed anyway. Durable runs
    * (`launch-script-run`) key every call from the run id, tool and call ordinal by
    * themselves, so a respawned run does not repeat its sends; pass a key to override that.
    * A one-off run started with an `idempotencyKey` (`script-run` tool or API) does the
@@ -1381,16 +1382,77 @@ declare module "swarm-sdk" {
       : T[K];
   };
 
-  /** Generic REST-routed methods: mapping would drop their type parameter, and they take no options. */
-  type SwarmSdkGenericMethods = "kv_get" | "kv_getOrNull" | "kv_set" | "kv_list";
+  /** Methods routed to a REST endpoint, not the MCP bridge: they take no `SwarmCallOptions`. */
+  type SwarmSdkRestRoutedMethods =
+    | "memory_search"
+    | "memory_get"
+    | "memory_rate"
+    | "memory_delete"
+    | "task_list"
+    | "task_get"
+    | "task_cancel"
+    | "approval_cancel"
+    | "kv_get"
+    | "kv_getOrNull"
+    | "kv_set"
+    | "kv_delete"
+    | "kv_del"
+    | "kv_incr"
+    | "kv_list"
+    | "room_get"
+    | "room_change"
+    | "room_reset"
+    | "room_decode"
+    | "repo_list"
+    | "schedule_list"
+    | "schedule_create"
+    | "schedule_update"
+    | "schedule_patch"
+    | "schedule_delete"
+    | "schedule_runNow"
+    | "script_search"
+    | "script_run"
+    | "savings_calibrationGet"
+    | "savings_calibrationRun"
+    | "db_query"
+    | "swarm_get"
+    | "agent_info"
+    | "metrics_get"
+    | "task_poll"
+    | "config_get"
+    | "config_list"
+    | "config_delete"
+    | "workflow_list"
+    | "workflow_get"
+    | "workflow_listRuns"
+    | "workflow_getRun"
+    | "workflow_delete"
+    | "workflow_create"
+    | "workflow_update"
+    | "workflow_patch"
+    | "workflow_patchNode"
+    | "workflow_trigger"
+    | "workflow_retryRun"
+    | "workflow_cancelRun"
+    | "prompt_list"
+    | "prompt_get"
+    | "prompt_delete"
+    | "skill_list"
+    | "skill_get"
+    | "skill_getFile"
+    | "skill_search"
+    | "skill_delete"
+    | "mcpServer_list"
+    | "mcpServer_get"
+    | "mcpServer_delete";
 
   export interface ScriptContext {
     /** Frozen caller identity supplied by the host. */
     caller: ScriptCaller;
     run?: ScriptRunContext;
     step?: ScriptWorkflowSteps;
-    swarm: WithSwarmCallOptions<Omit<SwarmSdk, SwarmSdkGenericMethods>> &
-      Pick<SwarmSdk, SwarmSdkGenericMethods> & { config: SwarmConfig };
+    swarm: WithSwarmCallOptions<Omit<SwarmSdk, SwarmSdkRestRoutedMethods>> &
+      Pick<SwarmSdk, Extract<keyof SwarmSdk, SwarmSdkRestRoutedMethods>> & { config: SwarmConfig };
     api: ScriptApiRegistry;
     mcp: ScriptMcpRegistry;
     /** The run's virtual filesystem. Same files as `ctx.sh` sees. */

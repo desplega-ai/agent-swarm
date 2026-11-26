@@ -4,6 +4,7 @@ import { Redacted } from "./redacted";
 import { readScriptSdkJsonResponse } from "./response-limit";
 import {
   assertNamespaces,
+  isRestRoutedSdkMethod,
   isSdkToolAllowed,
   mcpToolNameForSdkMethod,
   SDK_NAMESPACES,
@@ -83,8 +84,12 @@ function kvPath(args: Record<string, unknown>, keyRequired = true): string {
 /**
  * Maps SDK method names to specific REST endpoints where they exist.
  * Returns null for tools that should fall through to the generic MCP bridge.
+ * `REST_ROUTED_SDK_METHODS` lists the cases: a case missing from it, or a name
+ * in it with no case, fails to compile.
  */
 function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
+  // ── fallthrough: proxy via generic MCP bridge ──
+  if (!isRestRoutedSdkMethod(name)) return null;
   const body = argsRecord(args);
   switch (name) {
     // ── memory ──
@@ -490,9 +495,10 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       return { method: "DELETE", path: `/api/mcp-servers/${encodeURIComponent(id)}` };
     }
 
-    // ── fallthrough: proxy via generic MCP bridge ──
-    default:
-      return null;
+    default: {
+      const unrouted: never = name;
+      throw new Error(`swarm-sdk: ${String(unrouted)} has no REST route`);
+    }
   }
 }
 
