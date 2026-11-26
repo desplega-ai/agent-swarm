@@ -602,6 +602,8 @@ export interface paths {
                 header?: {
                     /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
                     "X-Runtime-Instance-ID"?: string;
+                    /** @description Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. The first successful call of a tool that is not read-only runs it and records its result; a later call with the same key and tool returns that result (with `Idempotent-Replayed: true`) and runs nothing, whatever its args. A call that fails or that the tool refuses records nothing. A second call while the first still runs waits for it, then gets a 409. Read-only tools ignore the key. Records expire after 7 days. Durable script runs send one on every ctx.swarm call. */
+                    "Idempotency-Key"?: string;
                 };
                 path?: never;
                 cookie?: never;
@@ -646,6 +648,15 @@ export interface paths {
                 };
                 /** @description Tool not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A call with the same Idempotency-Key is still running */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16635,6 +16646,10 @@ export interface paths {
                         profile?: string;
                         modelGroup?: string;
                         draft?: boolean;
+                        /** @description Slack channel the task's progress and outcome post to. Set together with `slackThreadTs`. Needs `task.slack.thread.bind`. */
+                        slackChannelId?: string;
+                        /** @description Slack thread ts in `slackChannelId` the task posts into. */
+                        slackThreadTs?: string;
                     };
                 };
             };
@@ -16657,7 +16672,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
+                /** @description Parent/session access denied, unauthorized chat-thread or Slack-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -38232,6 +38247,7 @@ export interface operations {
                     fsMode?: "none" | "workspace-rw";
                     /** @enum {string|null} */
                     executor?: "native" | "quickjs" | null;
+                    /** @description Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again. */
                     idempotencyKey?: string;
                     parentScriptRunId?: string;
                 };

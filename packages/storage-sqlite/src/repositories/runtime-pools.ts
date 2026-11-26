@@ -160,4 +160,11 @@ export class SqliteRuntimePoolsRepository extends BaseRuntimePoolsRepository {
       sql`SELECT * FROM runtime_instances WHERE pool_id = ${poolId} ORDER BY created_at, rowid`,
     );
   }
+
+  async listRuntimesForPools(poolIds: readonly string[]): Promise<RuntimeInstanceRow[]> {
+    if (poolIds.length === 0) return [];
+    return this.db.query<RuntimeInstanceRow>(
+      sql`SELECT * FROM runtime_instances WHERE pool_id IN (${sqlList(poolIds)}) ORDER BY created_at, rowid`,
+    );
+  }
 }

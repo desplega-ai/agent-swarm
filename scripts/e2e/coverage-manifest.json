@@ -621,7 +621,7 @@
       ]
     },
     "rbac-integration-role": {
-      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events and durable script runs, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
+      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events, durable script runs and Slack-thread-bound task creation, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
       "scenarios": ["rbac-integration-role"]
     },
     "script-sandbox-identity": {
@@ -635,6 +635,10 @@
     "script-sdk-calls": {
       "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API. Failed calls throw a typed SwarmToolError, and an unknown ctx.swarm method names the closest exposed ones.",
       "scenarios": ["script-sdk-calls", "script-memory-rate", "script-tool-errors"]
+    },
+    "script-tool-idempotency": {
+      "description": "An Idempotency-Key on the scripts MCP bridge runs a write once and answers repeats from the first result; read-only tools, refusals and unkeyed calls run every time, and keys are scoped to the caller. One-off runs dedupe with an explicit per-call key, or with a run-level idempotencyKey on the script-run tool or API that keys every call, nested script_run included. A durable run re-executed after an API restart repeats none of its ctx.swarm writes.",
+      "scenarios": ["script-tool-idempotency"]
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
@@ -915,7 +919,7 @@
       ]
     },
     "ui-dev-tooling": {
-      "description": "`bun run ui:dev` against a running swarm as a black box: ready line, same-origin proxy, slug lookup, usage errors and teardown",
+      "description": "`bun run ui:dev` and `agent-swarm ui-dev` against a running swarm as a black box: ready line, same-origin proxy, injected connection, slug lookup, usage errors and teardown",
       "scenarios": ["ui-dev-remote"]
     }
   }

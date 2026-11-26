@@ -252,6 +252,82 @@ const MCP_TOOL_NAMES: ReadonlySet<string> = new Set<string>(Object.values(SDK_TO
  */
 export const REST_ONLY_SDK_METHODS = ["savings_calibrationGet", "savings_calibrationRun"] as const;
 
+/**
+ * The SDK methods `bridgeRequestFor` (swarm-sdk.ts) sends to a REST route instead of the
+ * MCP bridge. This list routes the call, and the compiler checks it against that switch
+ * both ways. The generated script types read it too: these methods take no
+ * `SwarmCallOptions`, since only the MCP bridge dedupes by `Idempotency-Key`.
+ */
+export const REST_ROUTED_SDK_METHODS = [
+  "memory_search",
+  "memory_get",
+  "memory_rate",
+  "memory_delete",
+  "task_list",
+  "task_get",
+  "task_cancel",
+  "approval_cancel",
+  "kv_get",
+  "kv_getOrNull",
+  "kv_set",
+  "kv_delete",
+  "kv_del",
+  "kv_incr",
+  "kv_list",
+  "room_get",
+  "room_change",
+  "room_reset",
+  "room_decode",
+  "repo_list",
+  "schedule_list",
+  "schedule_create",
+  "schedule_update",
+  "schedule_patch",
+  "schedule_delete",
+  "schedule_runNow",
+  "script_search",
+  "script_run",
+  "savings_calibrationGet",
+  "savings_calibrationRun",
+  "db_query",
+  "swarm_get",
+  "agent_info",
+  "metrics_get",
+  "task_poll",
+  "config_get",
+  "config_list",
+  "config_delete",
+  "workflow_list",
+  "workflow_get",
+  "workflow_listRuns",
+  "workflow_getRun",
+  "workflow_delete",
+  "workflow_create",
+  "workflow_update",
+  "workflow_patch",
+  "workflow_patchNode",
+  "workflow_trigger",
+  "workflow_retryRun",
+  "workflow_cancelRun",
+  "prompt_list",
+  "prompt_get",
+  "prompt_delete",
+  "skill_list",
+  "skill_get",
+  "skill_getFile",
+  "skill_search",
+  "skill_delete",
+  "mcpServer_list",
+  "mcpServer_get",
+  "mcpServer_delete",
+] as const;
+
+export type RestRoutedSdkMethod = (typeof REST_ROUTED_SDK_METHODS)[number];
+
+export function isRestRoutedSdkMethod(name: string): name is RestRoutedSdkMethod {
+  return (REST_ROUTED_SDK_METHODS as readonly string[]).includes(name);
+}
+
 export function isSdkToolAllowed(name: string): boolean {
   return (
     (SDK_ALLOWLIST as readonly string[]).includes(name) ||

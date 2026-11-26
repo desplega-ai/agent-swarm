@@ -23,6 +23,7 @@ import {
   isAgentOnDemand,
   isAgentReachable,
   isRuntimePoolWakeable,
+  listOnDemandAgentIds,
 } from "../be/runtime-pools/reachability";
 import { codeLevelTriage, gatherSystemStatus, getBootTriageFindings } from "../heartbeat/heartbeat";
 import { handleAgentsRest } from "../http/agents";
@@ -387,6 +388,7 @@ describe("pool agent reachability", () => {
     }
     if (state === "slots-too-big") await updateRuntimePool(pool.id, { slotsPerRuntime: 4 });
     expect(await isAgentOnDemand(worker)).toBe(expected);
+    expect((await listOnDemandAgentIds([worker])).has(worker.id)).toBe(expected);
     // The heartbeat/routing predicate keeps its broader answer.
     expect(await isAgentReachable(worker)).toBe(true);
   });
@@ -398,6 +400,7 @@ describe("pool agent reachability", () => {
       [crypto.randomUUID(), worker.id, pool.id],
     );
     expect(await isAgentOnDemand(worker)).toBe(true);
+    expect((await listOnDemandAgentIds([worker])).has(worker.id)).toBe(true);
   });
   async function addRuntime(agentId: string, status: "provisioning" | "active", draining = 0) {
     await getDbClient().run(
@@ -413,6 +416,7 @@ describe("pool agent reachability", () => {
     const worker = await createPoolAgent(pool.id, { name: "booting-worker", maxTasks: 1 });
     await addRuntime(worker.id, "provisioning");
     expect(await isAgentOnDemand(worker)).toBe(true);
+    expect((await listOnDemandAgentIds([worker])).has(worker.id)).toBe(true);
   });
   test.each([
     ["an uncapped pool", null],
@@ -422,12 +426,14 @@ describe("pool agent reachability", () => {
     const worker = await createPoolAgent(pool.id, { name: "capped-worker", maxTasks: 1 });
     await addRuntime(worker.id, "active");
     expect(await isAgentOnDemand(worker)).toBe(false);
+    expect((await listOnDemandAgentIds([worker])).has(worker.id)).toBe(false);
   });
   test("a draining provisioning runtime does not count as booting", async () => {
     await updateRuntimePool(pool.id, { maxRuntimes: null, slotsPerRuntime: 1 });
     const worker = await createPoolAgent(pool.id, { name: "draining-worker", maxTasks: 1 });
     await addRuntime(worker.id, "provisioning", 1);
     expect(await isAgentOnDemand(worker)).toBe(false);
+    expect((await listOnDemandAgentIds([worker])).has(worker.id)).toBe(false);
   });
   test("GET /api/agents and /api/agents/{id} flag on-demand pool agents", async () => {
     const worker = await createPoolAgent(pool.id, { name: "sleeping-worker" });

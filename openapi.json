@@ -8717,6 +8717,17 @@
             "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
             "name": "X-Runtime-Instance-ID",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[\\x21-\\x7E]{1,255}$",
+              "description": "Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. The first successful call of a tool that is not read-only runs it and records its result; a later call with the same key and tool returns that result (with `Idempotent-Replayed: true`) and runs nothing, whatever its args. A call that fails or that the tool refuses records nothing. A second call while the first still runs waits for it, then gets a 409. Read-only tools ignore the key. Records expire after 7 days. Durable script runs send one on every ctx.swarm call."
+            },
+            "required": false,
+            "description": "Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. The first successful call of a tool that is not read-only runs it and records its result; a later call with the same key and tool returns that result (with `Idempotent-Replayed: true`) and runs nothing, whatever its args. A call that fails or that the tool refuses records nothing. A second call while the first still runs waits for it, then gets a 409. Read-only tools ignore the key. Records expire after 7 days. Durable script runs send one on every ctx.swarm call.",
+            "name": "Idempotency-Key",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -8773,6 +8784,16 @@
           },
           "404": {
             "description": "Tool not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A call with the same Idempotency-Key is still running",
             "content": {
               "application/json": {
                 "schema": {
@@ -41194,6 +41215,16 @@
                   },
                   "draft": {
                     "type": "boolean"
+                  },
+                  "slackChannelId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Slack channel the task's progress and outcome post to. Set together with `slackThreadTs`. Needs `task.slack.thread.bind`."
+                  },
+                  "slackThreadTs": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Slack thread ts in `slackChannelId` the task posts into."
                   }
                 },
                 "required": [
@@ -41225,7 +41256,7 @@
             }
           },
           "403": {
-            "description": "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
+            "description": "Parent/session access denied, unauthorized chat-thread or Slack-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
             "content": {
               "application/json": {
                 "schema": {
@@ -65505,7 +65536,8 @@
                   },
                   "idempotencyKey": {
                     "type": "string",
-                    "maxLength": 200
+                    "maxLength": 200,
+                    "description": "Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again."
                   },
                   "parentScriptRunId": {
                     "type": "string",

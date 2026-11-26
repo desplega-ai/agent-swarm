@@ -289,6 +289,8 @@ export interface SlackRepository {
   findSlackTreeByContextKey(contextKey: string): Promise<SlackMessageRow | null>;
   findSlackTreeByThread(channelId: string, threadTs: string): Promise<SlackMessageRow | null>;
   findSlackOutcomeByTask(taskId: string): Promise<SlackMessageRow | null>;
+  /** The outcome cards of `taskIds`, at most one per task, in no order. */
+  findSlackOutcomesByTaskIds(taskIds: readonly string[]): Promise<SlackMessageRow[]>;
   findSlackMessageByChannelTs(channelId: string, ts: string): Promise<SlackMessageRow | null>;
   /**
    * Finalized deferral outcome cards whose latest wake-up task is terminal and
@@ -827,6 +829,12 @@ export abstract class BaseSlackRepository implements SlackRepository {
   findSlackOutcomeByTask(taskId: string): Promise<SlackMessageRow | null> {
     return this.db.get<SlackMessageRow>(sql`
       SELECT * FROM slack_messages WHERE task_id = ${taskId} AND kind = 'outcome' LIMIT 1`);
+  }
+
+  async findSlackOutcomesByTaskIds(taskIds: readonly string[]): Promise<SlackMessageRow[]> {
+    if (taskIds.length === 0) return [];
+    return this.db.query<SlackMessageRow>(sql`
+      SELECT * FROM slack_messages WHERE task_id IN (${sqlList(taskIds)}) AND kind = 'outcome'`);
   }
 
   findSlackMessageByChannelTs(channelId: string, ts: string): Promise<SlackMessageRow | null> {

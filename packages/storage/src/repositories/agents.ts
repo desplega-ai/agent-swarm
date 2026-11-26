@@ -356,6 +356,8 @@ export interface AgentsRepository {
   // ---- capacity and activity (reads of agent_tasks keyed by agent) ----
   /** Tasks in one of the agent's slots: its in-progress tasks and the offers it is reviewing. */
   countActiveTasks(agentId: string): Promise<number>;
+  /** `countActiveTasks` for many agents in one statement. Agents with no active task are absent. */
+  countActiveTasksByAgent(agentIds: readonly string[]): Promise<Map<string, number>>;
   /**
    * Locks the agent row for the rest of the transaction (Postgres `FOR UPDATE`).
    * Serializes the transactions that hold it for one agent. True when the row exists.
@@ -477,6 +479,20 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
       WHERE ("agentId" = ${agentId} AND status = 'in_progress')
          OR ("offeredTo" = ${agentId} AND status = 'reviewing')`);
     return Number(row?.count ?? 0);
+  }
+
+  async countActiveTasksByAgent(agentIds: readonly string[]): Promise<Map<string, number>> {
+    if (agentIds.length === 0) return new Map();
+    // A task is either in_progress or reviewing, never both, so UNION ALL counts no row twice.
+    const rows = await this.db.query<{ agent_id: string; count: number | string }>(sql`
+      SELECT agent_id, COUNT(*) AS count FROM (
+        SELECT "agentId" AS agent_id FROM agent_tasks
+         WHERE status = 'in_progress' AND "agentId" IN (${sqlList(agentIds)})
+        UNION ALL
+        SELECT "offeredTo" AS agent_id FROM agent_tasks
+         WHERE status = 'reviewing' AND "offeredTo" IN (${sqlList(agentIds)})
+      ) slots GROUP BY agent_id`);
+    return new Map(rows.map((row) => [row.agent_id, Number(row.count)]));
   }
 
   /** The day of a timestamp column differs per engine (text on SQLite). */

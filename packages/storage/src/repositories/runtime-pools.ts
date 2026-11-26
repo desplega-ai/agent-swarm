@@ -476,6 +476,8 @@ export interface RuntimePoolsRepository {
   pruneStaleRuntimes(cutoff: string): Promise<number>;
   /** Rows of the pool, ordered by created_at, then insertion order. */
   listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]>;
+  /** Rows of every listed pool in one statement, ordered like `listRuntimesForPool`. */
+  listRuntimesForPools(poolIds: readonly string[]): Promise<RuntimeInstanceRow[]>;
 
   // --- remote controller connection (src/http/controllers-connect.ts) ---
   /** Stores the connection error; an `online` controller stays online, any other goes offline. */
@@ -1231,6 +1233,8 @@ export abstract class BaseRuntimePoolsRepository implements RuntimePoolsReposito
 
   /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
   abstract listRuntimesForPool(poolId: string): Promise<RuntimeInstanceRow[]>;
+  /** Insertion-order tiebreak differs per engine (SQLite `rowid`). */
+  abstract listRuntimesForPools(poolIds: readonly string[]): Promise<RuntimeInstanceRow[]>;
 
   // --- remote controller connection ---
 

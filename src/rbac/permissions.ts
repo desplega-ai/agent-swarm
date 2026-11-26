@@ -77,6 +77,11 @@ export const PERMISSIONS = {
     description: "Create a task the caller owns.",
     namespace: "task",
   },
+  "task.slack.thread.bind": {
+    description:
+      "Create a task bound to a Slack thread over HTTP: its agent posts progress and outcome in that thread.",
+    namespace: "task",
+  },
   "task.requester.assign": {
     description:
       "Attribute a new task to a user other than the requester of the caller's own current task.",
