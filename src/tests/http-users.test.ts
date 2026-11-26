@@ -12,7 +12,7 @@
  * deterministic.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -166,6 +166,34 @@ describe("GET /api/users", () => {
     expect(row.tokens).toEqual([]);
     const events = row.recentEvents as Array<{ eventType: string }>;
     expect(events.map((e) => e.eventType)).toContain("identity_added");
+
+    // The list reads a fixed number of statements, not four more per user.
+    const client = getDbClient();
+    const statements = async () => {
+      const spies = [spyOn(client, "query"), spyOn(client, "get"), spyOn(client, "run")];
+      try {
+        const response = await authedFetch("/api/users");
+        expect(response.status).toBe(200);
+        const users = ((await response.json()) as { users: Array<{ id: string }> }).users;
+        return { users, count: spies.reduce((n, spy) => n + spy.mock.calls.length, 0) };
+      } finally {
+        for (const spy of spies) spy.mockRestore();
+      }
+    };
+    const one = await statements();
+    for (const name of ["Second", "Third"]) {
+      const other = await createUser({ name });
+      await linkIdentity(other.id, "slack", `U_${name}`, { kind: "operator", id: OPERATOR_FP });
+    }
+    const three = await statements();
+    expect(one.users.length).toBe(1);
+    expect(three.users.length).toBe(3);
+    expect(three.count).toBe(one.count);
+    // Each listed row equals the single-user composition.
+    for (const listed of three.users) {
+      const single = await authedFetch(`/api/users/${listed.id}?recentEvents=5`);
+      expect(listed).toEqual(((await single.json()) as { user: unknown }).user);
+    }
   });
 
   test("recentEvents=0 returns no events, on the list and on a single user", async () => {

@@ -92,6 +92,7 @@ import {
   revokeAllUserCredentials,
   revokeToken,
   unlinkIdentity,
+  withUserListDetails,
 } from "../be/users";
 import { isRbacEnabled } from "../rbac";
 import {
@@ -1102,8 +1103,8 @@ export async function handleUsers(
     const parsed = await listUsers.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const recentLimit = parsed.query.recentEvents ?? 5;
-    const allUsers = await getAllUsers();
-    const users = await Promise.all(allUsers.map((u) => composeUser(u.id, recentLimit)));
+    // composeUser's shape from the listed rows plus three batched reads, not four per user.
+    const users = await withUserListDetails(await getAllUsers(), recentLimit);
     listUsers.respond(res, 200, { users });
     return true;
   }

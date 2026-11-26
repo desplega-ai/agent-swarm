@@ -4,6 +4,7 @@ import {
   type IdentityEventRow,
   SqlQuery,
   sql,
+  sqlList,
   type UserFavoriteRow,
   type UserMergeJobRow,
   type UserReferenceColumn,
@@ -85,6 +86,24 @@ export class SqliteUsersRepository extends BaseUsersRepository {
       LIMIT ${opts.limit}`);
   }
 
+  async listRecentIdentityEventsForUsers(
+    userIds: readonly string[],
+    limitPerUser: number,
+  ): Promise<IdentityEventRow[]> {
+    if (userIds.length === 0 || limitPerUser <= 0) return [];
+    return this.db.query<IdentityEventRow>(sql`
+      SELECT id, "userId", "eventType", actor, "beforeJson", "afterJson", "createdAt"
+      FROM (
+        SELECT *, ROW_NUMBER() OVER (
+          PARTITION BY "userId" ORDER BY "createdAt" DESC, rowid DESC
+        ) AS rn
+        FROM user_identity_events
+        WHERE "userId" IN (${sqlList(userIds)})
+      ) ranked
+      WHERE rn <= ${limitPerUser}
+      ORDER BY "userId", rn`);
+  }
+
   // ---- user_tokens ----
 
   listUserTokens(userId: string): Promise<UserTokenSummaryRow[]> {
@@ -93,6 +112,15 @@ export class SqliteUsersRepository extends BaseUsersRepository {
       FROM user_tokens
       WHERE "userId" = ${userId} AND "expiresAt" IS NULL
       ORDER BY "createdAt" DESC, rowid`);
+  }
+
+  async listUserTokensForUsers(userIds: readonly string[]): Promise<UserTokenSummaryRow[]> {
+    if (userIds.length === 0) return [];
+    return this.db.query<UserTokenSummaryRow>(sql`
+      SELECT id, "userId", label, "tokenPreview", "createdAt", "lastUsedAt", "revokedAt"
+      FROM user_tokens
+      WHERE "userId" IN (${sqlList(userIds)}) AND "expiresAt" IS NULL
+      ORDER BY "userId", "createdAt" DESC, rowid`);
   }
 
   listUnrevokedUserTokens(

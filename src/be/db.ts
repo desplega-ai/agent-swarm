@@ -45,7 +45,6 @@ import type {
   SkillFileRow,
   SkillRow,
   SkillWithInstallRow,
-  SlackMessageRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
@@ -289,6 +288,7 @@ import {
   sessionPageFields,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
+import { rowToSlackMessage } from "./db/slack-messages";
 import { taskAttachmentWrite } from "./db/tasks/attachment-write";
 import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
@@ -356,6 +356,7 @@ export {
   ExtensionAgentAssignmentError,
   extensionAgentAssignmentError,
   getActiveTaskCount,
+  getActiveTaskCounts,
   getAgentById,
   getAgentDailyTaskCounts,
   getAgentHarnessProviders,
@@ -708,30 +709,6 @@ export function isPendingSlackMessage(record: SlackMessageRecord): boolean {
 /** True when the renderer must not touch this card again: delivered, or given up on. */
 export function isSettledSlackMessage(record: SlackMessageRecord): boolean {
   return !!record.finalizedAt || !!record.deliveryAbandonedAt;
-}
-
-function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
-  return {
-    id: row.id,
-    contextKey: row.context_key,
-    channelId: row.channel_id,
-    threadTs: row.thread_ts,
-    ts: row.ts,
-    kind: row.kind as SlackMessageKind,
-    taskId: row.task_id ?? undefined,
-    permalink: row.permalink ?? undefined,
-    finalizedAt: row.finalized_at ?? undefined,
-    streamChunksAppended: row.stream_chunks_appended,
-    conclusionKind: (row.conclusion_kind as SlackConclusionKind | null) ?? undefined,
-    deferralResolvedAt: row.deferral_resolved_at ?? undefined,
-    deferralAbandonedAt: row.deferral_abandoned_at ?? undefined,
-    deliveryAttempts: row.delivery_attempts,
-    deliveryAbandonedAt: row.delivery_abandoned_at ?? undefined,
-    deliveryLastError: row.delivery_last_error ?? undefined,
-    closedAt: row.closed_at ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 export async function recordSlackMessage(input: {

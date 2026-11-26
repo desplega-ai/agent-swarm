@@ -52,6 +52,11 @@ export type SwarmConfigPayload = {
      */
     auditSourceTaskId?: { value: string; isSecret: false };
     /**
+     * Base of the per-call idempotency keys of a run started with an
+     * `idempotencyKey`; derived by the api from that key, never script input.
+     */
+    toolCallKeyPrefix?: { value: string; isSecret: false };
+    /**
      * Per-process secret set only by the in-process extension `ctx.swarm` SDK. The
      * bridge requires it to grant the `extension` call origin. Never sent to scripts.
      */

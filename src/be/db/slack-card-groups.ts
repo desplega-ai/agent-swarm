@@ -76,13 +76,23 @@ export async function getLatestSlackOutcomeGroupHost(
 export async function getSlackOutcomeGroupOf(
   messageId: string,
 ): Promise<SlackOutcomeGroupHost | null> {
+  const host = await getSlackOutcomeCardOf(messageId);
+  return host && host.mergedTaskIds.length > 0 ? host : null;
+}
+
+/**
+ * The delivered card that shows outcome row `messageId`: its host when the
+ * row was merged, else the row itself. Null when that card is not a
+ * delivered, unmerged card (pending, abandoned, or an unknown row).
+ */
+export async function getSlackOutcomeCardOf(
+  messageId: string,
+): Promise<SlackOutcomeGroupHost | null> {
   const own = await getStorage().repos.slack.findMergedIntoId(messageId);
   if (!own) return null;
   const hostId = own.merged_into_id ?? messageId;
   const row: HostRow | null = await getStorage().repos.slack.findOutcomeHost(hostId);
-  if (!row) return null;
-  const host = await toHost(row);
-  return host.mergedTaskIds.length > 0 ? host : null;
+  return row ? await toHost(row) : null;
 }
 
 /**

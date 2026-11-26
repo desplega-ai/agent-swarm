@@ -115,6 +115,20 @@ export function kvContract(engine: ContractEngine): void {
       expect(await repo.deleteEntry("ns", "k")).toBe(0);
     });
 
+    test("compare-and-set: replace and delete only while the value matches, expired or not", async () => {
+      await repo.upsertEntry(entry("ns", "cas", { value: '"a"', expires_at: 5 }));
+      const next = entry("ns", "cas", { value: '"b"', expires_at: 50, updated_at: 9 });
+      expect(await repo.replaceEntryIfValue(next, '"x"')).toBe(0);
+      expect(await repo.replaceEntryIfValue(next, '"a"')).toBe(1);
+      expect(await repo.findEntry("ns", "cas")).toEqual(
+        entry("ns", "cas", { value: '"b"', expires_at: 50, updated_at: 9 }),
+      );
+      expect(await repo.replaceEntryIfValue(entry("ns", "none"), '"a"')).toBe(0);
+      expect(await repo.deleteEntryIfValue("ns", "cas", '"a"')).toBe(0);
+      expect(await repo.deleteEntryIfValue("ns", "cas", '"b"')).toBe(1);
+      expect(await repo.findEntry("ns", "cas")).toBeNull();
+    });
+
     test("batch upsert: keeps created_at, last duplicate wins, spans several statements", async () => {
       await repo.upsertEntry(entry("ns", "old", { expires_at: 5 }));
       await repo.upsertEntries([]);
