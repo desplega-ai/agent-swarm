@@ -1,3 +1,5 @@
+import { swarmToolHttpError } from "./swarm-tool-error";
+
 /** SQL dialect of the swarm database, the storage engine's `dbQueryDialect` capability. */
 export type ScriptDbDialect = "sqlite" | "postgres";
 
@@ -36,7 +38,12 @@ export function dbQueryRows(result: unknown): ScriptDbRow[] {
   if (envelope.success !== true) {
     const reason =
       data && typeof data === "object" && "error" in data ? String(data.error) : "api failed";
-    throw new Error(`ctx.db.query failed with ${String(envelope.status)}: ${reason}`);
+    const status = typeof envelope.status === "number" ? envelope.status : 0;
+    throw swarmToolHttpError(
+      "db_query",
+      status,
+      `ctx.db.query failed with ${String(envelope.status)}: ${reason}`,
+    );
   }
   if (!data || !Array.isArray(data.rows))
     throw new Error("ctx.db.query: db_query returned no rows");

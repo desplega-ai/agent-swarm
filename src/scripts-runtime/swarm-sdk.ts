@@ -9,10 +9,19 @@ import {
   SDK_NAMESPACES,
   type SdkNamespaceRegistry,
   sdkMethodForNamespace,
+  unavailableSdkToolError,
   unwrapToolPayload,
 } from "./sdk-allowlist";
 import { backoffMs, retryAfterMs } from "./stdlib/retry";
 import type { SwarmConfig } from "./swarm-config";
+import { SwarmToolError, swarmToolHttpError, toSwarmToolError } from "./swarm-tool-error";
+
+export {
+  SWARM_TOOL_ERROR_CODES,
+  SwarmToolError,
+  type SwarmToolErrorCode,
+  type SwarmToolErrorInit,
+} from "./swarm-tool-error";
 
 export const DurableObject = new Function(`${DURABLE_OBJECT_BASE_JS}; return DurableObject;`)();
 
@@ -636,14 +645,40 @@ async function bridgeFetch(
   }
 }
 
+type BridgeCallOptions = { throwOnError?: boolean; preserveData?: boolean; signal?: AbortSignal };
+
+/** A bridge call whose every failure reaches the script as a SwarmToolError. */
 async function callBridgeApi(
   name: string,
   args: unknown,
   config: SwarmConfig,
-  options: { throwOnError?: boolean; preserveData?: boolean; signal?: AbortSignal } = {},
+  options: BridgeCallOptions = {},
+): Promise<unknown> {
+  let request: BridgeRequest | null;
+  try {
+    request = bridgeRequestFor(name, args);
+  } catch (error) {
+    // bridgeRequestFor only throws on a missing or malformed argument.
+    throw new SwarmToolError(error instanceof Error ? error.message : String(error), {
+      code: "invalid_args",
+      tool: name,
+    });
+  }
+  try {
+    return await sendBridgeRequest(name, args, request, config, options);
+  } catch (error) {
+    throw toSwarmToolError(name, error);
+  }
+}
+
+async function sendBridgeRequest(
+  name: string,
+  args: unknown,
+  request: BridgeRequest | null,
+  config: SwarmConfig,
+  options: BridgeCallOptions,
 ): Promise<unknown> {
   const baseUrl = Redacted.value(config.sdkBaseUrl).replace(/\/$/, "");
-  const request = bridgeRequestFor(name, args);
 
   // Tools without a specific REST route go through the generic MCP bridge
   if (!request) {
@@ -664,7 +699,11 @@ async function callBridgeApi(
         data && typeof data === "object" && "error" in data
           ? String((data as { error: unknown }).error)
           : `api failed with ${res.status}`;
-      throw new Error(`swarm-sdk: ${name} failed with ${res.status}: ${message}`);
+      throw swarmToolHttpError(
+        name,
+        res.status,
+        `swarm-sdk: ${name} failed with ${res.status}: ${message}`,
+      );
     }
     // The bridge answers 200 with the tool's structuredContent, whose registrar
     // envelope always carries `success: ok` (data cannot override it). A tool
@@ -702,7 +741,11 @@ async function callBridgeApi(
       data && typeof data === "object" && "error" in data
         ? String((data as { error: unknown }).error)
         : `api failed with ${res.status}`;
-    throw new Error(`swarm-sdk: ${name} failed with ${res.status}: ${message}`);
+    throw swarmToolHttpError(
+      name,
+      res.status,
+      `swarm-sdk: ${name} failed with ${res.status}: ${message}`,
+    );
   }
   const result = { success: res.ok, status: res.status, data };
   return options.preserveData ? result : scrubObject(result);
@@ -714,11 +757,7 @@ async function callTool(
   config: SwarmConfig,
   signal: AbortSignal | undefined,
 ): Promise<unknown> {
-  if (!isSdkToolAllowed(name)) {
-    throw new Error(
-      `Tool '${name}' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent`,
-    );
-  }
+  if (!isSdkToolAllowed(name)) throw unavailableSdkToolError(name);
 
   if (name === "script_search" || name === "script_run") {
     return callBridgeApi(name, args, config, { throwOnError: true, signal });
@@ -736,7 +775,11 @@ async function callTool(
         result.data && typeof result.data === "object" && "error" in result.data
           ? String((result.data as { error: unknown }).error)
           : "api failed";
-      throw new Error(`swarm-sdk: ${name} failed with ${result.status}: ${message}`);
+      throw swarmToolHttpError(
+        name,
+        result.status,
+        `swarm-sdk: ${name} failed with ${result.status}: ${message}`,
+      );
     }
     return result.data;
   }
@@ -795,7 +838,8 @@ export function createNamespaceClients(
   assertNamespaces(registry);
   const call = (ns: string, method: string) => async (args?: unknown) => {
     const label = `ctx.${ns}.${method}`;
-    const result = (await callTool(sdkMethodForNamespace(ns, method), args, config, signal)) as {
+    const tool = sdkMethodForNamespace(ns, method);
+    const result = (await callTool(tool, args, config, signal)) as {
       success: boolean;
       status: number;
       data: unknown;
@@ -805,9 +849,13 @@ export function createNamespaceClients(
     if (!result.success && data?.success !== false) {
       const reason =
         data && typeof data === "object" && "error" in data ? String(data.error) : "api failed";
-      throw new Error(`${label} failed with ${result.status}: ${reason}`);
+      throw swarmToolHttpError(
+        tool,
+        result.status,
+        `${label} failed with ${result.status}: ${reason}`,
+      );
     }
-    return unwrapToolPayload(label, result.data);
+    return unwrapToolPayload(label, result.data, tool);
   };
   return Object.freeze(
     Object.fromEntries(

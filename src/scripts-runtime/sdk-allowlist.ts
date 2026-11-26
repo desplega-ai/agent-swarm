@@ -1,3 +1,6 @@
+import { ALL_TOOLS } from "../tools/tool-config";
+import { SwarmToolError } from "./swarm-tool-error";
+
 export const SDK_TOOL_NAME_MAP = {
   // ── memory ──
   memory_search: "memory-search",
@@ -265,6 +268,101 @@ export function mcpToolNameForSdkMethod(name: string): string {
   return SDK_TOOL_NAME_MAP[name as keyof typeof SDK_TOOL_NAME_MAP] ?? name;
 }
 
+const normalizeToolName = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+type ToolNameIndex = {
+  /** Each callable SDK method with its normalized spellings: method, MCP tool name, method suffix. */
+  methods: Array<{ method: string; forms: string[] }>;
+  /** Normalized MCP tool names that are deliberately not exposed to scripts. */
+  excluded: ReadonlySet<string>;
+};
+
+let toolNameIndex: ToolNameIndex | undefined;
+
+function getToolNameIndex(): ToolNameIndex {
+  if (toolNameIndex) return toolNameIndex;
+  const methods = [...SDK_ALLOWLIST, ...REST_ONLY_SDK_METHODS].map((method: string) => {
+    const suffix = method.slice(method.indexOf("_") + 1);
+    const forms = new Set([method, mcpToolNameForSdkMethod(method), suffix].map(normalizeToolName));
+    return { method, forms: [...forms] };
+  });
+  // Every MCP tool is either in SDK_TOOL_NAME_MAP or excluded on purpose
+  // (scripts/check-sdk-tool-registration.ts), so the rest of ALL_TOOLS is the exclusion list.
+  const excluded = new Set(
+    [...ALL_TOOLS].filter((tool) => !MCP_TOOL_NAMES.has(tool)).map(normalizeToolName),
+  );
+  toolNameIndex = { methods, excluded };
+  return toolNameIndex;
+}
+
+/** Optimal string alignment distance: edits, with an adjacent swap counted as one. */
+function editDistance(a: string, b: string): number {
+  const rows = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+  );
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const row = rows[i] as number[];
+      const prev = rows[i - 1] as number[];
+      let best = Math.min(
+        (prev[j] as number) + 1,
+        (row[j - 1] as number) + 1,
+        (prev[j - 1] as number) + cost,
+      );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        best = Math.min(best, ((rows[i - 2] as number[])[j - 2] as number) + 1);
+      }
+      row[j] = best;
+    }
+  }
+  return (rows[a.length] as number[])[b.length] as number;
+}
+
+const MAX_SUGGESTIONS = 3;
+
+/** Up to three exposed SDK methods whose name is closest to `name` (case, `-` and `_` ignored). */
+export function suggestSdkTools(name: string): string[] {
+  const wanted = normalizeToolName(name);
+  if (!wanted) return [];
+  const limit = Math.max(1, Math.min(3, Math.floor(wanted.length / 3)));
+  const ranked = getToolNameIndex()
+    .methods.map(({ method, forms }) => ({
+      method,
+      distance: Math.min(...forms.map((form) => editDistance(wanted, form))),
+    }))
+    .filter(({ distance }) => distance <= limit)
+    .sort((a, b) => a.distance - b.distance || a.method.localeCompare(b.method));
+  // A respelling (`db-query`, `dbQuery`) names its method alone.
+  const exact = ranked.filter(({ distance }) => distance === 0);
+  return (exact.length > 0 ? exact : ranked).slice(0, MAX_SUGGESTIONS).map(({ method }) => method);
+}
+
+/**
+ * The error for a `ctx.swarm.<name>` call that is not an SDK method: `not_exposed`
+ * for a tool kept from scripts on purpose (lifecycle, credentials), else
+ * `unknown_tool` with the closest method names. A different spelling of an
+ * exposed method (`db-query`, `dbQuery`) is `unknown_tool` and suggests it.
+ */
+export function unavailableSdkToolError(name: string): SwarmToolError {
+  if (getToolNameIndex().excluded.has(normalizeToolName(name))) {
+    return new SwarmToolError(
+      `Tool '${name}' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent`,
+      { code: "not_exposed", tool: name },
+    );
+  }
+  const suggestions = suggestSdkTools(name);
+  const hint =
+    suggestions.length > 0
+      ? `Did you mean ${suggestions.map((method) => `ctx.swarm.${method}`).join(", ")}?`
+      : "No exposed tool has a similar name.";
+  return new SwarmToolError(`Tool '${name}' is not exposed to scripts (unknown tool). ${hint}`, {
+    code: "unknown_tool",
+    tool: name,
+    suggestions,
+  });
+}
+
 /** `{ ns: methods }`: `ctx.<ns>.<m>(args)` calls SDK method `<ns>_<m>` and returns its unwrapped result. */
 export type SdkNamespaceRegistry = Readonly<Record<string, readonly string[]>>;
 
@@ -334,12 +432,12 @@ export function assertNamespaces(registry: SdkNamespaceRegistry): void {
 }
 
 /** A tool's structured payload as a namespace returns it: throws on a refusal, else drops `success`. */
-export function unwrapToolPayload(label: string, payload: unknown): unknown {
+export function unwrapToolPayload(label: string, payload: unknown, tool = label): unknown {
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return payload;
   const { success, ...rest } = payload as Record<string, unknown>;
   if (success === false) {
     const reason = typeof rest.message === "string" ? rest.message : "tool refused the call";
-    throw new Error(`${label} failed: ${reason}`);
+    throw new SwarmToolError(`${label} failed: ${reason}`, { code: "refused", tool });
   }
   return rest;
 }

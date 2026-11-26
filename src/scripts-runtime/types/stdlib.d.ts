@@ -1339,6 +1339,55 @@ declare module "swarm-sdk" {
     | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
     | null;
 
+  export type SwarmToolErrorCode =
+    | "unknown_tool"
+    | "not_exposed"
+    | "invalid_args"
+    | "permission"
+    | "not_found"
+    | "rate_limited"
+    | "timeout"
+    | "refused"
+    | "upstream";
+
+  /**
+   * What a failed `ctx.swarm.*`, `ctx.<namespace>.*` or `ctx.db.query` call throws.
+   * Branch on `code` instead of matching the message:
+   * `unknown_tool` (no such method; `suggestions` names the closest ones),
+   * `not_exposed` (a lifecycle or credential tool kept from scripts),
+   * `invalid_args`, `permission`, `not_found`, `rate_limited`, `timeout`,
+   * `refused` (the tool declined the call) and `upstream` (any other failure).
+   * Calls that return `{ success, status, data }` still return a failed status instead of throwing.
+   *
+   * @example
+   * import { SwarmToolError } from "swarm-sdk";
+   * try { await ctx.swarm.kv_getOrNull({ key }); }
+   * catch (err) { if (SwarmToolError.is(err) && err.code === "rate_limited") { ... } }
+   */
+  export class SwarmToolError extends Error {
+    constructor(
+      message: string,
+      init: {
+        code: SwarmToolErrorCode;
+        tool: string;
+        status?: number;
+        suggestions?: string[];
+        cause?: unknown;
+      },
+    );
+    readonly name: "SwarmToolError";
+    readonly code: SwarmToolErrorCode;
+    /** The SDK method called, e.g. `kv_get`. */
+    readonly tool: string;
+    /** HTTP status of the failed call, when there was one. */
+    readonly status?: number;
+    readonly suggestions?: string[];
+    /** True for a SwarmToolError; also works on one rebuilt across the sandbox boundary. */
+    static is(value: unknown): value is SwarmToolError;
+  }
+
+  export const SWARM_TOOL_ERROR_CODES: readonly SwarmToolErrorCode[];
+
   export abstract class DurableObject<S> {
     constructor(id: string);
     readonly id: string;
