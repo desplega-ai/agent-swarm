@@ -4020,6 +4020,16 @@ export interface PageFeedbackResult {
  * one exposes `agentId` (the listing is bearer-gated, so the creator is
  * visible) — used by the SPA's `/pages` page for the "My pages only" toggle.
  */
+/** `GET /api/link-preview`: `ok: false` when the page could not be read. */
+export interface LinkPreview {
+  url: string;
+  ok: boolean;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  siteName: string | null;
+}
+
 export interface PageListItem {
   id: string;
   key: string;

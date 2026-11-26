@@ -206,6 +206,29 @@ function CardPreview({
   );
 }
 
+/**
+ * A task's header and details from its id alone, for a hover card on a task
+ * link. It reads the task (`GET /api/tasks/:id`) once, when the card opens.
+ */
+export function TaskSummaryCard({ taskId }: { taskId: string }) {
+  const { data: task, isLoading } = useTask(taskId, { refetchInterval: false });
+  if (task) return <CardBody task={task} />;
+  return (
+    <div className="space-y-2 px-4 py-3">
+      {isLoading ? (
+        <>
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-3 w-1/3" />
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Task <span className="font-mono">#{shortId(taskId)}</span> is not available.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** The header and the detail rows: everything here comes from the list row. */
 function CardBody({
   task,

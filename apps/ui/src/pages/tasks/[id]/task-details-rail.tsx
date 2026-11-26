@@ -31,7 +31,7 @@ import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { progressBarTone } from "@/lib/percent-progress-tone";
-import { githubOrigin } from "@/lib/swarm-links";
+import { githubOrigin, withoutLinkedUrls } from "@/lib/swarm-links";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { taskDisplayEffort } from "@/lib/task-model-resolution";
 import { cn, formatElapsed, formatSmartTime, parseUTCDate } from "@/lib/utils";
@@ -531,7 +531,7 @@ export function TaskDetailsRail({
       ? latestSnapshot.contextFormula
       : null;
   const harness = harnessLine(task);
-  const fileCount = task.attachments?.length ?? 0;
+  const fileCount = withoutLinkedUrls(task.attachments ?? [], task.output).length;
 
   return (
     <div
@@ -652,7 +652,7 @@ export function TaskDetailsRail({
         <RailSection
           title={
             <>
-              Files
+              Attachments
               <span className="font-mono tabular-nums">{fileCount}</span>
             </>
           }
@@ -661,6 +661,7 @@ export function TaskDetailsRail({
             taskId={task.id}
             attachments={task.attachments}
             variant="plain"
+            linkedText={task.output}
             className="-mx-2"
           />
         </RailSection>

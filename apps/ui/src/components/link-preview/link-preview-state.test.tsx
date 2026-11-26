@@ -70,6 +70,13 @@ mock.module("@/components/ui/tooltip", () => ({
   TooltipTrigger: ({ children }: { children: ReactNode }) => children,
   TooltipContent: () => null,
 }));
+mock.module("@/components/ui/hover-card", () => ({
+  HoverCard: ({ children }: { children: ReactNode }) => children,
+  HoverCardTrigger: ({ children }: { children: ReactNode }) => children,
+  HoverCardContent: () => null,
+}));
+mock.module("../shared/link-hover-card", () => ({ LinkHoverBody: () => null }));
+mock.module("../shared/brand-logo", () => ({ BrandLogo: () => null }));
 
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { createRoot } = await import("react-dom/client");
