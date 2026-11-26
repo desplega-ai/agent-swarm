@@ -1,3 +1,4 @@
+import { runCli } from "../cli";
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { minimalEnv, repoRoot, reservedPort } from "../sut";
@@ -51,7 +52,9 @@ async function uiDev(
 /**
  * `bun run ui:dev` (scripts/ui-dev): a dashboard dev server pre-connected to an API as a fixed
  * user. The browser render runs in packages/ui-e2e/specs/ui-dev.spec.ts; this checks the
- * ready line, the same-origin proxy, the slug lookup, usage errors and teardown.
+ * ready line, the same-origin proxy, the slug lookup, usage errors and teardown. Then
+ * `agent-swarm ui-dev` (no checkout) against a stand-in dashboard host: the injected
+ * connection, the key kept off the UI host, the same proxy, and the old-dashboard refusal.
  */
 export const uiDevRemote: Scenario = {
   name: "ui-dev-remote",
@@ -189,6 +192,116 @@ export const uiDevRemote: Scenario = {
         const run = await uiDev(args, env);
         expect(run.code === 2, `ui:dev ${args.join(" ")}: exit ${run.code}`);
         expect(run.stderr.includes(message), `ui:dev ${args.join(" ")}: ${run.stderr}`);
+      }
+
+      // `agent-swarm ui-dev`: the dashboard bundle comes from APP_URL, a stand-in host here.
+      const uiHeaders: (string | null)[] = [];
+      const shellHtml = (marker: boolean) =>
+        `<!doctype html><html><head>${marker ? '<meta name="agent-swarm-ui-runtime-config" content="1" />' : ""}<script async src="https://plausible.io/js/pa-x.js"></script><script type="module" src="/assets/index.js"></script></head><body><div id="root"></div></body></html>`;
+      const uiHost = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(req) {
+          uiHeaders.push(req.headers.get("authorization") ?? req.headers.get("cookie"));
+          const path = new URL(req.url).pathname;
+          if (path.startsWith("/assets/")) {
+            return new Response("export {};", { headers: { "content-type": "text/javascript" } });
+          }
+          return new Response(shellHtml(!path.startsWith("/old")), {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        },
+      });
+      try {
+        const cliPort = await reservedPort();
+        const cliEnv = { ...env, APP_URL: `http://127.0.0.1:${uiHost.port}` };
+        const cliRun = await runCli(
+          [
+            "ui-dev",
+            "--app",
+            appId,
+            "--api-url",
+            ctx.baseUrl,
+            "--port",
+            String(cliPort),
+            "--as-email",
+            email,
+            "--json",
+          ],
+          {
+            env: cliEnv,
+            timeoutMs: 60_000,
+            whileRunning: async ({ stdout }) => {
+              const deadline = Date.now() + 30_000;
+              while (!stdout().includes("\n") && Date.now() < deadline) await Bun.sleep(100);
+              const ready = asRecord(JSON.parse(stdout().trim()));
+              const url = new URL(asString(ready.url, "cli ready url"));
+              expect(
+                url.origin === `http://127.0.0.1:${cliPort}`,
+                `cli ready origin: ${url.origin}`,
+              );
+              expect(url.pathname === `/apps/${appId}`, `cli ready path: ${url.pathname}`);
+              expect(ready.userId === userId, `cli ready userId ${String(ready.userId)}`);
+              expect(
+                !JSON.stringify(ready).includes(ctx.apiKey),
+                "the cli ready line carries the key",
+              );
+
+              const shell = await (await fetch(url)).text();
+              expect(shell.includes('id="root"'), "cli dashboard shell HTML");
+              expect(
+                shell.includes("window.__AGENT_SWARM_UI_CONFIG__="),
+                "cli injects the connection",
+              );
+              expect(
+                shell.includes(userId) && shell.includes('"VITE_AGENT_PREVIEW":"1"'),
+                "cli config user and preview",
+              );
+              expect(
+                shell.includes(`"VITE_API_URL":"${url.origin}"`),
+                "cli config API is its own origin",
+              );
+              expect(!shell.includes("plausible"), "cli strips Plausible");
+
+              const asset = await fetch(`${url.origin}/assets/index.js`, {
+                headers: { Authorization: `Bearer ${ctx.apiKey}`, Cookie: "page_session_x=1" },
+              });
+              expect(asset.status === 200, `cli asset HTTP ${asset.status}`);
+              expect(
+                uiHeaders.every((h) => h === null),
+                "the key or cookie reached the UI host",
+              );
+
+              const health = await fetch(`${url.origin}/health`);
+              expect(health.status === 200, `cli proxied /health HTTP ${health.status}`);
+              const body = await fetch(`${url.origin}/p/${pageId}`);
+              expect((await body.text()).includes(marker), "cli proxied page body");
+            },
+          },
+        );
+        expect(
+          cliRun.exitCode === 0,
+          `ui-dev exit ${cliRun.exitCode}: ${cliRun.stderr.slice(-800)}`,
+        );
+
+        const old = await runCli(
+          [
+            "ui-dev",
+            "--app",
+            appId,
+            "--api-url",
+            ctx.baseUrl,
+            "--port",
+            String(await reservedPort()),
+          ],
+          {
+            env: { ...cliEnv, APP_URL: `http://127.0.0.1:${uiHost.port}/old` },
+          },
+        );
+        expect(old.exitCode === 2, `ui-dev on an old dashboard: exit ${old.exitCode}`);
+        expect(old.stderr.includes("predates ui-dev"), `ui-dev old dashboard: ${old.stderr}`);
+      } finally {
+        await uiHost.stop(true);
       }
     } finally {
       await ctx.api("DELETE", `/api/apps/${appId}`);

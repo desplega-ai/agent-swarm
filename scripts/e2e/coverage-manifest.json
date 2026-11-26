@@ -911,7 +911,7 @@
       ]
     },
     "ui-dev-tooling": {
-      "description": "`bun run ui:dev` against a running swarm as a black box: ready line, same-origin proxy, slug lookup, usage errors and teardown",
+      "description": "`bun run ui:dev` and `agent-swarm ui-dev` against a running swarm as a black box: ready line, same-origin proxy, injected connection, slug lookup, usage errors and teardown",
       "scenarios": ["ui-dev-remote"]
     }
   }
