@@ -645,7 +645,25 @@ async function bridgeFetch(
   }
 }
 
-type BridgeCallOptions = { throwOnError?: boolean; preserveData?: boolean; signal?: AbortSignal };
+type BridgeCallOptions = {
+  throwOnError?: boolean;
+  preserveData?: boolean;
+  signal?: AbortSignal;
+  /** Sent as the MCP bridge's `Idempotency-Key`; see `SwarmCallOptions`. */
+  idempotencyKey?: string;
+};
+
+/** Per-call options: the second argument of `ctx.swarm.<tool>(args, options)`. */
+export type SwarmCallOptions = {
+  /**
+   * Run this write at most once per key: a later call of the same tool with the
+   * same key returns the first call's result. Scoped to the calling agent.
+   */
+  idempotencyKey?: string;
+};
+
+/** Mirrors the server's `IDEMPOTENCY_KEY_PATTERN` (src/http/idempotency-key.ts). */
+const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7E]{1,255}$/;
 
 /** A bridge call whose every failure reaches the script as a SwarmToolError. */
 async function callBridgeApi(
@@ -663,6 +681,22 @@ async function callBridgeApi(
       code: "invalid_args",
       tool: name,
     });
+  }
+  const { idempotencyKey } = options;
+  if (idempotencyKey !== undefined) {
+    if (typeof idempotencyKey !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+      throw new SwarmToolError(
+        `swarm-sdk: ${name} idempotencyKey must be 1-255 visible ASCII characters`,
+        { code: "invalid_args", tool: name },
+      );
+    }
+    // Only the MCP bridge dedupes by key. A REST-routed method would ignore it silently.
+    if (request) {
+      throw new SwarmToolError(
+        `swarm-sdk: ${name} does not take an idempotencyKey option (it calls ${request.method} ${request.path}, not the tool bridge)`,
+        { code: "invalid_args", tool: name },
+      );
+    }
   }
   try {
     return await sendBridgeRequest(name, args, request, config, options);
@@ -687,10 +721,14 @@ async function sendBridgeRequest(
       `${baseUrl}/api/mcp-bridge`,
       {
         method: "POST",
-        headers: headers(config),
+        headers: {
+          ...headers(config),
+          ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
+        },
         body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
       },
-      bridgeSafety(isReadOnlyBridgeCall(name, "POST"), false),
+      // A keyed write is safe to repeat: the bridge answers the repeat from its record.
+      bridgeSafety(isReadOnlyBridgeCall(name, "POST"), options.idempotencyKey !== undefined),
       options.signal,
     );
     const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
@@ -756,15 +794,18 @@ async function callTool(
   args: unknown,
   config: SwarmConfig,
   signal: AbortSignal | undefined,
+  callOptions?: SwarmCallOptions,
 ): Promise<unknown> {
   if (!isSdkToolAllowed(name)) throw unavailableSdkToolError(name);
+  const keyed = callOptions?.idempotencyKey !== undefined;
+  const idempotencyKey = keyed ? { idempotencyKey: callOptions?.idempotencyKey } : {};
 
   if (name === "script_search" || name === "script_run") {
-    return callBridgeApi(name, args, config, { throwOnError: true, signal });
+    return callBridgeApi(name, args, config, { throwOnError: true, signal, ...idempotencyKey });
   }
 
   if (name === "kv_getOrNull") {
-    const result = (await callBridgeApi(name, args, config, { signal })) as {
+    const result = (await callBridgeApi(name, args, config, { signal, ...idempotencyKey })) as {
       success: boolean;
       status: number;
       data: unknown;
@@ -784,14 +825,17 @@ async function callTool(
     return result.data;
   }
 
-  return callBridgeApi(name, args, config, { signal });
+  return callBridgeApi(name, args, config, { signal, ...idempotencyKey });
 }
 
 type RoomMethods = Record<
   "get" | "change" | "reset" | "decode",
   (args?: unknown) => Promise<unknown>
 >;
-type RuntimeSwarmSdk = Record<string, (args?: unknown) => Promise<unknown>> & { room: RoomMethods };
+type RuntimeSwarmSdk = Record<
+  string,
+  (args?: unknown, options?: SwarmCallOptions) => Promise<unknown>
+> & { room: RoomMethods };
 
 /** `signal`: the run's abort signal; it stops bridge retries when the run ends. */
 export function createSwarmSdk(
@@ -818,7 +862,8 @@ export function createSwarmSdk(
     get(target, prop) {
       if (typeof prop !== "string") return undefined;
       if (prop in target) return target[prop];
-      return (args?: unknown) => callTool(prop, args, config, signal);
+      return (args?: unknown, options?: SwarmCallOptions) =>
+        callTool(prop, args, config, signal, options);
     },
   }) as RuntimeSwarmSdk;
 }

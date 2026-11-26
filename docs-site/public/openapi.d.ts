@@ -602,6 +602,8 @@ export interface paths {
                 header?: {
                     /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
                     "X-Runtime-Instance-ID"?: string;
+                    /** @description Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. The first successful call of a tool that is not read-only runs it and records its result; a later call with the same key and tool returns that result (with `Idempotent-Replayed: true`) and runs nothing, whatever its args. A call that fails or that the tool refuses records nothing. A second call while the first still runs waits for it, then gets a 409. Read-only tools ignore the key. Records expire after 7 days. Durable script runs send one on every ctx.swarm call. */
+                    "Idempotency-Key"?: string;
                 };
                 path?: never;
                 cookie?: never;
@@ -646,6 +648,15 @@ export interface paths {
                 };
                 /** @description Tool not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A call with the same Idempotency-Key is still running */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };

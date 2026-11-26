@@ -1034,12 +1034,38 @@ export abstract class DurableObject<S> {
   static idleTtlSec?: number;
 }
 
+/**
+ * Second argument of any \`ctx.swarm.<tool>\` call.
+ *
+ * \`idempotencyKey\` runs a write at most once per key: a later call of the same tool with
+ * the same key returns the first call's result and does nothing (args are not compared).
+ * Keys are scoped to the calling agent and kept 7 days. Read-only tools ignore it. Only
+ * tools that go through the MCP bridge take it; a REST-routed method (kv_*, memory_search,
+ * task_get, schedule_*, workflow_*, script_run, ...) throws \`invalid_args\`. Durable runs
+ * (\`launch-script-run\`) key every call from the run id, tool and call ordinal by
+ * themselves, so a respawned run does not repeat its sends; pass a key to override that.
+ */
+export interface SwarmCallOptions {
+  idempotencyKey?: string;
+}
+
+/** Adds the optional \`SwarmCallOptions\` argument to every method of \`T\`. */
+export type WithSwarmCallOptions<T> = {
+  [K in keyof T]: T[K] extends (...args: infer P) => infer R
+    ? (...args: [...P, options?: SwarmCallOptions]) => R
+    : T[K];
+};
+
+/** Generic REST-routed methods: mapping would drop their type parameter, and they take no options. */
+type SwarmSdkGenericMethods = "kv_get" | "kv_getOrNull" | "kv_set" | "kv_list";
+
 export interface ScriptContext {
   /** Frozen caller identity supplied by the host. */
   caller: ScriptCaller;
   run?: ScriptRunContext;
   step?: ScriptWorkflowSteps;
-  swarm: SwarmSdk & { config: SwarmConfig };
+  swarm: WithSwarmCallOptions<Omit<SwarmSdk, SwarmSdkGenericMethods>> &
+    Pick<SwarmSdk, SwarmSdkGenericMethods> & { config: SwarmConfig };
   api: ScriptApiRegistry;
   mcp: ScriptMcpRegistry;
   /** The run's virtual filesystem. Same files as \`ctx.sh\` sees. */

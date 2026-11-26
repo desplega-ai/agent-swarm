@@ -41,6 +41,11 @@ const RESERVED_FAMILIES = new Map([
     "integration:user-enrichment",
     "namespace is reserved for integration profile enrichment; the API writes it from the provider",
   ],
+  // Recorded results of scripts' keyed tool calls (src/be/scripts/tool-call-idempotency.ts). Private.
+  [
+    "tool-call-idempotency",
+    "namespace is reserved for tool call idempotency records; send an Idempotency-Key to /api/mcp-bridge",
+  ],
   // Kapso number routing and inbound dedupe (src/integrations/kapso/config.ts).
   [
     "integrations:kapso",
@@ -54,7 +59,13 @@ const RESERVED_FAMILIES = new Map([
  * source label names a private channel or a DM partner; a buffered Slack
  * reply holds a message from one).
  */
-const PRIVATE_FAMILIES = new Set(["session-labels", "slack-thread-buffer", "slack-feedback"]);
+const PRIVATE_FAMILIES = new Set([
+  "session-labels",
+  "slack-thread-buffer",
+  "slack-feedback",
+  // A recorded tool result can hold what only its caller may read.
+  "tool-call-idempotency",
+]);
 
 /**
  * Private families a Lead agent may still read through generic KV, with the
