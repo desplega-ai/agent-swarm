@@ -250,6 +250,15 @@ export type ScriptConnectionRow = {
   updated_by: string | null;
 };
 
+/**
+ * The columns a script run and a reachability check read. It leaves out the
+ * stored OpenAPI spec and the generated types, the largest columns of a row.
+ */
+export type ScriptConnectionCatalogRow = Pick<
+  ScriptConnectionRow,
+  "slug" | "kind" | "scope" | "scope_id" | "enabled" | "generated_runtime_json"
+>;
+
 /** Every content column of a connection (insert and full update). */
 export type ScriptConnectionWrite = {
   slug: string;
@@ -552,6 +561,8 @@ export interface ScriptsRepository {
   // ---- script_connections ----
   /** Ordered by slug, scope, scope_id (unique by the slug/scope index). */
   listConnections(): Promise<ScriptConnectionRow[]>;
+  /** {@link listConnections} with the catalog columns only, in the same order. */
+  listConnectionCatalog(): Promise<ScriptConnectionCatalogRow[]>;
   findConnectionById(id: string): Promise<ScriptConnectionRow | null>;
   /** NULL and '' scope ids compare equal. */
   findConnectionBySlug(
@@ -1022,6 +1033,12 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
   listConnections(): Promise<ScriptConnectionRow[]> {
     return this.db.query<ScriptConnectionRow>(
       sql`SELECT * FROM script_connections ORDER BY slug ASC, scope ASC, COALESCE(scope_id, '') ASC`,
+    );
+  }
+
+  listConnectionCatalog(): Promise<ScriptConnectionCatalogRow[]> {
+    return this.db.query<ScriptConnectionCatalogRow>(
+      sql`SELECT slug, kind, scope, scope_id, enabled, generated_runtime_json FROM script_connections ORDER BY slug ASC, scope ASC, COALESCE(scope_id, '') ASC`,
     );
   }
 

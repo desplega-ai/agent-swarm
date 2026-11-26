@@ -143,6 +143,19 @@ export function messagingContract(engine: ContractEngine): void {
       expect(await repo.countUnreadChannelMessages("c1", "a1", null)).toBe(2);
       expect(await repo.countUnreadChannelMessages("c1", "a1", T1)).toBe(0);
       expect(await repo.countChannelMentions("c1", "a1", null)).toBe(2);
+      expect(await repo.listUnreadChannelMentions("a1")).toEqual([
+        { channelId: "c1", lastReadAt: null, count: 2 },
+      ]);
+      expect(await repo.listUnreadChannelMentions("a2x")).toEqual([]);
+      await repo.setChannelLastRead("a1", "c1", T0);
+      expect(await repo.listUnreadChannelMentions("a1")).toEqual([
+        { channelId: "c1", lastReadAt: T0, count: 2 },
+      ]);
+      await repo.setChannelLastRead("a1", "c1", T1);
+      expect(await repo.listUnreadChannelMentions("a1")).toEqual([]);
+      await repo.setChannelLastRead("a1", "c1", T0);
+      expect(await repo.claimChannelMentions("a1", "c1", T0, T1)).toBe(1);
+      expect(await repo.listUnreadChannelMentions("a1")).toEqual([]);
       await repo.setChannelMessageContent("m1", "edited");
       expect((await repo.findChannelMessage("m1"))?.content).toBe("edited");
       expect(await repo.deleteChannel("c2")).toBe(1);
