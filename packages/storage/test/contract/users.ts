@@ -224,6 +224,76 @@ export function usersContract(engine: ContractEngine): void {
       ).toEqual(["e2", "e3"]);
     });
 
+    test("batched list reads match the per-user reads, grouped by user", async () => {
+      await repo.insertUser(newUser({ id: "u1" }));
+      await repo.insertUser(newUser({ id: "u2" }));
+      await repo.insertUser(newUser({ id: "u3" }));
+      for (const [userId, kind, externalId] of [
+        ["u2", "slack", "S2"],
+        ["u1", "slack", "S1"],
+        ["u1", "github", "g1"],
+      ] as const) {
+        await repo.insertExternalId(userId, kind, externalId);
+      }
+      // Same createdAt on purpose: the tiebreak must match listIdentityEvents.
+      for (const [id, userId, createdAt] of [
+        ["e1", "u1", T0],
+        ["e2", "u1", T1],
+        ["e3", "u1", T1],
+        ["e4", "u2", T2],
+        ["e5", "u1", T2],
+      ] as const) {
+        await repo.insertIdentityEvent({
+          id,
+          userId,
+          eventType: "email_added",
+          actor: "system:test",
+          beforeJson: null,
+          afterJson: null,
+          createdAt,
+        });
+      }
+      for (const [id, userId, createdAt, expiresAt] of [
+        ["t1", "u1", T0, null],
+        ["t2", "u2", T1, null],
+        ["t3", "u1", T0, null],
+        ["t4", "u1", T1, null],
+        ["run", "u1", T2, "2999-01-01T00:00:00.000Z"],
+      ] as const) {
+        await repo.insertUserToken({
+          id,
+          userId,
+          label: null,
+          tokenHash: `hash-${id}`,
+          tokenPreview: id,
+          createdAt,
+          expiresAt,
+        });
+      }
+      const ids = ["u1", "u2", "u3"];
+      const byUser = <T extends { userId: string }>(rows: T[], userId: string) =>
+        rows.filter((r) => r.userId === userId);
+
+      const externalIds = await repo.listExternalIdsForUsers(ids);
+      const events = await repo.listRecentIdentityEventsForUsers(ids, 2);
+      const tokens = await repo.listUserTokensForUsers(ids);
+      for (const userId of ids) {
+        expect(
+          byUser(externalIds, userId).map(({ kind, externalId }) => ({ kind, externalId })),
+        ).toEqual(await repo.listExternalIds(userId));
+        expect(byUser(events, userId)).toEqual(
+          await repo.listIdentityEvents(userId, { before: null, limit: 2 }),
+        );
+        expect(byUser(tokens, userId)).toEqual(await repo.listUserTokens(userId));
+      }
+      expect(events.map((e) => e.id)).toEqual(["e5", "e3", "e4"]);
+      expect(tokens.map((t) => t.id)).toEqual(["t4", "t1", "t3", "t2"]);
+      expect(await repo.listRecentIdentityEventsForUsers(ids, 0)).toEqual([]);
+      expect(await repo.listExternalIdsForUsers([])).toEqual([]);
+      expect(await repo.listRecentIdentityEventsForUsers([], 5)).toEqual([]);
+      expect(await repo.listUserTokensForUsers([])).toEqual([]);
+    });
+
     test("user tokens: lists, revoke paths and liveness", async () => {
       await repo.insertUser(newUser({ id: "u1" }));
       const token = (id: string, createdAt: string, expiresAt: string | null) =>
