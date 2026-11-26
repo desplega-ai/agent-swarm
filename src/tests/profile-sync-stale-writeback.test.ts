@@ -95,6 +95,7 @@ function bootedWorkspace(profile: Record<string, string>) {
 
 describe("profile sync never writes an untouched file over a DB edit", () => {
   let db: Record<string, string> = {};
+  let sentHashes: Record<string, string> | undefined;
   let server: ReturnType<typeof Bun.serve>;
   let config: SwarmHooksConfig;
 
@@ -105,8 +106,9 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
         if (req.method !== "PUT") return new Response("not found", { status: 404 });
         const body = (await req.json()) as Record<string, string>;
         const expected = (body.expectedHashes ?? {}) as unknown as Record<string, string>;
+        sentHashes = body.expectedHashes as unknown as Record<string, string> | undefined;
         for (const [field, value] of Object.entries(body)) {
-          if (field === "changeSource") continue;
+          if (field === "changeSource" || field === "expectedHashes") continue;
           // As the API does: a field based on an older DB value is dropped.
           if (expected[field] && expected[field] !== contentSha256(db[field] ?? "")) continue;
           db[field] = value;
@@ -232,7 +234,7 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     });
 
     expect(db.claudeMd).toBe(`${boot}\nagent rule\n`);
-    expect(db.expectedHashes).toEqual({ claudeMd: contentSha256(boot) });
+    expect(sentHashes).toEqual({ claudeMd: contentSha256(boot) });
     expect(io.files[CLAUDE_MD_LINEAGE_PATH]).toBe(lineage);
     expect(io.files[IDENTITY_BASELINES_PATH]).toBe(bootBaselines);
   });
