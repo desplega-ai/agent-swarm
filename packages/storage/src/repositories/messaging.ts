@@ -42,6 +42,13 @@ export type ChannelMessageRow = {
 
 export type ChannelReadStateRow = { lastReadAt: string | null; processing_since: string | null };
 
+/** A channel with unread mentions of an agent, and the agent's read mark in it. */
+export type UnreadChannelMentionsRow = {
+  channelId: string;
+  lastReadAt: string | null;
+  count: number;
+};
+
 /** One `inbox_messages` row. */
 export type InboxMessageRow = {
   id: string;
@@ -159,6 +166,12 @@ export interface MessagingRepository {
   ): Promise<number>;
   /** Messages in a channel after `since` that mention the agent. */
   countChannelMentions(channelId: string, agentId: string, since: string | null): Promise<number>;
+  /**
+   * For each channel the agent is not processing, its messages after the
+   * agent's read mark that mention the agent. Only channels with at least one;
+   * in `listChannels` order.
+   */
+  listUnreadChannelMentions(agentId: string): Promise<UnreadChannelMentionsRow[]>;
 
   // ---- channel_read_state ----
   setChannelLastRead(agentId: string, channelId: string, now: string): Promise<void>;
@@ -430,6 +443,21 @@ export abstract class BaseMessagingRepository implements MessagingRepository {
       SELECT COUNT(*) as count FROM channel_messages m
       WHERE m."channelId" = ${channelId} AND ${this.mentions(agentId)}${after}`);
     return row?.count ?? 0;
+  }
+
+  async listUnreadChannelMentions(agentId: string): Promise<UnreadChannelMentionsRow[]> {
+    // One statement for every channel: a poll read each channel's read state
+    // and mention count in turn, two statements for each channel.
+    const rows = await this.db.query<UnreadChannelMentionsRow>(sql`
+      SELECT c.id AS "channelId", s."lastReadAt" AS "lastReadAt", COUNT(*) AS count
+      FROM channels c
+      JOIN channel_messages m ON m."channelId" = c.id
+      LEFT JOIN channel_read_state s ON s."agentId" = ${agentId} AND s."channelId" = c.id
+      WHERE s.processing_since IS NULL AND ${this.mentions(agentId)}
+        AND (s."lastReadAt" IS NULL OR m."createdAt" > s."lastReadAt")
+      GROUP BY c.id, c.name, s."lastReadAt"
+      ORDER BY c.name, c.id`);
+    return rows.map((row) => ({ ...row, count: Number(row.count) }));
   }
 
   // ---- channel_read_state ----

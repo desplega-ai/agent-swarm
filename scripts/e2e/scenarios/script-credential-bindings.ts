@@ -29,10 +29,12 @@ export const scriptCredentialBindings: Scenario = {
     const configKey = `E2E_CRED_${ctx.nonce.toUpperCase()}`;
     const secretValue = `e2e-broker-secret-${ctx.nonce}-4242`;
     const placeholder = `[REDACTED:${configKey}]`;
-    // `/redirect-once` answers a relative 302; `/redirect-loop` answers a fragment-only
-    // Location, which keeps the query, so it loops past the broker's hop cap.
+    // `/loop` answers a 302 back to itself past the broker's hop cap; `/redirect-once`
+    // answers a relative 302; `/redirect-loop` answers a fragment-only Location, which
+    // keeps the query, so it loops past the hop cap too.
     const stub = startStub((request) => {
       const { pathname } = new URL(request.url);
+      if (pathname === "/loop") return redirect(`/loop?access_token=${placeholder}`);
       if (pathname === "/redirect-once") return redirect("/landed");
       if (pathname === "/redirect-loop") return redirect("#again");
       return Response.json({ ok: true });
@@ -193,10 +195,19 @@ export const scriptCredentialBindings: Scenario = {
       const queryBindingId = asString(asRecord(asRecord(queryBinding.json).binding).id, "id");
       bindingIds.push(queryBindingId);
       expect(queryBindingId !== headerId, "a different template is a different binding");
-      await runScript(ctx, workerId, {
+      // The script returns what it can read back reversed, so the run-output scrubber
+      // (exact-string match) cannot hide a substituted value that reached it.
+      const queryRun = await runScript(ctx, workerId, {
         source: `export default async function () {
+  const reverse = (text: string) => text.split("").reverse().join("");
   const response = await fetch("${stub.origin}/query?access_token=${placeholder}");
-  return response.status;
+  let error = "";
+  try {
+    await fetch("${stub.origin}/loop?access_token=${placeholder}");
+  } catch (err) {
+    error = String((err as Error).message);
+  }
+  return { status: response.status, url: reverse(response.url), error: reverse(error) };
 }`,
         intent: `e2e broker query ${ctx.nonce}`,
       });
@@ -204,6 +215,17 @@ export const scriptCredentialBindings: Scenario = {
       expect(
         queryRequest?.path === `/query?access_token=${secretValue}`,
         `the query placeholder must be substituted, got ${queryRequest?.path}`,
+      );
+      const queryResult = asRecord(queryRun.result);
+      const readBack = (field: string) => String(queryResult[field]).split("").reverse().join("");
+      expect(
+        readBack("url") === `${stub.origin}/query?access_token=${placeholder}`,
+        `response.url must keep the placeholder, got ${readBack("url")}`,
+      );
+      expect(
+        readBack("error") ===
+          `fetch exceeded 5 redirects: ${stub.origin}/loop?access_token=${placeholder}`,
+        `the redirect-cap error must report the placeholder URL, got ${readBack("error")}`,
       );
 
       // ── a source that embeds the registered secret is refused ──
@@ -247,15 +269,15 @@ export const scriptCredentialBindings: Scenario = {
         intent: `e2e broker refused ${ctx.nonce}`,
       });
       const refused = asRecord(refusedRun.result);
-      const readBack = (field: string) => String(refused[field]).split("").reverse().join("");
+      const readRefused = (field: string) => String(refused[field]).split("").reverse().join("");
       expect(
-        readBack("path") === refusedHref,
-        `error.path must keep the placeholder, got ${readBack("path")} (${JSON.stringify(refusedRun).slice(0, 300)})`,
+        readRefused("path") === refusedHref,
+        `error.path must keep the placeholder, got ${readRefused("path")} (${JSON.stringify(refusedRun).slice(0, 300)})`,
       );
       expect(
-        !readBack("dump").includes(secretValue) &&
-          !readBack("dump").includes(encodeURIComponent(secretValue)),
-        `the fetch error must not carry the secret, got ${readBack("dump")}`,
+        !readRefused("dump").includes(secretValue) &&
+          !readRefused("dump").includes(encodeURIComponent(secretValue)),
+        `the fetch error must not carry the secret, got ${readRefused("dump")}`,
       );
 
       // ── the broker's own redirect errors report the caller's URL too ──

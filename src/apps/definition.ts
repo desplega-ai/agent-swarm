@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { listScriptConnections } from "../be/script-connections";
+import { isScriptConnectionReachable } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
 import {
@@ -933,8 +933,7 @@ async function modelSourceIssues(
       });
     }
     if (source.connection !== undefined) {
-      const reachable = await listScriptConnections({ agentId: runAs });
-      if (!reachable.some((connection) => connection.slug === source.connection)) {
+      if (!(await isScriptConnectionReachable(source.connection, { agentId: runAs }))) {
         issues.push({
           path: `${path}.connection`,
           message: `connection "${source.connection}" not found or disabled for the sync run-as identity`,

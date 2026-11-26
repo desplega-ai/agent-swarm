@@ -178,8 +178,9 @@ export function patchFetchWithCredentialBroker(
       newHeaders.set(key, value);
     }
 
-    // The caller's URL, still holding its placeholders: a fetch error reports it,
-    // so a query-template value never travels back into script code.
+    // The caller's URL, still holding its placeholders. Everything handed back to
+    // the caller (Response.url, error text, the base of a relative redirect) uses
+    // it, so a query-template value never travels back into script code.
     const callerHref = url.href;
     const urlModified = applyQueryTemplates(url, bindings);
 
@@ -213,6 +214,8 @@ export function patchFetchWithCredentialBroker(
       const applied = bindings.filter((binding) => binding.allowedHosts.includes(hostname));
       throw restoreCallerUrlOnError(error, callerHref, url, applied);
     }
+    if (urlModified)
+      Object.defineProperty(response, "url", { value: callerHref, configurable: true });
     const location = response.headers.get("location");
     if (redirectMode === "manual" || !REDIRECT_STATUSES.has(response.status) || !location) {
       return response;
