@@ -300,7 +300,7 @@ describe("task UI spec storage", () => {
     };
 
     test("flag off: the task completes, no row, and the message says the spec was ignored", async () => {
-      await withFlag(undefined, async () => {
+      await withFlag("false", async () => {
         const task = await startedTask("UI spec flag off");
         const result = await handler()(
           { taskId: task.id, status: "completed", output: "Done", uiSpec: example() },

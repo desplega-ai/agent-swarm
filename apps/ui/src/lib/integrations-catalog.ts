@@ -415,7 +415,8 @@ export const INTEGRATIONS: IntegrationDef[] = [
         label: "Additive Slack mode",
         type: "boolean",
         advanced: true,
-        helpText: "Combine multiple Slack messages within a short window into a single task input.",
+        helpText:
+          "Combine multiple Slack messages within a short window into a single task input. On by default.",
       },
       {
         key: "ADDITIVE_SLACK_BUFFER_MS",

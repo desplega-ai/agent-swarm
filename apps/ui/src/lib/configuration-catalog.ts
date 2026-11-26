@@ -487,7 +487,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "WORKTREE_REAPER_MODE",
         label: "Worktree reaper",
         description:
-          "What workers do with the git worktrees agents leave behind. dry-run only logs what it would remove; on removes them; off disables the reaper.",
+          "What workers do with the git worktrees agents leave behind. dry-run only logs what it would remove; on removes them; off disables the reaper. New installs start at on; existing installs: dry-run until set.",
         kind: "enum",
         options: ["dry-run", "on", "off"],
         defaultValue: "dry-run",
@@ -991,10 +991,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "CREDENTIAL_SELECTION_STRATEGY",
         label: "Credential selection strategy",
         description:
-          "How a worker picks a key from a pooled credential. usage (default): the lowest-utilization key first. pace: the key furthest under even use of its windows first, so quota that resets soon gets used.",
+          "How a worker picks a key from a pooled credential. pace (default): the key furthest under even use of its windows first, so quota that resets soon gets used. usage: the lowest-utilization key first.",
         kind: "enum",
-        options: ["usage", "pace"],
-        defaultValue: "usage",
+        options: ["pace", "usage"],
+        defaultValue: "pace",
         restartRequired: false,
         docsUrl: `${DOCS}guides/harness-configuration`,
       },
@@ -1079,7 +1079,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "WORKFLOW_RUNS_RETENTION_DAYS",
         label: "Workflow run retention",
         description:
-          "Delete terminal workflow runs this many days after completion, with their steps and unused definition snapshots. Active runs and trees with a live or recent descendant are kept. Tasks and trigger deduplication survive. Leave unset to disable; deleted run links return 404.",
+          "Delete terminal workflow runs this many days after completion, with their steps and unused definition snapshots. Active runs and trees with a live or recent descendant are kept. Tasks and trigger deduplication survive. New installs start at 30 days; reset to turn this sweep off. Existing installs: off until set. Deleted run links return 404.",
         kind: "number",
         unit: "days",
         placeholder: "30",
@@ -1333,18 +1333,18 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "UI_SPEC_ENABLED",
         label: "Rich result cards",
         description:
-          "Let agents attach a json-render card (uiSpec) to a task result, rendered on the Slack outcome card and in the session view. Agents get the rich-card prompt section. Off: store-progress ignores uiSpec, Slack and text-only surfaces skip the card, and the section is dropped.",
+          "Let agents attach a json-render card (uiSpec) to a task result, rendered on the Slack outcome card and in the session view. Agents get the rich-card prompt section. On by default. Off: store-progress ignores uiSpec, Slack and text-only surfaces skip the card, and the section is dropped.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
         key: "UI_SPEC_ACTIONS_ENABLED",
         label: "Rich card action buttons",
         description:
-          "Allow Button elements in result cards, each naming a follow-up action the card declares. Requires UI_SPEC_ENABLED. Off refuses a card with a Button; LinkButton always works.",
+          "Allow Button elements in result cards, each naming a follow-up action the card declares. Requires UI_SPEC_ENABLED. On by default. Off refuses a card with a Button; LinkButton always works.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
@@ -1591,9 +1591,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:
-          "Batch consecutive messages in a Slack thread into a single task update instead of one per message.",
+          "Batch consecutive messages in a Slack thread into a single task update instead of one per message. On by default.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
@@ -1655,18 +1655,18 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SLACK_STOP_BUTTON_ENABLED",
         label: "Slack Stop button",
         description:
-          "Let people stop a running ask with Slack's native Stop button in the thread's Working… line. Stop cancels the thread's open tasks and the tasks they delegated. The button appears only once the Slack app also subscribes to the `agent_session_stopped` bot event.",
+          "Let people stop a running ask with Slack's native Stop button in the thread's Working… line. Stop cancels the thread's open tasks and the tasks they delegated. On by default. The button appears only once the Slack app also subscribes to the `agent_session_stopped` bot event.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}integrations/slack#stop-button`,
       },
       {
         key: "SLACK_FEEDBACK_BUTTONS",
         label: "Slack answer feedback",
         description:
-          "Put Slack's native 👍/👎 buttons under each final outcome card. A click stores the vote, with the task's agent, profile and model, in the `slack-feedback` KV namespace. A person's later click on the same answer replaces their vote.",
+          "Put Slack's native 👍/👎 buttons under each final outcome card. A click stores the vote, with the task's agent, profile and model, in the `slack-feedback` KV namespace. A person's later click on the same answer replaces their vote. On by default.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}integrations/slack#answer-feedback`,
       },
       {

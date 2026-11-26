@@ -15,7 +15,7 @@ export const SLACK_FEEDBACK_NAMESPACE = "slack-feedback";
 export type SlackFeedbackVote = "up" | "down";
 
 export function isSlackFeedbackButtonsEnabled(): boolean {
-  return isEnvFlagEnabled("SLACK_FEEDBACK_BUTTONS", false);
+  return isEnvFlagEnabled("SLACK_FEEDBACK_BUTTONS", true);
 }
 
 /** Slack's native feedback buttons for `taskId`, or none when `SLACK_FEEDBACK_BUTTONS` is off. */

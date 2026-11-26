@@ -12,7 +12,7 @@ The `slack-reply-gate` extension sits between the Slack thread buffer and Lead. 
 
 ## The problem
 
-With the [additive Slack buffer](/docs/integrations/slack#additive-slack-buffer) on (`ADDITIVE_SLACK=true`), a reply in a thread the swarm takes part in does not need an @mention. The buffer collects the replies for a short debounce window and turns them into one Lead task. That is what lets people give multi-message feedback without tagging the bot each time.
+With the [additive Slack buffer](/docs/integrations/slack#additive-slack-buffer) on (the default; `ADDITIVE_SLACK=false` turns it off), a reply in a thread the swarm takes part in does not need an @mention. The buffer collects the replies for a short debounce window and turns them into one Lead task. That is what lets people give multi-message feedback without tagging the bot each time.
 
 It also means every human message in that thread wakes Lead: "lol", an emoji, "thanks", or two people talking to each other. Lead spends a session deciding to say nothing, or replies to a conversation that was not addressed to it. Messages that @mention another person are already skipped by the buffer. Everything else reaches Lead.
 
@@ -56,7 +56,7 @@ In `enforce`, a skip returns `block` right away. The Slack calls run after it: t
 ## Prerequisites
 
 - **Agent Swarm with a Lead** and the [Slack integration](/docs/integrations/slack) connected. The bot token needs `reactions:write`, which the standard Slack app manifest already includes for its acceptance reactions. A swarm with Slack connected already has `SLACK_BOT_TOKEN`.
-- **The additive buffer on:** `ADDITIVE_SLACK=true`, and `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` not set to `true`. Without the buffer, non-mention thread replies never become Lead tasks and the gate has nothing to judge.
+- **The additive buffer on:** `ADDITIVE_SLACK` not set to `false` (it is on by default), and `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` not set to `true`. Without the buffer, non-mention thread replies never become Lead tasks and the gate has nothing to judge.
 - **One SystemOne provider credential**, set as a global config secret. See the table below.
 - **Someone who can enable extensions:** a lead, an operator, or a dashboard user. See [Lead activation and trust](/docs/guides/extensions#lead-activation-and-trust).
 
@@ -181,7 +181,7 @@ Paste this to your Lead to install the gate in shadow mode:
 ```text
 Install the slack-reply-gate extension from the extension catalog in shadow mode.
 
-1. Check that ADDITIVE_SLACK is true and SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION is not true. If the buffer is off, stop and tell me.
+1. Check that ADDITIVE_SLACK is not false (unset means on) and SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION is not true. If the buffer is off, stop and tell me.
 2. Check that at least one of these is set as a global config secret: TYPESAFE_API_KEY, OPENROUTER_API_KEY, or CLOUDFLARE_API_TOKEN with CLOUDFLARE_ACCOUNT_ID. Never print a value. If none is set, stop and tell me which one to add.
 3. Install it with extension-install, template "slack-reply-gate", config {"mode":"shadow"}. Then enable it with extension-enable.
 4. After a few thread replies, read KV namespace ext:slack-reply-gate (the "last" key and the "d:" rows) and send me a summary: counts per action, every shadow-skip preview, and any fail-open error.

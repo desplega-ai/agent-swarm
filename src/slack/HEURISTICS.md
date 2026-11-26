@@ -26,7 +26,7 @@ When someone @mentions the bot in a thread, the router checks whether a worker a
 
 ## Additive Slack Buffer
 
-**Feature flag:** `ADDITIVE_SLACK=true` (disabled by default)
+**Feature flag:** `ADDITIVE_SLACK` (enabled by default; `ADDITIVE_SLACK=false` turns it off)
 
 When enabled, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows humans to give multi-message feedback in a thread without needing to @mention the bot each time.
 
@@ -78,7 +78,7 @@ Used inside a thread with an active buffer to flush immediately, bypassing the d
 - If text follows `!now`, it is appended to the buffer before flushing
 - The buffer is flushed with `immediate=true`, meaning **no `dependsOn`** is set
 - The resulting task is immediately pickable by any available agent
-- Works only when `ADDITIVE_SLACK=true` and in a thread with swarm activity
+- Works only when `ADDITIVE_SLACK` is on (the default) and in a thread with swarm activity
 
 **Use case:** When you have been adding context to a thread and want the swarm to pick it up right now, rather than waiting for the debounce or for the current task to finish.
 
@@ -100,14 +100,14 @@ When the additive buffer flushes normally (not via `!now`), the created task use
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `ADDITIVE_SLACK` | `false` | Enables non-mention thread message buffering and batching |
+| `ADDITIVE_SLACK` | `true` | Enables non-mention thread message buffering and batching |
 | `ADDITIVE_SLACK_BUFFER_MS` | `10000` (10s) | Debounce window in milliseconds for the thread buffer |
 | `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | `false` | Requires @mention for thread follow-up routing; non-mention thread messages are silently dropped |
 | `SLACK_THREAD_WAKE_ON_ANY_MESSAGE` | `false` | Thread messages that @mention another user (and not the bot) still count as follow-ups, instead of being skipped |
 | `SLACK_THREAD_STEERING` | `lead` | `off` preserves follow-up tasks; `lead` steers the latest in-progress lead task; `all` targets the latest active task |
 | `SLACK_THREAD_STEERING_MODE` | `queue` | `queue` appends context; `steer` requests immediate steering and degrades to queue when unsupported |
 
-Both are read from environment variables. `ADDITIVE_SLACK` must be exactly `"true"` to enable. `ADDITIVE_SLACK_BUFFER_MS` is parsed as a number with fallback to 10000.
+Both are read from environment variables. `ADDITIVE_SLACK` is on when unset, empty or unrecognized; only `false` or `0` (case-insensitive) turn it off. `ADDITIVE_SLACK_BUFFER_MS` is parsed as a number with fallback to 10000.
 
 ---
 

@@ -621,7 +621,7 @@ export function registerMessageHandler(app: App): void {
       !isAddressedToOtherUser(effectiveText, botUserId);
 
     // ADDITIVE_SLACK: Check for !now command in threads
-    const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);
+    const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", true);
     const requireMentionForThreadFollowup = isEnvFlagEnabled(
       "SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION",
       false,

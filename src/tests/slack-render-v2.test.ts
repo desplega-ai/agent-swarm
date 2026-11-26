@@ -345,6 +345,8 @@ beforeAll(() => {
 beforeEach(async () => {
   clearVolatileSecretsForTesting();
   process.env.SLACK_RENDER_V2_DELEGATION = "false";
+  // On by default; the block-order assertions here predate the 👍/👎 row.
+  process.env.SLACK_FEEDBACK_BUTTONS = "false";
   closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
@@ -5015,7 +5017,7 @@ describe("Slack outcome card from a task uiSpec", () => {
     await storeUiSpec(ask.id, fixture);
     await completeTask(ask.id, "Deploys are up.");
     await backdateLastUpdated([ask.id], 20);
-    delete process.env.UI_SPEC_ENABLED;
+    process.env.UI_SPEC_ENABLED = "false";
     calls.length = 0;
     await processSlackRenderV2();
 
