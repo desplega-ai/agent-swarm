@@ -39,6 +39,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [manage-user](#manage-user)
   - [db-query](#db-query)
   - [get-oauth-access-token](#get-oauth-access-token)
+  - [data-query](#data-query)
   - [accept-steer](#accept-steer)
   - [steer-task](#steer-task)
 - [Task Pool Tools](#task-pool-tools)
@@ -497,6 +498,22 @@ Return a valid plaintext OAuth access token for an integrated tracker. The token
 | `provider` | `string` | No | - | OAuth provider slug to resolve the default authorization (for example: linear, jira). Provide this OR authorizationId. |
 | `authorizationId` | `string` | No | - | Explicit oauth_authorizations id to resolve. Takes precedence over provider when both are given. |
 | `minValiditySeconds` | `number` | No | 300 | Minimum remaining token lifetime required before returning it. |
+
+### data-query
+
+**Query drive files with SQL**
+
+Read-only DuckDB SQL over tabular files on your agent-fs drive (csv, tsv, parquet, json, ndjson, xlsx; `.gz` too), as your own agent-fs identity. Name a file in table position (`SELECT region, sum(amount) FROM '/shared/x/sales.csv' GROUP BY 1`) or bind it in `tables`. `DESCRIBE SELECT * FROM '<path>'` shows a schema. Aggregate in SQL rather than pulling rows. `card: true` also returns a uiSpec-ready card table (first 100 rows, 20 columns); `sheet: {path}` saves the result as a new sheet. Not for the swarm DB (use db-query). Limits: 30 s, 256 MB per file, 1,000 rows per call (10,000 from scripts).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sql` | `string` | Yes | - | One read-only DuckDB query. |
+| `tables` | `object` | No | - | Table name -> drive path, or {path, format} to override format detection. |
+| `maxRows` | `number` | No | - | Rows to return: default 100 (scripts 1000), at most 1000 (scripts 10000). |
+| `driveId` | `string` | No | - | Another drive in your org that your key can read. Default: your default drive. |
+| `card` | `boolean` | No | - | Also return `card`, a uiSpec spec with the result as a Table. |
+| `sheet` | `object` | No | - | New `.sheet.json` path; create-only. |
+| `origin` | `string` | No | - | Label for the usage event, e.g. `workflow`, `e2e` or `qa`. Default: the call path. |
 
 ### accept-steer
 
