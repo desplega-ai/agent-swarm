@@ -421,8 +421,29 @@ const createTask = route({
        * once the upload batch settles (or it self-promotes on a timeout).
        */
       draft: z.boolean().optional(),
+      slackChannelId: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          "Slack channel the task's progress and outcome post to. Set together with `slackThreadTs`. Needs `task.slack.thread.bind`.",
+        ),
+      slackThreadTs: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe("Slack thread ts in `slackChannelId` the task posts into."),
     })
     .superRefine((body, ctx) => {
+      if ((body.slackChannelId === undefined) !== (body.slackThreadTs === undefined)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "slackChannelId and slackThreadTs must both be set, or both omitted.",
+          path: [body.slackChannelId === undefined ? "slackChannelId" : "slackThreadTs"],
+        });
+      }
       if ((body.agentId !== undefined || body.offeredTo !== undefined) && !body.routingReason) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -441,7 +462,7 @@ const createTask = route({
     410: { description: "The task created under this Idempotency-Key was deleted" },
     403: {
       description:
-        "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
+        "Parent/session access denied, unauthorized chat-thread or Slack-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -1074,6 +1095,25 @@ async function mayBindChatThread(principal: RbacPrincipal): Promise<boolean> {
 }
 
 /**
+ * May this caller bind a new task to a Slack thread? The task's agent then posts its progress
+ * and outcome there. The operator may; an agent uses `send-task`. A user needs admin, or a
+ * role with `task.slack.thread.bind`.
+ */
+async function mayBindSlackThread(principal: RbacPrincipal): Promise<boolean> {
+  if (principal.kind === "user") {
+    if (!isRbacEnabled()) return true;
+    const grant = await getUserGrant(principal.userId);
+    return grant.grantsAll || grant.verbs.has("task.slack.thread.bind");
+  }
+  return can({
+    principal,
+    verb: "task.slack.thread.bind",
+    resource: { kind: "none" },
+    source: "http",
+  }).allow;
+}
+
+/**
  * Sibling awareness copies the open tasks under a contextKey into the new task, and may pick
  * one as its parent. A non-admin user may name a context only when they may write each of
  * its open tasks.
@@ -1308,6 +1348,14 @@ export async function handleTasks(
       );
       return true;
     }
+    if (parsed.body.slackChannelId && !(await mayBindSlackThread(principal))) {
+      jsonError(
+        res,
+        "Permission denied: binding a task to a Slack thread needs task.slack.thread.bind.",
+        403,
+      );
+      return true;
+    }
     if (
       parsed.body.contextKey &&
       parsed.body.contextKey !== parentTask?.contextKey &&
@@ -1383,6 +1431,8 @@ export async function handleTasks(
           source: parsed.body.source || "api",
           outputSchema: parsed.body.outputSchema || undefined,
           contextKey: parsed.body.contextKey || undefined,
+          slackChannelId: parsed.body.slackChannelId,
+          slackThreadTs: parsed.body.slackThreadTs,
           requestedByUserId,
           status: parsed.body.draft ? "draft" : undefined,
           ...splitLegacyModelAlias({

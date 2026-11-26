@@ -1507,6 +1507,11 @@ export interface TasksRepository {
     oldestTaskId: string | null;
     oldestClaimableAt: string | null;
   } | null>;
+  /**
+   * Tasks that `failed` with `finishedAt` at or after `since`. Cascade
+   * failures are left out, so one root failure counts once.
+   */
+  countFailedSince(since: string): Promise<number>;
   /** True when a user exists or any task other than boot triage and the heartbeat checklist. */
   hasUserOrNonSystemTask(): Promise<boolean>;
   /**
@@ -3731,6 +3736,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
     oldestTaskId: string | null;
     oldestClaimableAt: string | null;
   } | null>;
+
+  async countFailedSince(since: string): Promise<number> {
+    const row = await this.db.get<{ n: number }>(sql`
+      SELECT count(*) AS n FROM agent_tasks
+       WHERE status = 'failed' AND "finishedAt" >= ${since}
+         AND COALESCE("statusKind", '') != 'cascade'`);
+    return Number(row?.n ?? 0);
+  }
 
   async hasUserOrNonSystemTask(): Promise<boolean> {
     const row = await this.db.get<{ existing: number }>(sql`

@@ -84,7 +84,7 @@ export const BUILTIN_ROLES = [
     id: "rbac-role-obs-lite-integration",
     name: "obs-lite-integration",
     description:
-      "Extra role: create and follow own tasks, trigger workflows, send workflow events, and launch or cancel durable runs of the global scripts in SCRIPT_RUN_USER_ALLOWLIST (each runs as its owning agent).",
+      "Extra role: create and follow own tasks (optionally bound to a Slack thread), trigger workflows, send workflow events, and launch or cancel durable runs of the global scripts in SCRIPT_RUN_USER_ALLOWLIST (each runs as its owning agent).",
     isBuiltin: true,
     grantsAll: false,
     verbs: [
@@ -92,6 +92,7 @@ export const BUILTIN_ROLES = [
       "task.read.own",
       "task.cancel.own",
       "task.steer.own",
+      "task.slack.thread.bind",
       "workflow.trigger",
       "workflow.run.event",
       "script.run.durable",

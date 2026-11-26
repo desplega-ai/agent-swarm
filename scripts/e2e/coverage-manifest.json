@@ -618,7 +618,7 @@
       ]
     },
     "rbac-integration-role": {
-      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events and durable script runs, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
+      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events, durable script runs and Slack-thread-bound task creation, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
       "scenarios": ["rbac-integration-role"]
     },
     "script-sandbox-identity": {
