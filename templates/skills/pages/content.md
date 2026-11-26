@@ -625,6 +625,8 @@ Before publishing:
 
 To check a page by screenshot, open it from an origin its data endpoints allow. A page that fetches live data from a CORS-restricted endpoint falls back to its baked values when opened from any other origin (for example an internal service hostname), so a screenshot there proves layout only, never the live numbers. Check every element you changed and its neighbours at the viewport readers use.
 
+To see a page inside the dashboard, from an agent-swarm checkout run `bun run ui:dev --page <id|slug>` in the background and open the `url` of its `UI_DEV_READY {json}` line. It works for every content type and auth mode: the dev server proxies `/p/*` and `/@swarm/*` on its own origin, so authed pages get their session and SDK calls. A password page still asks for the password. Runbook: `runbooks/app-and-page-dev.md`.
+
 ## Auth Modes
 
 | Mode | URL behavior | When to use |

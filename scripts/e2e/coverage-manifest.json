@@ -909,6 +909,10 @@
         "cli-api",
         "cli-controller"
       ]
+    },
+    "ui-dev-tooling": {
+      "description": "`bun run ui:dev` against a running swarm as a black box: ready line, same-origin proxy, slug lookup, usage errors and teardown",
+      "scenarios": ["ui-dev-remote"]
     }
   }
 }
