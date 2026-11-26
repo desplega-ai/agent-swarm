@@ -12,6 +12,7 @@ import {
   readableSessionSql,
   SqlQuery,
   sql,
+  sqlJoin,
   sqlList,
   sqlWhere,
   TASK_FTS_COMPLETE,
@@ -87,23 +88,31 @@ function idRows(ids: readonly string[]): SqlQuery {
   return sql`jsonb_array_elements_text(${jsonText(JSON.stringify(ids))}) AS j(value)`;
 }
 
-/**
- * The FTS5 query `"<search>"*` as a tsquery: the words of the search (as
- * fts_words splits them) as one phrase, the last one a prefix. NULL when the
- * search has no word.
- */
-function taskTsQuery(search: string): SqlQuery {
-  return sql`to_tsquery('simple', (
-    SELECT string_agg(quote_literal(w), ' <-> ') || ':*'
-    FROM regexp_split_to_table(btrim(fts_words(CAST(${search} AS text))), ' +') AS w
-    WHERE w <> ''))`;
-}
-
 // The agent_tasks_fts expressions of migration 368 (indexes agent_tasks_fts_task
 // and agent_tasks_fts_title), word for word: the planner uses an index only for
 // an equal expression. One vector per column, as an FTS5 phrase never spans two.
 export const TASK_TEXT_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.task))`;
 export const TASK_TITLE_TSVECTOR = sql`to_tsvector('simple', fts_words(agent_tasks.title))`;
+// The adjacent word pairs of the task text, word for word the expression of
+// index agent_tasks_fts_task_pairs (migration 386). A pair lexeme is two words
+// joined by PAIR_JOINER.
+export const TASK_PAIRS_TSVECTOR = sql`to_tsvector('simple', fts_word_pairs(agent_tasks.task))`;
+const PAIR_JOINER = "ǂ";
+
+/** The most matched rows a search inlines as a `_rowid` list, as on SQLite. */
+const ROWID_LIST_MAX = 500;
+
+function tsQuery(query: string): SqlQuery {
+  return sql`to_tsquery('simple', CAST(${query} AS text))`;
+}
+
+/**
+ * A tsquery of words from fts_words. fts_words turns quotes and backslashes
+ * into spaces, so a word quotes as is.
+ */
+function tsWord(word: string): string {
+  return `'${word}'`;
+}
 
 const HUMAN_FREE_TAG_SQL = HUMAN_FREE_TAGS.map(
   (tag) => `COALESCE(CAST(task.tags AS text), '[]') ILIKE '%"${tag}"%' ESCAPE ''`,
@@ -247,7 +256,10 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   /**
    * A phrase-prefix match on the task text and title, or a prefix of the task
    * id. Until the backfill mark is complete it is the old substring LIKE, as on
-   * SQLite. The match uses the tsvector expression indexes of migration 368.
+   * SQLite. The match reads the GIN indexes of migrations 368 and 386 first and
+   * returns their rows as a `_rowid` set, as SQLite does. As a filter of the
+   * page or count query, the planner walked the ORDER BY index or the table and
+   * rebuilt the tsvector of every row it passed: milliseconds per task text.
    */
   protected async taskSearchCondition(
     search: string,
@@ -259,17 +271,69 @@ export class PostgresTasksRepository extends BaseTasksRepository {
       return sql`(${likeAsciiCi(sql`agent_tasks.task`, pattern)} OR ${likeAsciiCi(sql`agent_tasks.title`, pattern)} OR ${likeAsciiCi(sql`agent_tasks.id`, pattern)})`;
     }
     const idLow = search.trim().toLowerCase();
-    const terms: SqlQuery[] = [];
-    if (/[\p{L}\p{N}]/u.test(search)) {
-      terms.push(
-        sql`(${TASK_TEXT_TSVECTOR} @@ ${taskTsQuery(search)} OR ${TASK_TITLE_TSVECTOR} @@ ${taskTsQuery(search)})`,
-      );
+    const words = /[\p{L}\p{N}]/u.test(search) ? await this.searchWords(search) : [];
+    const arms: SqlQuery[] = [];
+    const arm = (where: SqlQuery) => sql`SELECT "_rowid" AS rid FROM agent_tasks WHERE ${where}`;
+    if (words.length > 0) {
+      // The FTS5 query `"<search>"*`: the words as one phrase, the last one a prefix.
+      const phrase = tsQuery(`${words.map(tsWord).join(" <-> ")}:*`);
+      arms.push(arm(sql`${TASK_TITLE_TSVECTOR} @@ ${phrase}`));
+      if (words.length === 1) {
+        arms.push(arm(sql`${TASK_TEXT_TSVECTOR} @@ ${phrase}`));
+      } else {
+        // The text index has no word positions: a phrase there rechecks every
+        // task with all its words by rebuilding the tsvector. The pair index
+        // matches every adjacent pair of the phrase, the last one a prefix. Two
+        // words are one pair, so that is the phrase. A longer phrase also needs
+        // its pairs in one run: the phrase test runs on the rows that have every
+        // pair (IS TRUE keeps it out of the index scan).
+        const pairs = words.slice(1).map((word, i) => tsWord(`${words[i]}${PAIR_JOINER}${word}`));
+        const pairMatch = sql`${TASK_PAIRS_TSVECTOR} @@ ${tsQuery(`${pairs.join(" & ")}:*`)}`;
+        arms.push(
+          words.length === 2
+            ? arm(pairMatch)
+            : arm(sql`${pairMatch} AND (${TASK_TEXT_TSVECTOR} @@ ${phrase}) IS TRUE`),
+        );
+      }
     }
-    if (idLow) {
-      terms.push(sql`(agent_tasks.id >= ${idLow} AND agent_tasks.id < ${`${idLow}\uffff`})`);
-    }
-    if (terms.length === 0) return sql`false`;
-    return terms.length === 2 ? sql`(${terms[0]!} OR ${terms[1]!})` : sql`(${terms[0]!})`;
+    if (idLow) arms.push(arm(sql`id >= ${idLow} AND id < ${`${idLow}\uffff`}`));
+    if (arms.length === 0) return sql`false`;
+    const rids = await this.readIndexOnly<{ rid: number | string }>(
+      sqlJoin(arms, sql` UNION `),
+    );
+    if (rids.length === 0) return sql`false`;
+    const list = rids.map((row) => Number(row.rid)).join(",");
+    return rids.length <= ROWID_LIST_MAX
+      ? raw(`agent_tasks."_rowid" IN (${list})`)
+      : sql`agent_tasks."_rowid" IN (SELECT unnest(CAST(${`{${list}}`} AS bigint[])))`;
+  }
+
+  /**
+   * Runs a full-text read with sequential scans priced out. The planner prices
+   * the tsvector rebuild of a sequential scan far below its real cost, so for a
+   * common word it scans the table instead of the GIN index. SET LOCAL ends with
+   * the transaction. Inside a caller's transaction this is a savepoint: a failed
+   * read rolls the setting back, a successful one resets it here.
+   */
+  private readIndexOnly<T>(query: SqlQuery): Promise<T[]> {
+    return this.db.transaction(
+      async () => {
+        await this.db.run(sql`SET LOCAL enable_seqscan = off`);
+        const rows = await this.db.query<T>(query);
+        await this.db.run(sql`SET LOCAL enable_seqscan TO DEFAULT`);
+        return rows;
+      },
+      { readOnly: true },
+    );
+  }
+
+  /** The words of a search as fts_words splits them, in order. */
+  private async searchWords(search: string): Promise<string[]> {
+    const rows = await this.db.query<{ w: string }>(sql`
+      SELECT w FROM regexp_split_to_table(btrim(fts_words(CAST(${search} AS text))), ' +')
+        WITH ORDINALITY AS t(w, n)
+      WHERE w <> '' ORDER BY n`);
+    return rows.map((row) => row.w);
   }
 
   listTaskDescendants(startId: string, maxDepth: number, limit: number): Promise<TaskLineageRow[]> {
