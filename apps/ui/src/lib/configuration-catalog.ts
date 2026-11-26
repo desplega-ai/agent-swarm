@@ -2171,6 +2171,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
+        key: "OTEL_SWARM_METRICS",
+        label: "Swarm state metrics",
+        description:
+          "Export swarm state gauges (failed tasks in the last hour, pending and overdue approvals, claimable queue size and age) once per metric export, on any engine. Requires the OTLP endpoint.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/observability-opentelemetry`,
+      },
+      {
         key: "OTEL_EXPORT_API_LOGS",
         label: "Export API logs",
         description:

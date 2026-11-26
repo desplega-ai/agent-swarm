@@ -31,6 +31,7 @@ import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import pkg from "../package.json";
+import type { SwarmStateStats } from "./be/swarm-state-stats";
 import {
   type DbRetentionSweepMetric,
   type DbStatementMetric,
@@ -252,6 +253,7 @@ export async function shutdown(): Promise<void> {
   sdk = undefined;
   stopEventLoopDelayMetrics();
   stopPostgresStats?.();
+  stopSwarmState?.();
   uninstallConsoleLogBridge();
 }
 
@@ -492,6 +494,99 @@ export function startPostgresStatsMetrics(read: () => Promise<PostgresStats | nu
   stopPostgresStats = () => {
     meter.removeBatchObservableCallback(collect, observables);
     stopPostgresStats = undefined;
+  };
+}
+
+let stopSwarmState: (() => void) | undefined;
+
+export function stopSwarmStateMetrics(): void {
+  stopSwarmState?.();
+}
+
+/**
+ * Swarm state gauges (failed tasks, pending approvals, claimable queue), read
+ * from the DB once per metric export like the Postgres gauges: same 10 s
+ * timeout, a read still in flight skips the export, a failed read logs once per
+ * distinct error. Unlabeled on purpose: obs-lite merges series with `max`, so a
+ * label would turn a total into a per-label max.
+ */
+export function startSwarmStateMetrics(
+  read: () => Promise<SwarmStateStats>,
+  meter: Meter = metrics.getMeter(METER_NAME),
+): void {
+  if (stopSwarmState) return;
+  const gauge = (name: string, description: string, unit: string) =>
+    meter.createObservableGauge(name, { description, unit });
+  const i = {
+    failedTasks1h: gauge(
+      "agentswarm.tasks.failed.1h",
+      "Tasks failed in the last hour, cascade failures excluded",
+      "{task}",
+    ),
+    pendingApprovals: gauge(
+      "agentswarm.approvals.pending",
+      "Pending approval requests",
+      "{request}",
+    ),
+    pendingApprovalMaxAgeSeconds: gauge(
+      "agentswarm.approvals.pending.max_age",
+      "Age of the oldest pending approval request, 0 when none",
+      "s",
+    ),
+    overdueApprovals: gauge(
+      "agentswarm.approvals.overdue",
+      "Pending approval requests past their deadline (the timeout sweep should keep this at 0)",
+      "{request}",
+    ),
+    claimableTasks: gauge(
+      "agentswarm.queue.claimable",
+      "Pending or unassigned tasks whose dependencies all completed",
+      "{task}",
+    ),
+    oldestClaimableAgeSeconds: gauge(
+      "agentswarm.queue.oldest_age",
+      "Time the oldest claimable task has waited, 0 when the queue is empty",
+      "s",
+    ),
+  } satisfies Record<keyof SwarmStateStats, unknown>;
+  let inFlight = false;
+  let lastError: string | undefined;
+  const collect = async (observer: BatchObservableResult) => {
+    if (inFlight) return;
+    inFlight = true;
+    const pending = read().finally(() => {
+      inFlight = false;
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stats: SwarmStateStats;
+    try {
+      stats = await Promise.race([
+        pending,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`timed out after ${PG_STATS_READ_TIMEOUT_MS} ms`)),
+            PG_STATS_READ_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } catch (error) {
+      const message = scrubSecrets(error instanceof Error ? error.message : String(error));
+      if (message !== lastError) console.warn(`[OTel] swarm state read failed: ${message}`);
+      lastError = message;
+      return;
+    } finally {
+      clearTimeout(timer);
+    }
+    lastError = undefined;
+    for (const key of Object.keys(i) as (keyof SwarmStateStats)[]) {
+      observer.observe(i[key], stats[key]);
+    }
+  };
+  const observables = Object.values(i);
+  meter.addBatchObservableCallback(collect, observables);
+  stopSwarmState = () => {
+    meter.removeBatchObservableCallback(collect, observables);
+    stopSwarmState = undefined;
   };
 }
 

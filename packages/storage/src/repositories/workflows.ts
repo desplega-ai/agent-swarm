@@ -691,6 +691,13 @@ export interface WorkflowsRepository {
    * past its deadline. Ordered by step insertion order, then request insertion order.
    */
   listStuckApprovalRuns(): Promise<StuckApprovalRunRow[]>;
+  /**
+   * Pending requests: how many, the oldest `createdAt` (null when none), and how
+   * many are past `expiresAt` at `now` (the timeout sweep should keep that at 0).
+   */
+  pendingApprovalStats(
+    now: string,
+  ): Promise<{ pending: number; oldestCreatedAt: string | null; overdue: number }>;
   /** Pending requests past `expiresAt`, earliest deadline first, ties in insertion order. */
   listExpiredPendingApprovals(now: string): Promise<ApprovalRequestRow[]>;
   /** Pending requests without a deadline created before `cutoff`, oldest first, ties in insertion order. */
@@ -1552,6 +1559,24 @@ export abstract class BaseWorkflowsRepository implements WorkflowsRepository {
          AND (ar.status IN ('approved', 'rejected', 'timeout')
               OR (ar.status = 'pending' AND ar."expiresAt" IS NOT NULL AND ar."expiresAt" < ${nowIso}))
        ORDER BY ${this.insertionOrder(sql`wrs`)}, ${this.insertionOrder(sql`ar`)}`);
+  }
+
+  async pendingApprovalStats(
+    now: string,
+  ): Promise<{ pending: number; oldestCreatedAt: string | null; overdue: number }> {
+    const row = await this.db.get<{
+      pending: number;
+      oldestCreatedAt: string | null;
+      overdue: number | null;
+    }>(sql`
+      SELECT count(*) AS pending, MIN("createdAt") AS "oldestCreatedAt",
+             SUM(CASE WHEN "expiresAt" IS NOT NULL AND "expiresAt" < ${now} THEN 1 ELSE 0 END) AS overdue
+        FROM approval_requests WHERE status = 'pending'`);
+    return {
+      pending: Number(row?.pending ?? 0),
+      oldestCreatedAt: row?.oldestCreatedAt ?? null,
+      overdue: Number(row?.overdue ?? 0),
+    };
   }
 
   listExpiredPendingApprovals(now: string): Promise<ApprovalRequestRow[]> {
