@@ -24,7 +24,7 @@ const QuestionSchema = z.object({
   description: z
     .string()
     .optional()
-    .describe("Optional help text, rendered as markdown (code fences, images)"),
+    .describe("Optional help text, rendered as markdown (code fences, inline images and videos)"),
   placeholder: z.string().optional().describe("Placeholder text (for text type)"),
   multiline: z.boolean().optional().describe("Use textarea instead of input (for text type)"),
   options: z
@@ -56,7 +56,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
         "Supports multiple question types: approval (yes/no), text, single-select, " +
         "multi-select, boolean, and config. Returns the request ID and URL for the human to respond. " +
         "config asks a person to set one swarm config key on the dashboard; secrets are stored encrypted and you receive only {key, scope, isSecret, status, updatedAt}, never the value. " +
-        "The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. " +
+        "The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and link an image or video to show it inline (the URL path ends in .png, .jpg, .gif, .webp, .mp4, .webm or .mov; for a URL without one, such as an agent-fs share /raw link, make the label the file name: ![demo.mp4](url)). " +
         "No Slack message is sent; share the URL yourself.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Title of the approval request"),
