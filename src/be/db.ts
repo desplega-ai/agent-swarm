@@ -185,7 +185,6 @@ import {
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   type SteeringAttachment,
-  SteeringAttachmentsSchema,
   type UserAvatar,
 } from "../types";
 import {
@@ -303,6 +302,7 @@ import {
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
+import { parseSteeringAttachments } from "./db/tasks/steering-attachments";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
@@ -1550,19 +1550,6 @@ function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
     handledNote: row.handled_note ?? undefined,
     attachments: parseSteeringAttachments(row.attachments),
   };
-}
-
-/** The stored JSON snapshot of a message's files; unreadable JSON reads as none. */
-function parseSteeringAttachments(
-  raw: string | null | undefined,
-): SteeringAttachment[] | undefined {
-  if (!raw) return undefined;
-  try {
-    const parsed = SteeringAttachmentsSchema.safeParse(JSON.parse(raw));
-    return parsed.success && parsed.data.length > 0 ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export interface CreateSteeringMessageArgs {
