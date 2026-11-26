@@ -12,7 +12,6 @@ import {
   getSlackDelegationActivatedAt,
   getSlackMessageByChannelTs,
   getSlackOutcomeMessage,
-  getSlackOutcomeMessages,
   getSlackRenderV2ActivatedAt,
   getSlackTasksInThread,
   getSlackTreeMessage,
@@ -35,6 +34,7 @@ import {
   recordMergedSlackOutcome,
   type SlackOutcomeGroupHost,
 } from "../be/db/slack-card-groups";
+import { getSlackOutcomeMessages } from "../be/db/slack-messages";
 import {
   closeSlackTreeIfSettled,
   getSlackProcessingThreads,
