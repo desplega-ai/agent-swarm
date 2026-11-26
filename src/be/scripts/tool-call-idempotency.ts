@@ -1,7 +1,7 @@
 import { MAX_KV_BODY_BYTES } from "../../kv-limits";
-import { claimKv, deleteKv, getKv, upsertKv } from "../db";
+import { claimKv, getKv } from "../db";
+import { deleteKvIfValue, replaceKvIfValue } from "../db/kv";
 import { sha256 } from "../db/workflow-idempotency";
-import { getStorage } from "../storage";
 
 /**
  * Per-call idempotency for side-effecting tools called through the scripts
@@ -23,13 +23,13 @@ export const TOOL_CALL_IDEMPOTENCY_NAMESPACE = "tool-call-idempotency";
 export const TOOL_CALL_IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * How long an in-flight claim holds the key. A claim whose server died is
- * taken over after this, so the call can run twice only when the server died
- * mid-call.
- * shortcut: a fixed lease, not a heartbeat; extend it from the call if a
- * bridged tool ever needs longer than this.
+ * How long an in-flight claim holds the key without a renewal. The owner renews
+ * it every quarter lease while the call runs, so a slow call keeps its key; a
+ * claim whose server died is taken over after this, so the call can run twice
+ * only when the server died (or stalled a whole lease) mid-call.
  */
 export const TOOL_CALL_IDEMPOTENCY_LEASE_MS = 2 * 60 * 1000;
+const LEASE_RENEW_MS = TOOL_CALL_IDEMPOTENCY_LEASE_MS / 4;
 
 /** How long a duplicate waits for the first call before it gets a 409. */
 const IN_FLIGHT_WAIT_MS = 30_000;
@@ -83,8 +83,8 @@ export async function runIdempotentToolCall<T>(
   const key = recordKey(scope);
   const token = crypto.randomUUID();
   const deadline = Date.now() + IN_FLIGHT_WAIT_MS;
+  const pending: Record_ = { state: "pending", token };
   for (;;) {
-    const pending: Record_ = { state: "pending", token };
     if (
       await claimKv({
         namespace,
@@ -108,14 +108,30 @@ export async function runIdempotentToolCall<T>(
     if (existing) await Bun.sleep(100 + Math.floor(Math.random() * 200));
   }
 
-  const ownsClaim = async () => {
-    const current = (await getKv(namespace, key))?.value as Record_ | undefined;
-    return current?.state === "pending" && current.token === token;
+  // Every write below is a compare-and-set on our own pending value, so an
+  // owner whose claim was taken over never renews, records or releases it.
+  let renewing: Promise<unknown> = Promise.resolve();
+  const renewTimer = setInterval(() => {
+    renewing = renewing.then(() =>
+      replaceKvIfValue({
+        namespace,
+        key,
+        expected: pending,
+        value: pending,
+        valueType: "json",
+        expiresAt: Date.now() + TOOL_CALL_IDEMPOTENCY_LEASE_MS,
+      }).catch(() => {
+        // A failed renewal retries on the next tick; the lease covers four.
+      }),
+    );
+  }, LEASE_RENEW_MS);
+  const stopRenewing = async () => {
+    clearInterval(renewTimer);
+    await renewing;
   };
   const release = async () => {
-    await getStorage().transaction(async () => {
-      if (await ownsClaim()) await deleteKv(namespace, key);
-    });
+    await stopRenewing();
+    await deleteKvIfValue(namespace, key, pending, "json");
   };
 
   let result: T;
@@ -129,21 +145,21 @@ export async function runIdempotentToolCall<T>(
     await release();
     return { result, replayed: false };
   }
+  await stopRenewing();
   const encoded = JSON.stringify(result);
   const done: Record_ =
     encoded !== undefined && Buffer.byteLength(encoded, "utf8") <= MAX_KV_BODY_BYTES
       ? { state: "done", result }
       : { state: "done", resultOmitted: true };
-  await getStorage().transaction(async () => {
-    // A claim that outlived its lease may belong to a takeover now: leave it.
-    if (!(await ownsClaim())) return;
-    await upsertKv({
-      namespace,
-      key,
-      value: done,
-      valueType: "json",
-      expiresAt: Date.now() + TOOL_CALL_IDEMPOTENCY_TTL_MS,
-    });
-  });
+  const record = {
+    namespace,
+    key,
+    value: done,
+    valueType: "json" as const,
+    expiresAt: Date.now() + TOOL_CALL_IDEMPOTENCY_TTL_MS,
+  };
+  // Our claim, or none left (it lapsed and a duplicate's read swept it): record.
+  // A takeover's live claim or record keeps the key.
+  if (!(await replaceKvIfValue({ ...record, expected: pending }))) await claimKv(record);
   return { result, replayed: false };
 }
