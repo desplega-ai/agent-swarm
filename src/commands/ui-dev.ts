@@ -289,6 +289,8 @@ export async function runUiDev(argv: string[]): Promise<number> {
     server = Bun.serve({
       hostname: "127.0.0.1",
       port,
+      // Streamed API responses (SSE) stay open past Bun's 10 s idle default.
+      idleTimeout: 0,
       // shortcut: no WebSocket proxy (only Comb file presence uses one); add it if a view needs it.
       async fetch(req) {
         const url = new URL(req.url);
