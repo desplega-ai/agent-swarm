@@ -135,6 +135,44 @@ export const rbacIntegrationRole: Scenario = {
       keyRefused.text.includes("task.slack.thread.bind"),
       `the contextKey 403 names task.slack.thread.bind: ${keyRefused.text}`,
     );
+    // A child may reuse its parent's own thread, and only that thread: the user owns a
+    // parent the operator bound to channel:thread, and neither half may differ.
+    const parentChannel = `C0E2EPAR${ctx.nonce}`;
+    const parentTs = "1700000000.000300";
+    const parent = await ctx.api("POST", "/api/tasks", {
+      body: {
+        task: `obs-int-parent ${ctx.nonce}`,
+        slackChannelId: parentChannel,
+        slackThreadTs: parentTs,
+        requestedByUserId: user.userId,
+      },
+    });
+    expectStatus(parent, [201], "the operator binds a user-owned parent to a Slack thread");
+    const parentTaskId = asString(asRecord(parent.json).id, "parent task id");
+    const childOf = (channel: string, ts: string) =>
+      ctx.api("POST", "/api/tasks", {
+        ...asUser,
+        body: {
+          task: `obs-int-child ${ctx.nonce}`,
+          parentTaskId,
+          contextKey: `task:slack:${channel}:${ts}`,
+        },
+      });
+    const sameThread = await childOf(parentChannel, parentTs);
+    expectStatus(sameThread, [201], "a child in its parent's own Slack thread");
+    await cancelTask(ctx, asString(asRecord(sameThread.json).id, "same-thread child id"));
+    for (const [channel, ts, label] of [
+      [parentChannel, "1700000000.000400", "another thread in the parent's channel"],
+      [`C0E2EPAR2${ctx.nonce}`, parentTs, "the parent's thread ts in another channel"],
+    ]) {
+      const refused = await childOf(channel, ts);
+      expectStatus(refused, [403], `a child naming ${label}`);
+      expect(
+        refused.text.includes("task.slack.thread.bind"),
+        `the 403 for ${label} names task.slack.thread.bind: ${refused.text}`,
+      );
+    }
+    await cancelTask(ctx, parentTaskId);
 
     // Requester + obs-lite-integration.
     expectStatus(
