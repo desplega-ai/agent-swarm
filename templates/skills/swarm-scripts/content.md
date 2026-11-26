@@ -89,10 +89,13 @@ The route runs the same typecheck and scope rules as the tool.
 ### What `ctx` holds
 
 - `ctx.swarm.*`: the swarm SDK. `task_get`, `task_send`, `task_storeProgress`, `task_action`, `task_list`, `slack_reply`, `memory_search`, `memory_store`, `kv_get`, `kv_getOrNull`, `kv_set`, `kv_delete`, `kv_incr`, `kv_list`, `swarm_get`, `agent_info`, `db_query`, and more. `kv_getOrNull` returns the entry, `null` on a missing key, and throws on other errors.
+- A failed call that throws (an unknown or excluded `ctx.swarm` method, a missing argument, `kv_getOrNull`, `script_run`, `ctx.<namespace>.*`, `ctx.db.query`) throws a `SwarmToolError` from `"swarm-sdk"` on both executors. Branch on `err.code` (`unknown_tool`, `not_exposed`, `invalid_args`, `permission`, `not_found`, `rate_limited`, `timeout`, `refused`, `upstream`), `err.tool` and `err.status`, not on message text. Use `SwarmToolError.is(err)` or `instanceof`. An `unknown_tool` error lists the closest method names in `err.suggestions`. Calls that return `{ success, status, data }` still do not throw.
+- `ctx.swarm.<tool>(args, { idempotencyKey })` runs a write at most once per key: a later call of the same tool with the same key (from any run of the same agent, for 7 days) returns the first result and does nothing, whatever its args. A failed or refused call does not use up the key. Only tools that go through the tool bridge take it (`task_send`, `slack_post`, `memory_store`, ...); a REST-routed method such as `kv_*`, `task_get`, `schedule_*`, `workflow_*` or `script_run` throws `invalid_args`. A run started with an `idempotencyKey` (`script-run` tool or API) keys every call from it the same way, so re-running it under the same key replays its bridge writes and `workflow_trigger` calls and hands a derived key to nested `script_run` calls; `kv_*` and `schedule_*` writes run again. Other one-off runs send no key unless you pass one.
 - `ctx.swarm.task_send` requires `routingReason` and `routingNote` whenever `agentId` is present. The note must explain the worker choice in at least 10 characters after trimming whitespace (maximum 200 characters). Use `human_pinned` for an explicit/configured choice, `skill` for a role or specialization match, `continuity` for the same worker/session, `reroute_fault` for a fault handoff, or `overflow` for capacity/pool escalation. Omit both `agentId` and routing fields for the pool.
 - `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for swarm config values, resolved for the agent running the script (agent scope over global, the same rows `get-config` returns for that agent). A key that is not set returns `undefined`, so `config.get("KEY") ?? fallback` works. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
 - `ctx.fs` and `ctx.sh`: files and bash. See "Files and shell" below.
+- `ctx.db`: the swarm database. `ctx.db.dialect` is `"sqlite"` or `"postgres"`, set when the run starts. `ctx.db.query(sql, params?)` runs read-only SQL and returns the rows as objects. See "SQL in scripts" below. Script workflows do not have `ctx.db`.
 - `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `retry`, `Redacted`.
 - Retries: `ctx.swarm` calls retry a 429 on any call, and a 502/503/504 or network error on reads and on writes that send an idempotency key (such as `workflow_trigger` with `idempotencyKey`), within about 5 s. `ctx.stdlib.fetch` retries a 429 on any method and a 502/503/504 or network error on GET, HEAD, OPTIONS, PUT and DELETE. A POST or PATCH retries those only with an `Idempotency-Key` header: pass `retry: { idempotencyKey: true }` to send one UUID on every attempt. The key prevents a duplicate only when the server dedupes by it. `retry: false` makes one attempt. Wrap anything else, sync or async, in `ctx.stdlib.retry(fn, { retries, minDelayMs, maxDelayMs, budgetMs, retryOn })`; it rethrows the last error or returns the last result when attempts run out.
 - `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
@@ -120,6 +123,7 @@ const { stdout, exitCode } = await ctx.sh("grep -rn TODO /afs/notes | sort | hea
 `launch-script-run` runs a script as a durable, journaled run with a different `ctx`: `ctx.run` (`id`, `agentId`, `args`) and `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, `ctx.step.swarmScript(label, config)`, plus `ctx.swarm.*`, `ctx.stdlib`, `ctx.logger`. Durable runs have no `ctx.api`, no `ctx.mcp`, no `ctx.fs`, no `ctx.sh`, and no `ctx.swarm.config`. A configured `ctx.step.agentTask` `agentId` records `human_pinned` unless `routingReason` is supplied. Call a connection or the drive from an inner script through `ctx.step.swarmScript`. See the `script-workflows` skill.
 
 - Each `ctx.step.agentTask` step is a normal worker task (`taskType: "script-run-step"`). When it finishes, the lead gets the usual "Worker task completed — review needed" follow-up, even while the run is still awaiting that step. The step config has no `followUpConfig` field, so a value passed there is dropped. Let the script's own judge step be the gate and close those follow-ups with a one-line accept.
+- A respawned run (API restart, crash) re-executes the script from the top: steps replay from the journal, and each `ctx.swarm.*` call replays from its idempotency record, keyed by the run id, the tool and the call's ordinal among that tool's calls in the run. Keep the order of `ctx.swarm` writes deterministic; a write whose ordinal shifts runs again. Read-only tools are never replayed. Pass `{ idempotencyKey }` to use your own key instead.
 - When a crash supersedes an in-flight step and resumes it as a new task, the run does not follow the new task id: it can stay `failed` (for example `write EPIPE`) while the resumed task completes. Check the resumed task's output before you re-launch the run.
 
 ### Durable objects
@@ -201,15 +205,31 @@ Registration is lead-only: `script-connections` and `credential-bindings`. A wor
 
 Full reference: the "Script connections" guide on the docs site.
 
-## `db_query` for aggregation
+## SQL in scripts
 
-Direct SQL beats fetching lists into the script. The parameter is `sql`:
+Direct SQL beats fetching lists into the script. Use `ctx.db.query(sql, params?)`. It returns the rows as objects keyed by column name, and it throws when the query fails (bad SQL, timeout, 429). It goes through `ctx.swarm.db_query`, so it has the same permissions, row cap and errors.
 
 ```typescript
-const res = await ctx.swarm.db_query({ sql: "SELECT status, count(*) AS cnt FROM agent_tasks GROUP BY status" });
+const counts = await ctx.db.query<{ status: string; cnt: number }>(
+  "SELECT status, count(*) AS cnt FROM agent_tasks GROUP BY status",
+);
 ```
 
-`db_query` returns positional rows: `{ rows: unknown[][], columns: string[] }`. Zip them:
+The swarm database is SQLite or PostgreSQL. `ctx.db.dialect` tells which one, with no probe query. When a statement has no portable form, give one text for each dialect. `ctx.db.query` runs the text of the active dialect:
+
+```typescript
+const durations = await ctx.db.query(
+  {
+    sqlite: `SELECT id, (julianday("finishedAt") - julianday("startedAt")) * 86400 AS seconds FROM script_runs WHERE "scriptName" = ? LIMIT 100`,
+    postgres: `SELECT id, extract(epoch FROM "finishedAt" - "startedAt") AS seconds FROM script_runs WHERE "scriptName" = $1 LIMIT 100`,
+  },
+  [args.scriptName],
+);
+```
+
+Give both texts. An object without both strings throws a `TypeError`. The db-query-guidance skill has the dialect notes.
+
+`ctx.swarm.db_query({ sql, params })` is the raw call. It does not throw on a failed query: it returns `{ success, status, data }`. On success, `data` holds positional rows, `{ rows: unknown[][], columns: string[], dialect }`. Zip them:
 
 ```typescript
 function rowsToObjects(res: any): any[] {
@@ -223,12 +243,13 @@ function rowsToObjects(res: any): any[] {
 
 ### Concurrency limit
 
-`ctx.swarm.db_query` throttles at about three concurrent calls. A wider `Promise.all` fan-out can return 429 responses with no `rows` key, so `res?.data?.rows ?? []` misreads throttling as a clean zero. Check the response status and `data.error` before reading `rows`. Serialize queries or cap concurrency at three.
+`ctx.swarm.db_query` throttles at about three concurrent calls. A wider `Promise.all` fan-out can return 429 responses with no `rows` key, so `res?.data?.rows ?? []` misreads throttling as a clean zero. `ctx.db.query` throws on a 429. With the raw call, check the response status and `data.error` before reading `rows`. Serialize queries or cap concurrency at three.
 
 ### Response traps
 
 - Every `ctx.swarm.*` response passes the secret scrubber. Text shaped like a secret-looking `key=value` assignment comes back as `[REDACTED:<key>]`, so code, HTML or profile text read through `kv_get`, `db_query` or a page read can differ from the stored bytes. Never write such a read back verbatim. Read stored text as `hex(...)` through `db_query`, decode it in the script, and refuse to publish or write when the result contains `[REDACTED:`.
 - `db_query` rejects any SQL containing `;`, even inside a string literal. Pass such literals through `params`.
+- Pass a JSON list as a string param. SQLite reads it with `json_each(?)`. On PostgreSQL, cast it with `$1::text::jsonb`, or pass a real array with `$1::jsonb`. A string param in a `json` or `jsonb` position must be JSON text: `'abc'` fails.
 - `db_query` caps rows without an error (1000 in scripts). Aggregate in SQL and confirm totals with `COUNT(*)`.
 - `kv_get` returns the entry at `data`: read `res.data.value`. The MCP tool shape `entry.value` reads `undefined` in a script.
 - `script_run` returns an envelope (`result`, `truncated`, `durationMs`, `stdout`, `stderr`, `exitCode`). The callee payload is at `.result`. Take key names from a real response: a guessed key that is absent reads as a false zero.

@@ -345,6 +345,21 @@ export function agentsContract(engine: ContractEngine): void {
         { date: "2026-11-20", count: 1 },
         { date: "2026-11-21", count: 1 },
       ]);
+      await repo.insertAgent(newAgent({ id: "a2" }));
+      await task("t6", "reviewing", "2026-11-21T12:00:00.000Z", "a1", "a2");
+      await task("t7", "in_progress", "2026-11-21T13:00:00.000Z", "a2", "a1");
+      // The grouped read agrees with the per-agent count, offers counted only via offeredTo.
+      const counts = await repo.countActiveTasksByAgent(["a1", "a2", "nobody"]);
+      expect([...counts].sort()).toEqual([
+        ["a1", await repo.countActiveTasks("a1")],
+        ["a2", await repo.countActiveTasks("a2")],
+      ]);
+      expect([...counts].sort()).toEqual([
+        ["a1", 2],
+        ["a2", 2],
+      ]);
+      expect((await repo.countActiveTasksByAgent(["a2"])).get("a1")).toBeUndefined();
+      expect((await repo.countActiveTasksByAgent([])).size).toBe(0);
     });
 
     test("worker-reported model columns write only on change (NULL-safe)", async () => {

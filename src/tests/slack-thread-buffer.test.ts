@@ -107,7 +107,8 @@ describe("Slack thread buffer", () => {
     const originalRequireMention = process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION;
 
     beforeAll(() => {
-      process.env.ADDITIVE_SLACK = "true";
+      // Unset: the buffer is on by default.
+      delete process.env.ADDITIVE_SLACK;
       process.env.STEERING_ENABLED = "false";
       // Pin explicitly rather than relying on it being unset — some environments
       // export this at the OS level, which would silently disable the whole gate.

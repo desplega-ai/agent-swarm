@@ -34,6 +34,13 @@ function numeric(
   return Number.isFinite(result) ? result : undefined;
 }
 
+function looseEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a === typeof b) return false;
+  const left = toNumber(a);
+  return left !== undefined && left === toNumber(b);
+}
+
 const OPS = {
   $add: (operands) => numeric(operands, (n) => n.reduce((sum, value) => sum + value, 0)),
   $sub: (operands) => numeric(operands, ([a, b]) => a! - b!, 2),
@@ -55,6 +62,12 @@ const OPS = {
       : typeof value === "string" || Array.isArray(value)
         ? value.length
         : undefined,
+  // Equality is strict, except that a number and its numeric string compare equal
+  // (route params and Select values arrive as strings).
+  $eq: ([a, b]) => looseEqual(a, b),
+  $neq: ([a, b]) => !looseEqual(a, b),
+  $not: ([value]) => !value,
+  $if: ([condition, then, otherwise]) => (condition ? then : otherwise),
 } satisfies Record<string, (operands: unknown[]) => unknown>;
 
 export type ExpressionOp = keyof typeof OPS;

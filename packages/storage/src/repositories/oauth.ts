@@ -310,6 +310,8 @@ export interface OAuthRepository {
     now: string,
   ): Promise<string | null>;
   releaseRefreshLock(lockKey: string, owner: string): Promise<void>;
+  /** True while `owner` holds the refresh lock on `lockKey` and it has not expired at `now`. */
+  isRefreshLockHeld(lockKey: string, owner: string, now: string): Promise<boolean>;
 
   getCodexDeviceFlow(flowId: string): Promise<{ state: string; expires_at: number } | null>;
   deleteCodexDeviceFlow(flowId: string): Promise<void>;
@@ -714,6 +716,14 @@ export abstract class BaseOAuthRepository implements OAuthRepository {
     await this.db.run(
       sql`DELETE FROM oauth_refresh_locks WHERE "lockKey" = ${lockKey} AND owner = ${owner}`,
     );
+  }
+
+  async isRefreshLockHeld(lockKey: string, owner: string, now: string): Promise<boolean> {
+    const row = await this.db.get<{ owner: string }>(
+      sql`SELECT owner FROM oauth_refresh_locks
+          WHERE "lockKey" = ${lockKey} AND owner = ${owner} AND "expiresAt" > ${now}`,
+    );
+    return !!row;
   }
 
   getCodexDeviceFlow(flowId: string): Promise<{ state: string; expires_at: number } | null> {

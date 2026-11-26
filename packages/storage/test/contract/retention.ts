@@ -173,12 +173,13 @@ export function retentionContract(engine: ContractEngine): void {
         INSERT INTO agent_tasks (id, task, status, "createdAt", "lastUpdatedAt", "workflowRunId", "workflowRunStepId")
         VALUES ('t-run', 't', 'completed', ${T0}, ${T0}, 'r1', NULL),
                ('t-step', 't', 'completed', ${T0}, ${T0}, NULL, 's1'),
+               ('t-both', 't', 'completed', ${T0}, ${T0}, 'r1', 's1'),
                ('t-other', 't', 'completed', ${T0}, ${T0}, 'r2', NULL)`);
       await storage.executor.run(sql`
         INSERT INTO wait_states (id, "workflowRunId", "workflowRunStepId", mode)
         VALUES ('w1', 'r1', 's1', 'time')`);
       const taskIds = await storage.transaction(() => repo.deleteWorkflowRuns(["r1"]));
-      expect([...taskIds].sort()).toEqual(["t-run", "t-step"]);
+      expect([...taskIds].sort()).toEqual(["t-both", "t-run", "t-step"]);
       expect(await ids("workflow_runs")).toEqual(["r2"]);
       expect(await ids("workflow_run_steps")).toEqual([]);
       expect(await ids("wait_states")).toEqual([]);
@@ -188,6 +189,7 @@ export function retentionContract(engine: ContractEngine): void {
         workflowRunStepId: string | null;
       }>(sql`SELECT id, "workflowRunId", "workflowRunStepId" FROM agent_tasks ORDER BY id`);
       expect(tasks).toEqual([
+        { id: "t-both", workflowRunId: null, workflowRunStepId: null },
         { id: "t-other", workflowRunId: "r2", workflowRunStepId: null },
         { id: "t-run", workflowRunId: null, workflowRunStepId: null },
         { id: "t-step", workflowRunId: null, workflowRunStepId: null },

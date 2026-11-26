@@ -48,5 +48,6 @@ export {
   runPostgresMigrations,
 } from "./migrations";
 export { OWNER_FENCE_KEY, type OwnerFence, OwnershipLostError } from "./owner-fence";
+export { type PostgresStatsOptions, readPostgresStats } from "./pg-stats";
 export { openPostgresQueryReader, type QueryReaderProbeResult } from "./query-reader";
 export { createPostgresStorage, type PostgresStorageOptions } from "./storage";

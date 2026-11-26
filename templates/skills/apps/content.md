@@ -2,7 +2,7 @@
 
 Swarm Apps are persistent, agent-authored internal applications: a schema-backed row store, named queries, custom script/task actions, and a validated json-render interface served at `/apps/<id>`. Use an app when people need to view and change live records; use `create_page` for a static snapshot.
 
-**When to use a sheet or board instead:** a tracker or grid people keep editing, with no queries or actions, is a sheet. A plan, diagram or map to think through is a board. Both are editable agent-fs files; see the `boards-and-sheets` skill. To show one inside an app, use the `ObjectEmbed` component (section "Embed a sheet or board").
+**When to use a sheet or board instead:** a tracker or grid people keep editing, with no queries or actions, is a sheet. A plan, diagram or map to think through is a board. Both are editable agent-fs files; see the `boards-and-sheets` skill. To show one inside an app, use the `ObjectEmbed` component (section "Embed a sheet or board"). To fill a sheet from CSV, Parquet or xlsx files on the drive, use `data-query` with `sheet` (the `data` skill).
 
 > **Capability gate**: app tools are available when the server's `CAPABILITIES` includes `pages` (for example `CAPABILITIES=core,task-pool,pages`). There is no separate `apps` capability. If these tools are absent from your MCP list, this is why.
 
@@ -11,9 +11,11 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | Tool | Use it for |
 |---|---|
 | `app-list` | Discover apps by id, name, description, and timestamps. Definitions are omitted. |
-| `app-get` | Read one complete stored definition before changing it. |
+| `app-catalog` | Ask what a page may contain: no args lists every component (one line, child slots) and action type; `{ component }` returns its props schema (`prop` drills into one); `{ action }` an action step's params; `{ topic: "expressions" }` the binding reference (`$state` roots, route params, `$param`, `$template`, repeat, `watch`, `OnEnter.everyMs`, visibility). Read it instead of guessing props or reading dashboard source. |
+| `app-get` | Read a definition. `{ outline: true }` returns the tree without props (pages with params and `{ nodeId: [type, childIds] }`, model columns, queries, actions); `{ path }` returns one subtree (`pages.main.elements.title` or `/pages/main/elements/title`). Read the whole app only when you need all of it; the whole read also returns `sourcesPath`, the app's agent-fs sources folder. |
 | `app-upsert` | Create an app, or replace an existing app's entire definition when you intentionally have the full desired state. |
-| `app-patch` | Make a focused change while preserving everything not mentioned in the patch. Prefer this for iteration. |
+| `app-patch-node` | Edit one page or reusable-element node: `props` merges one level (`null` deletes a prop), `set` replaces node keys, `remove` deletes the node and its subtree, `create: { parentId, index?, node }` adds one. Prefer this for UI iteration. |
+| `app-patch` | Make a focused change to actions, queries, models, page params or settings while preserving everything not mentioned. `ops` takes JSON-pointer `add`/`replace`/`remove`/`test` ops instead of a merge patch. |
 | `app-query` | Run one declared named query and return its rows. Use this when an agent or saved script needs to consume app data rather than render the app UI. |
 | `app-rows-list` | List rows with typed equality filters, sorting, and a limit. Returns `{ rows, total }`. |
 | `app-row-get` | Read a row by `rowId`. Returns `{ row }`. |
@@ -23,11 +25,14 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | `app-row-delete` | Delete a row by `rowId`. Returns `{ ok: true }`. |
 | `app-rows-delete` | Delete matching rows with a non-empty `equals` filter. Returns `{ deleted }`. |
 | `app-action-run` | Run a declared script, task, or sync action with `{ appId, action, input? }`. Agents can invoke it through MCP only. |
+| `app-action-status` | Read or wait on the run an action returned: `{ appId, runId, waitSeconds? }`. A script run settles when it and every run its script launched have finished. |
 | `app-history` | List definition snapshots and their compact model/column digests before choosing a restore point. |
 | `app-diff` | Show a unified definition diff; defaults to newest snapshot → CURRENT. |
 | `app-rollback` | Restore a snapshot through the normal schema-migration engine. |
 
-For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch` -> if rejected, fix every returned `issues[]` entry (`path` + `message`) and retry. Validation happens before storage, so a rejected update leaves the saved app unchanged. Do not guess at the current definition or use `app-upsert` with a partial definition.
+For every edit: `app-get { outline: true }` -> `app-get { path }` for the node you change -> `app-patch-node` (UI) or `app-patch` (actions, queries, models) -> if rejected, fix every returned `issues[]` entry (`path` + `message`) and retry. A missing node returns the `closest` node ids. Validation happens before storage, so a rejected update leaves the saved app unchanged. `dryRun: true` validates and reports `changed` without storing. Writes return a compact summary (`changed` paths, `issues`, `warnings`, `versionCreated`); pass `includeApp: true` only when you need the stored app back. Use `app-upsert` only to create an app or to replace a definition you hold whole; never with a partial definition.
+
+Keep what you need to rebuild or extend an app in its agent-fs sources folder, `sourcesPath` from `app-get` (`shared/app:<id>/src/` by default): the generator that builds the definition, backing-script drafts, and a `NOTES.md` with the decisions, data sources and control numbers a follow-up must keep. On a follow-up edit, read `NOTES.md` first, then update it with what you changed. `app-get` lists the files there when agent-fs is set up. The server never writes this folder.
 
 When refreshing row data, write only the diff: read the current rows with `app-rows-list`, then `app-row-patch` the changed rows, `app-rows-create` the new ones, and `app-row-delete` the removed ones. Do not delete every row and recreate it, or recreate the model: a large rewrite can be interrupted partway and leave the app half-populated.
 
@@ -204,7 +209,7 @@ Top-level `elements` are versioned inside the app definition and can be reused f
 ```
 
 - `pure` elements may read only their declared `/props/<name>` state; `$item` and `$index` are also legal inside repeated nodes. They cannot invoke any action step. A pure tree may contain at most one leaf `ElementSlot` where consumer children are inserted.
-- `bound` elements may additionally read the defining app's declared queries and actions and use its models. Those references are validated against the defining app, including hidden-column rules. Exported bound elements cannot use `app.navigate`; private bound elements may navigate within their defining app.
+- `bound` elements may additionally read the defining app's declared queries and actions and use its models. Those references are validated against the defining app, including hidden-column rules. Reusable elements cannot read `/app` directly, including private elements nested in an exported tree; pass app-wide state through a declared prop from the consuming page. Exported bound elements cannot use `app.navigate`; private bound elements may navigate within their defining app.
 - Prop kinds are `string`, `number`, `boolean`, `date`, or `enum`. An enum prop requires a non-empty `enum: ["value", ...]` values array. A literal default and each literal consumer value must match the kind and, for enums, be one of those values. A required prop without a default must be supplied.
 
 Reference an element with an `ElementRef` node. Omit `app` for same-app reuse; cross-app references name the defining app id and require `export: true`. `instanceKey` is optional. Consumer `children` are accepted only when the target has an `ElementSlot`:
@@ -532,7 +537,7 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Accordion, Container, Card, Section, Drawer, Dialog, and Svg). `watch` maps state paths to an action step or chain. A page may also declare `state`: page-local values read and written at `/local/<name>` (see Low-level primitives).
 
-## Component catalog (all 52)
+## Component catalog
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -540,62 +545,7 @@ Icons: every `icon` prop (and the `Icon` block) takes one name from a curated lu
 
 Tones: Badge, Metric and Progress `tone` take `neutral`, `success`, `active`, `error`, `info`, `pending`, `warning`, or `paused`.
 
-| Component | Required props | Optional props / values |
-|---|---|---|
-| `Stack` | none | Primary layout; `direction: "column", "row"`, `gap`, `padding: "none", "xs", "sm", "md", "lg", "xl"`; `align: "start", "center", "end", "stretch"`, `justify: "start", "center", "end", "between"`, `wrap`; `motion: "rise"` (default), `"fade"`, or `"none"` (see Motion below); `fill` (grow to fill a `fill`-aware parent; see Layout below); has the `default` child slot. |
-| `Grid` | none | Responsive `columns`: integer 1 through 6, or `{ base, sm, md, lg }` counts 1 through 6; `gap` uses the Stack spacing values; has the `default` child slot. |
-| `Split` | none | `ratio: "1-1", "1-2", "2-1", "1-3", "3-1"`, `gap`, `collapseBelow: "sm", "md", "lg"`, `reverse`, `fill` (same contract as Stack); has the positional `default` child slot. |
-| `Divider` | none | `label`, `orientation: "horizontal"` (default) or `"vertical"` (a rule between the items of a row `Stack`, as tall as the row); no children. |
-| `Tabs` | `id`, `tabs` | `tabs` entries are `{ key, label?, icon?, count? }` (`count` is a number shown as a small pill); `defaultTab`; `variant: "line"` (default) or `"segmented"` (a compact segmented control, same state and warm panels); has the positional `default` child slot. |
-| `Accordion` | `id`, `items` | Grouped collapsible sections. `items` entries are `{ key, title, description?, icon? }`; children are positional like Tabs (`children[i]` is the body of `items[i]`, same count, validated). `type: "single"` (default: opening one closes the others, and the open one can close) or `"multiple"`. Open keys are client state at `{ "$state": "/ui/<id>/open" }`, always an array; `defaultOpen` lists the keys open on first render. Bodies mount only while open. `Section collapsible` stays the one-item form. |
-| `Container` | none | Legacy layout primitive; prefer Stack. `direction: "row", "column"`, `gap: "none", "sm", "md", "lg"`; has the `default` child slot. |
-| `Card` | none | `title`, `description`; has the `default` child slot. |
-| `Heading` | `text` | `level: "h1", "h2", or "h3"`. |
-| `Text` | `content` | `tone: "default" or "muted"`. |
-| `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. A link to a GitHub PR, issue, commit or repo, a dashboard task, agent, session or app, or an agent-fs file renders as a chip (icon plus short label), like agent output in a session; `[text](url)` keeps its text. |
-| `SearchInput` | `id` | `placeholder`, `label`, `shortcut` (one key, usually `"/"`: shows a keycap and focuses the field); writes debounced text to `/ui/<id>/value`; no children. |
-| `Select` | `id`, `options` | `options` are strings or `{ value, label?, icon?, hint? }`; `placeholder`, `label`, `clearable`, `searchable` (type to filter; on by default past 8 options), `searchPlaceholder`, `multiple`, `defaultValue` (seeds `/ui/<id>/value` once, before any interaction; a one-entry array with `multiple`; a value bound to a query that is still loading seeds when it arrives, unless the viewer already picked); writes a string or null to `/ui/<id>/value`, or with `multiple` a string array (empty = nothing picked); no children. |
-| `NumberInput` | `id` | `label`, `placeholder`, `min`, `max`; a text field with a decimal keyboard that writes the parsed number to `/ui/<id>/value` on every change (no debounce), or null when the field is empty; non-numeric text (a bare `-` mid-edit, letters) leaves the stored value untouched; `min`/`max` clamp the stored value and the visible text snaps to it when the field loses focus; no children. |
-| `Chips` | `id`, `options` | Toggle chips for quick filters. `options` are strings or `{ value, label?, icon? }`; `multiple`; `label` (group name for screen readers). Writes a string or null to `/ui/<id>/value`, or a string array with `multiple`; pressing the selected chip clears it. |
-| `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` swaps the label for a spinner while that custom action's `/actions/<name>/status` is `"running"` (presses are ignored), then shows a check and `successLabel` for about 1.5s when it turns `"ok"`; `icon`, `iconPosition: "start" or "end"`; `size: "sm", "default", or "lg"`; `shortcut` (one key, shown as a keycap, presses the button); `hint` (tooltip); dispatch with element-level `on.press`. |
-| `Metric` | `label`, `value` | The dashboard stat tile. `value` is string or number (empty renders an em dash); bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon` with `tone` tinting its tile; `detail` (a line under the value); `trend: { direction: "up", "down", or "flat", label }`; `info` (explanation tooltip next to the label). `sparkline`: a small trend line under the value in the `tone` color, from an array of numbers (`null` is a gap) or from rows (bind `/queries/<name>/data`) read through `sparklineKey`; fewer than two points draws nothing. `format: "number"`, `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (a ratio: 0.42 is 42%) formats a numeric `value`, like Chart; a string value shows as is. |
-| `Chart` | `kind`, `x`, `series` | `kind: "line", "area", "bar", "pie" or "donut"`; bind `data` / `loading` / `error` to a named query like Table. `x` is the row field on the x axis; `xType: "category"` (default, row order) or `"time"` (ISO date or epoch ms, sorted, date ticks; rows whose `x` does not parse are dropped). `series`: 1-8 `{ key, label?, color? }`, `color` one of `chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted` (default palette, in order: `primary`, `chart-2`..`chart-5`). `stacked` stacks area and bar series (lines never stack). `format: "number"` (default), `"currency"` (with `currency`, an ISO code, default `USD`) or `"percent"` (values are ratios: 0.42 is 42%). Tooltip on hover; the legend shows with two or more series (`legend` forces it on or off). `height` 120-640 px (default 240); `emptyMessage` (default "No data yet"). `x` and every `series[].key` must be columns of the bound query's model. `pie` and `donut` take exactly one series: `x` is the slice label, each row with a positive value is a slice labelled with its share, the tooltip adds the share to the formatted value, and the legend defaults on (`xType` and `stacked` do not apply). Wrap it in a `Card` for a title. |
-| `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`, `icon` (overrides the tone icon), `actionLabel` (a button inside the callout that emits `press`; wire it with `on.press`). |
-| `Badge` | `text` | `text` is string or number; `tone`; `icon` replaces the dot; `variant: "tag"` (default uppercase chip), `"status"` (sentence-case pill), `"count"` (numeric pill), or `"beta"` (the BETA tag); `status` (a lifecycle value renders the dashboard status chip); `hint` (tooltip; the beta tag's explanation). |
-| `Icon` | `name` | `size: "sm", "md", or "lg"`, `tone: "default", "muted", "success", "warning", "error", or "info"`, `label` (accessible name; decorative without it). |
-| `Progress` | `value` | `max` (default 100), `tone`, `label`, `variant: "bar"` (default) or `"ring"` (the dashboard progress ring; ignores `tone`), `showValue` (default true: percent for a bar, `value / max` for a ring). |
-| `EmptyState` | `title` | `icon` (default inbox), `body`, `actionLabel` (a button that emits `press`; wire it with `on.press`). |
-| `CopyButton` | `value` | `value` is string or number; `label` is the visible text, icon-only without it. Renders nothing for an empty value. |
-| `Kbd` | `keys` | Keycaps, one per string (`["⌘", "K"]`). Display only. |
-| `Skeleton` | `shape` | `shape: "line", "block", "rows", "metric", or "card"`; `count` (1-20: lines, rows, tiles, or cards); `height` (px, `block` only, default 128). Show it with `visible` bound to a query's `loading`. |
-| `Spinner` | none | `variant: "ring", "ellipsis", or "bars"` (default: the dashboard spinner), `size: "sm" or "md"`, `label` (visible text and accessible name). |
-| `AvatarStack` | `users` | `users` are display names (initials avatars); `max` (default 4) before a `+N` count. Hover lists every name. |
-| `Section` | `title` | `description`, `collapsible`, `defaultOpen` (default true); has the `default` child slot. |
-| `Table` | `columns` | `data`, `loading`, `refreshing`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `id`, `selectable`, `bulkActions`, `filterable`, `clearState`, `onRetry`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
-| `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
-| `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md" (default), "lg", or "xl"` (about 480/660/900/1010px at 1440px; grows with the viewport up to 640/960/1280/1600px; full width on phones), `actions` (sticky footer buttons; see below), `presentation: "sheet"` (default) or `"split"` (an inline right pane beside the page; see below); has the `default` child slot. |
-| `Dialog` | `param` | A centered modal with the Drawer route contract: open exactly while the page param named by `param` is set; Escape, the X or a click outside clears it. `title`, `description`, `size: "sm", "md" (default), or "lg"`, `actions` (footer buttons, Drawer rules). Use it for a short form opened from `headerActions`; after the write, an `app.navigate` without the param closes it. Has the `default` child slot. |
-| `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls; see below for field kinds. |
-| `CardGrid` | `titleKey` | `data`, `loading`, `error`, `emptyMessage`, `imageKey`, `fields`, `columns`, `onClick`; one card per row for record browsers; see below. |
-| `Kanban` | `columnField`, `columns`, `titleField` | `data`, `loading`, `cardFields`, `idField` (default `id`), `onMove`, `onCardClick`; see below. |
-| `Calendar` | `startField`, `titleField` | `data`, `loading`, `endField`, `idField`, `onSelect`; read-only month grid; see below. |
-| `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
-| `Tree` | `id`, `nodes` | `label`, `maxHeight` (default `480px`), `fill`; collapsible outline of a doc-shaped value that writes the clicked node key to `/ui/<id>/value`; see below. |
-| `Files` | `path` | `mode: "list"` (default) or `"browser"`, `selectedPath`, `emptyMessage`, `maxHeight` (default `480px`), `fill`, `onSelect`, `upload`; an agent-fs folder listing read as the viewer; see below. |
-| `File` | `path` | `height`, `fill`; one agent-fs file (Markdown, image, PDF, text) read as the viewer; see below. |
-| `DateRange` | `id` | `presets` (any of `7d`, `30d`, `90d`, `mtd`, `custom`; default all five), `defaultPreset` (default the first), `label`; writes `/ui/<id>/from` and `/ui/<id>/to`; see below. |
-| `Timeline` | `timeField`, `titleField` | `data`, `loading`, `descriptionField`, `statusField`, `tones`, `icon`, `emptyMessage`, `onSelect`; vertical event list, newest first, grouped by day; see below. |
-| `SchemaForm` | `id`, `schema` | `value`, `baseDoc`, `nodeKey`, `onChange`, `fill`; form generated from a JSON schema's `properties`, mirrored to `/ui/<id>/value`; see below. |
-| `Approval` | `requestId` | `showResolved` (default true), `compact`, `onResolved`; one approval request answered in place by the viewer; see below. |
-| `SessionThread` | `id`, `sessionKey` | `scope`, `placeholder`, `onDispatch`, `fill`, `attachments`; the dashboard's session conversation (the "Session about this page" panel) for one session per viewer and key, with a composer that steers or chains tasks; the draft is mirrored to `/ui/<id>/value`; see below. |
-| `PageFrame` | `pageId` | `device` (`desktop` default, or `mobile`: a 390 px wide frame), `height` (default `640px`), `fill`; a live, clickable swarm Page that reloads when the page changes; see below. |
-| `Input` | none | Low-level text field: `value` (bind two-way with `$bindState` / `$bindItem`), `id` (the `ui.focus` target), `label`, `placeholder`, `type: "text"` or `"password"`, `inputMode`, `autoComplete: "off"` or `"one-time-code"`, `maxLength`, `size: "default"` or `"cell"` (square one-character box), `selectOnFocus`, `disabled`; chains `onInput`, `onPaste`, `onKeyDown:<Key>`; see Low-level primitives. |
-| `Svg` | `width`, `height` on the outer Svg | Vector drawing in `width` x `height` user units, scaled to its container; `label` (accessible name). Children: `Rect`, `Line`, `Path`, `Circle`, `SvgText`, or a nested `Svg` (a group offset by `x`/`y`, the place for `repeat`). |
-| `Rect` | `x`, `y`, `width`, `height` | `rx`, `fill`, `stroke`, `strokeWidth`, `opacity`, `title` (tooltip); only inside an Svg. |
-| `Line` | `x1`, `y1`, `x2`, `y2` | `stroke`, `strokeWidth`, `opacity`, `dashed`; only inside an Svg. |
-| `Path` | `d` | `fill`, `stroke`, `strokeWidth`, `opacity`; `d` holds path commands and numbers only; only inside an Svg. |
-| `Circle` | `cx`, `cy`, `r` | `fill`, `stroke`, `strokeWidth`, `opacity`, `title`; only inside an Svg. |
-| `SvgText` | `x`, `y`, `text` | `anchor: "start", "middle", "end"`, `size`, `weight: "normal"` or `"bold"`, `fill`; only inside an Svg. |
+Components: `Stack`, `Grid`, `Split`, `Divider`, `Tabs`, `Accordion`, `Container`, `Card`, `Heading`, `Text`, `Markdown`, `SearchInput`, `Select`, `NumberInput`, `Chips`, `Button`, `Metric`, `Chart`, `Alert`, `Badge`, `Icon`, `Progress`, `EmptyState`, `CopyButton`, `Kbd`, `Skeleton`, `Spinner`, `AvatarStack`, `Section`, `Table`, `Form`, `OnEnter`, `Drawer`, `Dialog`, `DetailList`, `CardGrid`, `Kanban`, `Calendar`, `ContributionGraph`, `Tree`, `Files`, `File`, `DateRange`, `Timeline`, `LogStream`, `SchemaForm`, `Approval`, `SessionThread`, `PageFrame`, `Input`, `Svg`, `Rect`, `Line`, `Path`, `Circle`, `SvgText`. Read a component's props, required props, enums and child slots with `app-catalog { component: "<Name>" }` (`prop` drills into one prop); it serves the same schema the server validates against. The notes below cover behavior the schema does not show.
 
 Table details:
 
@@ -662,7 +612,26 @@ DateRange and Timeline details:
 - `DateRange` writes inclusive `YYYY-MM-DD` dates (the viewer's local calendar) to `/ui/<id>/from` and `/ui/<id>/to`, and the active preset to `/ui/<id>/preset`. On first load it writes `defaultPreset` unless the state already holds a range. Bind query params with `{ "$state": "/ui/<id>/from" }` so the query refetches when the range changes. `7d` is today and the six days before it; `mtd` starts on the 1st. `custom` opens two date inputs in a popover; Apply needs both dates, from not after to. `id` must match `[A-Za-z0-9_-]+`, and `defaultPreset` must be one of `presets`.
 - `Timeline` reads `timeField` as an ISO date or epoch ms (rows that do not parse are left out), sorts newest first and groups under day headings: Today, Yesterday, then the date. Each event shows `titleField`, the time, `descriptionField` (two lines at most) and a `statusField` pill (`tones` maps value to tone; lifecycle values get the status chip). `icon` replaces the marker dot. `onSelect` runs with `$row` (the row) and `$rowIndex` (its index in `data`); without it events are not clickable.
 
-SchemaForm details:
+LogStream details — logs as a tail, not a table:
+
+- One monospace line per entry, newest first: `HH:mm:ss.SSS`, a 3 px severity bar (text like `WARN` or an OTel number), the service, the body on one line. Click a line to expand the full body, `attributesField` and `resourceField` (objects or JSON strings) and a trace link that runs `onTrace` with `$row`.
+- Virtualized and memoized: 50k entries scroll smoothly, and a refresh re-renders only the lines it adds. Set `keyField` to a unique id so expanded lines stay open across refreshes and a refetched entry is reused, not redrawn.
+- `maxRows` (default 10,000, at most 100,000) keeps the newest entries; the oldest past it drop with a notice at the bottom. Keep the source query bounded too (a `limit` or a `since` window).
+- Live tail: refresh the source with `OnEnter.everyMs` (and a `since` cursor in the action) and set `follow: true`. The newest entry stays in view; once the viewer scrolls down, new entries show an "N new" pill instead of moving the view.
+- Pair it with a severity histogram (`Chart` kind `bar`, stacked per severity) on top and facets (`Chips` or `Select` over service and severity) beside it.
+
+```json
+{ "type": "LogStream", "props": {
+  "data": { "$state": "/actions/tail/result/logs" },
+  "loading": { "$state": "/actions/tail/running" },
+  "timeField": "timestamp", "bodyField": "body", "severityField": "severity_text",
+  "serviceField": "service.name", "attributesField": "attributes", "traceField": "traceId", "keyField": "cursor",
+  "follow": true, "fill": true,
+  "onTrace": [{ "action": "app.navigate", "params": { "page": "trace", "params": { "traceId": { "$row": "traceId" } } } }]
+} }
+```
+
+Form details:
 
 - `schema` is a JSON schema object held in state (usually `{ "$state": ... }`). Each entry of `properties` becomes one control: `type: "boolean"` a switch, `enum` of strings a select, `type: "number"` or `"integer"` a number input, anything else a text input. `description` is the tooltip. Fields seed from `value[key]`, else the property `default`. At most 100 fields and 200 enum options render. `id` must match `[A-Za-z0-9_-]+`. Rebinding `schema` resets the form.
 - Typing updates `/ui/<id>/value` with the draft object; switches and selects commit at once and text and number inputs commit on blur. Each commit runs `onChange` with `$form` = the draft.
@@ -747,6 +716,65 @@ PageFrame details — a live swarm Page inside the app, for a preview pane next 
   "device": { "$state": "/ui/device/value" },
   "fill": true
 } }
+```
+
+#### Pages inside an app (`appContext`)
+
+An HTML page in an app `PageFrame` talks to the app through `window.appContext`. Outside an app (a page opened on its own, or embedded by another page) it is `null`, so one page serves both.
+
+- **App side**, on the `PageFrame`: `params` (scalars, usually bound) reach the page as its query string and as `appContext.params`; a change reloads the frame. `actions` lists the app actions the page may run (script actions only; task actions stay on app buttons). `expose` lists the app state paths the page may read (`/app/<name>`, `/ui/<id>/...`). `id` plus `on.message` receive the page's messages: each one is stored at `/ui/<id>/message` (`{ name, data, seq }`) before the chain runs. The frame also follows the app's theme preset, not the dashboard's.
+- **Page side**: `await appContext.ready` (rejects after 5 s with no app), then read `appContext.route` (`{ page, params }`), `.params`, `.theme` (`{ mode, preset }`) and `.state` (keyed by exposed path). `appContext.on("change" | "route" | "params" | "theme" | "state", fn)` returns an unsubscribe. `await appContext.action(name, input)` returns `{ status: "ok", result }` or `{ status: "error", error }`. `appContext.navigate(page, params)` opens another page of this app. `appContext.emit(name, data)` runs `on.message`.
+- **Security**: the page holds no credential. The app runs each action with its own `app.action` step as the viewer, so the server's `app.use` gate and the script's `caller` checks apply. A page never gets more than the viewer: an action outside `actions` and a path outside `expose` are refused, and navigation stays inside this app. The frame answers only its own iframe on the API origin, and caps requests at 20 per second and 64 KiB each.
+- JSON pages render inline and get no `appContext`. Keep one static page per view and feed it with `params` and `appContext.action`, instead of writing a page per viewer.
+
+### Example: Page inside an app
+
+The trace page draws a waterfall for `?traceId=`, loads spans through `traceDetail`, and asks the app to open a span: `appContext.emit("open", { spanId })`.
+
+```json
+{
+  "models": {},
+  "defaultPage": "trace",
+  "state": { "window": "1h" },
+  "actions": { "traceDetail": { "kind": "script", "scriptId": "00000000-0000-4000-8000-000000000001" } },
+  "pages": {
+    "trace": {
+      "title": "Trace",
+      "params": { "traceId": { "kind": "string" } },
+      "root": "frame",
+      "elements": {
+        "frame": {
+          "type": "PageFrame",
+          "props": {
+            "id": "waterfall",
+            "pageId": "8b8077e8b7a94dfc89c88636889a46ac",
+            "params": { "traceId": { "$state": "/route/params/traceId" } },
+            "actions": ["traceDetail"],
+            "expose": ["/app/window"],
+            "fill": true
+          },
+          "on": {
+            "message": [
+              { "action": "ui.set", "params": { "path": "/app/window", "value": { "$state": "/ui/waterfall/message/data/window" } } }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+In the page:
+
+```js
+const ctx = window.appContext;
+if (ctx) {
+  await ctx.ready;
+  const { result } = await ctx.action("traceDetail", { traceId: ctx.params.traceId });
+  draw(result.spans, ctx.theme.mode);
+  ctx.on("state", (state) => redraw(state["/app/window"]));
+}
 ```
 
 Form details:
@@ -861,9 +889,9 @@ Valid `$state` roots are:
 
 - `/queries/<declaredQuery>/...`
 - `/forms/<formId>/...`, where a `Form` element has that literal `props.id`
-- `/ui/<id>/...`, where a SearchInput, Select, Chips, or Tabs element has that literal `props.id` (SearchInput, Select, and Chips use `/value`; Tabs uses `/tab`)
+- `/ui/<id>/...`, where a SearchInput, Select, Chips, or Tabs element has that literal `props.id` (SearchInput, Select, and Chips use `/value`; Tabs uses `/tab`; Select also writes its typed search to `/search`)
 - `/actions/<declaredAction>/...`
-- `/route/page` for the active page name
+- `/route` (the whole `{ page, params }`), `/route/params` (all params), or `/route/page` for the active page name
 - `/route/params/<declaredParam>` for a param declared on the current page
 - `/local/<name>/...`, where the current page declares `<name>` in its `state`
 
@@ -912,13 +940,23 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 
 **Page state.** `pages.<page>.state` maps names to initial JSON values. The page reads them at `{ "$state": "/local/<name>/..." }` and only this root is writable. Each page has its own `/local`, even when two pages declare the same name. The values are seeded on first render and survive navigation; patching `pages.<page>.state.<name>` replaces that entry. Reusable elements cannot read or write `/local`.
 
+**App state.** The definition's top-level `state` maps names to initial JSON values shared by every page: read `{ "$state": "/app/<name>" }`, write with `ui.set` (`/app/<name>/...`) or bind a `Select`/`Input` through `$bindState`. Use it for one time window that every page follows. It is seeded once and survives navigation between the app's pages; a reload starts from the initial values.
+
 **Input.** `value: { "$bindState": "/local/<name>/..." }` binds two-way; inside a `repeat` over a `/local` list, `{ "$bindItem": "" }` binds the item itself (`"field"` binds a field of it). `$bindState` and `$bindItem` are valid only on `Input.value`. Event chains are props, run by the Input:
 
 - `onInput`: after every edit; `{ "$chain": "value" }` is the new text.
 - `onPaste`: instead of the browser paste; `{ "$chain": "text" }` is the clipboard text.
 - `onKeyDown:<Key>`: instead of that key's default. Keys: `Backspace`, `Delete`, `Enter`, `Escape`, `Tab`, `ArrowLeft`, `ArrowRight`, `ArrowUp`, `ArrowDown`, `Home`, `End`.
 
-`$state` reads inside these chains resolve at render time. To read the newest value, use `$chain`, or put the chain in a `watch`. A state write inside a `watch` chain re-runs the watch and cancels the steps after it, so make `ui.set` the last step there.
+`$state` reads inside these chains resolve at render time. To read the newest value, use `$chain`, or put the chain in a `watch`.
+
+**`watch` rules.** A `watch` skips the value it sees on first render: it only fires on a later change, so it never loads data on page open. Any state write while a `watch` chain runs cancels the steps after it, and `app.action` always writes (`/actions/<name>`), so a `watch` chain runs at most one `app.action` or `ui.set`, and it must be the last step. Put multi-step loads in `OnEnter` instead.
+
+**Live data.** `OnEnter.everyMs` (1000 or more) re-runs the chain on an interval while the tab is visible; a tick is skipped while any earlier run (a tick or a `deps` change) is still going. Bind it to a toggle (`{ "$if": [{ "$state": "/local/live" }, 2000, null] }`) for a pausable live tail.
+
+**Realtime.** An open app page holds one realtime socket (the same one pages use). A row write (UI, `app-row-*` tools, a sync pass) refreshes every query over that model on every open page within about 250 ms, with no polling needed; polling stays as the fallback. `/presence/peers` lists the other people on the same app page (`[{ id, name, avatar? }]`), `/presence/names` their names and `/presence/count` how many: `{ "type": "AvatarStack", "props": { "users": { "$state": "/presence/names" } } }`. Viewers need `app.use`. Script query results and action results are not pushed: refresh those with `OnEnter.everyMs`.
+
+**`OnEnter`: load on open.** An `OnEnter` element renders nothing. It runs its `on.enter` chain on mount, then again each time its resolved `deps` value changes. Its steps always run to the end (no `watch` cancel). Use `deps: { "$state": "/route" }` to re-run it when the page or a route param changes; omit `deps` to run it once per mount. Put it anywhere in the page tree.
 
 **Steps.**
 
@@ -935,10 +973,105 @@ Compose custom widgets (a code input, a timeline, a Gantt chart) from page-local
 | `$split` | text, separator (default `""`), optional limit | array of strings |
 | `$join` | array, separator (default `""`) | text |
 | `$length` | 1 value | length of a text or array (`0` for null) |
+| `$eq`, `$neq` | exactly 2 values | `true`/`false`. Strict, except a number equals its numeric string (`"5"` and `5`) |
+| `$not` | 1 value | `true` when the value is falsy |
+| `$if` | condition, then, optional else | `then` when the condition is truthy, else `else` (or no value) |
 
-A non-numeric operand, or a division by zero, yields no value and the attribute is left out.
+`{ "$eq": [{ "$state": "/actions/load/status" }, "running"] }` is a busy flag for a `loading` prop. A non-numeric operand, or a division by zero, yields no value and the attribute is left out.
 
 **Svg.** `Svg` draws in `width` x `height` user units. Shape attributes (`x`, `y`, `width`, `height`, `x1`..`y2`, `cx`, `cy`, `r`, `d`) accept expressions, so a bar is `x = 100 + (start - min) * scale`. A nested `Svg` is a group: put `repeat` on it to draw its shapes once per item. Colors are palette tokens (`chart-1`..`chart-5`, `primary`, `success`, `warning`, `error`, `info`, `muted`, `foreground`, `background`, `border`, `none`). The validator rejects unknown attributes, raw colors, a `Path.d` with anything but path commands and numbers, shapes outside an Svg, and non-shape Svg children.
+
+### Example: Load on enter
+
+The page loads its data on open and when the `traceId` param changes, runs two actions in a row, and shows a spinner while the first one runs. The edit form is prefilled from the loaded row.
+
+```json
+{
+  "models": {},
+  "defaultPage": "trace",
+  "actions": {
+    "traceDetail": { "kind": "task", "prompt": "Load the trace" },
+    "traceLogs": { "kind": "task", "prompt": "Load its logs" }
+  },
+  "pages": {
+    "trace": {
+      "title": "Trace",
+      "params": { "traceId": { "kind": "string" } },
+      "root": "main",
+      "elements": {
+        "main": { "type": "Stack", "props": { "direction": "column" }, "children": ["enter", "busy", "edit"] },
+        "enter": {
+          "type": "OnEnter",
+          "props": { "deps": { "$state": "/route" } },
+          "on": {
+            "enter": [
+              { "action": "app.action", "params": { "name": "traceDetail", "input": { "traceId": { "$state": "/route/params/traceId" } } } },
+              { "action": "app.action", "params": { "name": "traceLogs", "input": { "traceId": { "$state": "/route/params/traceId" } } } }
+            ]
+          }
+        },
+        "busy": {
+          "type": "Text",
+          "props": { "content": { "$if": [{ "$eq": [{ "$state": "/actions/traceDetail/status" }, "running"] }, "Loading…", "Loaded"] } }
+        },
+        "edit": {
+          "type": "Form",
+          "props": {
+            "id": "note",
+            "fields": [{ "name": "traceId", "label": "Trace id" }],
+            "initialValues": { "traceId": { "$state": "/route/params/traceId" } },
+            "resetKey": { "$state": "/route/params/traceId" },
+            "onSubmit": []
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Example: Shared window and action-fed chart
+
+Every page follows `/app/window`. The chart reads a script action's result, so it can draw any window; it reloads when the window changes and every 30 s.
+
+```json
+{
+  "models": {},
+  "defaultPage": "overview",
+  "state": { "window": "1h" },
+  "actions": { "red": { "kind": "task", "prompt": "Replace with a script action that returns { rows: [{ t, p95 }] }" } },
+  "pages": {
+    "overview": {
+      "title": "Overview",
+      "root": "main",
+      "elements": {
+        "main": { "type": "Stack", "props": { "direction": "column" }, "children": ["window", "load", "chart"] },
+        "window": {
+          "type": "Tabs",
+          "props": { "id": "w", "tabs": [{ "key": "1h", "label": "1h" }, { "key": "24h", "label": "24h" }] },
+          "watch": { "/ui/w/tab": [{ "action": "ui.set", "params": { "path": "/app/window", "value": { "$state": "/ui/w/tab" } } }] }
+        },
+        "load": {
+          "type": "OnEnter",
+          "props": { "deps": { "$state": "/app/window" }, "everyMs": 30000 },
+          "on": { "enter": [{ "action": "app.action", "params": { "name": "red", "input": { "window": { "$state": "/app/window" } } } }] }
+        },
+        "chart": {
+          "type": "Chart",
+          "props": {
+            "kind": "line",
+            "x": "t",
+            "xType": "time",
+            "series": [{ "key": "p95", "label": "p95 ms" }],
+            "data": { "$state": "/actions/red/result/rows" },
+            "loading": { "$eq": [{ "$state": "/actions/red/status" }, "running"] }
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 ### Example: 6-cell code input
 
@@ -1091,7 +1224,7 @@ Each task is a bar at `x = 100 + (start - min) * scale`, `width = days * scale`,
 
 `pages.<page>: null` deletes a page, except the current `defaultPage` cannot be deleted. `root`, `title`, and top-level `defaultPage` use ordinary merge semantics. A top-level `page` patch is rejected with guidance to patch `pages.<name>` instead.
 
-Because elements, param declarations, actions, and columns are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` requires sending its full `{ "type": "Table", "props": ... }` element. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
+Because elements, param declarations, actions, and columns are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` with a merge patch requires sending its full `{ "type": "Table", "props": ... }` element; `app-patch-node { page, nodeId, props: { emptyMessage } }` or one `ops` entry (`{ "op": "replace", "path": "/pages/main/elements/table/props/emptyMessage", "value": "..." }`) changes just that prop. A `test` op makes the patch conditional: when it fails, nothing is stored and the issue names `ops[<i>]`. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
 
 ```json
 {
@@ -1216,7 +1349,7 @@ The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the liv
 ## View and screenshot a live app
 
 - An app renders at `<dashboard>/apps/<id>`. Two view modes are set by query string: `?mode=full` (full-viewport overlay with a slim header) and `?mode=chromeless` (only the rendered page, the embed surface). `app.navigate` keeps only `?mode`.
-- Logged-in browser: a fresh dashboard has no connection and redirects to /setup. Seed the localStorage key `agent-swarm-connections` with `{connections:[{id,name,apiUrl,apiKey}],activeId}`. Build the value from an env var and pipe it to `agent-browser eval --stdin`, so the key never reaches a command line. Reload, then pick a user in the "Who are you?" dialog.
+- Logged-in browser: run `agent-swarm ui-dev --app <id>` in the background and wait for its `UI_DEV_READY {json}` line. It needs no repo checkout; when you change dashboard code, `bun run ui:dev --app <id>` from an agent-swarm checkout does the same with hot reload. Open its `url` with agent-browser, Playwright or qa-use: the dashboard is already connected as a fixed user, with no /setup redirect and no "Who are you?" dialog. It acts with your swarm key, so in prod do not click actions or submit forms unless the task asks. Do not seed localStorage or write a one-off browser script. Runbook: `runbooks/app-and-page-dev.md`.
 - Apps scroll inside an inner canvas, so a full-page screenshot captures only the viewport. Scroll the canvas or raise the viewport height. For mobile, set a 375px-wide viewport before the screenshot.
 - App definitions: `GET /api/apps` and `GET /api/apps/<id>` with the API key as Bearer.
 - Follow-up edit to a live app: list in the brief the control numbers the edit must not move, and assert them from the backing script before publishing. Take a signed-in screenshot of each changed selector at 1440px wide, save the shots to agent-fs, critique, and repeat at least 3 times. If the backing script caches results, bump its version or force a fresh run so the shots show new data.
@@ -1234,3 +1367,11 @@ Equality filters accept declared columns and system columns. Filter values must 
 
 `app-action-run` returns the REST action body under `data`. Script actions run with the script owner's identity and receive the verified invoking agent as `caller`.
 Scripts and extensions cannot invoke `app-action-run`.
+
+#### Async refresh: wait on the run, not on rows
+
+A script or task action returns `run: { id, state, settled, runs, failures?, next? }`. For a script action, the run tree is the action's own run plus every run its script launched with `ctx.swarm.script_launchRun` or called with `ctx.swarm.script_run`. The tree settles when none of them is running; `state` is `failed` when any of them failed, and `failures` names the first three. Runs that a launched background run starts itself are not in the tree: keep them nested (`script_run`) so the background run stays running until they finish, and let it fail when they fail.
+
+- Launch background work from the action script itself, before it returns, so the launched run joins the tree.
+- Wait with `app-action-run { waitSeconds: 25 }`. While `run.settled` is false, call `app-action-status { appId, runId: run.id, waitSeconds: 25 }` (REST: `GET /api/apps/<id>/action-runs/<runId>?waitSeconds=25`).
+- Never write sleep loops against a progress `meta` row: the run tree is the done signal.

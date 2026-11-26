@@ -29,7 +29,16 @@ export const scriptCredentialBindings: Scenario = {
     const configKey = `E2E_CRED_${ctx.nonce.toUpperCase()}`;
     const secretValue = `e2e-broker-secret-${ctx.nonce}-4242`;
     const placeholder = `[REDACTED:${configKey}]`;
-    const stub = startStub(() => Response.json({ ok: true }));
+    // `/loop` answers a 302 back to itself past the broker's hop cap; `/redirect-once`
+    // answers a relative 302; `/redirect-loop` answers a fragment-only Location, which
+    // keeps the query, so it loops past the hop cap too.
+    const stub = startStub((request) => {
+      const { pathname } = new URL(request.url);
+      if (pathname === "/loop") return redirect(`/loop?access_token=${placeholder}`);
+      if (pathname === "/redirect-once") return redirect("/landed");
+      if (pathname === "/redirect-loop") return redirect("#again");
+      return Response.json({ ok: true });
+    });
     const bindingIds: string[] = [];
     let configId: string | undefined;
     let oauthProvider: string | undefined;
@@ -186,10 +195,19 @@ export const scriptCredentialBindings: Scenario = {
       const queryBindingId = asString(asRecord(asRecord(queryBinding.json).binding).id, "id");
       bindingIds.push(queryBindingId);
       expect(queryBindingId !== headerId, "a different template is a different binding");
-      await runScript(ctx, workerId, {
+      // The script returns what it can read back reversed, so the run-output scrubber
+      // (exact-string match) cannot hide a substituted value that reached it.
+      const queryRun = await runScript(ctx, workerId, {
         source: `export default async function () {
+  const reverse = (text: string) => text.split("").reverse().join("");
   const response = await fetch("${stub.origin}/query?access_token=${placeholder}");
-  return response.status;
+  let error = "";
+  try {
+    await fetch("${stub.origin}/loop?access_token=${placeholder}");
+  } catch (err) {
+    error = String((err as Error).message);
+  }
+  return { status: response.status, url: reverse(response.url), error: reverse(error) };
 }`,
         intent: `e2e broker query ${ctx.nonce}`,
       });
@@ -197,6 +215,17 @@ export const scriptCredentialBindings: Scenario = {
       expect(
         queryRequest?.path === `/query?access_token=${secretValue}`,
         `the query placeholder must be substituted, got ${queryRequest?.path}`,
+      );
+      const queryResult = asRecord(queryRun.result);
+      const readBack = (field: string) => String(queryResult[field]).split("").reverse().join("");
+      expect(
+        readBack("url") === `${stub.origin}/query?access_token=${placeholder}`,
+        `response.url must keep the placeholder, got ${readBack("url")}`,
+      );
+      expect(
+        readBack("error") ===
+          `fetch exceeded 5 redirects: ${stub.origin}/loop?access_token=${placeholder}`,
+        `the redirect-cap error must report the placeholder URL, got ${readBack("error")}`,
       );
 
       // ── a source that embeds the registered secret is refused ──
@@ -213,6 +242,79 @@ export const scriptCredentialBindings: Scenario = {
         refusal.error === "source_contains_secret" && !embedded.text.includes(secretValue),
         `the refusal must not echo the secret: ${embedded.text.slice(0, 300)}`,
       );
+
+      // ── a failed fetch reports the caller's URL, not the substituted one ──
+      // The binding matches the hostname only, so a closed port on the same host still
+      // substitutes. The script returns the error reversed, so the run-output scrubber
+      // (exact-string match) cannot hide a substituted value that reached it. Native only:
+      // the quickjs egress guard refuses a loopback host before any connection.
+      const refusedHref = new URL(`http://${stub.hostname}:1/refused?access_token=${placeholder}`)
+        .href;
+      const refusedRun = await runScript(ctx, workerId, {
+        source: `export default async function () {
+  const reverse = (text: string) => text.split("").reverse().join("");
+  try {
+    await fetch("${refusedHref}");
+    return { fetched: true };
+  } catch (err) {
+    const error = err as Error & Record<string, unknown>;
+    const fields = Object.fromEntries(Object.keys(error).map((key) => [key, String(error[key])]));
+    return {
+      path: reverse(String(error.path)),
+      dump: reverse(JSON.stringify({ ...fields, message: error.message, text: String(error) })),
+    };
+  }
+}`,
+        executor: "native",
+        intent: `e2e broker refused ${ctx.nonce}`,
+      });
+      const refused = asRecord(refusedRun.result);
+      const readRefused = (field: string) => String(refused[field]).split("").reverse().join("");
+      expect(
+        readRefused("path") === refusedHref,
+        `error.path must keep the placeholder, got ${readRefused("path")} (${JSON.stringify(refusedRun).slice(0, 300)})`,
+      );
+      expect(
+        !readRefused("dump").includes(secretValue) &&
+          !readRefused("dump").includes(encodeURIComponent(secretValue)),
+        `the fetch error must not carry the secret, got ${readRefused("dump")}`,
+      );
+
+      // ── the broker's own redirect errors report the caller's URL too ──
+      // `redirect: "error"` refuses the first hop; the loop hits the hop cap. Both
+      // messages must name the placeholder, read back reversed as above.
+      const redirectRun = await runScript(ctx, workerId, {
+        source: `export default async function () {
+  const reverse = (text: string) => text.split("").reverse().join("");
+  const attempt = async (path: string, init: RequestInit) => {
+    try {
+      await fetch("${stub.origin}" + path + "?access_token=${placeholder}", init);
+      return "fetched";
+    } catch (err) {
+      return reverse(String((err as Error).message));
+    }
+  };
+  return {
+    refused: await attempt("/redirect-once", { redirect: "error" }),
+    looped: await attempt("/redirect-loop", {}),
+  };
+}`,
+        executor: "native",
+        intent: `e2e broker redirect errors ${ctx.nonce}`,
+      });
+      const redirected = asRecord(redirectRun.result);
+      for (const [field, path] of [
+        ["refused", "/redirect-once"],
+        ["looped", "/redirect-loop"],
+      ] as const) {
+        const message = String(redirected[field]).split("").reverse().join("");
+        expect(
+          message.includes(`${path}?access_token=${placeholder}`) &&
+            !message.includes(secretValue) &&
+            !message.includes(encodeURIComponent(secretValue)),
+          `the ${field} redirect error must name the placeholder, not the secret, got ${message} (${JSON.stringify(redirectRun).slice(0, 300)})`,
+        );
+      }
 
       // ── list shows both bindings; managed (connection-owned) ones are opt-in ──
       const listed = await ctx.api("GET", "/api/credential-bindings");
@@ -447,3 +549,7 @@ export const scriptCredentialBindings: Scenario = {
     }
   },
 };
+
+function redirect(location: string): Response {
+  return new Response(null, { status: 302, headers: { location } });
+}

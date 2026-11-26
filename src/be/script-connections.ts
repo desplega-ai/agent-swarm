@@ -1,4 +1,5 @@
 import type {
+  ScriptConnectionCatalogRow,
   ScriptConnectionRow,
   ScriptConnectionWrite,
   ScriptCredentialBindingRow,
@@ -22,6 +23,10 @@ import {
 import { createSsrfGuardedFetch } from "@/utils/egress-guard";
 import { refreshSecretScrubberCache } from "@/utils/secret-scrubber";
 import { listMcpServerTools } from "./mcp-proxy";
+import {
+  getScriptConnectionCatalogGeneration,
+  invalidateScriptConnectionCatalog,
+} from "./script-connection-catalog";
 import { assertPostgresDsn } from "./sql-connections";
 import { getStorage } from "./storage";
 import { readVendoredOpenapiSpec } from "./vendored-openapi";
@@ -1847,6 +1852,7 @@ export async function upsertScriptConnection(data: {
     });
 
   const row = await writeConnectionAndBinding();
+  invalidateScriptConnectionCatalog();
   if (derived?.secretWrite || sqlSecretWrite || supersededSecretDeleted) {
     refreshSecretScrubberCache();
   }
@@ -1923,6 +1929,7 @@ export async function refreshScriptConnection(
   });
   if (fetched.status === "not_modified") {
     const refreshed = await scriptsRepo().setConnectionSpecFetchedAt(id, fetched.fetchedAt);
+    invalidateScriptConnectionCatalog();
     return refreshed ? connectionFromRow(refreshed) : null;
   }
 
@@ -1964,6 +1971,7 @@ export async function setScriptConnectionEnabled(
     userId ?? null,
     new Date().toISOString(),
   );
+  invalidateScriptConnectionCatalog();
   return row ? connectionFromRow(row) : null;
 }
 
@@ -1986,6 +1994,7 @@ export async function deleteScriptConnection(id: string): Promise<ScriptConnecti
     const connection = connectionFromRow(row);
     await deleteManagedBindingForConnection(id);
     await storage.repos.scripts.deleteConnection(id);
+    invalidateScriptConnectionCatalog();
     const secretKey = derivedInlineSecretKey(connection);
     if (secretKey) {
       await deleteManagedConnectionSecret({
@@ -2000,35 +2009,131 @@ export async function deleteScriptConnection(id: string): Promise<ScriptConnecti
   return deleted;
 }
 
-export async function getScriptApiConnectionDescriptors(
-  context: { agentId?: string; repoId?: string } = {},
-): Promise<ScriptApiConnectionDescriptor[]> {
-  return (await listScriptConnections(context))
-    .filter((connection) => ["openapi", "graphql", "sql"].includes(connection.kind))
+/** The fields the run-time descriptor loaders read, one entry per connection row. */
+export type ScriptConnectionCatalog = ReadonlyArray<
+  Readonly<
+    Pick<
+      ScriptConnectionRecord,
+      "slug" | "kind" | "scope" | "scopeId" | "enabled" | "generatedRuntimeJson"
+    >
+  >
+>;
+
+const CONNECTION_CATALOG_TTL_MS = 30_000;
+let cachedCatalog: {
+  client: unknown;
+  /** Read before the query, so a write mid-load still invalidates. */
+  generation: number;
+  at: number;
+  catalog: Promise<ScriptConnectionCatalog>;
+} | null = null;
+
+/**
+ * The connection catalog a script run needs, cached in-process. Every
+ * script_connections write bumps the generation and drops it; the TTL bounds
+ * staleness from writes on another API replica. Load it once per run and pass
+ * it to both descriptor loaders.
+ */
+export async function loadScriptConnectionCatalog(): Promise<ScriptConnectionCatalog> {
+  const storage = getStorage();
+  // Inside a transaction the caller may read its own uncommitted writes: never cache those.
+  if (storage.inTransaction()) {
+    return catalogFromRows(await scriptsRepo().listConnectionCatalog());
+  }
+  const now = Date.now();
+  const generation = getScriptConnectionCatalogGeneration();
+  if (
+    cachedCatalog &&
+    cachedCatalog.client === storage &&
+    cachedCatalog.generation === generation &&
+    now - cachedCatalog.at < CONNECTION_CATALOG_TTL_MS
+  ) {
+    return cachedCatalog.catalog;
+  }
+  const entry: NonNullable<typeof cachedCatalog> = {
+    client: storage,
+    generation,
+    at: now,
+    catalog: scriptsRepo().listConnectionCatalog().then(catalogFromRows),
+  };
+  cachedCatalog = entry;
+  entry.catalog.catch(() => {
+    if (cachedCatalog === entry) cachedCatalog = null;
+  });
+  return entry.catalog;
+}
+
+function catalogFromRows(rows: ScriptConnectionCatalogRow[]): ScriptConnectionCatalog {
+  return rows.map((row) => ({
+    slug: row.slug,
+    kind: row.kind as ScriptConnectionKind,
+    scope: row.scope as ScriptConnectionScope,
+    scopeId: row.scope_id,
+    enabled: row.enabled === 1,
+    generatedRuntimeJson: row.generated_runtime_json,
+  }));
+}
+
+function catalogRuntimeDescriptors<T>(
+  catalog: ScriptConnectionCatalog,
+  kinds: ScriptConnectionKind[],
+  context: { agentId?: string; repoId?: string },
+): T[] {
+  return catalog
+    .filter(
+      (connection) =>
+        kinds.includes(connection.kind) &&
+        connection.enabled &&
+        applies(connection.scope, connection.scopeId, context),
+    )
     .map((connection) => {
       if (!connection.generatedRuntimeJson) return null;
       try {
-        return JSON.parse(connection.generatedRuntimeJson) as ScriptApiConnectionDescriptor;
+        return JSON.parse(connection.generatedRuntimeJson) as T;
       } catch {
         return null;
       }
     })
-    .filter((descriptor): descriptor is ScriptApiConnectionDescriptor => Boolean(descriptor));
+    .filter((descriptor): descriptor is T => Boolean(descriptor));
+}
+
+export async function getScriptApiConnectionDescriptors(
+  context: { agentId?: string; repoId?: string } = {},
+  catalog?: ScriptConnectionCatalog,
+): Promise<ScriptApiConnectionDescriptor[]> {
+  return catalogRuntimeDescriptors<ScriptApiConnectionDescriptor>(
+    catalog ?? (await loadScriptConnectionCatalog()),
+    ["openapi", "graphql", "sql"],
+    context,
+  );
 }
 
 export async function getScriptMcpConnectionDescriptors(
   context: { agentId?: string; repoId?: string } = {},
+  catalog?: ScriptConnectionCatalog,
 ): Promise<ScriptMcpConnectionDescriptor[]> {
-  return (await listScriptConnections({ ...context, kind: "mcp" }))
-    .map((connection) => {
-      if (!connection.generatedRuntimeJson) return null;
-      try {
-        return JSON.parse(connection.generatedRuntimeJson) as ScriptMcpConnectionDescriptor;
-      } catch {
-        return null;
-      }
-    })
-    .filter((descriptor): descriptor is ScriptMcpConnectionDescriptor => Boolean(descriptor));
+  return catalogRuntimeDescriptors<ScriptMcpConnectionDescriptor>(
+    catalog ?? (await loadScriptConnectionCatalog()),
+    ["mcp"],
+    context,
+  );
+}
+
+/**
+ * True when an enabled connection with this slug applies to the context: the
+ * `listScriptConnections(context)` check on the catalog columns only, not the
+ * stored spec and generated types. Uncached: every call sees the current rows.
+ */
+export async function isScriptConnectionReachable(
+  slug: string,
+  context: { agentId?: string; repoId?: string },
+): Promise<boolean> {
+  return catalogFromRows(await scriptsRepo().listConnectionCatalog()).some(
+    (connection) =>
+      connection.slug === slug &&
+      connection.enabled &&
+      applies(connection.scope, connection.scopeId, context),
+  );
 }
 
 export async function getScriptApiTypes(

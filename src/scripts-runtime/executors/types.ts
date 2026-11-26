@@ -1,6 +1,7 @@
 import type { EgressPolicy } from "../../utils/egress-guard";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "../api-types";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "../credential-broker";
+import type { ScriptDbDialect } from "../script-db";
 
 export type ScriptFsMode = "none" | "workspace-rw";
 export type ScriptExecutorName = "native" | "quickjs";
@@ -51,6 +52,11 @@ export type SwarmConfigPayload = {
      */
     auditSourceTaskId?: { value: string; isSecret: false };
     /**
+     * Base of the per-call idempotency keys of a run started with an
+     * `idempotencyKey`; derived by the api from that key, never script input.
+     */
+    toolCallKeyPrefix?: { value: string; isSecret: false };
+    /**
      * Per-process secret set only by the in-process extension `ctx.swarm` SDK. The
      * bridge requires it to grant the `extension` call origin. Never sent to scripts.
      */
@@ -62,6 +68,8 @@ export type SwarmConfigPayload = {
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
   agentFs?: ScriptAgentFsDescriptor;
+  /** The swarm database, as `ctx.db` exposes it. Absent: `ctx.db.dialect` is "sqlite". */
+  db?: { dialect: ScriptDbDialect };
   caller?: ScriptCaller;
   durable?: DurableInvocation;
 };

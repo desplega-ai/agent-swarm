@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { type ActiveToolSpanEntry, implicitCloseActiveToolSpans } from "../commands/runner";
+import {
+  type ActiveToolSpanEntry,
+  implicitCloseActiveToolSpans,
+  telemetryToolId,
+  workerToolArgsPreview,
+  workerToolResultPreview,
+} from "../commands/runner";
 import type { Attributes, AttributeValue, SwarmSpan } from "../otel";
+import { CodexSession, type ThreadItem } from "../providers/codex-adapter";
 
 /**
  * Minimal recording SwarmSpan stub for asserting attributes/status/end calls.
@@ -264,5 +271,98 @@ describe("end-to-end boundary semantics (helper integration)", () => {
     expect(span.attrs["agentswarm.tool.unclosed"]).toBe(true);
     expect(span.attrs["agentswarm.tool.implicit_close"]).toBeUndefined();
     expect(span.attrs["agentswarm.tool.duration_ms"]).toBe(4_000);
+  });
+});
+
+describe("worker tool span previews keep data-query payloads out of telemetry", () => {
+  const sentinel = "Private Customer Sentinel";
+  const args = { sql: `SELECT '${sentinel}' AS c`, tables: { t: "/shared/x.csv" } };
+  const result = [{ type: "text", text: `| c |\n| ${sentinel} |` }];
+
+  test("data-query SQL and result rows never reach a span preview", () => {
+    const argsPreview = String(workerToolArgsPreview("data-query", args));
+    expect(argsPreview).not.toContain(sentinel);
+    expect(argsPreview).toContain("[omitted]");
+    expect(argsPreview).toContain("/shared/x.csv");
+    expect(workerToolResultPreview("data-query", result)).toBe("[omitted]");
+    expect(String(workerToolArgsPreview("data-query", JSON.stringify(args)))).not.toContain(
+      sentinel,
+    );
+  });
+
+  test("nested harness envelopes are redacted at every depth", () => {
+    const envelope = (inner: unknown) => ({
+      server: "agent-swarm",
+      tool: "data-query",
+      arguments: inner,
+    });
+    for (const wrapped of [
+      envelope(args),
+      envelope(JSON.stringify(args)),
+      envelope(`{"sql":"SELECT '${sentinel}'`),
+      { input: [{ arguments: args }] },
+    ]) {
+      const preview = String(workerToolArgsPreview("data-query", wrapped));
+      expect(preview).not.toContain(sentinel);
+      expect(preview).toContain("[omitted]");
+    }
+  });
+
+  test("Codex mcp_tool_call tool_start args keep data-query SQL out of the preview", () => {
+    // The exact mapping CodexSession uses for a tool_start event's args: it
+    // wraps MCP arguments as { server, tool, arguments } (object or JSON string).
+    const toolArgsForItem = (item: ThreadItem): unknown =>
+      (
+        CodexSession.prototype as unknown as { toolArgsForItem(i: ThreadItem): unknown }
+      ).toolArgsForItem(item);
+    for (const inner of [args, JSON.stringify(args)]) {
+      const codexArgs = toolArgsForItem({
+        id: "mcp-1",
+        type: "mcp_tool_call",
+        server: "agent-swarm",
+        tool: "data-query",
+        arguments: inner,
+      });
+      // Control: the raw Codex envelope really carries the SQL.
+      expect(JSON.stringify(codexArgs)).toContain(sentinel);
+      const preview = String(workerToolArgsPreview("data-query", codexArgs));
+      expect(preview).not.toContain(sentinel);
+      expect(preview).toContain("[omitted]");
+      expect(preview).toContain("/shared/x.csv");
+      expect(String(workerToolArgsPreview("db-query", codexArgs))).toContain(sentinel);
+    }
+  });
+
+  test("OpenCode swarm_data-query ids are redacted on args and result", () => {
+    const id = telemetryToolId("swarm_data-query", args);
+    expect(id).toBe("swarm_data-query");
+    // Control: the raw OpenCode args really carry the SQL.
+    expect(JSON.stringify(args)).toContain(sentinel);
+    const preview = String(workerToolArgsPreview(id, args));
+    expect(preview).not.toContain(sentinel);
+    expect(preview).toContain("/shared/x.csv");
+    expect(workerToolResultPreview(id, result)).toBe("[omitted]");
+    expect(
+      workerToolResultPreview(telemetryToolId("mcp__agent-swarm__data-query", args), result),
+    ).toBe("[omitted]");
+    expect(
+      String(workerToolResultPreview(telemetryToolId("swarm_db-query", args), result)),
+    ).toContain(sentinel);
+  });
+
+  test("a bare data-query tool_end without a start still omits its result", () => {
+    // The missing-start path classifies with no args, so only the name is known.
+    expect(workerToolResultPreview(telemetryToolId("data-query", undefined), result)).toBe(
+      "[omitted]",
+    );
+    expect(workerToolResultPreview(telemetryToolId("swarm_data-query", undefined), result)).toBe(
+      "[omitted]",
+    );
+  });
+
+  test("control: other tools keep their args and result previews", () => {
+    expect(String(workerToolArgsPreview("db-query", args))).toContain(sentinel);
+    expect(String(workerToolResultPreview("db-query", result))).toContain(sentinel);
+    expect(String(workerToolArgsPreview(undefined, args))).toContain(sentinel);
   });
 });

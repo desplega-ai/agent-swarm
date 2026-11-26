@@ -141,6 +141,25 @@ type WorkflowRunInfo = {
   args: unknown;
 };
 
+/** Per-call options a script passes as the second argument of `ctx.swarm.<tool>`. */
+export type SwarmCallOptions = {
+  /** Replaces the run-derived key; scoped to the calling agent and the tool. */
+  idempotencyKey?: string;
+};
+
+/** What the guest sends with each `swarm.*` capability call. */
+export type SwarmCapabilityOptions = { idempotencyKey: string } | { ordinal: number };
+
+/**
+ * The key a durable run sends with a `ctx.swarm` call: the run, the tool and
+ * the call's ordinal among this run's calls to that tool. A respawned run that
+ * re-executes its body makes the same calls in the same order, so the bridge
+ * answers them from the first execution's records instead of repeating them.
+ */
+export function durableToolCallKey(runId: string, method: string, ordinal: number): string {
+  return `script-run:${runId}:${method}:${ordinal}`;
+}
+
 export type WorkflowCtx = {
   run: WorkflowRunInfo;
   step: {
@@ -149,7 +168,7 @@ export type WorkflowCtx = {
     swarmScript: (label: string, config: SwarmScriptConfig) => Promise<unknown>;
     humanInTheLoop: () => Promise<never>;
   };
-  swarm: Record<string, (args?: unknown) => Promise<unknown>>;
+  swarm: Record<string, (args?: unknown, options?: SwarmCallOptions) => Promise<unknown>>;
   stdlib: typeof stdlib;
   logger: Console;
   /** Registered `SDK_NAMESPACES` clients (`ctx.<ns>.<method>`); guest ctx only. */
@@ -404,13 +423,20 @@ export function buildWorkflowCtx(input: {
     abortController.abort(reason);
   }
 
-  const swarm = new Proxy({} as Record<string, (args?: unknown) => Promise<unknown>>, {
+  const swarm = new Proxy({} as WorkflowCtx["swarm"], {
     get(_target, prop) {
       if (typeof prop !== "string") return undefined;
-      return (args?: unknown) =>
+      return (args?: unknown, options?: SwarmCallOptions) =>
         fetchJson("/api/mcp-bridge", {
           method: "POST",
-          body: JSON.stringify({ tool: mcpToolNameForSdkMethod(prop), args: args ?? {} }),
+          ...(options?.idempotencyKey
+            ? { headers: { "Idempotency-Key": options.idempotencyKey } }
+            : {}),
+          body: JSON.stringify({
+            tool: mcpToolNameForSdkMethod(prop),
+            args: args ?? {},
+            parentScriptRunId: input.runId,
+          }),
         });
     },
   });
@@ -439,6 +465,8 @@ export function buildWorkflowCtx(input: {
               fsMode: config.fsMode ?? "none",
               intent: config.intent ?? `script-run:${input.runId}:${label}`,
               idempotencyKey: config.idempotencyKey,
+              // This run's key carries no run provenance: name the run so the child joins its tree.
+              parentScriptRunId: input.runId,
             }),
           }),
         ),

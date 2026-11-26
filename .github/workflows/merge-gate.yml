@@ -738,10 +738,10 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
-  # Four shards, one runner each: its own API process, DB file, ports and mocks. Bands
+  # Six shards, one runner each: its own API process, DB file, ports and mocks. Bands
   # are fixed by scenario order (SHARD_CUTS in scripts/e2e/shard.ts), not timing.
   e2e-contract-shard:
-    name: E2E Contract (shard ${{ matrix.shard }}/4)
+    name: E2E Contract (shard ${{ matrix.shard }}/6)
     needs: detect-changes
     # PRs skip the suite when they touch nothing it loads. merge_group (and any
     # other event) always runs it.
@@ -770,7 +770,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Checkout repository
@@ -797,7 +797,7 @@ jobs:
       # --coverage writes one lcov per API process (PRs for the changed-lines comment, the merge
       # queue for the coverage-on-main trend in the tracker); a coverage problem never fails it.
       - name: Run E2E contract shard
-        run: bun run e2e --shard ${{ matrix.shard }}/4 --coverage --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
+        run: bun run e2e --shard ${{ matrix.shard }}/6 --coverage --json e2e-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -856,7 +856,7 @@ jobs:
 
       # merge.ts imports no package, so no install. A missing shard file fails the merge.
       - name: Merge shards (strict coverage gate)
-        run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json e2e-shards/e2e-shard-4.json
+        run: bun scripts/e2e/merge.ts --strict --json e2e-results.json --summary-md e2e-summary.md e2e-shards/e2e-shard-1.json e2e-shards/e2e-shard-2.json e2e-shards/e2e-shard-3.json e2e-shards/e2e-shard-4.json e2e-shards/e2e-shard-5.json e2e-shards/e2e-shard-6.json
 
       - name: Add E2E job summary
         if: always()
@@ -903,7 +903,7 @@ jobs:
   # The same black-box contract on Postgres (storage brief, check 2): same scenario list,
   # same shards, a new database per run. The merge job applies --strict to the union.
   e2e-postgres-shard:
-    name: E2E Contract on Postgres (shard ${{ matrix.shard }}/4)
+    name: E2E Contract on Postgres (shard ${{ matrix.shard }}/6)
     needs: detect-changes
     if: github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true'
     # The recovery scenario needs pg_dump and pg_restore 16 for the pg16 service.
@@ -929,7 +929,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Checkout repository
@@ -944,7 +944,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run E2E contract shard on Postgres
-        run: bun run e2e --engine postgres --shard ${{ matrix.shard }}/4 --json e2e-pg-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
+        run: bun run e2e --engine postgres --shard ${{ matrix.shard }}/6 --json e2e-pg-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
 
       - name: Add E2E job summary
         if: always()
@@ -986,7 +986,7 @@ jobs:
           merge-multiple: true
 
       - name: Merge shards (strict coverage gate)
-        run: bun scripts/e2e/merge.ts --strict --json e2e-pg-results.json --summary-md e2e-summary.md e2e-pg-shards/e2e-pg-shard-1.json e2e-pg-shards/e2e-pg-shard-2.json e2e-pg-shards/e2e-pg-shard-3.json e2e-pg-shards/e2e-pg-shard-4.json
+        run: bun scripts/e2e/merge.ts --strict --json e2e-pg-results.json --summary-md e2e-summary.md e2e-pg-shards/e2e-pg-shard-1.json e2e-pg-shards/e2e-pg-shard-2.json e2e-pg-shards/e2e-pg-shard-3.json e2e-pg-shards/e2e-pg-shard-4.json e2e-pg-shards/e2e-pg-shard-5.json e2e-pg-shards/e2e-pg-shard-6.json
 
       - name: Add E2E job summary
         if: always()
@@ -1942,6 +1942,38 @@ jobs:
           MIGRATION_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
         run: bash scripts/check-migration-conflicts.sh
 
+  # Run on every PR and merge queue group, so a scenario `order` that main or a
+  # queued PR already took fails here in about a minute, not as a queue kick.
+  scenario-order-check:
+    name: Scenario Order Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The check diffs the base commit against HEAD and origin/main.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check e2e scenario orders
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SCENARIO_ORDER_BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+        run: bun scripts/check-scenario-orders.ts ${{ github.event_name == 'pull_request' && '--open-prs' || '' }}
+
   # Run on every PR and merge queue group: any path can carry a secret, and the
   # scan takes seconds. Only commits the event adds are scanned, so
   # secret-shaped lines already on main never block anyone.
@@ -1997,7 +2029,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract-shard, e2e-contract, e2e-postgres-shard, e2e-postgres, storage-checks, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-e2e, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract-shard, e2e-contract, e2e-postgres-shard, e2e-postgres, storage-checks, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-e2e, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, scenario-order-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
     # No checkout. checks: read lets the last step read the PR Body check.

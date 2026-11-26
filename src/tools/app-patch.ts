@@ -1,23 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { applyAppDefinitionPatch, parseAppDefinition } from "@/apps/definition";
 import {
-  type AppMigrationReport,
-  AppMigrationReportOutputSchema,
-  AppMigrationSchema,
-  AppSchemaMigrationError,
-  AppSnapshotFailure,
-  ForceElementBreakSchema,
-  migrateAppSchema,
-  unexpectedMigrationDetails,
-  withAppDefinitionLock,
-} from "@/apps/schema-migrate";
-import { appWriteTypesWarnings } from "@/apps/script-types";
-import { appDefinitionNeedsRepair, getApp, updateApp } from "@/apps/store";
-import { snapshotApp } from "@/apps/version";
+  AppDefinitionOpSchema,
+  applyAppDefinitionOps,
+  applyAppDefinitionPatch,
+} from "@/apps/definition";
+import { AppMigrationSchema, ForceElementBreakSchema } from "@/apps/schema-migrate";
+import { commitAppDefinitionWrite } from "@/apps/write";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { appWriteOutputShape, appWriteToolResult } from "@/tools/app-write-response";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr } from "@/tools/utils";
 
 export const registerAppPatchTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -25,7 +18,7 @@ export const registerAppPatchTool = (server: McpServer) => {
     {
       title: "Patch an app",
       description:
-        "Partially update an app, including zero-model pure-UI apps. userConfig defines versioned field schema while per-user values live outside definitions, survive rollback, and never need migration directives; userConfig.<field> entries are atomic. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, model columns, and userConfig fields are atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it.",
+        "Partially update an app, including zero-model pure-UI apps. userConfig defines versioned field schema while per-user values live outside definitions, survive rollback, and never need migration directives; userConfig.<field> entries are atomic. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, model columns, and userConfig fields are atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it. ops applies JSON-pointer add/replace/remove/test instead; to change one page or element node prefer app-patch-node. Returns a compact summary (changed paths, issues, warnings, migration); includeApp adds the whole app, dryRun stores nothing.",
       annotations: { destructiveHint: false },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID to patch."),
@@ -47,17 +40,26 @@ export const registerAppPatchTool = (server: McpServer) => {
         forceElementBreak: ForceElementBreakSchema.optional().describe(
           "Exported element names whose known consumers may be broken by this patch. Use only to abandon those consumers explicitly.",
         ),
+        ops: z
+          .array(AppDefinitionOpSchema)
+          .min(1)
+          .max(200)
+          .optional()
+          .describe(
+            'JSON-pointer ops instead of a merge patch: [{op: "add"|"replace"|"remove"|"test", path: "/pages/main/elements/title/props/text", value?}]. Applied in order; the first failing op (a failed test included) stores nothing and is reported at ops[<i>].',
+          ),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe("Validate and plan the write, report changed paths and issues, store nothing."),
+        includeApp: z
+          .boolean()
+          .optional()
+          .describe(
+            "Also return the whole stored app. Off by default: the response is the compact write summary.",
+          ),
       }),
-      outputSchema: swarmToolOutputSchema({
-        appId: z.string().optional(),
-        url: z.string().optional(),
-        app: z.unknown().optional(),
-        migration: AppMigrationReportOutputSchema.optional(),
-        warnings: z.array(z.string()).optional(),
-        issues: z
-          .array(z.looseObject({ path: z.string().optional(), message: z.string().optional() }))
-          .optional(),
-      }),
+      outputSchema: swarmToolOutputSchema(appWriteOutputShape),
     },
     async (input, requestInfo) => {
       if (!requestInfo.agentId) {
@@ -76,86 +78,28 @@ export const registerAppPatchTool = (server: McpServer) => {
       });
       if (!decision.allow) return toolErr(decision.reason);
 
-      const existing = await getApp(input.appId);
-      if (!existing) return toolErr(`App ${input.appId} not found.`);
-      return withAppDefinitionLock(input.appId, async () => {
-        const lockedExisting = await getApp(input.appId);
-        if (!lockedExisting) return toolErr(`App ${input.appId} not found.`);
-        if (appDefinitionNeedsRepair(lockedExisting)) {
-          return toolErr("Definition needs repair.", {
-            data: { issues: lockedExisting.definitionError },
-          });
-        }
-
-        const patch = applyAppDefinitionPatch(lockedExisting.definition, input.definition ?? {});
-        if (!patch.success) {
-          return toolErr("Invalid app definition.", {
-            details: JSON.stringify({ issues: patch.issues }, null, 2),
-            data: { issues: patch.issues },
-          });
-        }
-        const parsed = await parseAppDefinition(patch.definition, {
-          currentAppId: input.appId,
-          resolveApp: getApp,
-          writerAgentId: requestInfo.agentId,
-          existingDefinition: lockedExisting.definition,
-        });
-        if (!parsed.success) {
-          return toolErr("Invalid app definition.", {
-            details: JSON.stringify({ issues: parsed.issues }, null, 2),
-            data: { issues: parsed.issues },
-          });
-        }
-
-        let app: Awaited<ReturnType<typeof updateApp>>;
-        let migration: AppMigrationReport;
-        try {
-          const migrated = await migrateAppSchema({
-            appId: input.appId,
-            previousDefinition: lockedExisting.definition,
-            previousRawDefinition: lockedExisting.definition,
-            nextDefinition: parsed.definition,
-            migration: input.migration,
-            forceElementBreak: input.forceElementBreak,
-            snapshot: async () => {
-              try {
-                await snapshotApp(input.appId, requestInfo.agentId);
-              } catch {
-                throw new AppSnapshotFailure();
-              }
-            },
-            writeDefinition: () =>
-              updateApp(input.appId, {
-                name: input.name,
-                description: input.description,
-                definition: parsed.definition,
-              }),
-          });
-          app = migrated.result;
-          migration = migrated.migration;
-        } catch (error) {
-          if (error instanceof AppSchemaMigrationError) {
-            return toolErr("Invalid app schema migration.", {
-              details: JSON.stringify({ issues: error.issues }, null, 2),
-              data: { issues: error.issues },
-            });
-          }
-          if (error instanceof AppSnapshotFailure) {
-            return toolErr("Failed to snapshot app; patch was not applied.");
-          }
-          return toolErr("Failed to apply app schema migration; patch was not applied.", {
-            details: unexpectedMigrationDetails(error),
-          });
-        }
-        if (!app) return toolErr(`App ${input.appId} not found.`);
-
-        const url = `/apps/${app.id}`;
-        const warnings = await appWriteTypesWarnings(app.id);
-        const extra = warnings.length > 0 ? { warnings } : {};
-        return toolOk(`App "${app.name}" patched.`, {
-          details: JSON.stringify({ appId: app.id, url, app, migration, ...extra }, null, 2),
-          data: { appId: app.id, url, app, migration, ...extra },
-        });
+      if (input.definition !== undefined && input.ops !== undefined) {
+        return toolErr("Give definition or ops, not both.");
+      }
+      const startedAt = performance.now();
+      const ops = input.ops;
+      const result = await commitAppDefinitionWrite({
+        appId: input.appId,
+        writerAgentId: requestInfo.agentId,
+        name: input.name,
+        description: input.description,
+        nextDefinition: (stored) =>
+          ops
+            ? applyAppDefinitionOps(stored, ops)
+            : applyAppDefinitionPatch(stored, input.definition ?? {}),
+        migration: input.migration,
+        forceElementBreak: input.forceElementBreak,
+        dryRun: input.dryRun,
+      });
+      return appWriteToolResult(result, {
+        startedAt,
+        includeApp: input.includeApp,
+        verb: "patched",
       });
     },
   );

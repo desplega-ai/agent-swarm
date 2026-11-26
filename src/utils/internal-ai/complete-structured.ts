@@ -28,7 +28,7 @@ import {
 } from "../openrouter-base-url.js";
 import { scrubSecrets } from "../secret-scrubber.js";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";
-import { parseModelStr } from "./models.js";
+import { internalProviderOrder, MEMORY_RATER_MODEL_ENV, parseModelStr } from "./models.js";
 
 export interface CompleteStructuredOptions<TZod extends z.ZodTypeAny> {
   /** Zod schema used for output validation (final source of truth). */
@@ -60,6 +60,8 @@ export interface CompleteStructuredOptions<TZod extends z.ZodTypeAny> {
   signal?: AbortSignal;
   /** Optional diagnostic tag (e.g. `"session-summary:pi"`). */
   callerTag?: string;
+  /** Calling harness; feeds `internalProviderOrder`. Defaults to `env.HARNESS_PROVIDER`. */
+  harness?: string;
   // Test injection points:
   _resolveCredential?: typeof resolveCredential;
   _complete?: typeof complete;
@@ -258,11 +260,17 @@ export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
     cred = opts._credentialOverride;
   } else {
     const resolver = opts._resolveCredential ?? resolveCredential;
+    const env = opts.env ?? process.env;
     cred = await resolver({
-      env: (opts.env ?? process.env) as NodeJS.ProcessEnv,
+      env: env as NodeJS.ProcessEnv,
       apiUrl: opts.apiUrl,
       apiKey: opts.apiKey,
       callerTag: opts.callerTag,
+      // `modelDefault` is the rater model, so `MEMORY_RATER_MODEL` picks the kind.
+      kinds: internalProviderOrder(env, {
+        pinnedModel: env[MEMORY_RATER_MODEL_ENV],
+        harness: opts.harness,
+      }),
     });
   }
   if (!cred) {

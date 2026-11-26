@@ -184,20 +184,86 @@ function openPostgres(url: string): ReadOnlyDb {
  * `E2E_POSTGRES_URL` names. The URL must log in as a role that may CREATE DATABASE.
  */
 export async function createPostgresDatabase(stamp: string): Promise<string> {
+  return createDatabaseFrom(stamp, "template0");
+}
+
+/**
+ * Like `createPostgresDatabase`, but a clone of a template database that already holds
+ * the full migration chain. The chain takes about 4 s on each boot; a clone takes a
+ * fraction of a second. The clone has no seed rows, reader role or grants:
+ * `preparePostgresQueryReader` finds the chain applied and adds the role, and the API
+ * writes its boot seeds itself.
+ */
+export async function createMigratedPostgresDatabase(stamp: string): Promise<string> {
+  return createDatabaseFrom(stamp, await migratedTemplate());
+}
+
+async function createDatabaseFrom(stamp: string, template: string): Promise<string> {
   const admin = adminUrl();
   const name = `e2e_${stamp.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`;
   const client = new Bun.SQL({ url: admin, max: 1 });
   try {
     // Byte text order and ASCII-only case folding, like SQLite (ledger: C collation and ctype).
+    // The default WAL_LOG strategy: FILE_COPY forces a checkpoint and is much slower.
     await client.unsafe(
-      `CREATE DATABASE "${name}" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`,
+      `CREATE DATABASE "${name}" TEMPLATE "${template}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`,
     );
   } finally {
     await client.close();
   }
+  return databaseUrlFor(admin, name);
+}
+
+function databaseUrlFor(admin: string, name: string): string {
   const url = new URL(admin);
   url.pathname = `/${name}`;
   return url.toString();
+}
+
+// One template per runner process. The name is unique, so two runs on one server do not
+// share a template. It is set before the template exists, so a failed build still drops.
+let templateName: string | undefined;
+let templateBuild: Promise<string> | undefined;
+
+function migratedTemplate(): Promise<string> {
+  templateBuild ??= (async () => {
+    const name = `e2e_tpl_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    templateName = name;
+    const url = await createDatabaseFrom(name.slice("e2e_".length), "template0");
+    await applyPostgresMigrations(url);
+    // Postgres refuses to clone a database that has other sessions. The migration
+    // client above is closed; nothing else connects to the template.
+    return name;
+  })();
+  return templateBuild;
+}
+
+/** Drop this process's migrated template, if one was made. Safe to call more than once. */
+export async function dropPostgresTemplate(): Promise<void> {
+  const name = templateName;
+  if (!name) return;
+  templateName = undefined;
+  templateBuild = undefined;
+  const client = new Bun.SQL({ url: adminUrl(), max: 1 });
+  try {
+    await client.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+  } finally {
+    await client.close();
+  }
+}
+
+async function applyPostgresMigrations(databaseUrl: string): Promise<void> {
+  const { createPostgresClient, runPostgresMigrations } = await import(
+    "../../packages/storage-postgres/src/index"
+  );
+  const setup = createPostgresClient(databaseUrl, { max: 1 });
+  try {
+    await runPostgresMigrations(setup, {
+      migrationsDir: resolve(import.meta.dir, "../../src/be/migrations/postgres"),
+    });
+  } finally {
+    await setup.close();
+  }
 }
 
 /** The db-query reader role of a per-run database (decision D10). */
@@ -211,26 +277,19 @@ function readerRoleName(databaseUrl: string): string {
  * LOGIN role with SELECT on every table except the denied ones. Returns the
  * `DATABASE_QUERY_URL`. The SUT then finds the chain applied and probes the role.
  */
-export async function preparePostgresQueryReader(databaseUrl: string): Promise<string> {
-  const { createPostgresClient, runPostgresMigrations } = await import(
-    "../../packages/storage-postgres/src/index"
-  );
+export async function preparePostgresQueryReader(
+  databaseUrl: string,
+  seedFile = process.env.E2E_POSTGRES_SEED_SQL,
+): Promise<string> {
   const { DB_QUERY_DENIED_TABLES } = await import("../../packages/storage/src/index");
-  const setup = createPostgresClient(databaseUrl, { max: 1 });
-  try {
-    await runPostgresMigrations(setup, {
-      migrationsDir: resolve(import.meta.dir, "../../src/be/migrations/postgres"),
-    });
-  } finally {
-    await setup.close();
-  }
+  // A clone of the migrated template carries the `_migrations` ledger, so this finds
+  // every migration applied. Roles are cluster-wide, so the role is made per database.
+  await applyPostgresMigrations(databaseUrl);
   const role = readerRoleName(databaseUrl);
   const database = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
   const sql = new Bun.SQL({ url: databaseUrl, max: 1 });
   try {
-    // Bench only: `E2E_POSTGRES_SEED_SQL` names a SQL file that seeds the database
-    // before the API boots (for example scripts/e2e/fixtures/postgres-bench-seed.sql).
-    const seedFile = process.env.E2E_POSTGRES_SEED_SQL;
+    // A fixture or benchmark may seed this isolated database before the API boots.
     if (seedFile) await sql.unsafe(await Bun.file(seedFile).text());
     await sql.unsafe(`CREATE ROLE "${role}" LOGIN PASSWORD '${role}'`);
     await sql.unsafe(`GRANT CONNECT ON DATABASE "${database}" TO "${role}"`);
@@ -328,6 +387,34 @@ export async function dropPostgresRole(role: string): Promise<void> {
   }
 }
 
+/** Raw SQL on a private fixture copy before boot (SQLite text, `?` placeholders). */
+export type FixtureEditor = {
+  get: <T>(text: string, params?: SQLQueryBindings[]) => T | null;
+  run: (text: string, params?: SQLQueryBindings[]) => number;
+};
+
+/**
+ * Edit a private copy of a fixture before the SUT boots on it. `edit` gets a
+ * read-write handle; the result is the edited fixture under `name` plus what `edit` returned.
+ */
+export function editDbFixture<T>(
+  fixture: DbFixture,
+  name: string,
+  edit: (db: FixtureEditor) => T,
+): { fixture: DbFixture; result: T } {
+  const db = Database.deserialize(fixture.file);
+  try {
+    const result = edit({
+      get: <R>(text: string, params: SQLQueryBindings[] = []) =>
+        db.query(text).get(...params) as R | null,
+      run: (text, params = []) => db.run(text, params).changes,
+    });
+    return { fixture: { ...fixture, name, file: db.serialize() }, result };
+  } finally {
+    db.close();
+  }
+}
+
 /** Prepare historical tasks in a private copy of the base fixture before either API starts. */
 export async function loadMetricRangeFixture(
   agentId: string,
@@ -409,19 +496,6 @@ export function plantRefusedRows(path: string, tasks: RefusedRowTasks): void {
     ]);
     db.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["a\u0000b", tasks.nul]);
     db.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", ['["cut \\ud83d"]', tasks.surrogate]);
-  } finally {
-    db.close();
-  }
-}
-
-/** The repair an operator makes for each planted row. The Litestream tables stay. */
-export function repairRefusedRows(path: string, tasks: RefusedRowTasks): void {
-  const db = new Database(path);
-  try {
-    db.run("PRAGMA foreign_keys = OFF");
-    db.run(`UPDATE agent_tasks SET "requestedByUserId" = NULL WHERE id = ?`, [tasks.orphan]);
-    db.run("UPDATE agent_tasks SET output = ? WHERE id = ?", ["ab", tasks.nul]);
-    db.run("UPDATE agent_tasks SET tags = ? WHERE id = ?", ['["cut"]', tasks.surrogate]);
   } finally {
     db.close();
   }

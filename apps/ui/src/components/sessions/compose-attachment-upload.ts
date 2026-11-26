@@ -1,7 +1,10 @@
 import { uploadTaskAttachment } from "@/api/fs";
+import type { TaskAttachment } from "@/api/types";
 
 export interface ComposeAttachmentUploadResult {
   uploaded: number;
+  /** The created attachments, in the order of `files` (failed files left out). */
+  attachments: TaskAttachment[];
   failed: { file: File; error: Error }[];
 }
 
@@ -22,16 +25,18 @@ export async function uploadComposeAttachments({
   onUploaded?: (count: number) => void;
 }): Promise<ComposeAttachmentUploadResult> {
   const failed: ComposeAttachmentUploadResult["failed"] = [];
+  const created: (TaskAttachment | undefined)[] = [];
   let uploaded = 0;
   let next = 0;
 
   // Workers pull from one shared cursor, so a slow file never blocks the rest.
   async function worker(): Promise<void> {
     while (next < files.length) {
-      const file = files[next];
+      const index = next;
+      const file = files[index];
       next += 1;
       try {
-        await uploadTaskAttachment({ taskId, file, intent: "user-upload" });
+        created[index] = await uploadTaskAttachment({ taskId, file, intent: "user-upload" });
         uploaded += 1;
         onUploaded?.(uploaded);
       } catch (error) {
@@ -47,7 +52,11 @@ export async function uploadComposeAttachments({
     Array.from({ length: Math.min(COMPOSE_UPLOAD_CONCURRENCY, files.length) }, () => worker()),
   );
 
-  return { uploaded, failed };
+  return {
+    uploaded,
+    attachments: created.filter((a): a is TaskAttachment => a !== undefined),
+    failed,
+  };
 }
 
 export function formatComposeAttachmentUploadError(

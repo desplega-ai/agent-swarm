@@ -30,6 +30,8 @@ const PERMANENT: Record<string, string> = {
     "the engine-handle owner: opens the SQLite handle or starts the Postgres engine, so it names DbClient",
   "src/be/storage.ts":
     "builds the process Storage over the engine client from src/be/db/runtime.ts (the composition root's caller)",
+  "src/tools/data.ts":
+    "not the swarm database: data-query sends DuckDB SQL to the agent-fs sql op; the SQL text is the tool description's example",
   "src/be/scripts/typecheck.ts":
     "not SQL: the script SDK type declarations document db_query with example SQL in comments",
 };

@@ -1,4 +1,8 @@
-import { OpenAPIRegistry, OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
+import {
+  OpenAPIRegistry,
+  OpenApiGeneratorV31,
+  type ResponseConfig,
+} from "@asteasolutions/zod-to-openapi";
 import { getPublicMcpBaseUrl } from "../utils/constants";
 import { z } from "../utils/zod-openapi";
 import { routeRegistry } from "./route-def";
@@ -42,10 +46,7 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
 
   // Convert route definitions to OpenAPI paths
   for (const routeDef of routeRegistry) {
-    const responses: Record<
-      string,
-      { description: string; content?: Record<string, { schema: z.ZodType }> }
-    > = {};
+    const responses: Record<string, ResponseConfig> = {};
     for (const [code, resDef] of Object.entries(routeDef.responses)) {
       const schema =
         resDef.schema ??
@@ -54,6 +55,7 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
         (Number(code) >= 400 && !resDef.unstructured ? ErrorResponseSchema : undefined);
       responses[code] = {
         description: resDef.description,
+        headers: resDef.headers,
         ...(schema && {
           content: {
             "application/json": { schema },

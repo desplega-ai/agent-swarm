@@ -17,7 +17,7 @@ import {
   fetchUniverse,
   loadManifest,
 } from "./coverage";
-import { type DbFixture, openReadOnlyDb, type ReadOnlyDb } from "./db";
+import { type DbFixture, dropPostgresTemplate, openReadOnlyDb, type ReadOnlyDb } from "./db";
 import { runHarnessLeg, stopHarnessChildren } from "./harness";
 import {
   type ApiClient,
@@ -48,6 +48,7 @@ import {
   printTotals,
   type ScenarioResult,
   SkipError,
+  type StorageCounts,
   writeReports,
 } from "./report";
 import { rerunPlan, settleRerun } from "./rerun";
@@ -130,8 +131,10 @@ export type DataCopyPair = {
    * `beforeCopy` runs after the source API stopped and before the copy that the target
    * boots on: a scenario can change the SQLite file as a deployment would leave it, and
    * run copies that must be refused (`runCopy`) into the same empty target database.
+   * `args` are more `db-copy` options for the copy that the target boots on.
    */
   copy: (step?: {
+    args?: string[];
     beforeCopy?: (at: {
       sourcePath: string;
       targetUrl: string;
@@ -283,6 +286,10 @@ async function cleanup(keep: boolean): Promise<void> {
   await stopHarnessChildren();
   for (const stack of [...stacks]) await stopStack(stack, keep);
   await cleanupCliTemp(keep);
+  // Also under --keep: each kept database is a full clone and does not need its template.
+  await dropPostgresTemplate().catch((error) =>
+    console.error(`Could not drop the Postgres template database: ${errorMessage(error)}`),
+  );
 }
 
 /** A SUT that ignores --tx-replay would pass every scenario without replay: refuse that. */
@@ -298,8 +305,9 @@ async function assertSutReplaysTransactions(logPath: string): Promise<void> {
 /** A SUT that ignores DATABASE_URL would pass every scenario on the default engine: refuse that. */
 function assertSutUsesDatabase(db: ReadOnlyDb, engine: string): void {
   // The runner applies the migration chain before the SUT starts (the db-query
-  // reader role needs the tables), so a migrated schema proves nothing: the boot
-  // seeds the SUT writes do.
+  // reader role needs the tables), or clones a template that holds it, so a migrated
+  // schema proves nothing: the boot seeds the SUT writes do. The template holds no
+  // seed rows (no migration writes seed_state), so a clone proves it the same way.
   let seeded: unknown;
   try {
     seeded = db.get("SELECT 1 AS present FROM seed_state LIMIT 1");
@@ -399,8 +407,8 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
         const pairEnv = { SLACK_DISABLE: "true", ...copyOptions.env };
         const source = await startSut(options.keep, pairEnv, options.sutEnv, undefined, "sqlite");
         sourceStack.sut = source;
-        const copyCli = (databaseUrl: string) =>
-          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl], {
+        const copyCli = (databaseUrl: string, args: string[] = []) =>
+          runCli(["db-copy", "--from", source.dbPath, "--to", databaseUrl, ...args], {
             env: { DESPLEGA_TELEMETRY_ENV: "test" },
             timeoutMs: 300_000,
           });
@@ -424,8 +432,10 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
                   targetUrl,
                   runCopy: () => copyCli(targetUrl),
                 });
-                cli = await copyCli(targetUrl);
+                cli = await copyCli(targetUrl, step.args);
               },
+              // db-copy refuses a target that has tables.
+              "empty",
             );
             targetStack.sut = target;
             if (!cli) throw new Error("db-copy did not run");
@@ -477,6 +487,93 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
     await stopStack(stack, options.keep);
     throw error;
   }
+}
+
+type ProcessWriteStats = {
+  commits: number;
+  readOnlyCommits: number;
+  rollbacks: number;
+  writeStatements: number;
+  windows: Record<
+    string,
+    {
+      requests: number;
+      maxRequestCommits: number;
+      maxRequestCommitsPath: string;
+      maxRequestWriteStatements: number;
+      maxRequestWriteStatementsPath: string;
+    }
+  >;
+};
+
+/**
+ * `--write-stats`: the file of each API process of the run (src/be/write-stats.ts). Each
+ * is cumulative and rewritten after each transaction, so processes that started or
+ * stopped during a scenario count too.
+ */
+async function readWriteStats(dir: string): Promise<ProcessWriteStats[]> {
+  const files = [...new Bun.Glob("*.json").scanSync(dir)];
+  return Promise.all(
+    files.map(async (file) => (await Bun.file(`${dir}/${file}`).json()) as ProcessWriteStats),
+  );
+}
+
+/** The API processes read this file at each request start: requests then belong to `name`. */
+async function setWriteStatsWindow(dir: string, name: string): Promise<void> {
+  await Bun.write(`${dir}/window.tmp`, name);
+  await Bun.$`mv -f ${`${dir}/window.tmp`} ${`${dir}/window`}`.quiet();
+}
+
+function sumTotals(stats: ProcessWriteStats[]) {
+  return stats.reduce(
+    (sum, s) => ({
+      commits: sum.commits + s.commits,
+      readOnlyCommits: sum.readOnlyCommits + s.readOnlyCommits,
+      rollbacks: sum.rollbacks + s.rollbacks,
+      writeStatements: sum.writeStatements + s.writeStatements,
+    }),
+    { commits: 0, readOnlyCommits: 0, rollbacks: 0, writeStatements: 0 },
+  );
+}
+
+/** `http POST api/apps/<uuid>` becomes `http POST api/apps/:id`, so two runs compare. */
+function requestLabel(path: string): string {
+  return path.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ":id");
+}
+
+/** Totals are differences of the sums; the request maximums come from the scenario's window. */
+function scenarioCounts(
+  name: string,
+  before: ProcessWriteStats[],
+  after: ProcessWriteStats[],
+): StorageCounts {
+  const start = sumTotals(before);
+  const end = sumTotals(after);
+  const counts: StorageCounts = {
+    commits: end.commits - start.commits,
+    readOnlyCommits: end.readOnlyCommits - start.readOnlyCommits,
+    rollbacks: end.rollbacks - start.rollbacks,
+    writeStatements: end.writeStatements - start.writeStatements,
+    requests: 0,
+    maxRequestCommits: 0,
+    maxRequestCommitsPath: "",
+    maxRequestWriteStatements: 0,
+    maxRequestWriteStatementsPath: "",
+  };
+  for (const process of after) {
+    const window = process.windows[name];
+    if (!window) continue;
+    counts.requests += window.requests;
+    if (window.maxRequestCommits > counts.maxRequestCommits) {
+      counts.maxRequestCommits = window.maxRequestCommits;
+      counts.maxRequestCommitsPath = requestLabel(window.maxRequestCommitsPath);
+    }
+    if (window.maxRequestWriteStatements > counts.maxRequestWriteStatements) {
+      counts.maxRequestWriteStatements = window.maxRequestWriteStatements;
+      counts.maxRequestWriteStatementsPath = requestLabel(window.maxRequestWriteStatementsPath);
+    }
+  }
+  return counts;
 }
 
 /** Run one scenario, then stop its pollers and scripted answers so none outlive it. */
@@ -634,6 +731,9 @@ async function main(): Promise<number> {
   }
   // A fresh directory: the report unions every lcov in it, and stale ones would count.
   if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
+  // A fresh directory too: the counts of each scenario are differences of its sums.
+  const writeStatsDir = options.writeStatsDir;
+  if (writeStatsDir) await Bun.$`rm -rf ${writeStatsDir} && mkdir -p ${writeStatsDir}`.quiet();
   // CLI children write their lcov next to the API's, so rule 3 sees CLI lines too.
   setCliCoverageDir(options.coverageDir);
   const { sut, db, ctx, observe: observeMain } = await bootStack(options, manifest, journalPath);
@@ -654,6 +754,11 @@ async function main(): Promise<number> {
       const file = `${EXTRA_JOURNAL_PREFIX}${scenario.name}-${extraJournals}.jsonl`;
       return { file, path: `${visualsDir}/${file}` };
     };
+    let countsBefore: ProcessWriteStats[] | undefined;
+    if (writeStatsDir) {
+      countsBefore = await readWriteStats(writeStatsDir);
+      await setWriteStatsWindow(writeStatsDir, scenario.name);
+    }
     const result = await runInStack(
       scenario,
       ctx,
@@ -665,6 +770,14 @@ async function main(): Promise<number> {
       },
       slackJournal,
     );
+    if (writeStatsDir && countsBefore) {
+      await setWriteStatsWindow(writeStatsDir, "");
+      result.storage = scenarioCounts(
+        scenario.name,
+        countsBefore,
+        await readWriteStats(writeStatsDir),
+      );
+    }
     scenarioResults.push(result);
     printScenario(result);
   }

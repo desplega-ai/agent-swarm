@@ -490,6 +490,14 @@ const pageFrameProps = z.object({
   /** CSS height of the frame, e.g. '640px' (default '640px'). */
   height: z.string().optional(),
   fill: z.boolean().optional(),
+  /** State id: a page message (`appContext.emit`) lands at `/ui/<id>/message` before `on.message` runs. */
+  id: z.string().optional(),
+  /** Query params for the page (`location.search` and `appContext.params`). A change reloads the page. */
+  params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  /** App actions the page may run through `appContext.action` (script actions only). Default: none. */
+  actions: z.array(z.string()).optional(),
+  /** App state paths the page may read (`appContext.state`), e.g. `/app/window`. `/route` is always shared. */
+  expose: z.array(z.string()).optional(),
 });
 
 const markdownProps = z.object({
@@ -605,6 +613,35 @@ const timelineProps = z.object({
   emptyMessage: z.string().optional(),
   /** Chain run when an event is clicked; `$row` = the row, `$rowIndex` its index in `data`. */
   onSelect: actionChainSchema.optional(),
+});
+
+const logStreamProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }` or an action result: one entry per row, newest first. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  loading: z.boolean().optional(),
+  /** Row field with the entry time (ISO date, or epoch s/ms/ns). Shown as HH:mm:ss.SSS. */
+  timeField: z.string(),
+  /** Row field with the log body (a string, or an object shown as JSON). */
+  bodyField: z.string(),
+  /** Row field with the severity text or OTel number; it colours the bar. */
+  severityField: z.string().optional(),
+  serviceField: z.string().optional(),
+  /** Row fields with attribute objects (or JSON strings of one), shown when a line is expanded. */
+  attributesField: z.string().optional(),
+  resourceField: z.string().optional(),
+  /** Row field with a trace id: an expanded line links to it through `onTrace`. */
+  traceField: z.string().optional(),
+  /** Row field with a unique id; keeps expanded lines open across refreshes. */
+  keyField: z.string().optional(),
+  /** Keep the newest entry in view; when the viewer scrolls away, show "N new". */
+  follow: z.boolean().optional(),
+  /** Newest entries kept (default 10,000, at most 100,000); older ones are dropped with a notice. */
+  maxRows: z.number().int().positive().max(100_000).optional(),
+  height: z.string().optional(),
+  fill: z.boolean().optional(),
+  emptyMessage: z.string().optional(),
+  /** Chain run from an expanded line's trace link; `$row` = the entry, `$rowIndex` its index. */
+  onTrace: actionChainSchema.optional(),
 });
 
 const badgeProps = z.object({
@@ -748,6 +785,13 @@ const spinnerProps = z.object({
   size: z.enum(["sm", "md"]).optional(),
   /** Visible text next to the spinner, also its accessible name. */
   label: z.string().optional(),
+});
+
+const onEnterProps = z.object({
+  /** Re-runs `on.enter` whenever this resolved value changes (for example `{ "$state": "/route" }`). */
+  deps: z.unknown().optional(),
+  /** Also re-runs `on.enter` every `everyMs` (>= 1000) while the tab is visible. Bind it to a toggle for a live tail. */
+  everyMs: z.number().int().min(1000).optional(),
 });
 
 const avatarStackProps = z.object({
@@ -1113,6 +1157,17 @@ const formProps = z.object({
   title: z.string().optional(),
   fields: z.array(formFieldSchema),
   submitLabel: z.string().optional(),
+  /**
+   * Prefill: `{ <field>: value }`, usually bound to a row (`{ "$state": "/queries/q/data/0" }`).
+   * Written into the fields on mount; a later change re-seeds only fields the user has not
+   * edited. Set `resetKey` so an edit dialog opened for another row shows that row.
+   */
+  initialValues: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Row identity for `initialValues`, usually the row id. When it changes, every field
+   * re-seeds and unsaved edits from the previous row are dropped.
+   */
+  resetKey: z.union([z.string(), z.number()]).optional(),
   /** Action chain run on submit; params may reference `$form`. */
   onSubmit: actionChainSchema,
 });
@@ -1447,6 +1502,7 @@ export type MetricTrend = z.infer<typeof metricTrendSchema>;
 export type ChartProps = z.infer<typeof chartProps>;
 export type DateRangeProps = z.infer<typeof dateRangeProps>;
 export type TimelineProps = z.infer<typeof timelineProps>;
+export type LogStreamProps = z.infer<typeof logStreamProps>;
 export type ChartColor = (typeof CHART_COLORS)[number];
 export type UiToastParams = z.infer<typeof uiToastActionSchema>;
 
@@ -1601,6 +1657,11 @@ export const swarmCatalogSpec = {
       description:
         'Inline busy indicator with `role=status`. `variant` ring|ellipsis|bars (default: the dashboard spinner), `size` sm|md, `label` shown next to it (and its accessible name; defaults to an sr-only "Loading").',
     },
+    OnEnter: {
+      props: onEnterProps,
+      description:
+        'Renders nothing. Runs its `on.enter` chain once when mounted, and again each time the resolved `deps` value changes (`{ "$state": "/route" }` re-runs it on every page or route-param change). `everyMs` also re-runs it on an interval while the tab is visible, skipping a tick while the previous run is still going. Unlike `watch`, a state write by a step does not cancel the remaining steps.',
+    },
     AvatarStack: {
       props: avatarStackProps,
       description:
@@ -1699,6 +1760,11 @@ export const swarmCatalogSpec = {
       description:
         "Vertical event list over rows, newest first, grouped under day headings (Today, Yesterday, then dates). Bind `data`/`loading` to a named query like Table. `timeField` (ISO date or epoch ms; rows that do not parse are left out), `titleField`, optional `descriptionField`, and `statusField` with `tones` (value → pill tone, lifecycle values get the status chip) shape each event; `icon` replaces the marker dot. `onSelect` runs with `$row` and `$rowIndex` when an event is clicked. No rows renders `emptyMessage`.",
     },
+    LogStream: {
+      props: logStreamProps,
+      description:
+        'A log tail, not a table: one dense monospace line per entry, newest first, with the time (HH:mm:ss.SSS), a severity colour bar (OTel text or number), the service and the one-line body. Click a line to expand the full body, `attributesField` and `resourceField` as key/value lists, and a trace link that runs `onTrace` with `$row`. Virtualized and memoized, so tens of thousands of rows scroll smoothly; past `maxRows` (default 10,000) the oldest entries are dropped with a notice. `follow: true` keeps the newest entry in view; once the viewer scrolls down, a refresh that adds entries on top shows an "N new" pill. 480 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. Feed it from a query or an action result, and refresh with `OnEnter.everyMs` for a live tail.',
+    },
     SchemaForm: {
       props: schemaFormProps,
       description:
@@ -1712,7 +1778,7 @@ export const swarmCatalogSpec = {
     PageFrame: {
       props: pageFrameProps,
       description:
-        'A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ "$state": "/queries/<name>/data/0/pageId" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: "mobile"` narrows the frame to 390 px, so the page\'s own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows "No page selected".',
+        'A live swarm Page: the same body `/pages/<pageId>` shows, clickable. An HTML page runs in a sandboxed iframe (scripts, forms and popups, never top navigation); a JSON page renders inline. It checks the page every 3 s and reloads by itself when the page changes (a new version, a restore, a theme switch), with no viewer action; a reload resets scroll and any state inside the page. Bind `pageId` to a row or route param (`{ "$state": "/queries/<name>/data/0/pageId" }`). The viewer needs read access to the page: an authed page launches a page session for them, a password page asks for the password. `device: "mobile"` narrows the frame to 390 px, so the page\'s own media queries see a phone (a JSON page follows the dashboard viewport instead). 640 px tall by default; `height` sets it, `fill: true` grows inside a `fill`-aware parent. An empty `pageId` shows "No page selected". Inside an app, an HTML page gets `window.appContext` (see the apps skill, "Pages inside an app"): it reads the route, theme, `params` and the `expose`d state, runs the `actions` listed here as the viewer, navigates the app, and sends messages that run `on.message` with the message at `/ui/<id>/message`.',
     },
     ElementRef: {
       props: elementRefProps,

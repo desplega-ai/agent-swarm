@@ -136,8 +136,14 @@ describe("tasks table model cell", () => {
     expect(html).not.toContain("data-card");
   });
 
+  test("the run model labels a task that used the harness default", () => {
+    const html = renderModel({ id: "t4", runModel: "claude-opus-5-5" });
+    expect(cellOf(html)).toContain("Claude Opus 5.5");
+    expect(cellOf(html)).toContain('data-card="claude-opus-5-5"');
+  });
+
   test("tasks without any model data render a dash", () => {
-    const html = renderModel({ id: "t4" });
+    const html = renderModel({ id: "t5" });
     expect(html).not.toContain("data-card");
     expect(html).toContain("—");
   });

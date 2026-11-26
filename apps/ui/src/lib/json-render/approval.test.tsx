@@ -43,6 +43,8 @@ const { StateProvider, ActionProvider } = await import("@json-render/react");
 const { QueryClient, QueryClientProvider, useQuery } = await import("@tanstack/react-query");
 const { GrantsContext } = await import("../use-can");
 const { approvalPollInterval } = await import("../approval-format");
+const { approvalDraftKey } = await import("../approval-drafts");
+const { getConfig } = await import("../config");
 
 /** What the server holds; the stub query reads it on every fetch. */
 let serverRequest: ApprovalRequest | null = null;
@@ -70,10 +72,17 @@ mock.module("@/api/hooks/use-approval-requests", () => ({
 mock.module("@/components/shared/question-flow", () => ({
   ...real("@/components/shared/question-flow"),
   // One button that submits a fixed answer; a rejection shows its message.
-  QuestionFlow: ({ onSubmit }: { onSubmit: (v: Record<string, unknown>) => Promise<void> }) => (
+  QuestionFlow: ({
+    onSubmit,
+    initialValues,
+  }: {
+    onSubmit: (v: Record<string, unknown>) => Promise<void>;
+    initialValues?: Record<string, unknown>;
+  }) => (
     <button
       type="button"
       data-testid="submit"
+      data-initial={JSON.stringify(initialValues ?? {})}
       onClick={() => {
         onSubmit({ go: { approved: true } }).catch((error: Error) => {
           document.body.dataset.flowError = error.message;
@@ -240,6 +249,28 @@ async function click(element: HTMLElement | null) {
 }
 
 describe("Approval", () => {
+  test("restores a saved draft and drops it after a successful submit", async () => {
+    serverRequest = makeRequest({
+      approvers: { policy: "all", users: ["a", "b"] },
+      approvalProgress: { approved: 0, required: 2 },
+    });
+    const key = approvalDraftKey(getConfig().apiUrl, "req-1", serverRequest.questions);
+    localStorage.setItem(
+      key,
+      JSON.stringify({ text: JSON.stringify({ go: { approved: true } }), savedAt: Date.now() }),
+    );
+    // Still pending after this answer: only the submit clears the draft.
+    respondImpl = async () => ({
+      approvalRequest: { ...serverRequest, approvalProgress: { approved: 1, required: 2 } },
+    });
+    const { host } = await mount({ requestId: "req-1" });
+    expect(JSON.parse(byTestId(host, "submit")?.dataset.initial ?? "{}")).toEqual({
+      go: { approved: true },
+    });
+    await click(byTestId(host, "submit"));
+    expect(localStorage.getItem(key)).toBeNull();
+  });
+
   test("an empty requestId renders nothing and fetches nothing", async () => {
     const { host } = await mount({ requestId: "" });
     expect(host.innerHTML).toBe("");

@@ -17,6 +17,28 @@ async function taskMetadata(ctx: ScenarioContext, agentId: string, otherId: stri
   const taskId = await createAssignedTask(ctx, agentId, `metadata task ${ctx.nonce}`);
   await claimTask(ctx, agentId, taskId);
 
+  for (const [index, model] of ["claude-sonnet-5-5", "claude-opus-5-5", "default"].entries()) {
+    const stored = await ctx.api("POST", "/api/session-costs", {
+      body: {
+        agentId,
+        taskId,
+        sessionId: `model-${index}-${ctx.nonce}`,
+        model,
+        totalCostUsd: 0.25,
+        createdAt: Date.now() + index,
+      },
+    });
+    expectStatus(stored, [201], "store the session model");
+  }
+  const listed = await ctx.api("GET", `/api/tasks?search=${taskId}`);
+  expectStatus(listed, [200], "list the task with recorded session costs");
+  const listedTask = asRecords(listed.json, "tasks").find((task) => task.id === taskId);
+  expect(listedTask, "task missing from the list");
+  expect(
+    listedTask.runModel === "claude-opus-5-5" && listedTask.model === undefined,
+    `expected the latest named session model on an unpinned task, got ${String(listedTask.runModel)}`,
+  );
+
   // PUT /api/tasks/{id}/session
   let response = await ctx.api("PUT", `/api/tasks/${taskId}/session`, {
     body: {

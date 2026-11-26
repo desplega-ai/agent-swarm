@@ -1,8 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { readdirSync } from "node:fs";
+import { normalizeDateRequired, parseScheduleInstant } from "../date-utils";
 import {
   assertNotEmptySqliteDatabase,
   backfillScriptRunSources,
+  normalizeScheduleNextRunTimes,
   runSqliteMigrations,
 } from "../storage-root";
 
@@ -65,6 +67,12 @@ export function resolveMigrationsDir(
 export function runMigrations(db: Database): void {
   runSqliteMigrations(db, {
     migrationsDir: resolveMigrationsDir(import.meta.dir),
+    dataMigrations: {
+      "374_schedule_next_run_at_utc": (db) =>
+        normalizeScheduleNextRunTimes(db, (value) =>
+          parseScheduleInstant(normalizeDateRequired(value))?.toISOString(),
+        ),
+    },
     afterMigrations: backfillScriptRunSources,
   });
 }

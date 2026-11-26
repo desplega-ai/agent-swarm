@@ -423,7 +423,7 @@ export const cliApi: Scenario = {
           env: { ...quiet, SLACK_DISABLE: "true", SECRETS_ENCRYPTION_KEY_FILE: `${dir}/key` },
           cwd: dir,
           timeoutMs: 90_000,
-          async whileRunning() {
+          async whileRunning(child) {
             const healthy = await pollUntil(
               async () =>
                 (await fetch(`http://127.0.0.1:${port}/health`).catch(() => undefined))?.status ===
@@ -438,6 +438,9 @@ export const cliApi: Scenario = {
               headers: { Authorization: `Bearer ${key}` },
             });
             expect(allowed.status === 200, `api with its key answered ${allowed.status}`);
+            // /health answers before Ink's throttled frame shows the running line: a stop
+            // right after the checks can land before that frame is written.
+            await pollUntil(() => child.stdout().includes("API server running on"), 10_000, 50);
           },
         },
       );

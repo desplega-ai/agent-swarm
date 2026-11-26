@@ -166,22 +166,25 @@ export function openSqliteCopySource(path: string): CopySource {
     },
     foreignKeyViolations() {
       const copied = new Set(tables.map((t) => t.name));
-      const keyColumns = new Map<string, string[]>();
-      const columnsOf = (table: string, id: number): string[] => {
-        const key = `${table}#${id}`;
-        let columns = keyColumns.get(key);
-        if (!columns) {
-          columns = db
-            .query<{ id: bigint; seq: bigint; from: string }, []>(
-              `SELECT id, seq, "from" FROM pragma_foreign_key_list(${quoteText(table)})`,
+      const keys = new Map<string, { columns: string[]; onDelete: string }>();
+      const keyOf = (table: string, id: number) => {
+        const name = `${table}#${id}`;
+        let key = keys.get(name);
+        if (!key) {
+          const rows = db
+            .query<{ id: bigint; seq: bigint; from: string; on_delete: string }, []>(
+              `SELECT id, seq, "from", on_delete FROM pragma_foreign_key_list(${quoteText(table)})`,
             )
             .all()
             .filter((row) => Number(row.id) === id)
-            .sort((a, b) => Number(a.seq) - Number(b.seq))
-            .map((row) => row.from);
-          keyColumns.set(key, columns);
+            .sort((a, b) => Number(a.seq) - Number(b.seq));
+          key = {
+            columns: rows.map((row) => row.from),
+            onDelete: rows[0]?.on_delete ?? "NO ACTION",
+          };
+          keys.set(name, key);
         }
-        return columns;
+        return key;
       };
       return db
         .query<{ table: string; rowid: bigint | null; parent: string; fkid: bigint }, []>(
@@ -193,7 +196,7 @@ export function openSqliteCopySource(path: string): CopySource {
           table: row.table,
           row: row.rowid === null ? "a WITHOUT ROWID row" : `rowid ${row.rowid}`,
           parent: row.parent,
-          columns: columnsOf(row.table, Number(row.fkid)),
+          ...keyOf(row.table, Number(row.fkid)),
         }));
     },
     *rows(table: CopyTable, batchSize: number, batchBytes = Number.POSITIVE_INFINITY) {

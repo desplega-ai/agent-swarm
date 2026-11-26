@@ -23,6 +23,8 @@ export type DataCopyArgs = {
   from?: string;
   to?: string;
   json?: string;
+  /** `--repair`: fix what Postgres cannot store during the copy, and list each fix. */
+  repair?: boolean;
 };
 
 export function parseDataCopyArgs(argv: string[]): DataCopyArgs | { error: string } {
@@ -31,7 +33,8 @@ export function parseDataCopyArgs(argv: string[]): DataCopyArgs | { error: strin
     const arg = argv[i] as string;
     const [flag, inline] = arg.includes("=") ? arg.split(/=(.*)/s, 2) : [arg, undefined];
     const value = () => inline ?? argv[++i];
-    if (flag === "--from") args.from = value();
+    if (arg === "--repair") args.repair = true;
+    else if (flag === "--from") args.from = value();
     else if (flag === "--to") args.to = value();
     else if (flag === "--json") args.json = value();
     else return { error: `Unknown option: ${arg}` };
@@ -81,6 +84,7 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
     sqlitePath: from,
     postgresUrl: to,
     embeddingDimensions: EMBEDDING_DIMENSIONS,
+    repair: parsed.repair,
     log: (line) => console.log(scrubSecrets(line)),
   });
 
@@ -89,6 +93,18 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
   }
   for (const rebuilt of report.rebuilt) {
     console.log(`[db-copy] rebuilt ${rebuilt.table}: ${rebuilt.rows} rows (${rebuilt.reason})`);
+  }
+  for (const repair of (report.repairs ?? []).slice(0, 200)) {
+    console.log(
+      scrubSecrets(
+        `[db-copy] repaired ${repair.table}.${repair.column} (${repair.row}): ${repair.action}`,
+      ),
+    );
+  }
+  if ((report.repairCount ?? 0) > 200) {
+    console.log(
+      `[db-copy] ... and ${(report.repairCount ?? 0) - 200} more repair(s)${parsed.json ? ` (all in ${parsed.json})` : " (--json lists all)"}`,
+    );
   }
   for (const problem of report.problems.slice(0, 200)) {
     console.error(
@@ -123,6 +139,8 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
     );
   }
   const rows = report.tables.reduce((sum, t) => sum + t.targetRows, 0);
+  const repairs = report.repairCount ?? 0;
+  const repairNote = repairs > 0 ? `; ${repairs} repair(s) made by --repair` : "";
   if (parsed.json) {
     try {
       await writeReportAtomically(parsed.json, `${JSON.stringify(report, null, 2)}\n`);
@@ -140,18 +158,23 @@ export async function runDataCopyCommand(argv: string[]): Promise<number> {
   const unchecked = report.unchecked?.length ?? 0;
   if (report.ok && unchecked > 0) {
     console.error(
-      `[db-copy] COMMITTED with unchecked dashboards: ${report.tables.length} tables, ${rows} rows, every count and checksum equal, but ${unchecked} saved ${unchecked === 1 ? "query was" : "queries were"} not checked on Postgres (NOT CHECKED lines above). Run each one before cutover.`,
+      `[db-copy] COMMITTED with unchecked dashboards: ${report.tables.length} tables, ${rows} rows, every count and checksum equal${repairNote}, but ${unchecked} saved ${unchecked === 1 ? "query was" : "queries were"} not checked on Postgres (NOT CHECKED lines above). Run each one before cutover.`,
     );
     // 4: committed, a dashboard check is incomplete. Distinct from 0, 1 and 3.
     return 4;
   }
   if (report.ok) {
     console.log(
-      `[db-copy] done: ${report.tables.length} tables, ${rows} rows, every count and checksum equal`,
+      `[db-copy] done: ${report.tables.length} tables, ${rows} rows, every count and checksum equal${repairNote}`,
     );
     return 0;
   }
   console.error(scrubSecrets(`[db-copy] FAILED: ${report.error ?? "unknown error"}`));
+  if (report.problemCount > 0 && !parsed.repair) {
+    console.error(
+      "[db-copy] --repair fixes these kinds during the copy and lists each fix: NUL bytes and invalid UTF-8 in text, \\u0000 and unpaired surrogate escapes in JSON, a value of the wrong kind in a nullable number or flag column, orphan rows. The SQLite file is not changed.",
+    );
+  }
   return 1;
 }
 

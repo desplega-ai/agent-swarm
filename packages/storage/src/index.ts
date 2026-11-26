@@ -1,4 +1,5 @@
 export type { Capabilities, CapabilityName } from "./capabilities";
+export type { PostgresStats } from "./engine-stats";
 export {
   type DbClient,
   type DbExecutor,
@@ -12,7 +13,9 @@ export type {
   CopyCell,
   CopyColumn,
   CopyMigration,
+  CopyOrphan,
   CopyProblem,
+  CopyRepair,
   CopyReport,
   CopyRow,
   CopySource,

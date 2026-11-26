@@ -226,7 +226,7 @@ Store task progress, or mark a task as completed, failed, or skipped. Use `skipp
 | `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. Agent-fs pointers are verified before task state changes using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
 | `citations` | array | No | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each in `output` with `[citation:N]`, or set `general: true` for a source that backs the whole answer. Kinds: `task`, `memory`, `github`, `slack`, `agent-fs`, `page`, `script-run`, `url`. The first completing call is refused (the task stays in progress) if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; after one refusal, completion proceeds and those markers are dropped. At most 50 per call/task. |
 | `learning` | string \| object | No | A lesson worth keeping: a gotcha, a dead end, a pattern that worked. Stored as a swarm memory at `/learnings/<workstream>/<slug>`, tagged `learning` and tied to the task. Pass a string, or `{text, tags?, workstream?}` with at most 5 kebab-case tags; `workstream` defaults to the task's repo name, else `general`. Line 1 is the title and line 2 the rule ("When X, do Y"), evidence after: recall shows only the first 300 characters. The memory expires 30 days after it is written. Text under 80 characters, or text contained in the same call's `progress` or `output`, is not stored: the result has status `failed` with `noiseFloor` `too-short` or `repeats-progress`. Send it on or before the completing call. A learning that repeats an existing swarm memory under `/learnings/` or `/longterm/` (raw cosine 0.80 or higher) is not stored: the result has status `duplicate` with that memory's id, and the existing memory gets a positive rating. The check scores the newest 10,000 rows under each prefix, so it is exact while a prefix holds at most 10,000 rows; past that, an older twin is missed. A failed write is reported in the result and never blocks the progress update. |
-| `uiSpec` | object | No | Optional rich card for the result: `{spec, actions?}`, where `spec` is a json-render spec for the chat catalog with a `Card` root. Rendered in the Slack outcome card, the session view and Chat SDK channels; `output` stays the prose answer. Stored only with `status: "completed"` and only when `UI_SPEC_ENABLED=true` (ignored otherwise); an invalid spec refuses the first completion. `actions` (follow-up prompts or `script` actions named by `Button` ids) need `UI_SPEC_ACTIONS_ENABLED=true`; a `script` action also needs its script pinned in `UI_SPEC_SCRIPT_ACTIONS`. |
+| `uiSpec` | object | No | Optional rich card for the result: `{spec, actions?}`, where `spec` is a json-render spec for the chat catalog with a `Card` root. Rendered in the Slack outcome card, the session view and Chat SDK channels; `output` stays the prose answer. Stored only with `status: "completed"` and only while `UI_SPEC_ENABLED` is on (the default; ignored when it is `false`); an invalid spec refuses the first completion. `actions` (follow-up prompts or `script` actions named by `Button` ids) need `UI_SPEC_ACTIONS_ENABLED` on (the default); a `script` action also needs its script pinned in `UI_SPEC_SCRIPT_ACTIONS`. |
 | `persistMemory` | boolean | No | Opt in to task-completion memory persistence for automatic or recurring tasks. Manual tasks persist by default; scheduled, system, heartbeat, monitor, and digest tasks are skipped unless this is `true`. |
 | `chainedTaskId` | uuid | No | With `status: "completed"` only: a live child task you created (`parentTaskId` set to this task) that carries the result forward. No lead follow-up is created for this completion. See [Chained completions](/docs/concepts/task-lifecycle#chained-completions). |
 | `force` | boolean | No | On an already-terminal task, replace only the explicitly supplied `output` and/or `failureReason`. Status, `finishedAt`, completion events, memories, follow-ups, and capacity updates are preserved rather than replayed. |
@@ -949,6 +949,8 @@ List app summaries. Use `app-get` to inspect a complete definition.
 
 Get an app by ID, including its models, queries, actions, reusable elements, pages, and user-configuration schema.
 
+Pass `path` (a dot path or JSON pointer) to read one definition subtree, or `outline: true` for the definition tree without props.
+
 ### app-upsert
 
 Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported. The optional top-level `icon` is `{ type: "lucide", icon, color? }`, `{ type: "url", url }` (https), or `{ type: "agent-fs", path }` (swarm drive; add `orgId` and `driveId` for another drive). The dashboard shows a glyph when an image cannot load.
@@ -956,6 +958,22 @@ Create or update an app definition. Updates pass schema-migration and exported-e
 ### app-patch
 
 Apply an RFC 7396 merge patch to an app. Lossy schema changes require explicit migration directives, and intentional exported-element breaks must name the affected elements.
+
+### app-patch-node
+
+Edit one node of a page or reusable element without resending the definition, like `patch-workflow-node`. `props` merges one level into the node's props (`null` deletes a prop); `set` replaces node keys whole; `remove` deletes the node and its unreachable subtree; `create` adds a node under a parent at an index. The result is validated like `app-patch` and snapshotted. It returns a compact summary of changed paths, issues and warnings; `includeApp` adds the whole app and `dryRun` stores nothing. A missing node returns the closest node ids.
+
+### app-catalog
+
+Describe what an app page may contain, from the catalog the server validates against. With no arguments it lists every component and action type. `component` (plus optional `prop`) returns a component's slots and props schema, `action` returns an action step's params, and `topic: "expressions"` returns the binding reference.
+
+### app-action-run
+
+Run a declared app action as an agent. A script or task action returns `run` with `settled`; `waitSeconds` (up to 25) waits for every run the action's script launched or called. Scripts and extensions cannot invoke this tool.
+
+### app-action-status
+
+Read or wait on the run an `app-action-run` call returned (`runId`). A script action's run settles when it and every run its script started have finished; a task action's run settles with its task. `waitSeconds` (up to 25) holds the call until the run settles.
 
 ### app-query
 
@@ -1418,6 +1436,19 @@ Execute a read-only SQL query against the swarm database. Available to all authe
 | `params` | array | No | Query parameters |
 
 Responses include `total`, `truncated`, and `rowLimit` so callers can distinguish a complete result set from one capped by the configured row limit.
+
+### data-query
+
+Run read-only DuckDB SQL over tabular files on your agent-fs drive (csv, tsv, parquet, json, ndjson, xlsx, and `.gz` variants), as your own agent-fs identity. Name a file in table position (`SELECT region, sum(amount) FROM '/shared/x/sales.csv' GROUP BY 1`) or bind it in `tables`. Not for the swarm database: use `db-query`. Limits: 30 s, 256 MB per file, 1,000 rows per call (10,000 from scripts).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sql` | string | Yes | One read-only DuckDB query |
+| `tables` | object | No | Table name to drive path, or `{path, format}` to override format detection |
+| `maxRows` | number | No | Rows to return: default 100 (scripts 1000), at most 1000 (scripts 10000) |
+| `driveId` | string | No | Another readable drive in your org. Default: your default drive |
+| `card` | boolean | No | Also return a uiSpec-ready card table (first 100 rows, 20 columns) |
+| `sheet` | object | No | Save the result as a new `.sheet.json` at this path (create-only) |
 
 ### get-oauth-access-token
 

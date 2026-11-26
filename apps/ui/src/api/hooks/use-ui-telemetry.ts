@@ -16,6 +16,7 @@ import { api } from "@/api/client";
 import type { ProviderName, SlackConnectMoment, StatusResponse } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import type { UserFunction } from "@/lib/company-profile";
+import { isAgentPreview } from "../../lib/deployment-config";
 
 export type PopupName = "feedback" | "org_name" | "used_by";
 export type PopupTrigger =
@@ -97,9 +98,13 @@ export type UiTelemetryEvent =
  * - `undefined` (`/status` not resolved yet): no.
  * - `null` (older API without `/status`) or a payload without `telemetry`:
  *   yes, matching the server default (on unless `ANONYMIZED_TELEMETRY=false`).
+ * - An agent preview load (`bun run ui:dev`): never.
  */
-export function isUiTelemetryEnabled(status: StatusResponse | null | undefined): boolean {
-  if (status === undefined) return false;
+export function isUiTelemetryEnabled(
+  status: StatusResponse | null | undefined,
+  agentPreview: boolean = isAgentPreview,
+): boolean {
+  if (agentPreview || status === undefined) return false;
   return status?.telemetry?.enabled !== false;
 }
 
@@ -107,8 +112,9 @@ export function isUiTelemetryEnabled(status: StatusResponse | null | undefined):
 export function sendUiTelemetry(
   status: StatusResponse | null | undefined,
   input: UiTelemetryEvent,
+  agentPreview: boolean = isAgentPreview,
 ): void {
-  if (!isUiTelemetryEnabled(status)) return;
+  if (!isUiTelemetryEnabled(status, agentPreview)) return;
   // Drop undefined optional properties: the catalog check rejects nothing for
   // them, but the wire stays tidy.
   const properties = Object.fromEntries(

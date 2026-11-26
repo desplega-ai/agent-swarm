@@ -6,6 +6,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-11-26
+
+### Added
+- Data: `data-query` MCP tool, read-only DuckDB SQL over csv, tsv, parquet, json, ndjson and xlsx files on an agent-fs drive (#3676).
+- Apps: `app-patch-node` edits one page or element node with JSON-pointer ops, and `app-get` reads a subtree (`path`) or an outline (#3678); `app-catalog` lists valid components, props and bindings (#3681); `app-action-run` waits on action runs and `app-action-status` reads them (#3658).
+- Slack: opt-in 👍/👎 feedback buttons on final outcome cards, `SLACK_FEEDBACK_BUTTONS` (#3670).
+- RBAC: scoped user-token verbs for workflow triggers, events and durable script runs (#3654).
+- Telemetry: API events report the storage engine (#3684).
+- Extensions: handler execution is traced with OpenTelemetry (#3672).
+
+### Changed
+- agent-fs pins bumped 0.18.38 -> 0.18.39 (worker image, chart, compose files, `@desplega.ai/agent-fs-just-bash`).
+- Performance: `getTaskById` and `getAgentById` are memoized per HTTP request (#3679), Slack activation reads are cached (#3677), a script run loads the connection catalog once (#3680), and app row KV writes are batched into multi-row statements (#3682).
+- Worker harness bumps: claude-code, anthropic sdk, cursor, amp, goose and kiro (#3665), then pi and amp (#3674).
+- CI: e2e fails fast on scenario order collisions (#3671) and a nightly PostgreSQL commit budget runs (#3664).
+- Specs: heartbeat spec synced with main (#3666).
+
+### Fixed
+- KV: reading an app namespace over `/api/kv` requires `app.use` (#3685).
+- OTel: `POST /mcp` spans nest under `worker.session` in every harness (#3675).
+- Scripts: every run a background script run starts links back to it (#3673).
+- db-query: JSON-text string params read as JSON on Postgres (#3683).
+- Apps: `$template` reads are validated on ordinary pages (#3650).
+- Internal AI: internal LLM calls no longer route to OpenRouter unless opted in (#3669).
+- Models: the open-harness smart tier points at Kimi K3.1 Pro, and cursor smol is refreshed (#3668).
+- Seed: seeded schedule prompts keep updating after an operator toggle (#3652).
+- API: ping serialization conflicts return a retryable response (#3657).
+- UI: the task list shows the recorded model (#3686).
+
+## [2.15.0] - 2026-11-25
+
+### Added
+- Tasks: an `alert` task source and a `tags` filter on `GET /api/tasks` (#3653).
+- Apps: realtime row refresh and page presence over the existing socket (#3632), a `LogStream` log tail component (#3630), a `window.appContext` bridge between an app and its PageFrame pages (#3628), app-wide state with action-fed charts and interval refresh (#3627), and `OnEnter`, comparison expressions, form prefill and fuzzy Select search (#3625).
+- Scripts: `ctx.db.dialect` and `ctx.db.query` in script runs (#3642).
+- db-copy: `--repair` fixes the rows Postgres refuses (#3619).
+- Slack: an opt-in native Stop button for running asks, `SLACK_STOP_BUTTON_ENABLED` (#3613), and a quiet Lead threads setting, `SLACK_RENDER_V2_QUIET_LEAD_THREADS` (#3588).
+- Onboarding QA: run the stack on a git ref with overlays, plus a stress pack (#3603).
+- Docs: warranty claim evidence review guide (#3634) and a Café Helmcode talk deck on memory and dreaming (#3639).
+
+### Changed
+- agent-fs pins bumped 0.18.37 -> 0.18.38 (worker image, chart, compose files, `@desplega.ai/agent-fs-just-bash`).
+- Apps: a bulk row request writes in one transaction (#3655).
+- Dependencies: the minor-and-patch group (#3644), agent-browser 0.44.0 (#3618), and worker harness bumps for amp, copilot and acp sdk (#3643) and claude-code, codex, amp, gemini and anthropic-sdk (#3615).
+- CI: e2e clones a migrated Postgres template and runs six contract shards (#3648); nightly coverage skips storage-postgres tests (#3612).
+- Specs: TLA+ specs synced with main for heartbeat and workflows (#3620).
+
+### Fixed
+- Slack: a Lead follow-up card posts when the ask is on the dispatch edge (#3636), and the thread header says stopped when the work was cancelled (#3616).
+- Codex: task `outputSchema` is enforced natively, with one reprompt on a missing result (#3595).
+- Codex OAuth: a worker persists a slot it refreshed under the lock (#3635).
+- pi: the configured model is honored at session startup (#3609).
+- Docker: db-copy runs from the API image without booting the API (#3589).
+- Schedules: next run times are stored as UTC instants (#3367).
+- Scripts: report cutoffs use ISO timestamps (#3438), inline scratch autosave is concurrency-safe (#3608), and the delete and types routes decode the script name (#3623).
+- Seed: seeded SQL runs on both SQLite and Postgres (#3629).
+- VCS: task PR providers are detected from remote hosts (#3577).
+- UI: markdown tables grow to full height again (#3647), and page bodies are no longer persisted, so an API update shows on reload (#3638).
+- E2E: wait for the API running line before stopping cli-api (#3649), skip Postgres legs when `E2E_POSTGRES_URL` is unset (#3621), pick the SUT API port below the ephemeral range (#3624), and do not call a transient state exclusion stale (#3614).
+
 ## [2.14.5] - 2026-11-24
 
 ### Added

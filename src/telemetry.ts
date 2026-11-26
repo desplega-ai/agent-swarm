@@ -95,6 +95,8 @@ export function setTelemetryIngestObserver(
 let cachedOrgId: string | undefined;
 /** Email domain of the org's admin, set by the API server (`setTelemetryOrgDomain`). */
 let cachedOrgDomain: string | undefined;
+/** Storage engine of the API server (`setTelemetryDbEngine`). Workers leave it unset. */
+let cachedDbEngine: TelemetryDbEngine | undefined;
 let roleResolver: ((userId: string) => TelemetryUserRole | undefined) | null = null;
 let functionResolver: ((userId: string) => EventContext["user_function"]) | null = null;
 let identityReloader: (() => Promise<void>) | null = null;
@@ -529,6 +531,16 @@ export function setTelemetryOrgDomain(domain: string | null | undefined): void {
   cachedOrgDomain = validOrgDomain(domain);
 }
 
+export type TelemetryDbEngine = "sqlite" | "postgres";
+
+/**
+ * API server only: publish the storage engine as the `db_engine` property on
+ * every event of this process. Workers do not know the engine and omit it.
+ */
+export function setTelemetryDbEngine(engine: TelemetryDbEngine | null | undefined): void {
+  cachedDbEngine = engine === "sqlite" || engine === "postgres" ? engine : undefined;
+}
+
 /**
  * API server only: how to look up a user's role for `context.user_role`
  * without an await. The resolver must be synchronous and cache-backed.
@@ -747,6 +759,8 @@ function emit(
         has_email_channel: cachedHasEmailChannel,
         has_notification_channel: cachedHasSlackChannel || cachedHasEmailChannel,
         install_method: cachedInstallMethod,
+        // API-server events only; spread LAST so callers can't spoof it.
+        ...(cachedDbEngine ? { db_engine: cachedDbEngine } : {}),
       }),
       metadata: {
         transport: "https",
@@ -793,6 +807,7 @@ export function _resetTelemetryStateForTests(): void {
   cachedInstallPreset = undefined;
   cachedOrgId = undefined;
   cachedOrgDomain = undefined;
+  cachedDbEngine = undefined;
   roleResolver = null;
   functionResolver = null;
   identityReloader = null;

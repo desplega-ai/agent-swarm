@@ -11,6 +11,7 @@ import {
   listKv,
   upsertKv,
 } from "../be/db";
+import { getUserGrant } from "../be/rbac-roles";
 import { MAX_KV_BODY_BYTES } from "../kv-limits";
 import { mcpOverflowAuthError } from "../kv-overflow";
 import {
@@ -21,9 +22,11 @@ import {
   scrubReservedRead,
 } from "../kv-reserved-namespaces";
 import { hasKvViewArgs, resolveKvView } from "../kv-view";
-import { can } from "../rbac";
+import { can, isRbacEnabled } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
 import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
+import { authUserId, requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
@@ -416,13 +419,35 @@ function authorizeWrite(
   return null;
 }
 
-function authorizeRead(
+async function authorizeRead(
+  req: IncomingMessage,
   namespace: string,
   ctx: AuthCtx,
-): { status: number; message: string } | null {
+): Promise<{ status: number; message: string } | null> {
   const readErr =
-    privateNamespaceError(namespace) ?? mcpOverflowAuthError(namespace, ctx.callerAgentId);
-  return readErr ? { status: 403, message: readErr } : null;
+    privateNamespaceError(namespace, { isLead: ctx.isLead }) ??
+    mcpOverflowAuthError(namespace, ctx.callerAgentId);
+  if (readErr) return { status: 403, message: readErr };
+  // `apps:<appId>` holds app rows: apply the app row routes' app.use admission and check.
+  if (namespace === "apps" || namespace.startsWith("apps:")) {
+    const userId = authUserId(getRequestAuth(req));
+    if (userId && isRbacEnabled()) {
+      const grant = await getUserGrant(userId);
+      if (!grant.grantsAll && !grant.verbs.has("app.use")) {
+        return { status: 403, message: "Forbidden: admission: missing permission 'app.use'" };
+      }
+    }
+    const decision = can({
+      principal: await requestPrincipal(req, ctx.callerAgentId, {
+        unauthenticatedFallback: "anonymous-agent",
+      }),
+      verb: "app.use",
+      resource: { kind: "app", appId: namespace.slice("apps:".length) },
+      source: "http",
+    });
+    if (!decision.allow) return { status: 403, message: decision.reason };
+  }
+  return null;
 }
 
 function encodeValueOrError(
@@ -681,7 +706,7 @@ async function sendGet(
   query: z.infer<typeof kvGetQuerySchema>,
   respond: GetKvRespond,
 ): Promise<boolean> {
-  const authErr = authorizeRead(namespace, await buildAuthCtx(req));
+  const authErr = await authorizeRead(req, namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
@@ -782,7 +807,7 @@ async function sendList(
   query: z.infer<typeof kvListQuerySchema>,
   respond: ListKvRespond,
 ): Promise<boolean> {
-  const authErr = authorizeRead(namespace, await buildAuthCtx(req));
+  const authErr = await authorizeRead(req, namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;

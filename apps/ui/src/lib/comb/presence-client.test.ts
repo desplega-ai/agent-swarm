@@ -200,4 +200,48 @@ describe("PresenceClient", () => {
     await tick();
     expect(second.sockets).toHaveLength(1);
   });
+
+  test("subscribes its channels after each join and reports only their frames", async () => {
+    const sockets: FakeSocket[] = [];
+    const events: unknown[] = [];
+    const client = new PresenceClient({
+      namespace: "presence:app:a:home",
+      getTicket: async () => "t",
+      socketUrl: (ticket) => `ws://api/api/realtime?ticket=${ticket}`,
+      onPeers: () => {},
+      channels: [{ namespace: "app:a", name: "rows" }],
+      onChannel: (channel, data) => events.push([channel.name, data]),
+      createSocket: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+      retryDelay: () => 0,
+    });
+    client.start();
+    await tick();
+    expect(sockets[0].requests("subscribe")).toEqual([]);
+    await joined(sockets[0]);
+    expect(sockets[0].requests("subscribe")).toMatchObject([{ namespace: "app:a", name: "rows" }]);
+    sockets[0].frame({
+      type: "channel",
+      namespace: "app:a",
+      name: "rows",
+      seq: 2,
+      data: { model: "item" },
+    });
+    sockets[0].frame({
+      type: "channel",
+      namespace: "app:b",
+      name: "rows",
+      seq: 3,
+      data: { model: "x" },
+    });
+    expect(events).toEqual([["rows", { model: "item" }]]);
+    sockets[0].drop();
+    await tick();
+    await joined(sockets[1]);
+    expect(sockets[1].requests("subscribe")).toHaveLength(1);
+    client.stop();
+  });
 });

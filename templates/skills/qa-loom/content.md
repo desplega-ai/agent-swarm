@@ -71,6 +71,7 @@ BASE_URL=http://localhost:5274 OUT=./loom bash run-qa.sh
 Notes:
 
 - Log in and seed data **before** `record start`, so the loom shows only the change.
+- To record a swarm app or page, start it with `agent-swarm ui-dev --app <id>` or `--page <id>` (no checkout needed; `bun run ui:dev` from an agent-swarm checkout when you change dashboard code) and use the origin of its ready-line `url` as `BASE_URL`: no login step needed. It acts with your swarm key: in prod, do not click actions or submit forms unless the task asks.
 - For a mobile check, run `agent-browser set viewport 390 844` inside a step. The build letterboxes it.
 - After each step, wait about 800 ms so the viewer sees the result before the next action.
 - Take your normal QA screenshots as well. They are the fallback.

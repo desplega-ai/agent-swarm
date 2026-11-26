@@ -158,6 +158,11 @@ drift "extension catalog and manifest schema" \
   "src/extensions/catalog.generated.json templates/extensions/manifest.schema.json" \
   bash -c 'bun run build:extension-catalog && bun run build:extension-schema'
 
+if grep -q '^scripts/e2e/scenarios/' <<<"$changed"; then
+  step "e2e scenario orders (vs origin/main and open PRs)"
+  bun scripts/check-scenario-orders.ts --open-prs
+fi
+
 step "test:root (affected tests)"
 PRE_PUSH_TESTS_INCLUDE_WORKTREE=1 bash scripts/pre-push-tests.sh
 
@@ -169,21 +174,21 @@ else
   case "$scope" in
     skip) step "e2e contract: the diff reaches neither the API nor the runner, skipped" ;;
     full)
-      # CI's four shards, side by side: each boots its own API on free ports.
-      step "e2e contract (full suite, 4 shards in parallel)"
+      # CI's six shards, side by side: each boots its own API on free ports.
+      step "e2e contract (full suite, 6 shards in parallel)"
       e2e_logs=$(mktemp -d)
       pids=()
-      for shard in 1 2 3 4; do
-        bun run e2e --shard "$shard/4" >"$e2e_logs/shard-$shard.log" 2>&1 &
+      for shard in 1 2 3 4 5 6; do
+        bun run e2e --shard "$shard/6" >"$e2e_logs/shard-$shard.log" 2>&1 &
         pids+=($!)
       done
       e2e_failed=0
-      for shard in 1 2 3 4; do
+      for shard in 1 2 3 4 5 6; do
         if wait "${pids[$((shard - 1))]}"; then
-          printf 'shard %s/4: %s\n' "$shard" "$(grep -E ' passed, ' "$e2e_logs/shard-$shard.log" | tail -1)"
+          printf 'shard %s/6: %s\n' "$shard" "$(grep -E ' passed, ' "$e2e_logs/shard-$shard.log" | tail -1)"
         else
           e2e_failed=1
-          printf '\nshard %s/4 failed, last lines of %s:\n' "$shard" "$e2e_logs/shard-$shard.log"
+          printf '\nshard %s/6 failed, last lines of %s:\n' "$shard" "$e2e_logs/shard-$shard.log"
           tail -60 "$e2e_logs/shard-$shard.log"
         fi
       done

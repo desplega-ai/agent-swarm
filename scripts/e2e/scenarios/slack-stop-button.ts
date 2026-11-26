@@ -91,11 +91,11 @@ async function expectStopIgnored(ctx: ScenarioContext, threadTs: string, taskIds
 }
 
 /**
- * Slack's native Stop button for a running ask, behind SLACK_STOP_BUTTON_ENABLED. Off (the
- * default): the event is ignored. On: a person outside the sender allowlist is ignored, and an
- * allowed person cancels the thread's open tasks and their delegated work, then the session
- * leaves `processing`. The mock cannot draw Slack's own Working… line, so the frames show the
- * thread before and after the click.
+ * Slack's native Stop button for a running ask, behind SLACK_STOP_BUTTON_ENABLED. An explicit
+ * `false` wins over the on default: the event is ignored. Unset (the default, on): a person
+ * outside the sender allowlist is ignored, and an allowed person cancels the thread's open tasks
+ * and their delegated work, then the session leaves `processing`. The mock cannot draw Slack's
+ * own Working… line, so the frames show the thread before and after the click.
  */
 export const slackStopButton: Scenario = {
   name: "slack-stop-button",
@@ -104,7 +104,6 @@ export const slackStopButton: Scenario = {
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
     const leadId = await registerLead(ctx, `e2e-lead-stop-${ctx.nonce}`);
-    // ── Setting off: the click does nothing ────────────────────────────────────
     const presence = await ctx.api(
       "GET",
       "/api/config/env-presence?keys=SLACK_STOP_BUTTON_ENABLED",
@@ -112,26 +111,33 @@ export const slackStopButton: Scenario = {
     expectStatus(presence, [200], "check the Stop button setting is unset");
     expect(
       asRecord(asRecord(presence.json).presence).SLACK_STOP_BUTTON_ENABLED === false,
-      "SLACK_STOP_BUTTON_ENABLED is already set; this phase checks the default",
+      "SLACK_STOP_BUTTON_ENABLED is already set; the on phase checks the default",
     );
-    const off = await runningAsk(ctx, leadId, "summarize the open incidents");
-    ctx.markThread("stop-button-off", CHANNEL, off.threadTs);
-    await clickStop(ctx, off.threadTs, ALICE);
-    await expectStopIgnored(ctx, off.threadTs, [off.taskId]);
-    // Logged once per process, so an earlier ignored click in this process may have logged it.
-    expect(
-      (await ctx.sutLog()).includes("SLACK_STOP_BUTTON_ENABLED is off"),
-      "The SUT did not log why it ignored the Stop click",
-    );
-    await finish(ctx, leadId, off.taskId, { status: "completed", output: "No open incidents." });
-    await waitForReaction(ctx, off.threadTs, "white_check_mark");
 
-    // ── Setting on ─────────────────────────────────────────────────────────────
     const rows: string[] = [];
     try {
-      rows.push(
-        String((await putConfig(ctx, { key: "SLACK_STOP_BUTTON_ENABLED", value: "true" })).id),
+      // ── Explicit false: the click does nothing ─────────────────────────────────
+      const offRow = String(
+        (await putConfig(ctx, { key: "SLACK_STOP_BUTTON_ENABLED", value: "false" })).id,
       );
+      rows.push(offRow);
+      await reloadConfig(ctx);
+      await ctx.slack.waitForConnection(30_000);
+      const off = await runningAsk(ctx, leadId, "summarize the open incidents");
+      ctx.markThread("stop-button-off", CHANNEL, off.threadTs);
+      await clickStop(ctx, off.threadTs, ALICE);
+      await expectStopIgnored(ctx, off.threadTs, [off.taskId]);
+      // Logged once per process, so an earlier ignored click in this process may have logged it.
+      expect(
+        (await ctx.sutLog()).includes("SLACK_STOP_BUTTON_ENABLED is off"),
+        "The SUT did not log why it ignored the Stop click",
+      );
+      await finish(ctx, leadId, off.taskId, { status: "completed", output: "No open incidents." });
+      await waitForReaction(ctx, off.threadTs, "white_check_mark");
+      await deleteConfig(ctx, offRow);
+      rows.splice(rows.indexOf(offRow), 1);
+
+      // ── Unset: on by default ───────────────────────────────────────────────────
       rows.push(String((await putConfig(ctx, { key: "SLACK_ALLOWED_USER_IDS", value: ALICE })).id));
       await reloadConfig(ctx);
       await ctx.slack.waitForConnection(30_000);

@@ -83,6 +83,16 @@ Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
 });
 
 registerTemplate({
+  eventType: "task.worker.slack_card_blocked",
+  header: "",
+  defaultBody: `
+
+\u26a0\ufe0f Result card NOT posted: {{reason}}. The engine found no Slack ask in this worker's parent or dispatch chain, so it will not post this follow-up's output to the thread. If the thread waits for the result, post it with \`slack-reply\`.`,
+  variables: [{ name: "reason", description: "Why the engine will not post the outcome card" }],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
   eventType: "task.worker.chain_rejected",
   header: "",
   defaultBody: `

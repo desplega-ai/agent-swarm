@@ -1,0 +1,178 @@
+# The PostgreSQL commit budget: one HTTP request of an e2e scenario may make at most the
+# Postgres commits and write statements that scripts/e2e/bench-budget.json allows. On
+# PostgreSQL each commit waits for a WAL flush, so a change that commits once per row is slow
+# there and fast on SQLite. Durations depend on the runner, these counts do not.
+#
+# Shape: `measure` runs each Merge Gate band on SQLite (for the duration ratio, not gated) and
+# on Postgres with --write-stats. `report` checks the counts against the budget. On main a
+# failure opens one issue (or comments on the open one with the same title), and the first
+# green run closes it. Dispatch with write_budget=true to get a regenerated budget artifact.
+# Guide: scripts/e2e/README.md (Commit budget) and runbooks/e2e-blackbox.md.
+name: Nightly PostgreSQL commit budget
+
+on:
+  # An external scheduler dispatches this on main daily. GitHub fires this repository's
+  # `schedule` triggers hours late (#2968), so no workflow here uses one.
+  workflow_dispatch:
+    inputs:
+      write_budget:
+        description: Also upload a bench-budget.json regenerated from this run
+        type: boolean
+        default: false
+
+concurrency:
+  group: nightly-commit-budget-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: measure (shard ${{ matrix.shard }}/6)
+    if: github.repository == 'desplega-ai/agent-swarm'
+    # The recovery scenario needs pg_dump and pg_restore 16 for the pg16 service.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      E2E_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      DESPLEGA_TELEMETRY_ENV: test
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # A failed scenario does not fail this step: the report lists it as not checked.
+      - name: Run the band on SQLite and on Postgres
+        run: bun run e2e:bench --collect out --shard ${{ matrix.shard }}/6
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: commit-budget-shard-${{ matrix.shard }}
+          path: out/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  report:
+    needs: measure
+    if: ${{ !cancelled() && github.repository == 'desplega-ai/agent-swarm' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Download the results
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: commit-budget-shard-*
+          path: results
+
+      # bench-budget.ts imports only Bun and node: modules, so no install. A band with no
+      # result file fails the check: its scenarios were not measured.
+      - name: Check the budget
+        id: check
+        run: |
+          set -uo pipefail
+          args=()
+          for dir in results/*/; do args+=(--results "$dir"); done
+          code=0
+          bun scripts/e2e/bench.ts --check "${args[@]}" \
+            --md budget-summary.md \
+            --issue-out budget-issue.md \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --sha "$GITHUB_SHA" > /dev/null || code=$?
+          cat budget-summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" = "0" ]; then ok=true; else ok=false; fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
+      - name: Regenerate the budget
+        if: inputs.write_budget
+        run: |
+          set -euo pipefail
+          args=()
+          for dir in results/*/; do args+=(--results "$dir"); done
+          bun scripts/e2e/bench.ts --write-budget "${args[@]}"
+
+      - name: Upload the regenerated budget
+        if: inputs.write_budget
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-budget
+          path: scripts/e2e/bench-budget.json
+          retention-days: 14
+
+      # One open issue per title carries the failure state. Only main writes issues: a
+      # dispatch on a branch reports in its summary and its exit code.
+      - name: Update the issue
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OK: ${{ steps.check.outputs.ok }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: Nightly PostgreSQL commit budget exceeded
+        run: |
+          set -euo pipefail
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label bug --limit 200 \
+            --json number,title --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
+          if [ "$OK" = "true" ]; then
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "Within budget again: $RUN_URL"
+              gh issue close "$issue" --repo "$GITHUB_REPOSITORY"
+            fi
+            exit 0
+          fi
+          if [ -n "$issue" ]; then
+            { printf 'Still over budget: %s\n\n' "$RUN_URL"; cat budget-summary.md; } > comment.md
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label bug --body-file budget-issue.md
+          fi
+
+      - name: Fail when the budget check failed
+        run: |
+          if [ "${{ steps.check.outputs.ok }}" != "true" ]; then
+            echo "The PostgreSQL commit budget check failed. See the job summary." >&2
+            exit 1
+          fi

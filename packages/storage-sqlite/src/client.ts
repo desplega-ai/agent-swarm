@@ -69,6 +69,8 @@ type TxContext = {
   closed: boolean;
   /** Hooks to run after COMMIT; dropped on ROLLBACK. */
   afterCommit: (() => void | Promise<void>)[];
+  /** Hooks to run synchronously after COMMIT, before `transaction()` resolves; dropped on ROLLBACK. */
+  onCommit: (() => void)[];
   /** Hooks to run after ROLLBACK; dropped on COMMIT. */
   afterRollback: (() => void)[];
   /** Hooks to run when this attempt rolls back, replayed or not; dropped on COMMIT. */
@@ -83,6 +85,16 @@ function runAttemptRollbackHooks(ctx: TxContext): void {
       hook();
     } catch (hookErr) {
       console.error("[db-client] onAttemptRollback hook threw:", hookErr);
+    }
+  }
+}
+
+function runOnCommitHooks(ctx: Pick<TxContext, "onCommit">): void {
+  for (const hook of ctx.onCommit) {
+    try {
+      hook();
+    } catch (hookErr) {
+      console.error("[db-client] onCommit hook threw:", hookErr);
     }
   }
 }
@@ -412,6 +424,7 @@ class BunSqliteClient implements DbClient {
     const ctx: TxContext = {
       closed: false,
       afterCommit: [],
+      onCommit: [],
       afterRollback: [],
       attemptRollback: [],
     };
@@ -447,6 +460,7 @@ class BunSqliteClient implements DbClient {
         const replayCtx: TxContext = {
           closed: false,
           afterCommit: [],
+          onCommit: [],
           afterRollback: [],
           attemptRollback: [],
         };
@@ -482,6 +496,9 @@ class BunSqliteClient implements DbClient {
           deadlineAt,
         );
       }
+      // Closed before the hooks run, so a hook's own client calls do not join it.
+      ctx.closed = true;
+      runOnCommitHooks(ctx);
       for (const hook of ctx.afterCommit) this.scheduleHook(hook);
       return { ok: true, value: result };
     } catch (err) {
@@ -515,6 +532,12 @@ class BunSqliteClient implements DbClient {
       return;
     }
     this.scheduleHook(fn);
+  }
+
+  onCommit(fn: () => void): void {
+    const ctx = txContext.getStore();
+    if (ctx && !ctx.closed) ctx.onCommit.push(fn);
+    else runOnCommitHooks({ onCommit: [fn] });
   }
 
   afterRollback(fn: () => void): void {
@@ -578,6 +601,7 @@ class BunSqliteClient implements DbClient {
         ctx.closed = value;
       },
       afterCommit: [],
+      onCommit: [],
       afterRollback: ctx.afterRollback,
       attemptRollback: ctx.attemptRollback,
     };
@@ -586,6 +610,7 @@ class BunSqliteClient implements DbClient {
       const result = await txContext.run(inner, () => fn(tx));
       db.run(`RELEASE SAVEPOINT ${name}`);
       ctx.afterCommit.push(...inner.afterCommit);
+      ctx.onCommit.push(...inner.onCommit);
       return result;
     } catch (err) {
       db.run(`ROLLBACK TO SAVEPOINT ${name}`);
@@ -595,6 +620,7 @@ class BunSqliteClient implements DbClient {
       ended = true;
       // A late registration from a leaked continuation joins the outer list, as before.
       inner.afterCommit = ctx.afterCommit;
+      inner.onCommit = ctx.onCommit;
     }
   }
 

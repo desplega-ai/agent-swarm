@@ -58,6 +58,7 @@ describe("withUiSpecFallback", () => {
   });
 
   test("with UI_SPEC_ENABLED off the body is returned unchanged", async () => {
+    process.env.UI_SPEC_ENABLED = "false";
     const { taskId } = await taskWithSpec();
     const body = "Deploys are up 12% this week.";
     expect(await withUiSpecFallback(taskId, body)).toBe(body);

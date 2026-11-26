@@ -42,6 +42,7 @@ import {
 import { normalizeOutputSchema } from "../../../utils/output-schema";
 import { parseProviderMeta } from "../../../utils/provider-metadata";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
+import { memoizedRead } from "../../request-memo";
 import { getStorage } from "../../storage";
 import { getAgentById } from "../agents";
 
@@ -422,8 +423,10 @@ function rowToAgentTaskTimelineItem(row: AgentTaskTimelineRow): AgentTaskTimelin
 }
 
 export async function getTaskById(id: string): Promise<AgentTask | null> {
-  const row = await tasksRepo().findTaskById(id);
-  return row ? toTask(row) : null;
+  return memoizedRead("task", id, async () => {
+    const row = await tasksRepo().findTaskById(id);
+    return row ? toTask(row) : null;
+  });
 }
 
 export async function getChildTasks(parentTaskId: string): Promise<AgentTask[]> {
@@ -765,11 +768,13 @@ function toListFilters(filters: TaskFilters | undefined): TaskListFilters {
   };
 }
 
+type AgentTaskListItem = AgentTaskSummary & { runModel?: string };
+
 export function getAllTasks(filters?: TaskFilters): Promise<AgentTask[]>;
 export function getAllTasks(
   filters: TaskFilters | undefined,
   opts: { slim: true },
-): Promise<AgentTaskSummary[]>;
+): Promise<AgentTaskListItem[]>;
 export function getAllTasks(
   filters: TaskFilters | undefined,
   opts: { fields: "timeline" },
@@ -777,7 +782,7 @@ export function getAllTasks(
 export async function getAllTasks(
   filters?: TaskFilters,
   opts?: { slim?: boolean; fields?: "timeline" },
-): Promise<AgentTask[] | AgentTaskSummary[] | AgentTaskTimelineItem[]> {
+): Promise<AgentTask[] | AgentTaskListItem[] | AgentTaskTimelineItem[]> {
   // One call per projection, so each branch sees the row type of its own fields value.
   const listFilters = toListFilters(filters);
   const page = {
@@ -807,7 +812,10 @@ export async function getAllTasks(
 
   if (opts?.slim) {
     const rows = await tasksRepo().listTasks(listFilters, page, "slim");
-    let tasks = rows.map(rowToAgentTaskSummary);
+    let tasks = rows.map((row) => ({
+      ...rowToAgentTaskSummary(row),
+      runModel: row.runModel ?? undefined,
+    }));
     if (filters?.readyOnly) tasks = await filterReady(tasks);
     return tasks;
   }

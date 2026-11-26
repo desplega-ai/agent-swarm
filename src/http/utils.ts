@@ -313,7 +313,14 @@ export function safeRequestUrlForLog(rawUrl: string | undefined): string {
 export async function agentWithCapacity<T extends { id: string; maxTasks?: number }>(
   agent: T,
 ): Promise<T & { capacity: { current: number; max: number; available: number } }> {
-  const activeCount = await getActiveTaskCount(agent.id);
+  return withCapacity(agent, await getActiveTaskCount(agent.id));
+}
+
+/** `agentWithCapacity` with the active task count already read (`getActiveTaskCounts`). */
+export function withCapacity<T extends { id: string; maxTasks?: number }>(
+  agent: T,
+  activeCount: number,
+): T & { capacity: { current: number; max: number; available: number } } {
   const max = agent.maxTasks ?? 1;
   return {
     ...agent,

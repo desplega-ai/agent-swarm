@@ -41,6 +41,7 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfig } from "@/hooks/use-config";
+import { isAgentPreview } from "../../lib/deployment-config";
 
 /** The side column from `@5xl` (container `home`): it scrolls on its own under the fixed strip. */
 const SIDE_COLUMN =
@@ -64,7 +65,7 @@ export function UnifiedHome() {
   return (
     <div className="@container/home flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 @5xl/home:min-h-0 @5xl/home:flex-1 @5xl/home:pb-0">
-        <DashboardNudges />
+        {!isAgentPreview && <DashboardNudges />}
         <HomeMetrics className="shrink-0" />
         <div className="grid grid-cols-1 gap-4 @5xl/home:min-h-0 @5xl/home:flex-1 @5xl/home:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] @5xl/home:grid-rows-[minmax(0,1fr)]">
           <div className={MAIN_COLUMN}>

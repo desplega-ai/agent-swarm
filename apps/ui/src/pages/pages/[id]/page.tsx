@@ -508,18 +508,24 @@ export function PagePreviewBody({
   frameQuery,
   className,
   revision,
+  themePreset,
 }: {
   id: string;
   frameQuery: string;
   className?: string;
   /** A new value reloads the HTML frame (the app `PageFrame` passes the page's `updatedAt`). */
   revision?: string;
+  /** An app's own theme preset: the page follows the app, not the dashboard (the app `PageFrame` passes it). */
+  themePreset?: string | null;
 }) {
-  const viewer = useTheme();
+  const dashboard = useTheme();
+  const viewer = themePreset ? { ...dashboard, preset: themePreset } : dashboard;
   const { data, error, isLoading } = useQuery({
     queryKey: ["page-metadata", id],
     queryFn: () => fetchPageMetadataWithLaunchRetry(id),
     staleTime: Infinity,
+    // Each open shows the cached body, then fetches the current one.
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
@@ -644,6 +650,8 @@ export default function ArtifactPage() {
     // refetch + re-render the iframe while the user is interacting with it
     // (and for password mode this would re-trigger the unlock flow).
     staleTime: Infinity,
+    // A revisit in the same session still fetches the current head once on open.
+    refetchOnMount: "always",
     refetchInterval: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

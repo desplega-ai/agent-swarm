@@ -243,10 +243,12 @@ describe("keyPaceFromWindows", () => {
 });
 
 describe("credentialSelectionStrategy", () => {
-  test("defaults to usage; only pace switches", () => {
-    expect(credentialSelectionStrategy(undefined)).toBe("usage");
+  test("defaults to pace; only an explicit usage switches", () => {
+    expect(credentialSelectionStrategy(undefined)).toBe("pace");
+    expect(credentialSelectionStrategy("")).toBe("pace");
     expect(credentialSelectionStrategy(" PACE ")).toBe("pace");
-    expect(credentialSelectionStrategy("nonsense")).toBe("usage");
+    expect(credentialSelectionStrategy(" USAGE ")).toBe("usage");
+    expect(credentialSelectionStrategy("nonsense")).toBe("pace");
   });
 });
 

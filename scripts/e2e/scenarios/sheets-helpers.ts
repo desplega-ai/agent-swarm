@@ -17,6 +17,8 @@ export type AgentFsStub = {
   writes: () => number;
   /** Runs inside every PUT before the version check, so a test can play the other writer. */
   beforeWrite: (hook: ((path: string) => void) | undefined) => void;
+  /** Answers an ops call (`sql`, `stat`, ...) before the default glob answer; undefined falls through. */
+  onOp: (handler: ((op: Record<string, unknown>) => Response | undefined) | undefined) => void;
   /** Every request carried the agent's own key. */
   authorizedOnlyAsOwner: () => boolean;
   seen: ReturnType<typeof startStub>["seen"];
@@ -31,6 +33,7 @@ export function startAgentFsStub(ctx: ScenarioContext, label: string): AgentFsSt
   const files = new Map<string, StoredFile>();
   let writes = 0;
   let hook: ((path: string) => void) | undefined;
+  let opHandler: ((op: Record<string, unknown>) => Response | undefined) | undefined;
   const stub = startStub((request, body, bytes) => {
     const url = new URL(request.url);
     if (request.headers.get("authorization") !== `Bearer ${ownKey}`) {
@@ -64,6 +67,8 @@ export function startAgentFsStub(ctx: ScenarioContext, label: string): AgentFsSt
       return Response.json({ path, version });
     }
     if (url.pathname === `/orgs/${org}/ops`) {
+      const answered = opHandler?.(asRecord(JSON.parse(body || "{}")));
+      if (answered) return answered;
       const matches = [...files.keys()]
         .filter((path) => path.endsWith(".sheet.json"))
         .map((path) => ({ path: `/${path}`, size: 1 }));
@@ -80,6 +85,9 @@ export function startAgentFsStub(ctx: ScenarioContext, label: string): AgentFsSt
     writes: () => writes,
     beforeWrite: (next) => {
       hook = next;
+    },
+    onOp: (next) => {
+      opHandler = next;
     },
     authorizedOnlyAsOwner: () =>
       stub.seen.length > 0 &&

@@ -67,6 +67,56 @@ describe("runPostgresMigrations", () => {
   );
 
   test(
+    "upgrades legacy schedule timestamps to UTC without shifting their instants",
+    async () => {
+      const db = await createScratchDatabase("migrate_schedule_times");
+      const client = createPostgresClient(db.url);
+      try {
+        await runPostgresMigrations(client, { migrationsDir: CHAIN_DIR, ...quiet });
+        await client.run("DELETE FROM _migrations WHERE name = '374_schedule_next_run_at_utc'");
+
+        const utc = "2030-01-15T04:00:00.123Z";
+        const cases = [
+          ["positive", "2030-01-15T12:00:00.123+08:00", utc],
+          ["negative", "2030-01-14T23:00:00.123-05:00", utc],
+          ["compact", "2030-01-15T12:00:00.1239999+0800", utc],
+          ["bare", "2030-01-15 04:00:00", "2030-01-15T04:00:00.000Z"],
+          ["canonical", utc, utc],
+          ["cleared", null, null],
+          ["invalid", "2030-01-32T00:00:00+08:00", "2030-01-32T00:00:00+08:00"],
+        ] as const;
+        for (const [id, nextRunAt] of cases) {
+          await client.run(
+            `INSERT INTO scheduled_tasks
+               (id, "key", name, "scheduleType", "taskTemplate", "nextRunAt", "createdAt", "lastUpdatedAt")
+             VALUES ($1, $2, $3, 'one_time', 'Fixture task', $4, $5, $6)`,
+            [id, `shared/schedules/${id}/`, id, nextRunAt, utc, utc],
+          );
+        }
+
+        const upgraded = await runPostgresMigrations(client, {
+          migrationsDir: CHAIN_DIR,
+          ...quiet,
+        });
+        expect(upgraded.applied).toEqual(["374_schedule_next_run_at_utc"]);
+        const again = await runPostgresMigrations(client, { migrationsDir: CHAIN_DIR, ...quiet });
+        expect(again.applied).toEqual([]);
+        const rows = await client.query<{ id: string; nextRunAt: string | null }>(
+          'SELECT id, "nextRunAt" FROM scheduled_tasks',
+        );
+        const byId = new Map(rows.map((row) => [row.id, row.nextRunAt]));
+        for (const [id, , expected] of cases) {
+          expect(byId.get(id)).toBe(expected);
+        }
+      } finally {
+        await client.close();
+        await db.drop();
+      }
+    },
+    APPLY_TIMEOUT_MS,
+  );
+
+  test(
     "a second runner waits while another session holds the migration lock",
     async () => {
       const db = await createScratchDatabase("migrate_lock");

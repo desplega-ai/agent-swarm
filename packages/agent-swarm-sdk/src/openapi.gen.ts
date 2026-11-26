@@ -42,7 +42,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -58,6 +58,10 @@ export interface paths {
                         profile?: string;
                         modelGroup?: string;
                         draft?: boolean;
+                        /** @description Slack channel the task's progress and outcome post to. Set together with `slackThreadTs`. Needs `task.slack.thread.bind`. */
+                        slackChannelId?: string;
+                        /** @description Slack thread ts in `slackChannelId` the task posts into. */
+                        slackThreadTs?: string;
                     };
                 };
             };
@@ -80,7 +84,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
+                /** @description Parent/session access denied, unauthorized chat-thread or Slack-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -614,7 +618,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "bitbucket" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat" | "alert";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -844,7 +848,9 @@ export interface operations {
                     fsMode?: "none" | "workspace-rw";
                     /** @enum {string|null} */
                     executor?: "native" | "quickjs" | null;
+                    /** @description Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again. */
                     idempotencyKey?: string;
+                    parentScriptRunId?: string;
                 };
             };
         };
@@ -905,7 +911,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Script not found */
+            /** @description Script not found, or parentScriptRunId names no running run of the calling agent */
             404: {
                 headers: {
                     [name: string]: unknown;

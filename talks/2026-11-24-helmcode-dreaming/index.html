@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>On Building Agents That Actually Learn · Agent Swarm · Café Helmcode</title>
+  <link rel="icon" href="assets/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="deck.css">
+</head>
+<body>
+<div id="stage">
+
+  <!-- 1. TITLE -->
+  <section class="slide">
+    <div class="kicker">Café Helmcode · 2026-11-24</div>
+    <h1 style="font-size:104px">On building agents<br>that <span class="grad">actually learn</span></h1>
+    <p class="small mono"><svg class="star" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg> 1.1K+ · MIT</p>
+    <img class="closing-qr" src="assets/qr-repo.svg" alt="github.com/desplega-ai/agent-swarm">
+    <p class="qr-caption mono">swar.am/gh</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (15s):</strong> "Hi, I am Taras. We run a swarm of AI agents in production, all open source. Today is about how it learns. It learns in two ways: a little on every task, and a lot every night. Both taught us the same lesson."</li>
+        <li><strong>Thesis, spoken on the last slide:</strong> agents that learn are agents that forget well. The last slide itself shows the open question.</li>
+        <li>Promise: one formula, two charts, one honest number, one question for this room.</li>
+        <li>Numbers to say aloud if you want them (read 2026-11-24): 1,109 GitHub stars, about 700 thousand tasks, about 890 billion tokens, 777 installs.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 2. INTRO -->
+  <section class="slide has-hexy">
+    <div class="kicker">whoami</div>
+    <img class="hexy-peek" src="assets/hexy-2pac-peek.webp" alt="">
+    <div class="cols" style="align-items:center">
+      <div style="display:flex;flex-direction:column;gap:28px;justify-content:center">
+        <h2>Taras</h2>
+        <p class="lead" style="font-size:42px">Building <strong>Agent Swarm</strong><br>at Desplega Labs.</p>
+      </div>
+      <div>
+        <ul>
+          <li>Maths by background, techie at core</li>
+          <li>7th hire at Capchase</li>
+          <li>My thoughts at <span class="mono">taras.lol</span></li>
+        </ul>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (15s):</strong> "Mathematician by training, engineer at heart. I was hire number 7 at Capchase. Now I build Agent Swarm at Desplega Labs: a team of AI agents that lives in your Slack. One warning: there is a formula coming. Let me start with the day it broke."</li>
+        <li>15 seconds. Do not repeat your name.</li>
+        <li>The one in the corner is Hexy, the mascot of the swarm, with a bandana. No need to explain it.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 3. ACT 1 HOOK -->
+  <section class="slide">
+    <div class="kicker">part 1 · memory · june 2026</div>
+    <h2>On day 76, the swarm <span class="bad-text">forgot</span></h2>
+    <div class="cols">
+      <div class="card gray">
+        <h3>Where we started: embed all, top-k</h3>
+        <ul>
+          <li>Stale facts never die</li>
+          <li>Noise outranks truth</li>
+          <li>One bad memory reaches every agent</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <h3 style="white-space:nowrap">A half-life and a reputation</h3>
+        <ul>
+          <li id="rank-line" style="white-space:nowrap;font-size:30px"><strong>Rank:</strong> match × time × use × source × reputation</li>
+          <li><strong>Forget:</strong> each source at its own speed</li>
+          <li><strong>Learn:</strong> agents grade memories</li>
+        </ul>
+      </div>
+    </div>
+    <p class="small mono">the full story · swar.am/blog/memory</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Story hook (45s, say it, do not explain it):</strong> "In June the swarm stopped finding a memory it relied on. The memory was 76 days old. The embedding was fine. The match was fine. It ranked below yesterday's chatter." The why comes two slides later.</li>
+        <li>The history in one breath: we started with embed all, top-k, so stale facts never died. We added one flat 14-day half-life. Then old truth died too. That is day 76.</li>
+        <li>Agents are stateless workers in containers. Every session starts with amnesia. A shared memory teaches every agent in the company. The cost: one bad memory reaches everyone.</li>
+        <li><strong>Plant the word "forgot".</strong> It comes back on slide 9 with the opposite sign.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 4. LOOP 1 ARCHITECTURE -->
+  <section class="slide top">
+    <div class="kicker">part 1 · memory · runs on every task</div>
+    <h2>Memory: write, read, learn</h2>
+    <div style="display:flex;flex-direction:column;gap:26px">
+      <div class="lane"><div class="name">WRITE</div><div class="flow">
+        <div class="box"><b>agents + hooks</b><span>intent + automatic</span></div><div class="arrow">→</div>
+        <div class="box hot"><b>write gate</b><span>dedup · noise floor</span></div><div class="arrow">→</div>
+        <div class="box"><b>embed</b><span>512d</span></div><div class="arrow">→</div>
+        <div class="box db"><b>SQLite</b><span>vectors · FTS5 · links</span></div>
+      </div></div>
+      <div class="lane"><div class="name">READ</div><div class="flow">
+        <div class="box"><b>task</b><span>automatic + manual</span></div><div class="arrow">→</div>
+        <div class="box hot"><b>hybrid search</b><span>semantic + keyword</span></div><div class="arrow">→</div>
+        <div class="box"><b>graph</b></div><div class="arrow">→</div>
+        <div class="box hot"><b>score</b><span>the formula</span></div><div class="arrow">→</div>
+        <div class="box"><b>context</b><span>only if relevant</span></div>
+      </div></div>
+      <div class="lane"><div class="name">LEARN</div><div class="flow">
+        <div class="box"><b>retrieval log</b></div><div class="arrow">→</div>
+        <div class="box"><b>3 raters</b><span>citation · self · LLM</span></div><div class="arrow">→</div>
+        <div class="box hot"><b>α, β</b><span>promote or demote</span></div>
+      </div></div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (45s):</strong> "One SQLite file. Agents and hooks write. Every task reads: hybrid search, one hop in a graph, then one score. And we log what we showed, so the next score knows what helped."</li>
+        <li>Stack: Bun, TypeScript, SQLite with sqlite-vec and FTS5, MCP tools. No vector database, no queue, no extra service.</li>
+        <li>WRITE: agents call memory-store, hooks write on task done and session end, files get indexed. Embed with text-embedding-3-small at 512 dims.</li>
+        <li>READ: semantic (sqlite-vec) plus keyword (FTS5, BM25), fused with RRF. Then 1-hop graph expansion, then the rerank formula. The prompt gets 300-char stubs plus ids.</li>
+        <li>LEARN: three raters score what we showed. applyRating moves alpha and beta on the same row.</li>
+        <li>Two scopes: agent (private) and swarm (shared).</li>
+        <li><strong>New since September (checked in code 2026-11-24):</strong></li>
+        <li>Write gate: a task can leave a one-line learning. A noise floor rejects text that holds no lesson, and a near-duplicate of a swarm memory is not stored. Learnings expire after 30 days.</li>
+        <li>A curated tree under /longterm (facts, decisions, entities). A memory there never decays, whatever its source. Dreaming maintains it.</li>
+        <li>Read gate: all retrieval arms are on one 0 to 1 scale, and a memory is injected only if it is relevant enough.</li>
+        <li>Raters are on by default now (citation + self). The LLM judge is opt-in.</li>
+        <li>Demotion exists now: a memory rated wrong can fall to 0.5x. See slide 7.</li>
+        <li>Search runs in worker threads. Postgres is a second storage engine since 2026-11-23. The default is still one SQLite file.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 5. THE FORMULA -->
+  <section class="slide center">
+    <div class="kicker">part 1 · memory · why it forgot</div>
+    <h2><span class="grad">One score</span> for short-term and long-term</h2>
+    <div class="math">
+      <span class="term"><span><i>score</i></span></span>
+      <span class="op">=</span>
+      <span class="term" data-label="hybrid match"><span>sim(<i>q</i>, <i>m</i>)</span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="time"><span>2<sup>−age / τ<sub>source</sub></sup></span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="use"><span><i>boost</i><sub>access</sub></span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="source"><span><i>trust</i><sub>source</sub></span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="reputation"><span><i>U</i>(α, β)</span></span>
+    </div>
+    <p class="legend">τ = half-life of the source · α, β = times it helped / did not<br>trust: 1.5× stored on purpose · 0.5× session summary</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (40s):</strong> "Back to day 76. This is the score. Five factors, one product. One term killed that memory." Point at time.</li>
+        <li>q is the query, m is the memory. Each term has its label under it on the slide.</li>
+        <li>sim is not raw cosine. It is the fused rank score of two searches: semantic (vectors) and keyword (FTS5), fused with RRF, k = 60.</li>
+        <li>trust (source_quality in the code): stored on purpose 1.5x, indexed file 1.0x, task learning 0.7x, session summary 0.5x.</li>
+        <li>Everyone draws two boxes: short-term and long-term. We have one table and one reranker. Short or long is how fast the weight falls.</li>
+        <li>New since September: a sixth factor, the path weight. A memory in the curated /longterm tree gets the weight of its folder. A decision tagged "superseded" weighs 0.3.</li>
+        <li>Real code: src/be/memory/reranker.ts. Pure function, takes "now" as an argument.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 6. DECAY CURVES -->
+  <section class="slide top">
+    <div class="kicker">part 1 · memory · the fix</div>
+    <h2>Four sources, four half-lives</h2>
+    <svg id="decay-chart" class="chart"></svg>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (45s):</strong> The reveal. "The red line is that memory. One flat 14-day half-life for everything: 2^(-76/14) = 0.02. The truth ranked below yesterday's chatter. The fix: each source forgets at its own speed."</li>
+        <li>Yes, this is the time term of the score, plotted: every curve is 2^(−age / τ) with its own τ. At age = τ the weight is one half.</li>
+        <li>Session summary 7d, task learning 14d, indexed file 180d, stored on purpose never.</li>
+        <li>/learnings is the one step function. A learning is stored as "manual", so its weight stays 1.0. Then a hard expiry removes it at day 30. It does not fade, it disappears.</li>
+        <li>No new source since September: still four. Two paths are new. /longterm is the curated tree: it never decays, like "manual". /learnings holds one-line lessons from tasks: they expire after 30 days, unless dreaming promotes them.</li>
+        <li>Fix (PR #696): the same memory now scores x0.75 as a file, x1.0 if curated.</li>
+        <li><strong>Lesson, say it:</strong> "The bug was not semantic. It forgot the wrong thing. Forgetting is a feature. You have to choose what."</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 7. REPUTATION -->
+  <section class="slide top" style="gap:26px">
+    <div class="kicker">part 1 · memory · what deserves to stay</div>
+    <h2>Every memory earns a reputation</h2>
+    <div class="cols wide-left">
+      <div style="display:flex;flex-direction:column;gap:30px;justify-content:center">
+        <p class="lead"><strong>α</strong> counts the times it helped.<br><strong>β</strong> counts the times it did not.</p>
+        <p class="lead"><span class="mono" style="color:var(--amber-700)">Beta(α, β)</span>: a distribution on 0 to 1.<br>Our belief about how often it helps.</p>
+        <table style="font-size:30px">
+          <tr><td>Implicit citation</td><td>cited: α <strong>+0.5</strong> · ignored: β <strong>+0.25</strong></td></tr>
+          <tr><td>LLM judge</td><td>rides on the summary call</td></tr>
+          <tr><td>Self-rating</td><td><span class="mono">memory_rate(id, useful)</span></td></tr>
+        </table>
+      </div>
+      <svg id="beta-chart" class="chart"></svg>
+    </div>
+    <div class="math sm">
+      <span><i>f</i>(<i>x</i>; α, β) =</span>
+      <span class="frac"><span><i>x</i><sup>α−1</sup>(1 − <i>x</i>)<sup>β−1</sup></span><span>B(α, β)</span></span>
+      <span class="gap"></span>
+      <span>mean =</span>
+      <span class="frac"><span>α</span><span>α + β</span></span>
+    </div>
+    <p class="legend" style="font-size:22px;text-align:center"><i style="font-size:26px">x</i> = how often it helps, from 0 to 1 · fresh memory: Beta(1, 1), mean 0.5</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (50s):</strong> "Time tells you what is old. It does not tell you what helped. So every memory has two counters. Three raters move them. We cannot train the model. We can train what it remembers."</li>
+        <li><strong>The twist, one line:</strong> "Ask the agents: 90% of their memories are useful. Watch the agents: 37% get cited. So the reward that counts is one the agent cannot write."</li>
+        <li>Prod numbers (2026-09-21, since May): 227K rating events. Implicit citation 166,588 (37% cited). LLM judge 56,711 (60% positive). Self-rating 3,987 (90% "useful"). These are September numbers. Say "in September".</li>
+        <li><strong>The formulas, if someone asks:</strong></li>
+        <li>Yes, Beta is a probability distribution, and it lives on 0 to 1 only. x is the unknown we care about: the chance that this memory helps when we show it. The curve says how much we believe each value of x.</li>
+        <li>Left formula: the density. α − 1 and β − 1 are the exponents, so more "helped" pushes the mass to the right and more "did not" pushes it to the left. B(α, β) is a constant that makes the area equal to 1. We never compute it.</li>
+        <li>Right formula: the mean. It is all we use in production: α / (α + β). Beta(1, 1) gives 0.5. Beta(6, 2) gives 0.75. Beta(2, 5) gives 0.29. These are the three curves on the chart.</li>
+        <li>Why Beta and not a plain average: with 1 good rating out of 1, an average says 100%. Beta(2, 1) says 67%, and the curve is still wide. It does not trust small samples.</li>
+        <li>How a rating moves it: cited adds 0.5 to α, ignored adds 0.25 to β. The other raters add their own weights the same way.</li>
+        <li>Beta in one breath: the curve is wide when we know little, and narrow when we have evidence. A fresh memory is Beta(1,1): flat, no opinion.</li>
+        <li>usefulness = clamp(2α / (α + β), floor, 2.0). Proven memories climb to 2x. New since November: a memory can fall to 0.5x, but only with evidence that it was rated wrong. "Shown and not used" does not demote.</li>
+        <li>The RL mapping is in the appendix (slide 22) if someone asks.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 8. BRIDGE -->
+  <section class="slide center">
+    <div class="kicker">part 1 → part 2</div>
+    <h1 style="font-size:108px">Now it remembers<br>But it does not <span class="grad">improve</span></h1>
+    <p class="lead">Memory changes what an agent recalls.<br>It does not change the agent.</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (20s):</strong> "This is where this talk ended in September. Memory fixed recall. But each agent still had the same instructions, the same skills, the same tools as the day before. For that we had a second mechanism: a job that ran at night. And it had the opposite bug."</li>
+        <li>Pause after "the opposite bug". Then next slide.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 9. ACT 2 HOOK -->
+  <section class="slide">
+    <div class="kicker">part 2 · dreaming · march → september 2026</div>
+    <h2>Every night it learned<br>It never <span class="bad-text">forgot</span></h2>
+    <div class="cols">
+      <div class="card gray">
+        <h3>Daily Evolution: one prompt at night</h3>
+        <ul>
+          <li>One agent, one long prompt, every night</li>
+          <li><strong>Non-deterministic:</strong> no two nights alike</li>
+          <li>It adds. It never cleans</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <h3>Dreaming: a workflow that says no</h3>
+        <ul>
+          <li><strong>Deterministic:</strong> same steps every night</li>
+          <li><strong>Model</strong> proposes. <strong>Code</strong> decides</li>
+          <li><strong>Reject</strong> by default, undo any write</li>
+        </ul>
+      </div>
+    </div>
+    <p class="small mono">the full story · swar.am/blog/dreaming</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (60s):</strong> "Since March, one task ran every night. The lead agent read the day's sessions and edited every agent: prompts, skills, memories. We hoped it got better each day. It got heavier. In four weeks of September it added 4.7 thousand tokens of instructions and removed nothing. Day 76 forgot the wrong thing. The night job forgot nothing."</li>
+        <li><strong>The key point, say it:</strong> "With one prompt you can never be sure that the agent did the same thing as yesterday. The model is not deterministic. So you cannot compare two nights, and you cannot debug one. The fix is not a better prompt. The fix is to make the process deterministic and leave the model only the creative part."</li>
+        <li>Why it was unpredictable: one long prompt. The output changed with the model, the effort level, and the accumulated context. No two nights were comparable.</li>
+        <li>In September I said on stage: "that job adds lessons, it does not clean up". Dreaming is the answer to that line.</li>
+        <li>Dreaming went live on 2026-09-30 (night 1). The team built it in one day with two dry runs: the swarm designed and built its own replacement.</li>
+        <li><strong>Trap:</strong> "Daily Evolution" is the product name. The schedule in code is daily-compounding-reflection. Use one name.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 10. JUDGMENT INTO CODE -->
+  <section class="slide top">
+    <div class="kicker">part 2 · dreaming · the move</div>
+    <h2>Move judgment <span class="grad">into code</span></h2>
+    <div class="cols wide-left" style="align-items:center">
+      <svg id="nodes-grid" class="chart" style="border:0;background:none;border-radius:0"></svg>
+      <div class="bignums">
+        <div><b>63%</b><span>of the steps run no model<br>26 of 41 · they cost $0</span></div>
+        <div><b>$10</b><span>a night, like the old prompt ($9.48)<br>for about 3× the output</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (60s):</strong> "The prompt became a workflow with 41 steps. Every repeated step became a script. Every decision became a gate with a schema. 26 steps run no model at all. The model keeps one job: propose something new. A better model brings better proposals. The guardrails stay the same."</li>
+        <li>41 nodes = 16 scripts, 9 gate checks, 1 notification, 15 model steps. These are the numbers in the blog post (2026-10-28).</li>
+        <li>The workflow that ships today is a little larger (18 script nodes, 10 gates in templates/workflows/dreaming). The ratio holds. If someone counts, say "about 60%".</li>
+        <li>Cost: the last 7 nights cost $10.40 on average. The night before last cost $8.74. In last night's report the model steps were the 7 self-reports ($1.94), the synthesis ($1.73) and the skills lane ($0.99). Gather, gates, apply and verify are code.</li>
+        <li>Cost change: the one prompt it replaced cost $9.48 a night, measured in September. So about the same price. "3× the output" is the table on slide 15: 93 changes in 28 nights for the old job, 318 for dreaming. The two numbers use different model prices. Say "about the same".</li>
+        <li>The blog post says $17.80 a night for 3 agents. That was the October estimate at Opus prices. Nights are cheaper now.</li>
+        <li><strong>For this room:</strong> a process where 63% of the steps are code depends less on which model you run.</li>
+        <li><strong>Trap:</strong> we benchmarked open models on the swarm with Helmcode (swar.am/helmcode). I did not check if dreaming itself ran on an open model. Do not say it did unless you know.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 11. ONE NIGHT -->
+  <section class="slide top">
+    <div class="kicker">part 2 · dreaming · one night, 4:30 AM</div>
+    <h2>One night: gather, propose, apply, verify</h2>
+    <div style="display:flex;flex-direction:column;gap:22px">
+      <div class="lane"><div class="name">GATHER</div><div class="flow">
+        <div class="box"><b>last 24 hours</b><span>tasks · cost · skills · memories</span></div><div class="arrow">→</div>
+        <div class="box"><b>who reports</b><span>read-only script</span></div>
+      </div></div>
+      <div class="lane"><div class="name">PROPOSE</div><div class="flow">
+        <div class="box hot"><b>every agent</b><span>self-report, no write tools</span></div><div class="arrow">→</div>
+        <div class="box"><b>report check</b><span>no evidence id, no entry</span></div><div class="arrow">→</div>
+        <div class="box hot"><b>lead synthesis</b><span>approve, or reject with a reason</span></div>
+      </div></div>
+      <div class="lane"><div class="name">APPLY</div><div class="flow">
+        <div class="box"><b>caps</b><span>per lane, per agent</span></div><div class="arrow">→</div>
+        <div class="box db"><b>5 lanes</b><span>profile · memory · skills · scripts · heartbeat</span></div>
+      </div></div>
+      <div class="lane"><div class="name">VERIFY</div><div class="flow">
+        <div class="box"><b>re-read every write</b><span>is the stored text what we claimed?</span></div><div class="arrow">→</div>
+        <div class="box"><b>ledger</b><span>undo by run id</span></div><div class="arrow">→</div>
+        <div class="box hot"><b>report</b><span>problems first</span></div>
+      </div></div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (70s):</strong> "A script reads the last day: tasks, cost, skill use, memories. Then every agent writes a self-report. The prompt forbids write tools: proposals only, each with an evidence id. A script drops reports that break the rules. The lead reviews and returns an approved list. Every rejection has a reason. Only then code applies the writes, inside caps. And a last script reads every write again and compares it."</li>
+        <li>Five lanes: profile files (identity and instructions), memory, skills, scripts, and the lead's heartbeat checklist.</li>
+        <li><strong>Say it aloud, there is no legend:</strong> "Amber means a model runs. All the rest is code."</li>
+        <li><strong>Where a model runs (amber boxes):</strong> the self-reports, the lead synthesis, and the report, which a writer agent writes. The skills and scripts lanes also use agents to write the skill or the script. The re-read is NOT a model: it is the script dreaming-verify. It reads every claimed write again and compares.</li>
+        <li>After verify there is one more script, dreaming-learn. It scores the cuts of the last 14 days. A cut whose text came back becomes a pin: no lane may cut that text again.</li>
+        <li>The schedule is 03:30 UTC. That is 04:30 in Barcelona in winter. It runs after the daily blocker digest, which the lead reads during synthesis.</li>
+        <li>Why agents report on themselves: the agent that did the work knows where the friction was. The lead only sees the outcome.</li>
+        <li>Safety detail if asked: the writes that need lead authority run as tasks on the lead, and each is bound to its step in the run. A forged entry in the key-value store cannot change what was applied.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 12. REJECT BY DEFAULT -->
+  <section class="slide top">
+    <div class="kicker">part 2 · dreaming · the rule</div>
+    <h2>Reject <span class="grad">by default</span></h2>
+    <div class="cols wide-left" style="align-items:center">
+      <table style="font-size:32px">
+        <tr><td style="white-space:nowrap">A proposal</td><td>needs an evidence id</td></tr>
+        <tr><td style="white-space:nowrap">One night</td><td>1 edit per agent · 2 skills · 2 scripts</td></tr>
+        <tr><td>A trim</td><td>must leave the text smaller</td></tr>
+        <tr><td>A write</td><td>is read again, then logged</td></tr>
+        <tr><td>A run</td><td>has a budget: <span class="mono">$25</span></td></tr>
+        <tr><td style="white-space:nowrap">The trail</td><td>report + changelog per night, versioned</td></tr>
+      </table>
+      <div class="bignums">
+        <div><b>65%</b><span>of proposals rejected<br>first 28 nights</span></div>
+        <div><b>415</b><span>changes applied<br>in those 28 nights</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (55s):</strong> "The old job said yes to itself every night. The new one rejects two of every three proposals. That is the goal. We want a correct system more than a fast one. Each night has caps, so one bad night cannot do much. Every write is read again. And one command undoes a night."</li>
+        <li>Caps tonight (from the run report): 1 identity edit per agent, 6 skill updates, 2 new skills, 2 script builds, 3 trims. Budget $25, soft cap $22.</li>
+        <li>Rollback: the script dreaming-rollback undoes a run's ledger in reverse order and re-reads after each restore. It has a dry-run flag.</li>
+        <li>Audit trail: every night writes a report and one changelog entry to agent-fs, our shared file system for agents. Files there are versioned, so a human or an agent can read what changed on any night and why. 56 nights so far.</li>
+        <li>65% and 415 are from the blog post: the first 28 nights (2026-09-30 to 2026-10-27).</li>
+        <li><strong>Spine:</strong> rejecting is forgetting before you write. Same idea as the half-life.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 13. LAST NIGHT -->
+  <section class="slide top">
+    <div class="kicker">part 2 · dreaming · the real report · 2026-11-24, 4:49 AM</div>
+    <h2>What it did <span class="grad">last night</span></h2>
+    <div class="cols">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <span class="tag">applied · 11 · each one read again</span>
+        <div class="report">
+          <div class="row"><div><strong>Skill fixed: pre-push checks</strong><span>An agent missed the same step 4 times.</span></div></div>
+          <div class="row"><div><strong>Memory corrected</strong><span>It named a connection that no longer exists.</span></div></div>
+          <div class="row"><div><strong>New skill: blog to podcast</strong><span>Done twice by hand, with the same mistakes.</span></div></div>
+          <div class="row"><div><strong>One line added to 2 agents</strong><span>About 50 tokens each. The cap is 1 per agent.</span></div></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <span class="tag grey">rejected · 12 · grouped by reason</span>
+        <div class="report">
+          <div class="row"><b>6×</b><div><strong>Already covered</strong><span>A skill or a workflow does this today.</span></div></div>
+          <div class="row"><b>3×</b><div><strong>Over the limit for one night</strong><span>The cap for that kind of change was used.</span></div></div>
+          <div class="row"><b>2×</b><div><strong>Still true</strong><span>Agents called a memory unhelpful. The fact holds.</span></div></div>
+          <div class="row"><b>1×</b><div><strong>Not a job for a script</strong><span>It needs a shell. It became a skill step.</span></div></div>
+        </div>
+      </div>
+    </div>
+    <p class="small mono">7 agents reported · 2 scripts built · 8 of 9 earlier changes survived</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (70s):</strong> "This is last night, not a demo. Seven agents reported. 11 changes applied. One example: an agent forgot a manifest entry for the fourth time, so the pre-push skill now has that step. One memory named a connection that no longer exists, so it was corrected. And 12 proposals rejected. Six because something already covers them. Two because agents called a memory unhelpful, but the fact in it is still true, so it stays."</li>
+        <li><strong>If there is time:</strong> the status of the run was "degraded". Verify found one memory write that no step of the workflow owns. Probably an agent's own write during a task. It did not hide it: that line is at the top of the report.</li>
+        <li>Survival check: 9 of the previous night's actions checked, 8 survived, 1 drifted (a later rewrite, expected), 0 reverted. 54 cuts scored so far, 0 reverted, 0 reintroduced.</li>
+        <li>Cost: the night before cost $8.74 in full. Last night was at $5.08 when the report was written (verify was still running).</li>
+        <li>The two added lines: +46 and +54 tokens, one agent each.</li>
+        <li>Full skill name: agent-swarm-prepush-gates.</li>
+        <li><strong>Trap:</strong> the report names agents and people. Do not open it on screen.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 14. THE CHART -->
+  <section class="slide top">
+    <div class="kicker">part 2 · dreaming · tokenminning · 12 busiest agents</div>
+    <h2>The old job added, dreaming <span class="grad">cut</span></h2>
+    <svg id="dream-chart" class="chart"></svg>
+    <p class="small mono">y axis: instruction tokens, summed over the 12 busiest agents</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (60s):</strong> "This is all the instruction text that our 12 busiest agents load, in tokens. Left: four weeks of the old job. Up 4.7 thousand. Then dreaming starts. The first cliff is one night: the lead's instructions went from 90 thousand characters to 20 thousand. Four weeks later: minus 52%. And the last part is the honest one. In month two it stays flat, even a little up. It found the floor."</li>
+        <li>Numbers: 61,932 (Sep 1), 66,661 (Sep 29), 31,969 (Oct 27), 32,690 (today). Lowest point: 31,334 on Nov 4.</li>
+        <li><strong>The joke, say it:</strong> "Everyone is tokenmaxxing. This is tokenminning." The y axis is instruction tokens, and fewer is the goal.</li>
+        <li>Measure: instructions + identity + personality text of each agent (claudeMd + identityMd + soulMd), chars / 4, summed over 12 agents with 20+ tasks.</li>
+        <li>All 85 points are real daily values. Sep 1 to Oct 27 is the series published with the blog post. Oct 28 to today comes from the same live script (dreaming-gains-series), read 2026-11-24.</li>
+        <li>What month two does instead: it rewrites skills. Since 2026-10-28 the live counters show 102 skill updates, 45 scripts built, 21 new skills, 105 memories written, 1,415 memories reviewed. Check the window before you quote these.</li>
+        <li><strong>Spine:</strong> shorter instructions is forgetting on purpose. Nothing was reverted because agents missed it: 0 of 54 scored cuts came back.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 15. OUTPUT PER LANE -->
+  <section class="slide top">
+    <div class="kicker">part 2 · dreaming · same swarm, 28 nights each</div>
+    <h2>It cut more. It also <span class="grad">built more</span></h2>
+    <div class="cols wide-left" style="align-items:center">
+      <table style="font-size:34px">
+        <tr><th></th><th>Daily Evolution</th><th>Dreaming</th></tr>
+        <tr><td>New skills</td><td>1</td><td><strong>20</strong></td></tr>
+        <tr><td>New scripts</td><td>6</td><td><strong>38</strong></td></tr>
+        <tr><td>Skills updated</td><td>4</td><td><strong>22</strong></td></tr>
+        <tr><td>Memories edited</td><td>5</td><td><strong>90</strong></td></tr>
+        <tr><td>Memories created</td><td>77</td><td><strong>148</strong></td></tr>
+      </table>
+      <div class="bignums">
+        <div><b>−93%</b><span>lead's checklist: 55k → 4k tokens</span></div>
+        <div><b>80+</b><span>memories deleted over 56 nights</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (35s):</strong> "You would expect a process that rejects 65% to produce less. It produced more. 20 new skills against 1. 38 scripts against 6. A script is a procedure that no longer needs a model. And the checklist that the lead runs all day went from 55 thousand tokens to 4 thousand."</li>
+        <li>Windows: Daily Evolution 2026-09-02 to 09-29, Dreaming 2026-09-30 to 10-27. Source: the blog post data.</li>
+        <li>Why more: the workflow forces five separate lanes. The old prompt did what the model felt like that night, and that was mostly "add a memory".</li>
+        <li>Heartbeat: 55,040 tokens on Sep 29, 4,095 on Oct 27. Last night's report: 3,352.</li>
+        <li><strong>Created vs edited:</strong> "created" is a new memory that the job stored on purpose. "Edited" is a change to a memory that already existed: a fix, a merge, a rename. A good cleanup job should edit more than it creates. The old job edited 5 in 28 nights.</li>
+        <li><strong>Removals (counted 2026-11-24 from the 56 nightly reports and the changelog):</strong> 87 memory delete actions on 31 nights: 30 in the first 28 nights, 57 since. The old job: 0 delete calls in its logs. Reasons in the reports: superseded, exact duplicate, rule now lives in a skill. 63 instruction trims, about 19 thousand tokens cut. Say "more than 80": it is a count of report rows, not a database count, because a delete leaves no trace in the database.</li>
+        <li><strong>Honest gap:</strong> I found no night that deleted a skill. Dreaming fixes and refactors skills. It does not retire them yet. There are 226 skill rows today.</li>
+        <li>All 46 nights that carry counts in the changelog: 651 applied, 1,430 rejected, 244 handed to an owner.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 16. MEMORY + DREAMING -->
+  <section class="slide top">
+    <div class="kicker">part 3 · both · where the learning lives</div>
+    <h2>The model is rented<br>The learning is <span class="grad">owned</span></h2>
+    <table style="font-size:34px">
+      <tr><th>what changes</th><th>how often</th><th>who decides</th></tr>
+      <tr><td>Memory rank (α, β)</td><td>every task</td><td>citations and raters</td></tr>
+      <tr><td>Memories</td><td>every task, every night</td><td>agents write, dreaming curates</td></tr>
+      <tr><td>Skills and scripts</td><td>every task, every night</td><td>agents write, dreaming refactors</td></tr>
+      <tr><td>Instructions</td><td>every night</td><td>dreaming, mostly to cut</td></tr>
+      <tr class="locked"><td>Weights</td><td>never</td><td>rented, use Helmcode 🫣</td></tr>
+    </table>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (60s):</strong> "Put memory and dreaming in one table. What can change in an agent without a change to the model? Its memory rank, on every task. Its memories, skills and scripts: agents write them during tasks, and dreaming cleans them every night. Its instructions, every night. Everything above the last row is text and code in a database. It survives a model swap. We changed the default model in September and none of this was lost."</li>
+        <li><strong>The turn to the room:</strong> "The last row is locked for us. We rent the model. This room does not have to. With Helmcode we ran 14 real agent tasks on open models. The results are at swar.am/helmcode." Then: "That is the good part. The hard part is next."</li>
+        <li><strong>Trap:</strong> swar.am/helmcode is the open model benchmark page (Helmcode × Agent Swarm, 2026-11-03). Read its numbers again before you quote one. I did not copy any here.</li>
+        <li>Each row is slower and more expensive to change than the row above it. Each row also needs a stronger gate: a rating is cheap to undo, a weight is not.</li>
+        <li>This is the RL mapping from the appendix, extended: memory rank is the value estimate, dreaming is the policy improvement step, on the parts of the policy that are not weights.</li>
+        <li>Agents write during tasks: memory-store for memories, script-upsert for scripts, skills from the skill tools. Dreaming is the second pass: dedup, fix, promote, cut.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 17. HOW TO MEASURE IT -->
+  <section class="slide">
+    <div class="kicker">part 3 · both · the open problem</div>
+    <h2>Changed is not <span class="grad">improved</span></h2>
+    <div class="cols">
+      <div class="card gray">
+        <h3>Why it is hard</h3>
+        <ul>
+          <li><strong>No replay:</strong> a day of tasks happens once</li>
+          <li><strong>Shorter</strong> is not better</li>
+          <li><strong>Counterfactual:</strong> the same day, no change</li>
+          <li><strong>Drift:</strong> true today, false tomorrow</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <h3>What we watch: second-order evals</h3>
+        <ul>
+          <li><strong>Repeated work:</strong> schedules, PRs, reviews</li>
+          <li><strong>A skill changes:</strong> same PR merge rate?</li>
+          <li><strong>A script ships:</strong> does its use go up?</li>
+          <li><strong>Last night:</strong> 8 of 9 changes survived</li>
+        </ul>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (70s):</strong> "Here is the part we have not solved. The swarm changes itself every night. How do you know that it improved, and not only changed? You cannot replay yesterday. A shorter prompt is not a better prompt. What we watch today is second-order evals. We do not grade the change. We watch the work that uses it. And a swarm repeats itself a lot: the same schedules, the same PR flow, the same reviews, every day. So if dreaming changes a skill that mostly the coder uses, and the share of merged PRs stays the same, the change is fine. If it drops, we see it the next day. If a new script ships and agents start to use it, that is adoption. Repetition is our benchmark."</li>
+        <li><strong>The nightly numbers:</strong> did last night's change survive, or did someone revert it? 8 of 9 last night. Did a cut come back because an agent missed it? 0 of 54 so far. Size and cost, night over night. And every new script ships with two controls: one run that must pass and one that must fail.</li>
+        <li><strong>Trap:</strong> the second-order reading is mostly done by people and by the lead today, on top of the per-agent stats that the gather step collects. I did not find an automated gate that compares a PR merge rate before and after a skill change. Say "we watch", not "the system checks".</li>
+        <li><strong>Be honest:</strong> these measure stability and cost. They do not measure quality. "It survived" is not "it is better".</li>
+        <li>The same problem on the memory side: a static eval passes on day 1 and on day 76. The match was fine, only time changed. There we have unit tests that own the clock, scenario evals with near-miss lies, and the citation rate by source in production.</li>
+        <li><strong>The direction:</strong> replay. Record real tasks, then run them again against today's agent with a cheap model, before the change ships. The blog post calls this "dry evolution". Trap: I could not confirm that a replay runs in the nightly workflow today. Present it as the direction, not as a feature.</li>
+        <li>Numbers on the slide are from last night's report: survival 8 of 9, cuts scored 54, reverted 0, reintroduced 0.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 18. CLOSE -->
+  <section class="slide">
+    <div class="kicker">part 3 · the open question</div>
+    <h2>It changes every night<br>How do you know it <span class="grad">improved</span>?</h2>
+    <div class="closing-links">
+      <div>
+        <p><span>code</span>swar.am/gh</p>
+        <p><span>slides</span>swar.am/helmcafe</p>
+        <p><span>site</span>agent-swarm.dev</p>
+        <p><span>newsletter</span>dspl.sh</p>
+      </div>
+    </div>
+    <img class="closing-qr" src="assets/qr-repo.svg" alt="github.com/desplega-ai/agent-swarm">
+    <aside class="notes">
+      <ul>
+        <li><strong>Say (40s):</strong> "Day 76: it forgot the wrong thing. The night job: it forgot nothing. Both fixes are the same fix. A half-life. A reputation. A process that rejects 65% and cuts its own instructions in half. Agents that learn are agents that forget well. But I cannot prove that to you yet. So I end on the question we have not solved: it changes every night. How do you know it improved? I would like to hear how you would measure it."</li>
+        <li>Stay on this slide during Q&amp;A.</li>
+        <li>Backup questions if the room is quiet: how do you know a self-edit made the agent better and not only shorter? Would you let a model edit its own instructions without a human in the loop? What would the reject rate be with a smaller open model? When is a fine-tune better than a night of this?</li>
+        <li>Everything shown is open source: the reranker, the raters, the dreaming workflow and its scripts. Dreaming ships enabled by default.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 19. APPENDIX: COST OF ONE NIGHT (for Q&A) -->
+  <section class="slide top appendix">
+    <div class="kicker">appendix · what one night costs</div>
+    <h2>Where the money of one night goes</h2>
+    <div class="cols wide-left" style="align-items:center">
+      <table class="bars" style="font-size:30px">
+        <tr><td style="white-space:nowrap">Lead synthesis</td><td style="width:44%"><div class="bar" style="width:100%"></div></td><td class="num">$3.10</td></tr>
+        <tr><td style="white-space:nowrap">Scripts lane + report</td><td style="width:44%"><div class="bar" style="width:92%"></div></td><td class="num">$2.84</td></tr>
+        <tr><td style="white-space:nowrap">7 self-reports</td><td style="width:44%"><div class="bar" style="width:57%"></div></td><td class="num">$1.78</td></tr>
+        <tr><td style="white-space:nowrap">Skills lane</td><td style="width:44%"><div class="bar" style="width:19%"></div></td><td class="num">$0.60</td></tr>
+        <tr><td style="white-space:nowrap">3 apply steps on the lead</td><td style="width:44%"><div class="bar" style="width:14%"></div></td><td class="num">$0.42</td></tr>
+        <tr><td style="white-space:nowrap">Every script and gate</td><td style="width:44%"><div class="bar" style="width:0"></div></td><td class="num">$0</td></tr>
+      </table>
+      <div class="bignums">
+        <div><b>$8.74</b><span>one full night, 7 agents<br>2026-11-23</span></div>
+        <div><b>$0.25</b><span>for each extra agent:<br>one more self-report</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say:</strong> "A night costs under 10 dollars for 7 agents. One third is the lead's synthesis: it reads every report and decides. The scripts and the gates cost nothing. Each extra agent adds one self-report, about 25 cents."</li>
+        <li>Source: the run reports of 2026-11-23 and 2026-11-24. The full cost of the 11-23 night is $8.74. Four steps are measured one by one ($5.90 in total). "Scripts lane + report" is the rest: $2.84. It holds the agents that write and test scripts, and the writer of the report.</li>
+        <li>The night before cost $8.83. The mean of the last 7 nights is $10.40. The budget is $25, with a soft cap at $22.</li>
+        <li>The blog post says $17.80 a night for 3 agents. That was the October estimate at Opus prices. Nights cost less now.</li>
+        <li>Cost is API-equivalent cost from our pricing table.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 20. APPENDIX: ONE REAL CHANGE (for Q&A) -->
+  <section class="slide top appendix">
+    <div class="kicker">appendix · one real change · 2026-11-24</div>
+    <h2>One change, from evidence to write</h2>
+    <div class="cols">
+      <table style="font-size:30px">
+        <tr><td style="white-space:nowrap">Evidence</td><td>the same CI failure, 4 times in 3 weeks</td></tr>
+        <tr><td style="white-space:nowrap">Proposal</td><td>put the step into the pre-push skill</td></tr>
+        <tr><td style="white-space:nowrap">Gate</td><td>approved, 1 of 6 skill slots that night</td></tr>
+        <tr><td style="white-space:nowrap">Write</td><td>one new section, skill v28 → v29</td></tr>
+        <tr><td style="white-space:nowrap">Verify</td><td>read again, hash <span class="mono">a322492e</span></td></tr>
+      </table>
+<pre class="code" style="font-size:23px"><span class="dim">skill agent-swarm-prepush-gates  v29</span>
+
+<span class="hl">+ ## New e2e scenario: map it in the</span>
+<span class="hl">+    coverage manifest</span>
++ When a commit adds an e2e scenario,
++ add its flow mapping to
++ `coverage-manifest.json` in the same
++ commit. Before pushing, grep the
++ manifest for each new scenario name.
++ This miss is recorded 4 times
++ (Nov 1, twice on Nov 14, Nov 23).</pre>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say:</strong> "This is one of last night's 11 changes, the real text. Our repo has a rule: a new end-to-end test needs an entry in a manifest file, or CI fails. Agents forgot it four times in three weeks. Last night that became a section in the skill that every agent reads before a push. Nobody wrote it by hand."</li>
+        <li>The text on the right is the real section, shortened by two sentences. The skill and the repo are open source.</li>
+        <li>Written 2026-11-24 at 04:39 Barcelona time. It is version 29 of that skill: dreaming and the agents changed it 28 times before.</li>
+        <li>Why a skill and not a memory: a memory is recalled only if the search finds it. A skill step is read every time the agent pushes.</li>
+        <li>What will tell us if it worked: the count of that CI failure in the next weeks. That is the second-order check of slide 17.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 21. APPENDIX: OPEN MODELS (for Q&A) -->
+  <section class="slide top appendix" style="gap:22px">
+    <div class="kicker">appendix · open models · swar.am/helmcode</div>
+    <h2>Open models on our 14 agent tasks</h2>
+    <table class="bars tight" style="font-size:26px">
+      <tr><th>model</th><th>tasks passed</th><th></th><th>cost per task</th></tr>
+      <tr><td style="white-space:nowrap">Claude Opus 5.5</td><td style="width:46%"><div class="bar dark" style="width:97%"></div></td><td class="num">97%</td><td class="num">€0.23</td></tr>
+      <tr><td style="white-space:nowrap">GPT-6 Astra</td><td style="width:46%"><div class="bar dark" style="width:89%"></div></td><td class="num">89%</td><td class="num">€0.80</td></tr>
+      <tr><td style="white-space:nowrap"><strong>DeepSeek V4.1 Flash</strong></td><td style="width:46%"><div class="bar" style="width:81%"></div></td><td class="num">81%</td><td class="num">€0.01 to €0.07</td></tr>
+      <tr><td style="white-space:nowrap">GPT-6.1 Terra</td><td style="width:46%"><div class="bar dark" style="width:79%"></div></td><td class="num">79%</td><td class="num">€0.06</td></tr>
+      <tr><td style="white-space:nowrap"><strong>Gemma 4</strong></td><td style="width:46%"><div class="bar" style="width:68%"></div></td><td class="num">68%</td><td class="num">flat plan</td></tr>
+      <tr><td style="white-space:nowrap"><strong>GLM 5.3</strong></td><td style="width:46%"><div class="bar" style="width:62%"></div></td><td class="num">62%</td><td class="num">€0.01 to €0.04</td></tr>
+      <tr><td style="white-space:nowrap"><strong>Qwen 3.6</strong></td><td style="width:46%"><div class="bar" style="width:60%"></div></td><td class="num">60%</td><td class="num">flat plan</td></tr>
+      <tr><td style="white-space:nowrap"><strong>GLM 5.3 Flash</strong></td><td style="width:46%"><div class="bar" style="width:55%"></div></td><td class="num">55%</td><td class="num">€0.01 to €0.03</td></tr>
+    </table>
+    <p class="small mono">amber: open models on Helmcode, 28 Oct 2026 · dark: closed models</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Say:</strong> "With Helmcode we ran the swarm on open models. 14 real agent tasks, the same grader for all. The best open model passed 81%. That is above one closed model and 16 points under the best one. The price per task is 3 to 40 times lower than the best closed model."</li>
+        <li>Each open model: 42 attempts (14 tasks, 3 attempts), medium effort, on the pi harness. Closed models ran on their own harness (Claude Code, Codex) in our weekly benchmark.</li>
+        <li><strong>Trap:</strong> the confidence intervals are wide. DeepSeek 81% is 67 to 90%. Terra 79% is 61 to 90%. Do not say that DeepSeek beats Terra. Say "in the same range".</li>
+        <li>Cost: open models are priced from the Helmcode Starter plan, so the number is a range that depends on how much of the plan you use. Gemma 4 and Qwen 3.6 have no token cap. Closed models: public API prices, converted to euros.</li>
+        <li>Median task time: Qwen 3.6 68 s, DeepSeek 115 s, Opus 5.5 61 s.</li>
+        <li>This benchmark measures the agent tasks, not dreaming. I do not know if dreaming itself ran on an open model.</li>
+        <li>All numbers are from swar.am/helmcode, generated 2026-10-28 to 2026-10-30.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 22. APPENDIX: RL MAPPING (for Q&A) -->
+  <section class="slide top appendix">
+    <div class="kicker">appendix · the same loop as RL</div>
+    <h2>We cannot fine-tune the model<br>We can fine-tune <span class="grad">what it remembers</span></h2>
+    <div class="loop">
+      <div class="loop-rail"><span>every task</span></div>
+      <table>
+        <tr><th>reinforcement learning</th><th>swarm memory</th></tr>
+        <tr class="locked"><td>Policy weights</td><td>the LLM. Frozen, not ours to train</td></tr>
+        <tr><td>Action</td><td>which memories we surface</td></tr>
+        <tr><td>Reward</td><td>cited, ignored, judged, self-rated</td></tr>
+        <tr><td>Value</td><td>mean of Beta(α, β)</td></tr>
+        <tr class="open open-first"><td>Exploration</td><td><em>none yet</em> <span class="gloss">proven memories keep winning</span></td></tr>
+        <tr class="open"><td>Credit assignment</td><td><em>task passed: which memory earned it?</em></td></tr>
+      </table>
+      <div class="bignums">
+        <div><b>90%</b><span>agents rate their own<br>memories "useful"</span></div>
+        <div><b>37%</b><span>of retrieved memories get<br>cited later in the task</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>It is a Beta-Bernoulli bandit with one arm per memory. No gradients, no weights. The learnable parameters are two floats per memory in SQLite.</li>
+        <li><strong>Exploration:</strong> we rank by the mean of the Beta only. A new memory starts neutral at 1.0, a proven one can reach 2.0. So old winners keep winning. Thompson sampling and UCB are the known fixes. We parked them: random retrieval in prod makes runs hard to reproduce.</li>
+        <li><strong>Credit assignment:</strong> a task retrieves 5 to 10 memories and then passes or fails. One bit for the whole task. We reward each memory with proxies: was it cited, did the judge say it helped. We know what got USED, not what CAUSED the pass.</li>
+        <li><strong>Cited, not rated.</strong> 37% is measured by the server: the id of the memory shows up later in the session log of the task. Nobody rates anything for that number. The 90% is the rated one.</li>
+        <li><strong>The two numbers measure different things.</strong> 90%: agents chose to rate 3,987 memories and 3,606 say "useful". 37%: the server checked all 166,588 retrievals for a later citation. The 90% has a selection bias. The 37% is a floor. Numbers are from September.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 23. APPENDIX: PROMPTS (for Q&A) -->
+  <section class="slide top appendix">
+    <div class="kicker">appendix · simplified prompts</div>
+    <h2>Two prompts: read, learn</h2>
+    <div class="cols">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <span class="tag">read · appended to every task</span>
+<pre class="code"><span class="hl">### Relevant Past Knowledge</span>
+These memories from your previous
+sessions may be useful. Use `memory-get`
+with the id to retrieve full details.
+
+- <span class="hl">**deploy-gotcha**</span> (id: 7f3a…):
+  first 300 chars…
+
+<span class="dim">When a memory genuinely helps, or
+actively misleads you, call `memory_rate`.
+2-5 ratings per task is plenty.</span></pre>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <span class="tag">learn · rides on the session summary</span>
+<pre class="code"><span class="dim">// one cheap call, two outputs</span>
+{
+  "summary": "what happened…",
+  <span class="hl">"ratings"</span>: [{
+    "id": "7f3a…",
+    "score": 0.8,
+    "reasoning": "the fix came from here",
+    <span class="hl">"referencesSource"</span>:
+      "github:org/repo#696"
+  }]
+}</pre>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>Left: progressive disclosure. The prompt holds pointers to memories, not the memories.</li>
+        <li>Right: we already paid for a small-model call to summarise the session. The ratings ride on it for almost nothing.</li>
+        <li>All prompt text lives in a template registry. No string concatenation in runners.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <div id="topbrand"><img src="assets/desplega-logo.png" alt="Desplega Labs"></div>
+  <div id="footer">
+    <div class="brand"><img src="assets/logo.png" alt=""><span>agent-swarm.dev</span></div>
+    <span id="counter"></span>
+  </div>
+  <div id="progress"></div>
+</div>
+
+<div id="notes-overlay"></div>
+
+<div id="presenter">
+  <div class="bar"><span id="p-timer">00:00</span><span>presenter · arrows drive both windows</span></div>
+  <h1 id="p-title"></h1>
+  <div class="body" id="p-body"></div>
+  <div class="next" id="p-next"></div>
+</div>
+
+<script src="deck.js"></script>
+<script>
+  // Review mode and the rehearsal timer are local tools. The public deploy does not ship them.
+  if (["localhost", "127.0.0.1", ""].includes(location.hostname)) {
+    for (const src of ["debug.js", "timer.js"]) {
+      document.body.appendChild(Object.assign(document.createElement("script"), { src }));
+    }
+  }
+</script>
+</body>
+</html>

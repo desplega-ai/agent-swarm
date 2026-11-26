@@ -77,6 +77,11 @@ export const PERMISSIONS = {
     description: "Create a task the caller owns.",
     namespace: "task",
   },
+  "task.slack.thread.bind": {
+    description:
+      "Create a task bound to a Slack thread over HTTP: its agent posts progress and outcome in that thread.",
+    namespace: "task",
+  },
   "task.requester.assign": {
     description:
       "Attribute a new task to a user other than the requester of the caller's own current task.",
@@ -425,6 +430,23 @@ export const PERMISSIONS = {
   "script.run": {
     description: "Run a global or inline script as yourself from the user MCP.",
     namespace: "script",
+  },
+  "script.run.durable": {
+    description:
+      "Launch a durable script run over HTTP. A user caller names a global script listed in SCRIPT_RUN_USER_ALLOWLIST, which runs as its owning agent.",
+    namespace: "script",
+  },
+  "script.run.cancel": {
+    description: "Cancel a durable script run (a user caller: only runs it launched).",
+    namespace: "script",
+  },
+  "workflow.trigger": {
+    description: "Trigger a workflow run over HTTP.",
+    namespace: "workflow",
+  },
+  "workflow.run.event": {
+    description: "Send an event to waiting workflow runs (run-scoped or global).",
+    namespace: "workflow",
   },
   "script.api.read.secrets": {
     description: "Reveal an external script API endpoint bearer token.",

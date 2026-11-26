@@ -87,6 +87,7 @@ describe("native ctx namespaces", () => {
         ...Object.keys(SDK_NAMESPACES),
         "api",
         "caller",
+        "db",
         "fs",
         "logger",
         "mcp",
@@ -126,7 +127,7 @@ describe("quickjs ctx namespaces", () => {
 };`);
     expect(output.error).toBeUndefined();
     expect(output.result).toEqual({
-      keys: ["api", "app", "caller", "fs", "kv", "logger", "mcp", "sh", "stdlib", "swarm"],
+      keys: ["api", "app", "caller", "db", "fs", "kv", "logger", "mcp", "sh", "stdlib", "swarm"],
       frozen: true,
       list: { entries: [{ key: "a" }], total: 1 },
       apps: { message: "1 app", apps: [{ id: "x" }] },
@@ -165,6 +166,7 @@ describe("quickjs ctx namespaces", () => {
         ...Object.keys(SDK_NAMESPACES),
         "api",
         "caller",
+        "db",
         "fs",
         "logger",
         "mcp",
@@ -186,7 +188,9 @@ describe("workflow guest ctx namespaces", () => {
       namespaces: FIXTURE,
       invokeTool: async (path, argsJson) => {
         calls.push(`${path} ${argsJson}`);
-        const fail = (JSON.parse(argsJson) as { fail?: boolean }).fail;
+        // Swarm capabilities carry `[args, options]`; options hold the call's idempotency ordinal.
+        const [args] = JSON.parse(argsJson) as [{ fail?: boolean }];
+        const fail = args.fail;
         return JSON.stringify(
           fail ? { success: false, message: "no" } : { success: true, entries: [] },
         );
@@ -195,7 +199,10 @@ describe("workflow guest ctx namespaces", () => {
     const kv = ctx.kv as Record<string, (args?: unknown) => Promise<unknown>>;
     expect(await kv.list?.({ prefix: "p" })).toEqual({ entries: [] });
     await expect(kv.list?.({ fail: true })).rejects.toThrow("ctx.kv.list failed: no");
-    expect(calls[0]).toBe('swarm.kv_list {"prefix":"p"}');
+    expect(calls).toEqual([
+      'swarm.kv_list [{"prefix":"p"},{"ordinal":1}]',
+      'swarm.kv_list [{"fail":true},{"ordinal":2}]',
+    ]);
     expect(Object.isFrozen(kv)).toBe(true);
   });
 });

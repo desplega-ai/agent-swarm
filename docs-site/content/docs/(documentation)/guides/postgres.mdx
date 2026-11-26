@@ -64,9 +64,20 @@ ALTER DEFAULT PRIVILEGES FOR ROLE swarm IN SCHEMA public GRANT SELECT ON TABLES 
 
 Then set `DATABASE_QUERY_URL` and restart. At start the API probes the role: it must not read the denied tables or write. If the probe fails, `db-query` is off and the log says why.
 
+### SQL rules for db-query
+
+On Postgres, `db-query` runs Postgres SQL:
+
+- Parameters are `$1`, `$2`, and so on, not `?`.
+- Quote every identifier that has an uppercase letter: `"taskId"`, `"createdAt"`.
+- Flags are `boolean`: `"isLead"`, not `"isLead" = 1`.
+- Pass a JSON list as a string with `$1::text::jsonb`, or as a real array with `$1::jsonb`. SQLite reads the same string with `json_each(?)`. A string param in a `json` or `jsonb` position must be JSON text: `'abc'` fails.
+
 ## Move a SQLite database to Postgres
 
 `agent-swarm db-copy` copies the SQLite file into an empty Postgres database in one transaction, then compares the row count and a checksum of each table.
+
+This section is the short form. For a swarm with data, scripts and dashboards, follow [Migrate a SQLite swarm to PostgreSQL](/docs/migrations/sqlite-to-postgres): it covers the SQL that the copy does not move, the rehearsal, the first hour and rollback.
 
 Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API and run every custom dashboard against the copied data. Compare its results with SQLite. A query can pass the copy's planning check and still fail on a value in a stored row.
 
@@ -77,6 +88,7 @@ Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API a
    docker run --rm -v <api data volume>:/app/data --network <network> \
      <api image>:<api tag> db-copy --from /app/data/agent-swarm-db.sqlite --to <postgres url>
    ```
+   A long-lived database often holds rows that Postgres refuses (a NUL byte in text, a row whose parent row is gone). The copy lists each one and writes nothing. Run it again with `--repair` to fix those kinds during the copy: each fix is listed, and the SQLite file is not changed.
 4. Set `DATABASE_URL`, keep the same encryption key, and start the API.
 
 If the copy reports values that Postgres cannot store (a NUL byte, invalid UTF-8, an invalid timestamp), it writes nothing. Fix those rows in the SQLite file and copy again. To roll back, unset `DATABASE_URL`: the API starts on the untouched SQLite file.

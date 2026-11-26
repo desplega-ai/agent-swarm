@@ -365,6 +365,28 @@ describe("resolveCredentials", () => {
     expect(none).toEqual([]);
   });
 
+  test("`kinds` order wins over the default precedence", async () => {
+    const env = { OPENROUTER_API_KEY: "example-or", CLAUDE_CODE_OAUTH_TOKEN: "oat" };
+    const creds = await resolveCredentials({
+      ...makeOpts({ env }),
+      kinds: ["claude-cli", "openrouter"],
+    });
+    expect(creds.map((cred) => cred.kind)).toEqual(["claude-cli", "openrouter"]);
+  });
+
+  test("MEMORY_RATER_MODEL pins only the kind its provider prefix names", async () => {
+    const env = {
+      OPENROUTER_API_KEY: "example-or",
+      CLAUDE_CODE_OAUTH_TOKEN: "oat",
+      MEMORY_RATER_MODEL: "haiku",
+    };
+    const creds = await resolveCredentials(makeOpts({ env }));
+    expect(creds.map((cred) => [cred.kind, cred.modelDefault])).toEqual([
+      ["openrouter", "openrouter/deepseek/deepseek-v4.1-flash"],
+      ["claude-cli", "haiku"],
+    ]);
+  });
+
   test("the codex probe runs only when its kind is requested", async () => {
     let probed = 0;
     const base = {
@@ -529,16 +551,16 @@ describe("amazon-bedrock", () => {
   });
 
   test("a pinned rater model applies to the bedrock credential too", async () => {
-    const saved = process.env.MEMORY_RATER_MODEL;
-    process.env.MEMORY_RATER_MODEL = "amazon-bedrock/us.anthropic.claude-haiku-5-5";
-    try {
-      const cred = await resolveCredential(
-        makeOpts({ env: { AWS_PROFILE: "p", AWS_REGION: "us-east-1" }, _getEnvApiKey: awsChain }),
-      );
-      expect(cred?.modelDefault).toBe("amazon-bedrock/us.anthropic.claude-haiku-5-5");
-    } finally {
-      if (saved === undefined) delete process.env.MEMORY_RATER_MODEL;
-      else process.env.MEMORY_RATER_MODEL = saved;
-    }
+    const cred = await resolveCredential(
+      makeOpts({
+        env: {
+          AWS_PROFILE: "p",
+          AWS_REGION: "us-east-1",
+          MEMORY_RATER_MODEL: "amazon-bedrock/us.anthropic.claude-haiku-5-5",
+        },
+        _getEnvApiKey: awsChain,
+      }),
+    );
+    expect(cred?.modelDefault).toBe("amazon-bedrock/us.anthropic.claude-haiku-5-5");
   });
 });

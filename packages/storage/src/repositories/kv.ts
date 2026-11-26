@@ -28,6 +28,14 @@ export type KvKeyRange = { after?: string; from?: string; before?: string; throu
 /** Top-level JSON field equality on `json` entries (path text chosen by the caller). */
 export type KvJsonFieldFilter = { path: string; value: string | number | boolean };
 
+/**
+ * Rows per multi-row KV upsert (7 parameters each) and keys per `IN` list. Both
+ * stay under 999 bound parameters, the oldest SQLite limit, so no build of
+ * either engine refuses a batch.
+ */
+export const KV_BATCH_ROWS = 100;
+export const KV_BATCH_KEYS = 500;
+
 export interface KvRepository {
   /**
    * The key `offset` rows past `afterKey` inside `(afterKey, prefixUpper)` in
@@ -87,10 +95,32 @@ export interface KvRepository {
     nowMs: number,
     limit: number,
   ): Promise<number>;
+  /**
+   * Deletes up to `limit` entries (expired or not) of every namespace matching
+   * `likePattern` (`\` escapes, ASCII case folded). Returns the change count.
+   */
+  deleteNamespacesLikeBatch(likePattern: string, limit: number): Promise<number>;
   /** Insert or overwrite (keeps `created_at`). */
   upsertEntry(row: KvRow): Promise<KvRow | null>;
+  /**
+   * `upsertEntry` for many rows, in multi-row statements of at most
+   * `KV_BATCH_ROWS` rows. A repeated (namespace, key) keeps its last row. Run
+   * it inside a transaction when the write must be all or nothing.
+   */
+  upsertEntries(rows: readonly KvRow[]): Promise<void>;
+  /** Full rows of the listed keys, expired or not, in no set order. */
+  findEntries(namespace: string, keys: readonly string[]): Promise<KvRow[]>;
+  /** Deletes the listed keys; returns the change count. */
+  deleteEntries(namespace: string, keys: readonly string[]): Promise<number>;
   /** Insert, or overwrite an entry expired at `nowMs`; returns the change count. */
   claimEntry(row: KvRow, nowMs: number): Promise<number>;
+  /**
+   * Overwrite value, type and expiry only while the stored value equals
+   * `expectedValue`, expired or not (a compare-and-set); returns the change count.
+   */
+  replaceEntryIfValue(row: KvRow, expectedValue: string): Promise<number>;
+  /** Deletes the entry only while its value equals `expectedValue`; returns the change count. */
+  deleteEntryIfValue(namespace: string, key: string, expectedValue: string): Promise<number>;
   setEntryValue(
     namespace: string,
     key: string,
@@ -259,6 +289,16 @@ export abstract class BaseKvRepository implements KvRepository {
     return result.changes;
   }
 
+  async deleteNamespacesLikeBatch(likePattern: string, limit: number): Promise<number> {
+    const result = await this.db.run(sql`
+      DELETE FROM kv_entries
+      WHERE (namespace, key) IN (
+        SELECT namespace, key FROM kv_entries
+        WHERE ${likeAsciiCi(sql`namespace`, sql`${likePattern}`, "\\")}
+        LIMIT ${limit})`);
+    return result.changes;
+  }
+
   upsertEntry(r: KvRow): Promise<KvRow | null> {
     return this.db.get<KvRow>(sql`
       INSERT INTO kv_entries (${this.kvColumns})
@@ -272,6 +312,51 @@ export abstract class BaseKvRepository implements KvRepository {
       RETURNING ${this.kvColumns}`);
   }
 
+  async upsertEntries(rows: readonly KvRow[]): Promise<void> {
+    // Postgres refuses one statement that upserts the same key twice.
+    const unique = [...new Map(rows.map((r) => [`${r.namespace}\u0000${r.key}`, r])).values()];
+    for (let start = 0; start < unique.length; start += KV_BATCH_ROWS) {
+      const values = unique
+        .slice(start, start + KV_BATCH_ROWS)
+        .map(
+          (r) =>
+            sql`(${r.namespace}, ${r.key}, ${r.value}, ${r.value_type}, ${r.expires_at}, ${r.created_at}, ${r.updated_at})`,
+        );
+      await this.db.run(sql`
+        INSERT INTO kv_entries (${this.kvColumns})
+        VALUES ${sqlJoin(values, sql`, `)}
+        ON CONFLICT(namespace, key) DO UPDATE SET
+          value = excluded.value,
+          value_type = excluded.value_type,
+          expires_at = excluded.expires_at,
+          updated_at = excluded.updated_at`);
+    }
+  }
+
+  async findEntries(namespace: string, keys: readonly string[]): Promise<KvRow[]> {
+    const rows: KvRow[] = [];
+    for (let start = 0; start < keys.length; start += KV_BATCH_KEYS) {
+      rows.push(
+        ...(await this.db.query<KvRow>(sql`
+          SELECT ${this.kvColumns} FROM kv_entries
+          WHERE namespace = ${namespace} AND key IN (${sqlList(keys.slice(start, start + KV_BATCH_KEYS))})`)),
+      );
+    }
+    return rows;
+  }
+
+  async deleteEntries(namespace: string, keys: readonly string[]): Promise<number> {
+    let changes = 0;
+    for (let start = 0; start < keys.length; start += KV_BATCH_KEYS) {
+      changes += (
+        await this.db.run(sql`
+          DELETE FROM kv_entries
+          WHERE namespace = ${namespace} AND key IN (${sqlList(keys.slice(start, start + KV_BATCH_KEYS))})`)
+      ).changes;
+    }
+    return changes;
+  }
+
   async claimEntry(r: KvRow, nowMs: number): Promise<number> {
     const result = await this.db.run(sql`
       INSERT INTO kv_entries (${this.kvColumns})
@@ -283,6 +368,21 @@ export abstract class BaseKvRepository implements KvRepository {
         expires_at = excluded.expires_at,
         updated_at = excluded.updated_at
       WHERE kv_entries.expires_at IS NOT NULL AND kv_entries.expires_at <= ${nowMs}`);
+    return result.changes;
+  }
+
+  async replaceEntryIfValue(r: KvRow, expectedValue: string): Promise<number> {
+    const result = await this.db.run(sql`
+      UPDATE kv_entries SET value = ${r.value}, value_type = ${r.value_type},
+        expires_at = ${r.expires_at}, updated_at = ${r.updated_at}
+      WHERE namespace = ${r.namespace} AND key = ${r.key} AND value = ${expectedValue}`);
+    return result.changes;
+  }
+
+  async deleteEntryIfValue(namespace: string, key: string, expectedValue: string): Promise<number> {
+    const result = await this.db.run(sql`
+      DELETE FROM kv_entries
+      WHERE namespace = ${namespace} AND key = ${key} AND value = ${expectedValue}`);
     return result.changes;
   }
 

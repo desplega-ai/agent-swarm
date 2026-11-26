@@ -19,6 +19,9 @@ export function dbCopyHelp(binName: string): CommandHelp {
       "  --from <path>          SQLite database file (default: DATABASE_PATH)",
       "  --to <url>             Target postgres:// URL (default: DATABASE_URL)",
       "  --json <path>          Write the full report (tables, checksums, problems) as JSON",
+      "  --repair               Fix what Postgres cannot store during the copy, and list each fix:",
+      "                         NUL bytes and invalid UTF-8 in text, bad escapes in JSON, a value of",
+      "                         the wrong kind in a nullable number or flag column, orphan rows",
       "  -h, --help             Show this help",
     ].join("\n"),
     examples: [

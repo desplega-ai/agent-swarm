@@ -1,5 +1,6 @@
 "use client";
 
+import { defaultFilter } from "cmdk";
 import { Check, ChevronsUpDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -42,6 +43,8 @@ interface SearchableSelectBaseProps {
   "aria-label"?: string;
   /** Attributes for the portalled list, e.g. an app surface's `data-theme`. */
   contentAttrs?: { "data-theme"?: string };
+  /** Called with the typed search text, e.g. to load options from the server. */
+  onSearchChange?: (search: string) => void;
 }
 
 export interface SearchableSelectProps extends SearchableSelectBaseProps {
@@ -55,12 +58,18 @@ export interface SearchableMultiSelectProps extends SearchableSelectBaseProps {
   onChange: (next: string[]) => void;
 }
 
-/** Tokenized AND match, so "lea" + " worker" both narrow. The phone Add people list shares it. */
+/**
+ * Ranked match. Every search token found as a substring ranks first ("lea" +
+ * "worker" both narrow); a fuzzy subsequence match (cmdk scoring, "tmln" finds
+ * "timeline") ranks below it. Within each band, cmdk's score orders the list.
+ */
 export function tokenFilter(itemValue: string, search: string): number {
-  const haystack = itemValue.toLowerCase();
   const needle = search.toLowerCase().trim();
   if (!needle) return 1;
-  return needle.split(/\s+/).every((token) => haystack.includes(token)) ? 1 : 0;
+  const haystack = itemValue.toLowerCase();
+  const fuzzy = defaultFilter(haystack, needle);
+  const allTokens = needle.split(/\s+/).every((token) => haystack.includes(token));
+  return allTokens ? 0.5 + fuzzy / 2 : fuzzy / 2;
 }
 
 /**
@@ -133,6 +142,7 @@ function OptionsCombobox({
   id,
   "aria-label": ariaLabel,
   contentAttrs,
+  onSearchChange,
   isSelected,
   onPick,
   closeOnPick = false,
@@ -163,11 +173,19 @@ function OptionsCombobox({
       </PopoverTrigger>
       <PopoverContent
         {...contentAttrs}
-        className={cn("w-(--radix-popover-trigger-width) min-w-[220px] p-0", contentClassName)}
+        // At least as wide as the trigger, as wide as the longest option, capped so a
+        // long list never runs off a phone. A narrow trigger no longer truncates
+        // every option to the same prefix.
+        className={cn(
+          "w-max min-w-[max(220px,var(--radix-popover-trigger-width))] max-w-[min(560px,90vw)] p-0",
+          contentClassName,
+        )}
         align="start"
       >
         <Command filter={tokenFilter}>
-          {searchable ? <CommandInput placeholder={searchPlaceholder} /> : null}
+          {searchable ? (
+            <CommandInput placeholder={searchPlaceholder} onValueChange={onSearchChange} />
+          ) : null}
           <CommandList className="max-h-72">
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             <CommandGroup>
@@ -187,7 +205,9 @@ function OptionsCombobox({
                       className={cn("h-4 w-4 shrink-0", selected ? "opacity-100" : "opacity-0")}
                     />
                     {option.icon}
-                    <span className="truncate">{option.label}</span>
+                    <span className="min-w-0 [overflow-wrap:anywhere]" title={option.label}>
+                      {option.label}
+                    </span>
                     {option.hint ? (
                       <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
                         {option.hint}

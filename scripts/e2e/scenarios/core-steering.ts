@@ -1,5 +1,5 @@
 import { sql } from "../db";
-import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
+import { asRecord, asRecords, asString, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
   cancelQuietly,
@@ -514,6 +514,65 @@ async function mcpSteering(ctx: ScenarioContext) {
   }
 }
 
+/** A steer carries files uploaded to its task; the worker's queue lists them. */
+async function withFiles(ctx: ScenarioContext) {
+  const agentId = await registerWorker(ctx, "steer-files", { maxTasks: 3 });
+  const taskId = await runningTask(ctx, agentId, `steer files ${ctx.nonce}`);
+  const otherId = await runningTask(ctx, agentId, `steer files other ${ctx.nonce}`);
+  const upload = async (target: string, name: string) => {
+    const response = await ctx.api("POST", `/api/fs/tasks/${target}/files?name=${name}`, {
+      rawBody: new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }),
+    });
+    expectStatus(response, [201], `upload ${name}`);
+    return asString(asRecord(response.json).id, "attachment id");
+  };
+  const shotId = await upload(taskId, `shot-${ctx.nonce}.png`);
+  const foreignId = await upload(otherId, `foreign-${ctx.nonce}.png`);
+
+  // A file of another task is a 400 and writes no row.
+  const rejected = await ctx.api("POST", `/api/tasks/${taskId}/steer`, {
+    body: { message: `look ${ctx.nonce}`, attachmentIds: [foreignId] },
+  });
+  expectStatus(rejected, [400], "steer with another task's attachment");
+  const empty = await ctx.api("GET", `/api/tasks/${taskId}/steering-messages`);
+  expect(asRecords(empty.json, "messages").length === 0, "A rejected steer wrote a row");
+
+  const result = await steer(ctx, taskId, {
+    message: `look at this ${ctx.nonce}`,
+    attachmentIds: [shotId],
+  });
+  expect(result.outcome === "queued", `Expected a queued steer, got ${JSON.stringify(result)}`);
+
+  const response = await ctx.api("GET", `/api/steering-messages?taskId=${taskId}`, { agentId });
+  expectStatus(response, [200], "pending steering with files");
+  const [message] = asRecords(response.json, "messages");
+  const files = asRecords(message, "attachments");
+  expect(
+    files.length === 1 &&
+      files[0]?.id === shotId &&
+      files[0]?.taskId === taskId &&
+      files[0]?.name === `shot-${ctx.nonce}.png` &&
+      String(files[0]?.mimeType).startsWith("image/png"),
+    `Pending steering lists ${JSON.stringify(message)}`,
+  );
+
+  // An undeliverable steer becomes a follow-up whose text names the file.
+  const promoted = await ctx.api(
+    "POST",
+    `/api/steering-messages/${String(result.steeringMessageId)}/undeliverable`,
+    { agentId, body: { reason: `session ended ${ctx.nonce}`, taskId } },
+  );
+  expectStatus(promoted, [200], "promote a steer with files");
+  const followUpId = String(asRecord(promoted.json).promotedTaskId);
+  const followUp = await readTask(ctx, followUpId);
+  expect(
+    String(followUp.task).startsWith(`look at this ${ctx.nonce}\n\n📎 Attached file(s)`) &&
+      String(followUp.task).includes(`/api/fs/tasks/${taskId}/files/${shotId}/raw`),
+    `Promoted follow-up text is ${JSON.stringify(followUp.task)}`,
+  );
+  for (const id of [taskId, otherId, followUpId]) await cancelQuietly(ctx, id);
+}
+
 /** A worker that finishes first turns its undelivered steering into a follow-up it then runs. */
 async function finishPromotes(ctx: ScenarioContext) {
   const agentId = await registerWorker(ctx, "steer-flow", { maxTasks: 2 });
@@ -572,6 +631,7 @@ export const coreSteering: Scenario = {
     await outcomes(ctx);
     await workerCallbacks(ctx);
     await mcpSteering(ctx);
+    await withFiles(ctx);
     await finishPromotes(ctx);
   },
 };

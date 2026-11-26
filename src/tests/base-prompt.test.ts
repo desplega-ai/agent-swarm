@@ -881,21 +881,24 @@ Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing va
 Swarm tools are already in your tool list.
 `;
 
-  test("included when UI_SPEC_ENABLED is true", async () => {
+  test("included by default and when UI_SPEC_ENABLED is true", async () => {
+    delete process.env.UI_SPEC_ENABLED;
+    const unset = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(unset).toContain(RICH_CARDS_HEADER);
     process.env.UI_SPEC_ENABLED = "true";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).toContain(RICH_CARDS_HEADER);
     expect(result).toContain("`ui-spec` skill");
   });
 
-  test("excluded when UI_SPEC_ENABLED is not set", async () => {
-    delete process.env.UI_SPEC_ENABLED;
+  test("excluded when UI_SPEC_ENABLED is false", async () => {
+    process.env.UI_SPEC_ENABLED = "false";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).not.toContain(RICH_CARDS_HEADER);
   });
 
   test("the flag-off prompt equals the kept snapshot", async () => {
-    delete process.env.UI_SPEC_ENABLED;
+    process.env.UI_SPEC_ENABLED = "false";
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).toBe(FLAG_OFF_PROMPT);
   });
@@ -1380,9 +1383,10 @@ describe("getBasePrompt: size budget", () => {
   // +150 for the multi-person thread line in the communication block (~105 chars).
   // +200 for the chat-card outputs line (~190 chars).
   // +300 for the rich-card line in the communication block (~220 chars).
-  test("a fresh claude worker stays under 6,400 characters", async () => {
+  // +1,000 for the Rich cards section, on by default since UI_SPEC_ENABLED defaults to true (~980 chars).
+  test("a fresh claude worker stays under 7,400 characters", async () => {
     const result = await getBasePrompt({ ...minimalArgs, name: "Ada", traits: localTraits });
-    expect(result.length).toBeLessThan(6_400);
+    expect(result.length).toBeLessThan(7_400);
   });
 
   // The lead ceiling includes the swarm-docs pointer (~190 chars), which renders
@@ -1390,14 +1394,15 @@ describe("getBasePrompt: size budget", () => {
   // the use-case paragraph (~790 chars), and the rich-card line in the
   // communication block (~220 chars).
   // +250 for the chat-card outputs line (~190 chars).
-  test("a fresh claude lead stays under 7,750 characters", async () => {
+  // +1,000 for the Rich cards section, on by default since UI_SPEC_ENABLED defaults to true (~980 chars).
+  test("a fresh claude lead stays under 8,750 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(7_750);
+    expect(result.length).toBeLessThan(8_750);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {

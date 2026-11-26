@@ -39,6 +39,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [manage-user](#manage-user)
   - [db-query](#db-query)
   - [get-oauth-access-token](#get-oauth-access-token)
+  - [data-query](#data-query)
   - [accept-steer](#accept-steer)
   - [steer-task](#steer-task)
 - [Task Pool Tools](#task-pool-tools)
@@ -151,10 +152,13 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-row-delete](#app-row-delete)
   - [app-rows-delete](#app-rows-delete)
   - [app-action-run](#app-action-run)
+  - [app-action-status](#app-action-status)
   - [app-history](#app-history)
   - [app-diff](#app-diff)
   - [app-list](#app-list)
   - [app-patch](#app-patch)
+  - [app-patch-node](#app-patch-node)
+  - [app-catalog](#app-catalog)
   - [app-query](#app-query)
   - [app-rollback](#app-rollback)
   - [app-sync](#app-sync)
@@ -477,8 +481,6 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 
 **Execute database query**
 
-Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents. Queries that read credential tables (OAuth authorizations, apps and pending flows, user and session tokens, script API bearers, Codex device-login state) are rejected, and secret-shaped values in results are redacted. Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.
-
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `sql` | `string` | No | - | Read-only SQL query (writes are rejected). Runs with a wall-clock budget in a bounded child process by default, and results are capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) — a query is safe to try even against a huge table. session_logs, agent_log, events, and task_context_snapshots are too large to read whole: filter on an indexed column (session_logs: taskId/sessionId; agent_log: agentId/taskId/eventType/createdAt) and add a LIMIT, don't COUNT(*)/SUM(...)/typeof() across the table, and don't split a large read into rowid chunks — each chunk still reads every row in its range. See the db-query-guidance skill for the operator config knobs (timeout, row cap, concurrency cap) if a query keeps timing out or getting rejected. |
@@ -496,6 +498,22 @@ Return a valid plaintext OAuth access token for an integrated tracker. The token
 | `provider` | `string` | No | - | OAuth provider slug to resolve the default authorization (for example: linear, jira). Provide this OR authorizationId. |
 | `authorizationId` | `string` | No | - | Explicit oauth_authorizations id to resolve. Takes precedence over provider when both are given. |
 | `minValiditySeconds` | `number` | No | 300 | Minimum remaining token lifetime required before returning it. |
+
+### data-query
+
+**Query drive files with SQL**
+
+Read-only DuckDB SQL over tabular files on your agent-fs drive (csv, tsv, parquet, json, ndjson, xlsx; `.gz` too), as your own agent-fs identity. Name a file in table position (`SELECT region, sum(amount) FROM '/shared/x/sales.csv' GROUP BY 1`) or bind it in `tables`. `DESCRIBE SELECT * FROM '<path>'` shows a schema. Aggregate in SQL rather than pulling rows. `card: true` also returns a uiSpec-ready card table (first 100 rows, 20 columns); `sheet: {path}` saves the result as a new sheet. Not for the swarm DB (use db-query). Limits: 30 s, 256 MB per file, 1,000 rows per call (10,000 from scripts).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sql` | `string` | Yes | - | One read-only DuckDB query. |
+| `tables` | `object` | No | - | Table name -> drive path, or {path, format} to override format detection. |
+| `maxRows` | `number` | No | - | Rows to return: default 100 (scripts 1000), at most 1000 (scripts 10000). |
+| `driveId` | `string` | No | - | Another drive in your org that your key can read. Default: your default drive. |
+| `card` | `boolean` | No | - | Also return `card`, a uiSpec spec with the result as a Table. |
+| `sheet` | `object` | No | - | New `.sheet.json` path; create-only. |
+| `origin` | `string` | No | - | Label for the usage event, e.g. `workflow`, `e2e` or `qa`. Default: the call path. |
 
 ### accept-steer
 
@@ -748,7 +766,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `scope` | `unknown` | No | - | Optional scope for named script resolution. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
 | `executor` | `unknown` | No | - | Optional executor override ("native" or "quickjs"). When omitted, named scripts use their saved executor or SCRIPT_EXECUTOR. |
-| `idempotencyKey` | `string` | No | - | When set, output is auto-persisted to kv under script:executions/{key}. Re-running with the same key overwrites. Queryable via kv-get. |
+| `idempotencyKey` | `string` | No | - | Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again. |
 
 ### script-upsert
 
@@ -1634,7 +1652,7 @@ Send a state and typed questions (noul, choice, score) to a SystemOne decision h
 
 **Request human input**
 
-Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, boolean, and config. Returns the request ID and URL for the human to respond. config asks a person to set one swarm config key on the dashboard; secrets are stored encrypted and you receive only {key, scope, isSecret, status, updatedAt}, never the value. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. No Slack message is sent; share the URL yourself.
+Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, boolean, and config. Returns the request ID and URL for the human to respond. config asks a person to set one swarm config key on the dashboard; secrets are stored encrypted and you receive only {key, scope, isSecret, status, updatedAt}, never the value. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and link an image or video to show it inline (the URL path ends in .png, .jpg, .gif, .webp, .mp4, .webm or .mov; for a URL without one, such as an agent-fs share /raw link, make the label the file name: ![demo.mp4](url)). No Slack message is sent; share the URL yourself.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1807,11 +1825,13 @@ Capability: `pages` (enabled by default)
 
 **Get an app**
 
-Get an app by ID, including its models, named queries, actions, and json-render pages definition.
+Get an app by ID, including its models, named queries, actions, and json-render pages definition. To edit, read less: outline: true returns the tree without props (pages with params and {nodeId: [type, childIds]}, model columns, queries, actions); path returns one subtree (dot path pages.main.elements.title or JSON pointer /pages/main/elements/title). Then change it with app-patch-node. A whole read also returns sourcesPath, the app's agent-fs folder for generators, backing-script drafts and NOTES.md (sourceFiles lists it when agent-fs is set up); read NOTES.md there first on a follow-up edit. For valid components, props and bindings, call app-catalog.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `appId` | `string` | Yes | - | App ID to retrieve. |
+| `path` | `string` | No | - | Return only this definition subtree: a dot path or a JSON pointer. |
+| `outline` | `boolean` | No | - | Return the definition outline without props instead of the whole app. |
 
 ### app-rows-list
 
@@ -1905,13 +1925,26 @@ Delete matching app rows. Supply at least one equality filter.
 
 **Run an app action**
 
-Run a declared app action as an agent. Scripts and extensions cannot invoke this tool.
+Run a declared app action as an agent. A script or task action returns `run` with `settled`; pass `waitSeconds` (up to 25) to wait for every run the action's script launched or called, then `app-action-status` while `run.settled` is false. Scripts and extensions cannot invoke this tool.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `appId` | `string` | Yes | - | - |
 | `action` | `unknown` | Yes | - | - |
 | `input` | `object` | No | - | - |
+| `waitSeconds` | `number` | No | - | Hold the call up to this many seconds (max 25) until the action's run settles. Default 0: return at once. |
+
+### app-action-status
+
+**Read or wait on an app action run**
+
+Read the run an `app-action-run` call returned (`run.id`). A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (up to 25) holds the call until the run settles. Use it instead of sleep loops on app rows.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | - |
+| `runId` | `string` | Yes | - | The `run.id` from app-action-run. |
+| `waitSeconds` | `number` | No | - | Hold the call up to this many seconds (max 25) until the run settles. |
 
 ### app-history
 
@@ -1948,7 +1981,7 @@ List app summaries without their definitions. Use app-get to inspect one app in 
 
 **Patch an app**
 
-Partially update an app, including zero-model pure-UI apps. userConfig defines versioned field schema while per-user values live outside definitions, survive rollback, and never need migration directives; userConfig.<field> entries are atomic. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, model columns, and userConfig fields are atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it.
+Partially update an app, including zero-model pure-UI apps. userConfig defines versioned field schema while per-user values live outside definitions, survive rollback, and never need migration directives; userConfig.<field> entries are atomic. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, model columns, and userConfig fields are atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it. ops applies JSON-pointer add/replace/remove/test instead; to change one page or element node prefer app-patch-node. Returns a compact summary (changed paths, issues, warnings, migration); includeApp adds the whole app, dryRun stores nothing.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1958,6 +1991,34 @@ Partially update an app, including zero-model pure-UI apps. userConfig defines v
 | `definition` | `object` | No | - | Definition merge patch. Objects merge recursively; arrays and scalars replace; null deletes. For elements.<name>, a value containing ONLY the elements key merges node-by-node; any mode/root/props/export key makes it a full replace, so restate every field to keep. Page-element, param, action, and column entries replace atomically. |
 | `migration` | `unknown` | No | - | Explicit per-column directives for lossy schema changes (set, from/map/else, coerce/else, or purge). |
 | `forceElementBreak` | `unknown` | No | - | Exported element names whose known consumers may be broken by this patch. Use only to abandon those consumers explicitly. |
+| `ops` | `array` | No | - | JSON-pointer ops instead of a merge patch: [{op: "add"|"replace"|"remove"|"test", path: "/pages/main/elements/title/props/text", value?}]. Applied in order; the first failing op (a failed test included) stores nothing and is reported at ops[<i>]. |
+| `dryRun` | `boolean` | No | - | Validate and plan the write, report changed paths and issues, store nothing. |
+| `includeApp` | `boolean` | No | - | Also return the whole stored app. Off by default: the response is the compact write summary. |
+
+### app-patch-node
+
+**Patch one app node**
+
+Edit one node of a page (page) or reusable element (element) without resending the definition, like patch-workflow-node. props merges one level into the node's props (null deletes a prop); set replaces node keys whole (type, props, children, on, visible, repeat, watch); remove deletes the node, unlinks it from its parent and drops its now-unreachable subtree; create adds nodeId under create.parentId at create.index. The result is validated like app-patch and snapshotted. A missing node returns the closest node ids. Returns a compact summary (changed paths, issues, warnings); includeApp adds the whole app, dryRun stores nothing. Read the node first with app-get {path}, or the tree with app-get {outline: true}.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID to patch. |
+| `dryRun` | `boolean` | No | - | Validate the edit and report changed paths and issues, store nothing. |
+| `includeApp` | `boolean` | No | - | Also return the whole stored app. Off by default. |
+
+### app-catalog
+
+**App component catalog**
+
+What an app page may contain, from the catalog the server validates against. No args: every component (one line, child slots) and action type. component: "Chart": its description, slots and props schema (prop: "columns" drills into one prop). action: "app.mutate": that action step's params. topic: "expressions": the binding reference ($state roots, route params and $param, $template, repeat/$item, watch, OnEnter.everyMs, visibility). Read this instead of guessing props.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `component` | `string` | No | - | Component type, e.g. Chart. |
+| `prop` | `string` | No | - | With component: return one prop's schema. |
+| `action` | `string` | No | - | Action step type, e.g. app.mutate. |
+| `topic` | `unknown` | No | - | Reference topic. |
 
 ### app-query
 

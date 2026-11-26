@@ -27,9 +27,10 @@ export type CliOptions = {
   timeoutMs?: number;
   /**
    * For a command that serves until stopped (`api`): runs while the child does, then the
-   * child gets SIGTERM. Its error fails the run after the child is stopped.
+   * child gets SIGTERM. Its error fails the run after the child is stopped. `stdout()` is the
+   * output so far, to wait for a line before the stop (Ink writes frames throttled).
    */
-  whileRunning?: () => Promise<void>;
+  whileRunning?: (child: { stdout: () => string }) => Promise<void>;
 };
 
 const calledCommands = new Set<string>();
@@ -126,22 +127,29 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
     timedOut = true;
     child.kill("SIGKILL");
   }, options.timeoutMs ?? 60_000);
-  const output = Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
+  let stdoutSoFar = "";
+  // Under --coverage the child is `bun test`, which prints its own banner first. Strip it from
+  // the live view too, so `whileRunning` sees the CLI's own first line.
+  const cliStdout = (raw: string) =>
+    wrapped ? raw.replace(/^bun test v\S+ \([0-9a-f]+\)\n/, "") : raw;
+  const readStdout = (async () => {
+    const decoder = new TextDecoder();
+    for await (const chunk of child.stdout) stdoutSoFar += decoder.decode(chunk, { stream: true });
+    stdoutSoFar += decoder.decode();
+    return stdoutSoFar;
+  })();
+  const output = Promise.all([readStdout, new Response(child.stderr).text()]);
   let duringError: unknown;
   if (options.whileRunning) {
     try {
-      await options.whileRunning();
+      await options.whileRunning({ stdout: () => cliStdout(stdoutSoFar) });
     } catch (error) {
       duringError = error;
     }
     child.kill("SIGTERM");
   }
   const [rawStdout, stderr] = await output;
-  // Under --coverage the child is `bun test`, which prints its own banner first.
-  const stdout = wrapped ? rawStdout.replace(/^bun test v\S+ \([0-9a-f]+\)\n/, "") : rawStdout;
+  const stdout = cliStdout(rawStdout);
   let exitCode = await child.exited;
   clearTimeout(timer);
   if (wrapped) {

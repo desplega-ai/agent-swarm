@@ -74,6 +74,7 @@ mock.module("@/api/fs", () => ({
     uploads.push(input);
     return {};
   },
+  deleteTaskAttachment: async () => {},
 }));
 // The DOM rasterizer: records what it was asked to capture and how.
 const captures: Array<{ node: HTMLElement; filter: (n: Node) => boolean }> = [];

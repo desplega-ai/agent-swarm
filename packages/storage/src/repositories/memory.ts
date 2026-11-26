@@ -381,8 +381,8 @@ export interface MemoryRepository {
   // ---- search arms (read through `reader` when given) ----
   /**
    * FTS arm: rows that match any of `terms` (each term a phrase), best first
-   * (`rank` ascending: bm25 on SQLite, minus ts_rank on Postgres). Each engine
-   * builds its own query from the terms; no terms match nothing.
+   * (`rank` ascending: bm25 on SQLite, minus the same bm25 score on Postgres).
+   * Each engine builds its own query from the terms; no terms match nothing.
    */
   searchFtsRows(
     terms: string[],
@@ -450,7 +450,8 @@ export interface MemoryRepository {
   // ---- run-time search indexes ----
   /**
    * The definition of the full-text index (the FTS5 CREATE text on SQLite, the
-   * GIN index definition on Postgres), or null when it does not exist.
+   * GIN index definition of `memory_fts` on Postgres), or null when it does not
+   * exist.
    */
   ftsTableSchema(): Promise<string | null>;
   /**
@@ -460,8 +461,8 @@ export interface MemoryRepository {
   vecTableSchema(reader?: MemoryReadExecutor): Promise<string | null>;
   /**
    * One batch of index rows after `afterRowid`, index order. Orphan: its memory
-   * is gone. An index with no rows of its own (Postgres: an expression index on
-   * agent_memory) returns none, and the FTS row writes below are no-ops there.
+   * is gone (Postgres has none: a foreign key deletes the row with its memory,
+   * and its rows come in the order of their memory's rowid).
    */
   scanFtsBatch(
     afterRowid: number,

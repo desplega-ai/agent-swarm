@@ -21,6 +21,7 @@ import {
 } from "./executors/types";
 import { HOST_VALIDATED_ARGS } from "./host-validated-args";
 import { validateScriptImports } from "./import-allowlist";
+import type { ScriptDbDialect } from "./script-db";
 
 /**
  * `capacity_exceeded` (see `ScriptExecutorError`) means the sandboxed process
@@ -72,6 +73,11 @@ export type RunScriptInput = {
    * calls so their writes get the same audit person. The api re-checks ownership.
    */
   sourceTaskId?: string;
+  /**
+   * Set when the run was started with an `idempotencyKey`: every `ctx.swarm`
+   * call in the run derives its own key from it (`<prefix>:<method>:<ordinal>`).
+   */
+  toolCallKeyPrefix?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   mcpBaseUrl?: string;
@@ -82,6 +88,11 @@ export type RunScriptInput = {
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
   agentFs?: ScriptAgentFsDescriptor;
+  /**
+   * SQL dialect of the swarm database, read by the api-side caller from the
+   * storage capability. It becomes `ctx.db.dialect`.
+   */
+  dbDialect?: ScriptDbDialect;
 };
 
 export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr"> & {
@@ -121,6 +132,9 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
       ...(input.sourceTaskId
         ? { auditSourceTaskId: { value: input.sourceTaskId, isSecret: false as const } }
         : {}),
+      ...(input.toolCallKeyPrefix
+        ? { toolCallKeyPrefix: { value: input.toolCallKeyPrefix, isSecret: false as const } }
+        : {}),
     },
     user: input.userConfig ?? {},
     durable: input.durable,
@@ -130,6 +144,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
     apiConnections: input.apiConnections ?? [],
     mcpConnections: input.mcpConnections ?? [],
     ...(input.agentFs ? { agentFs: input.agentFs } : {}),
+    ...(input.dbDialect ? { db: { dialect: input.dbDialect } } : {}),
   };
 }
 

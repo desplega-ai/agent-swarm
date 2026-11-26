@@ -513,10 +513,11 @@ describe("getValidCodexOAuth", () => {
         if (lockRes) return lockRes;
       }
 
-      if (method === "PUT") {
-        const body = JSON.parse(init?.body as string) as Record<string, unknown>;
-        putCapturedKey = body.key as string;
-        return new Response(JSON.stringify({ id: "cfg-1" }), { status: 200 });
+      if (method === "PUT" && urlStr.includes("/api/codex-oauth/slots/0/credentials")) {
+        const body = JSON.parse(init?.body as string) as { lockOwner: string };
+        // The refreshed slot is written under the lock this caller took.
+        if (body.lockOwner === "test-owner") putCapturedKey = "codex_oauth_0";
+        return new Response(JSON.stringify({ slot: 0, key: "codex_oauth_0" }), { status: 200 });
       }
 
       return new Response("Not Found", { status: 404 });
@@ -537,6 +538,60 @@ describe("getValidCodexOAuth", () => {
     const result = await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0);
     expect(result?.access).toBe("example-at_refreshed");
     expect(putCapturedKey).toBe("codex_oauth_0");
+  });
+
+  it("quarantines the slot under the lock when the persist is refused", async () => {
+    const expiredCreds = { ...mockCreds, expires: Date.now() - 1000 };
+    const calls: string[] = [];
+
+    globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      const method = init?.method || "GET";
+      if (method === "GET" && urlStr.includes("config/resolved")) {
+        return new Response(
+          JSON.stringify({
+            configs: [{ id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(expiredCreds) }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/api/oauth/refresh-locks/")) {
+        calls.push(`${method} lock`);
+        const lockRes = mockLockResponse(method);
+        if (lockRes) return lockRes;
+      }
+      if (urlStr.includes("/api/codex-oauth/slots/0/credentials")) {
+        const body = JSON.parse(init?.body as string) as { lockOwner: string };
+        calls.push(`${method} slot ${body.lockOwner}`);
+        if (method === "PUT") return new Response("lock not held", { status: 409 });
+        return new Response(JSON.stringify({ slot: 0, key: "codex_oauth_0", deleted: true }), {
+          status: 200,
+        });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    setFetchForTesting(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "example-at_refreshed",
+            refresh_token: "example-rt_refreshed",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0)).rejects.toThrow(
+      "Failed to store codex_oauth_0 config: HTTP 409",
+    );
+    expect(calls).toEqual([
+      "POST lock",
+      "PUT slot test-owner",
+      "DELETE slot test-owner",
+      "DELETE lock",
+    ]);
   });
 
   it("returns null when no credentials stored", async () => {
@@ -615,10 +670,11 @@ describe("getValidCodexOAuth", () => {
         const lockRes = mockLockResponse(method);
         if (lockRes) return lockRes;
       }
-      if (method === "PUT") {
-        const body = JSON.parse(init?.body as string) as Record<string, unknown>;
-        putCapturedKey = body.key as string;
-        return new Response(JSON.stringify({ id: "cfg-1" }), { status: 200 });
+      if (method === "PUT" && urlStr.includes("/api/codex-oauth/slots/0/credentials")) {
+        const body = JSON.parse(init?.body as string) as { lockOwner: string };
+        // The refreshed slot is written under the lock this caller took.
+        if (body.lockOwner === "test-owner") putCapturedKey = "codex_oauth_0";
+        return new Response(JSON.stringify({ slot: 0, key: "codex_oauth_0" }), { status: 200 });
       }
       return new Response("Not Found", { status: 404 });
     };
