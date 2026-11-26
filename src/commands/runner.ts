@@ -127,6 +127,11 @@ import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
+import {
+  TELEMETRY_OMITTED,
+  telemetryOmitsToolResult,
+  telemetryToolArgs,
+} from "../utils/tool-telemetry-redaction.ts";
 import { vcsRepoName, vcsRepoUrlMatches } from "../utils/vcs-repo-match.ts";
 import { canonicalAzureDevOpsRepoUrl, parseAzureDevOpsRepoUrl } from "../vcs/azure-devops.ts";
 import { bitbucketFullName, parseBitbucketRepoUrl } from "../vcs/bitbucket.ts";
@@ -707,6 +712,7 @@ async function pollAndStartSteeringDispatches(
               message.id,
               message.body,
               message.senderLabel ?? message.createdByKind,
+              message.attachments,
             )
           : undefined;
     }
@@ -4375,6 +4381,25 @@ function telemetryPreview(value: unknown): string | undefined {
   }
 }
 
+/** Tool span args preview; a `data-query` call keeps its SQL out of telemetry. */
+export function workerToolArgsPreview(mcpTool: string | undefined, args: unknown) {
+  return telemetryPreview(telemetryToolArgs(mcpTool, args));
+}
+
+/** Tool span result preview; a `data-query` result (file rows) never reaches telemetry. */
+export function workerToolResultPreview(mcpTool: string | undefined, result: unknown) {
+  return telemetryOmitsToolResult(mcpTool) ? TELEMETRY_OMITTED : telemetryPreview(result);
+}
+
+/**
+ * The tool id the telemetry redaction policy keys on: the MCP tool name when the
+ * harness reports one, else the raw tool name (an OpenCode `swarm_<tool>` id, or
+ * a bare name on a tool_end with no recorded start).
+ */
+export function telemetryToolId(toolName: string, args: unknown): string {
+  return classifyTool(toolName, args).mcpTool ?? toolName;
+}
+
 type ToolTelemetry = {
   kind: "mcp" | "harness" | "skill" | "agent" | "shell" | "file" | "unknown";
   name: string;
@@ -4558,6 +4583,8 @@ export function withHarnessTelemetryEnv(
 export type ActiveToolSpanEntry = {
   span: SwarmSpan;
   startedAt: number;
+  /** Redaction tool id from tool_start (`telemetryToolId`), so tool_end can redact its result. */
+  mcpTool?: string;
 };
 
 /**
@@ -4887,6 +4914,9 @@ export async function spawnProviderProcess(
     "agentswarm.session.vcs_repo": opts.vcsRepo,
     "gen_ai.request.model": model || undefined,
   });
+  // The harness sends its swarm MCP calls itself, with headers fixed at spawn,
+  // so `worker.session` is the closest span a `POST /mcp` can name as parent.
+  config.traceHeaders = withSpanContext(sessionSpan, () => injectTraceContext({}));
 
   const session = await withSpanContext(sessionSpan, () =>
     withSpan(
@@ -5033,13 +5063,7 @@ export async function spawnProviderProcess(
   let sessionIdReport = Promise.resolve();
   let acpStatusReport: Promise<void> | undefined;
   let runningTaskForSessionInit: RunningTask | undefined;
-  const activeToolSpans = new Map<
-    string,
-    {
-      span: SwarmSpan;
-      startedAt: number;
-    }
-  >();
+  const activeToolSpans = new Map<string, ActiveToolSpanEntry>();
   // sessionSpan was created above (before provider-session creation). Stamp the
   // provider session ID now that it exists; it's refreshed on `session_init`.
   if (providerSessionId) {
@@ -5208,6 +5232,7 @@ export async function spawnProviderProcess(
         }
         case "tool_start": {
           const tool = classifyTool(event.toolName, event.args);
+          const redactionId = telemetryToolId(event.toolName, event.args);
           const toolSpan = startSpan(tool.kind === "mcp" ? "worker.mcp.tool" : "worker.tool", {
             "agent.id": opts.agentId,
             "agentswarm.task.id": effectiveTaskId,
@@ -5221,11 +5246,12 @@ export async function spawnProviderProcess(
             "agentswarm.tool.call_id": event.toolCallId,
             "mcp.server.name": tool.mcpServer,
             "mcp.tool.name": tool.mcpTool,
-            "agentswarm.tool.args_preview": telemetryPreview(event.args),
+            "agentswarm.tool.args_preview": workerToolArgsPreview(redactionId, event.args),
           });
           activeToolSpans.set(event.toolCallId, {
             span: toolSpan,
             startedAt: Date.now(),
+            mcpTool: redactionId,
           });
 
           // Auto-progress: report tool activity as task progress (throttled)
@@ -5269,7 +5295,10 @@ export async function spawnProviderProcess(
           if (active) {
             active.span.setAttributes({
               "agentswarm.tool.duration_ms": now - active.startedAt,
-              "agentswarm.tool.result_preview": telemetryPreview(event.result),
+              "agentswarm.tool.result_preview": workerToolResultPreview(
+                active.mcpTool,
+                event.result,
+              ),
             });
             active.span.setStatus({ code: 1 });
             active.span.end();
@@ -5289,7 +5318,10 @@ export async function spawnProviderProcess(
               "agentswarm.tool.call_id": event.toolCallId,
               "mcp.server.name": tool.mcpServer,
               "mcp.tool.name": tool.mcpTool,
-              "agentswarm.tool.result_preview": telemetryPreview(event.result),
+              "agentswarm.tool.result_preview": workerToolResultPreview(
+                telemetryToolId(event.toolName, undefined),
+                event.result,
+              ),
               "agentswarm.tool.missing_start": true,
             });
             span.end();

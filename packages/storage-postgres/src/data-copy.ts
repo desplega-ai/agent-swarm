@@ -24,8 +24,9 @@ import { loadPostgresMigrations, runPostgresMigrations } from "./migrations";
  * target with any table is refused (2); user triggers are off during the copy (3);
  * each value is converted to the type of its target column (4); a value the
  * target cannot store is reported, never dropped (5); the vector table is built
- * from the copied embeddings, full text needs no rebuild because it is an
- * expression index (6); identity sequences restart past the copied keys (7);
+ * from the copied embeddings, the memory full-text table from the copied
+ * memories and the task search documents from the copied tasks (6); identity
+ * sequences restart past the copied keys (7);
  * row counts and checksums of normalized values are compared per table (8); the
  * caller exits non-zero when `ok` is false (9).
  */
@@ -542,7 +543,7 @@ function copyMetadataProblem(migrationsDir: string): string | null {
     try {
       format = (JSON.parse(readFileSync(file, "utf8")) as { format?: unknown }).format;
     } catch (error) {
-      return `${file} is not valid JSON: ${(error instanceof Error ? error.message : String(error))}`;
+      return `${file} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
     }
     if (format !== COPY_METADATA_FORMAT) {
       return (
@@ -621,7 +622,7 @@ async function planReadOnly(url: string, query: MetricQuery): Promise<string | n
         );
         return null;
       } catch (error) {
-        return (error instanceof Error ? error.message : String(error));
+        return error instanceof Error ? error.message : String(error);
       } finally {
         await conn.unsafe("ROLLBACK").catch(() => {});
       }
@@ -781,7 +782,7 @@ export async function copyIntoPostgres(
     try {
       conn = (await pool.reserve()) as unknown as Conn;
     } catch (error) {
-      report.error = `cannot connect to the target database: ${(error instanceof Error ? error.message : String(error))}`;
+      report.error = `cannot connect to the target database: ${error instanceof Error ? error.message : String(error)}`;
       return report;
     }
     try {
@@ -841,7 +842,7 @@ export async function copyIntoPostgres(
 
         const sourceTables = source.tables();
         const sourceNames = new Set(sourceTables.map((t) => t.name));
-        const rebuiltTables = new Set(["memory_vec"]);
+        const rebuiltTables = new Set(["memory_vec", "memory_fts", "agent_tasks_search"]);
         const missing = sourceTables.filter((t) => !targets.has(t.name)).map((t) => t.name);
         const extra = [...targets.keys()].filter(
           (name) => name !== "_migrations" && !sourceNames.has(name) && !rebuiltTables.has(name),
@@ -963,6 +964,37 @@ export async function copyIntoPostgres(
             table: "memory_vec",
             rows: vectors,
             reason: `vectors of the agent_memory embeddings with ${options.embeddingDimensions} dimensions`,
+          });
+        }
+        // The copy writes with user triggers off and the migration that fills
+        // memory_fts ran on empty tables: build one text-search document per
+        // copied memory, with the functions the memory store writes with.
+        if (targets.has("memory_fts")) {
+          log("[db-copy] building the full-text documents of agent_memory (memory_fts)");
+          const result = (await conn.unsafe(
+            `INSERT INTO memory_fts (memory_id, doc, doc_len)
+             SELECT s.id, s.doc, memory_fts_length(s.doc)
+               FROM (SELECT id, memory_fts_document(name, content) AS doc FROM agent_memory) s`,
+          )) as { count?: number };
+          report.rebuilt.push({
+            table: "memory_fts",
+            rows: Number(result.count ?? 0),
+            reason: "full-text documents of the copied agent_memory rows",
+          });
+        }
+        // The copy writes with user triggers off, after the chain ran on empty
+        // tables: build one search document row per copied task (migration
+        // 391), with the function the tasks repository writes with.
+        if (targets.has("agent_tasks_search")) {
+          log("[db-copy] building the task search documents (agent_tasks_search)");
+          const result = (await conn.unsafe(
+            `INSERT INTO agent_tasks_search (task_id, task_doc, title_doc)
+             SELECT id, task_search_document(task), task_search_document(title) FROM agent_tasks`,
+          )) as { count?: number };
+          report.rebuilt.push({
+            table: "agent_tasks_search",
+            rows: Number(result.count ?? 0),
+            reason: "task search documents of the copied agent_tasks rows",
           });
         }
 
@@ -1109,7 +1141,7 @@ export async function copyIntoPostgres(
               table: "metrics",
               column: pending.where,
               row: pending.row,
-              reason: `could not be checked on Postgres: ${(error instanceof Error ? error.message : String(error))}`,
+              reason: `could not be checked on Postgres: ${error instanceof Error ? error.message : String(error)}`,
             });
             continue;
           }
@@ -1126,7 +1158,7 @@ export async function copyIntoPostgres(
         return report;
       } catch (error) {
         if (!committed) await conn.unsafe("ROLLBACK").catch(() => {});
-        report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${(error instanceof Error ? error.message : String(error))}`;
+        report.error = `copy failed${committed ? " after commit" : ", nothing was written"}: ${error instanceof Error ? error.message : String(error)}`;
         return report;
       } finally {
         // An early refusal returns without COMMIT: undo the chain and every write.
@@ -1135,7 +1167,7 @@ export async function copyIntoPostgres(
     } catch (error) {
       // A failure before the copy transaction (target inspection):
       // it still goes into the report, so --json is written.
-      report.error = `the copy did not start, no row was copied: ${(error instanceof Error ? error.message : String(error))}`;
+      report.error = `the copy did not start, no row was copied: ${error instanceof Error ? error.message : String(error)}`;
       return report;
     } finally {
       await conn.unsafe("SELECT pg_advisory_unlock($1)", [PROCESS_LOCK_KEY]).catch(() => {});

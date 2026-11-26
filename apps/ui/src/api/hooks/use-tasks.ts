@@ -560,6 +560,8 @@ export interface SteerTaskInput {
   requestedByUserId?: string;
   /** Originating surface; the client defaults to "ui". App pages send "app-page". */
   source?: SteeringSource;
+  /** Attachments already uploaded to the task; the worker gets a fetch command for each. */
+  attachmentIds?: string[];
 }
 
 /**
@@ -571,8 +573,14 @@ export interface SteerTaskInput {
 export function useSteerTask() {
   const queryClient = useQueryClient();
   return useMutation<SteerResult, Error, SteerTaskInput, TaskMutationContext>({
-    mutationFn: ({ id, message, mode, requestedByUserId, source }) =>
-      api.steerTask(id, { message, mode, requestedByUserId, source }),
+    mutationFn: ({ id, message, mode, requestedByUserId, source, attachmentIds }) =>
+      api.steerTask(id, {
+        message,
+        mode,
+        requestedByUserId,
+        source,
+        ...(attachmentIds?.length ? { attachmentIds } : {}),
+      }),
     onMutate: async ({ id }) => {
       await queryClient.cancelQueries({ queryKey: ["task", id, "steering-messages"] });
       return snapshotTaskQueries(queryClient, id);

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { isConstraintViolation, type TransactionObservation } from "@desplega/storage";
-import { createPostgresClient, type PostgresClient } from "../src";
+import { acquireProcessLock, createPostgresClient, type PostgresClient } from "../src";
 import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 
 // The driver seam on Postgres: pool, pinned transactions, savepoints, the
@@ -80,6 +80,20 @@ describe("postgres client", () => {
     ).toBe("read committed");
   });
 
+  test("JIT is off on every pooled connection, whatever the server default", async () => {
+    // The server default stays on (Postgres ships with jit = on): only the pool turns it off.
+    const raw = new Bun.SQL({ url: scratch.url, max: 1 });
+    try {
+      expect((await raw.unsafe(`SELECT current_setting('jit') AS j`))[0].j).toBe("on");
+    } finally {
+      await raw.close();
+    }
+    const jit = async () =>
+      String((await client.get<{ j: string }>(`SELECT current_setting('jit') AS j`))?.j);
+    const settings = await Promise.all([jit(), jit(), jit(), jit(), client.transaction(jit)]);
+    expect(settings).toEqual(["off", "off", "off", "off", "off"]);
+  });
+
   test("a nested transaction is a savepoint: its failure keeps the outer one usable", async () => {
     await client.transaction(async () => {
       await client.run(`INSERT INTO t VALUES ('s1', 'x', 0)`);
@@ -155,9 +169,90 @@ describe("postgres client", () => {
     expect(seen).toEqual(["attempt", "rollback"]);
   });
 
+  // A pooled read that runs between an UPDATE and its COMMIT sees the old row.
+  // A cache keyed on a write epoch must bump it again at COMMIT, before the
+  // writer's caller continues: `onCommit` runs then, `afterCommit` a turn later.
+  test("onCommit runs after COMMIT and before transaction() resolves; afterCommit stays deferred", async () => {
+    await client.run(`INSERT INTO t VALUES ('oc', 'old', 1)`);
+    const seen: string[] = [];
+    let release!: () => void;
+    const wrote = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Started outside the transaction: it reads on the pool.
+    const concurrent = (async () => {
+      await wrote;
+      return client.get<{ camelCol: string }>(`SELECT "camelCol" FROM t WHERE id = 'oc'`);
+    })();
+    await client.transaction(async () => {
+      await client.run(`UPDATE t SET "camelCol" = 'new' WHERE id = 'oc'`);
+      client.onCommit(() => seen.push("onCommit"));
+      client.afterCommit(() => {
+        seen.push("afterCommit");
+      });
+      await client.transaction(async () => {
+        client.onCommit(() => seen.push("released savepoint"));
+      });
+      await expect(
+        client.transaction(async () => {
+          client.onCommit(() => seen.push("rolled-back savepoint"));
+          throw new Error("inner");
+        }),
+      ).rejects.toThrow("inner");
+      release();
+      expect((await concurrent)?.camelCol).toBe("old");
+      expect(seen).toEqual([]);
+    });
+    expect(seen).toEqual(["onCommit", "released savepoint"]);
+    await tick();
+    expect(seen).toEqual(["onCommit", "released savepoint", "afterCommit"]);
+
+    seen.length = 0;
+    await expect(
+      client.transaction(async () => {
+        client.onCommit(() => seen.push("rolled-back outer"));
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    client.onCommit(() => seen.push("no transaction"));
+    expect(seen).toEqual(["no transaction"]);
+  });
+
+  // A fenced autocommit write runs in its own transaction: an observer that
+  // registers `onCommit` for it (the API's request memo) sees it run before
+  // the write resolves.
+  test("a fenced autocommit write runs the onCommit hooks its statement registered before it resolves", async () => {
+    const lock = await acquireProcessLock(scratch.url, { waitMs: 0 });
+    const seen: string[] = [];
+    const fenced: PostgresClient = createPostgresClient(scratch.url, {
+      max: 2,
+      fence: { ownerPid: lock.pid, ownerBackendStart: lock.backendStart },
+      observer: {
+        onStatement: (sql) => {
+          if (sql.startsWith("UPDATE") && fenced.inTransaction()) {
+            fenced.onCommit(() => seen.push("onCommit"));
+            fenced.afterCommit(() => {
+              seen.push("afterCommit");
+            });
+          }
+        },
+      },
+    });
+    try {
+      await fenced.run(`UPDATE t SET "camelCol" = 'fenced' WHERE id = 'oc'`);
+      expect(seen).toEqual(["onCommit"]);
+      await tick();
+      expect(seen).toEqual(["onCommit", "afterCommit"]);
+    } finally {
+      await fenced.close();
+      await lock.release();
+    }
+  });
+
   test("a serialization failure retries the whole callback; failed attempts' hooks are discarded", async () => {
     await client.run(`INSERT INTO t VALUES ('ctr', 'x', 0)`);
     const commits: number[] = [];
+    const syncCommits: number[] = [];
     let attempts = 0;
     let attemptRollbacks = 0;
     const bump = (label: number) =>
@@ -170,12 +265,14 @@ describe("postgres client", () => {
         client.afterCommit(() => {
           commits.push(label);
         });
+        client.onCommit(() => syncCommits.push(label));
       });
     const before = client.retriedAttempts;
     await Promise.all([bump(1), bump(2), bump(3)]);
     await tick();
     expect((await client.get<{ n: number }>(`SELECT n FROM t WHERE id = 'ctr'`))?.n).toBe(3);
     expect(commits.sort()).toEqual([1, 2, 3]);
+    expect(syncCommits.sort()).toEqual([1, 2, 3]);
     expect(client.retriedAttempts).toBeGreaterThan(before);
     expect(attempts).toBe(3 + (client.retriedAttempts - before));
     expect(attemptRollbacks).toBe(client.retriedAttempts - before);

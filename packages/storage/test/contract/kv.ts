@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { KvRepository, KvRow, Storage } from "../../src";
-import { sql } from "../../src";
+import { KV_BATCH_KEYS, KV_BATCH_ROWS, sql } from "../../src";
 import type { ContractEngine } from "./env";
 
 const NOW = 1_800_000_000_000;
@@ -113,6 +113,65 @@ export function kvContract(engine: ContractEngine): void {
       expect((await repo.findEntry("ns", "k"))?.updated_at).toBe(7);
       expect(await repo.deleteEntry("ns", "k")).toBe(1);
       expect(await repo.deleteEntry("ns", "k")).toBe(0);
+    });
+
+    test("compare-and-set: replace and delete only while the value matches, expired or not", async () => {
+      await repo.upsertEntry(entry("ns", "cas", { value: '"a"', expires_at: 5 }));
+      const next = entry("ns", "cas", { value: '"b"', expires_at: 50, updated_at: 9 });
+      expect(await repo.replaceEntryIfValue(next, '"x"')).toBe(0);
+      expect(await repo.replaceEntryIfValue(next, '"a"')).toBe(1);
+      expect(await repo.findEntry("ns", "cas")).toEqual(
+        entry("ns", "cas", { value: '"b"', expires_at: 50, updated_at: 9 }),
+      );
+      expect(await repo.replaceEntryIfValue(entry("ns", "none"), '"a"')).toBe(0);
+      expect(await repo.deleteEntryIfValue("ns", "cas", '"a"')).toBe(0);
+      expect(await repo.deleteEntryIfValue("ns", "cas", '"b"')).toBe(1);
+      expect(await repo.findEntry("ns", "cas")).toBeNull();
+    });
+
+    test("batch upsert: keeps created_at, last duplicate wins, spans several statements", async () => {
+      await repo.upsertEntry(entry("ns", "old", { expires_at: 5 }));
+      await repo.upsertEntries([]);
+      await repo.upsertEntries([
+        entry("ns", "old", { value: "2", value_type: "integer", created_at: 9, updated_at: 9 }),
+        entry("ns", "new", { value: '"first"' }),
+        entry("other", "new"),
+        entry("ns", "new", { value: '"last"', updated_at: 3 }),
+      ]);
+      expect(await repo.findEntry("ns", "old")).toEqual(
+        entry("ns", "old", { value: "2", value_type: "integer", created_at: 1, updated_at: 9 }),
+      );
+      expect(await repo.findEntry("ns", "new")).toEqual(
+        entry("ns", "new", { value: '"last"', updated_at: 3 }),
+      );
+      expect(await repo.findEntry("other", "new")).toEqual(entry("other", "new"));
+
+      const many = Array.from({ length: KV_BATCH_ROWS * 2 + 1 }, (_, i) =>
+        entry("bulk", `k${String(i).padStart(4, "0")}`, { value: String(i) }),
+      );
+      await repo.upsertEntries(many);
+      expect(await repo.countLiveEntries("bulk", NOW, {})).toBe(many.length);
+    });
+
+    test("batch find and delete: listed keys only, expired rows included, any key count", async () => {
+      await repo.upsertEntry(entry("ns", "a"));
+      await repo.upsertEntry(entry("ns", "b", { expires_at: 1 }));
+      await repo.upsertEntry(entry("ns", "c"));
+      await repo.upsertEntry(entry("other", "a"));
+      const found = await repo.findEntries("ns", ["b", "a", "missing", "a"]);
+      expect(found.map((r) => r.key).sort()).toEqual(["a", "b"]);
+      expect(found.find((r) => r.key === "b")).toEqual(entry("ns", "b", { expires_at: 1 }));
+      expect(await repo.findEntries("ns", [])).toEqual([]);
+      expect(await repo.deleteEntries("ns", [])).toBe(0);
+      expect(await repo.deleteEntries("ns", ["a", "b", "missing"])).toBe(2);
+      expect(await repo.findEntry("ns", "c")).not.toBeNull();
+      expect(await repo.findEntry("other", "a")).not.toBeNull();
+
+      const keys = Array.from({ length: KV_BATCH_KEYS + 1 }, (_, i) => `k${i}`);
+      await repo.upsertEntries(keys.map((key) => entry("wide", key)));
+      expect((await repo.findEntries("wide", keys)).length).toBe(keys.length);
+      expect(await repo.deleteEntries("wide", keys)).toBe(keys.length);
+      expect(await repo.countLiveEntries("wide", NOW, {})).toBe(0);
     });
 
     test("expiry sweeps: one namespace, and a namespace family in batches", async () => {

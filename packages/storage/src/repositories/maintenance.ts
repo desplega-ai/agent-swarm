@@ -97,6 +97,20 @@ export abstract class BaseMaintenanceRepository implements MaintenanceRepository
     expect: Readonly<Record<string, DbParam>>,
     expectNull: readonly string[],
   ): Promise<boolean> {
+    const result = await this.db.run(
+      this.compareAndSetStatement(target, id, set, expect, expectNull),
+    );
+    return result.changes > 0;
+  }
+
+  /** The UPDATE of `compareAndSetRow`, with no RETURNING clause. */
+  protected compareAndSetStatement(
+    target: KeyedTextTable,
+    id: string,
+    set: Readonly<Record<string, DbParam>>,
+    expect: Readonly<Record<string, DbParam>>,
+    expectNull: readonly string[],
+  ): SqlQuery {
     const sets = sqlJoin(
       Object.entries(set).map(([column, value]) => sql`${sqlIdent(column)} = ${value}`),
       sql`, `,
@@ -108,10 +122,9 @@ export abstract class BaseMaintenanceRepository implements MaintenanceRepository
       ...expectNull.map((column) => sql`${sqlIdent(column)} IS NULL`),
     ];
     const guard = guards.length === 0 ? sql`` : sql` AND ${sqlJoin(guards, sql` AND `)}`;
-    const result = await this.db.run(sql`
+    return sql`
       UPDATE ${sqlIdent(target.table)} SET ${sets}
-      WHERE ${this.filter(target)}${sqlIdent(target.idColumn)} = ${id}${guard}`);
-    return result.changes > 0;
+      WHERE ${this.filter(target)}${sqlIdent(target.idColumn)} = ${id}${guard}`;
   }
 
   private filter(target: KeyedTextTable): SqlQuery {

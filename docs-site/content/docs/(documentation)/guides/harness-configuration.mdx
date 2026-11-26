@@ -678,7 +678,7 @@ behavior, and cost tracking.
 ## Cursor
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY`. The defaults are
-`gpt-5.4-mini`, `claude-sonnet-5-5`, `claude-opus-5-5`, and
+`gpt-5.6-luna`, `claude-sonnet-5-5`, `claude-opus-5-5`, and
 `claude-fable-5-1` for `smol` through `ultra`; the SDK resolves them against
 the account's model list. Cursor passes supported reasoning effort through the
 model's own parameter, wires swarm MCP, and supports steer and queue. Sessions
@@ -700,8 +700,8 @@ details.
 Set `HARNESS_PROVIDER=fx` and one of `OPENROUTER_API_KEY` (for
 `openrouter/<vendor>/<id>`), `OPENAI_API_KEY` (for a bare id) or
 `AI_GATEWAY_API_KEY` (for `vercel/<vendor>/<id>`). Tier defaults are
-`openrouter/deepseek/deepseek-v4.1-flash` for `smol` and `regular`,
-`openrouter/deepseek/deepseek-v4-pro-0813` for `smart` and
+`openrouter/deepseek/deepseek-v4.1-flash-1017` for `smol` and `regular`,
+`openrouter/moonshotai/kimi-k3.1-pro` for `smart` and
 `openrouter/anthropic/claude-opus-5.5` for `ultra`. fx includes swarm MCP,
 steers natively and resumes sessions. Cost is a pricing-table estimate. fx
 ships only in `worker-full`. See [Provider Auth: fx](/docs/guides/provider-auth/fx)
@@ -773,8 +773,8 @@ ANTHROPIC_API_KEY=sk-ant-api-key1,sk-ant-api-key2
 
 Each session selects one available credential from the pool in three steps. First, it keeps the keys within 0.10 of the lowest score. Second, among those, it keeps the keys with the fewest running sessions (`in_progress` tasks on that key). Third, it breaks ties at random. `CREDENTIAL_SELECTION_STRATEGY` sets the score:
 
-- `usage` (default): the higher of the key's live 5-hour and 7-day utilization. A reset or unobserved window counts as 0.
-- `pace`: the key's pace delta. For each live window, it is the utilization minus the share of the window that has passed (the even-use point the dashboard Usage page draws). The key's score is its highest delta across the 5-hour and 7-day windows, plus the weekly window of the task's model family (Fable, Opus or Sonnet) when it has one. The most under-pace key wins, so a key with 39% used two days before its weekly reset goes before a key with 18% used five days before it. A key over pace on any of those windows ranks behind the keys under pace on all of them. A key with no live window scores 0.
+- `usage`: the higher of the key's live 5-hour and 7-day utilization. A reset or unobserved window counts as 0.
+- `pace` (default): the key's pace delta. For each live window, it is the utilization minus the share of the window that has passed (the even-use point the dashboard Usage page draws). The key's score is its highest delta across the 5-hour and 7-day windows, plus the weekly window of the task's model family (Fable, Opus or Sonnet) when it has one. The most under-pace key wins, so a key with 39% used two days before its weekly reset goes before a key with 18% used five days before it. A key over pace on any of those windows ranks behind the keys under pace on all of them. A key with no live window scores 0.
 
 The score only orders the pick: no score excludes a key. Codex OAuth slots still pick at random. A log line shows the selected index, its usage, its pace delta and the strategy (never the credential itself). Single values work unchanged.
 

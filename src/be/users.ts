@@ -269,6 +269,43 @@ export async function listUserTokens(userId: string): Promise<UserTokenSummary[]
   return usersRepo().listUserTokens(userId);
 }
 
+export type UserListDetails = {
+  identities: Array<{ kind: string; externalId: string }>;
+  tokens: UserTokenSummary[];
+  recentEvents: IdentityEvent[];
+};
+
+/**
+ * Each user with `getUserIdentities` + `listUserTokens` + `listUserEvents({ limit })`
+ * attached, read in three statements for the whole list instead of three per user.
+ */
+export async function withUserListDetails<T extends { id: string }>(
+  users: T[],
+  recentEventLimit: number,
+): Promise<Array<T & UserListDetails>> {
+  const userIds = users.map((u) => u.id);
+  const limit = Math.max(0, Math.min(recentEventLimit, 200));
+  // shortcut: one IN list of every id, bounded by the engine's bind-parameter cap
+  // (32766 on SQLite); chunk the ids if a swarm ever has that many users.
+  const [identities, tokens, events] = await Promise.all([
+    usersRepo().listExternalIdsForUsers(userIds),
+    usersRepo().listUserTokensForUsers(userIds),
+    usersRepo().listRecentIdentityEventsForUsers(userIds, limit),
+  ]);
+  const details = new Map<string, UserListDetails>(
+    userIds.map((id) => [id, { identities: [], tokens: [], recentEvents: [] }]),
+  );
+  for (const { userId, kind, externalId } of identities) {
+    details.get(userId)?.identities.push({ kind, externalId });
+  }
+  for (const token of tokens) details.get(token.userId)?.tokens.push(token);
+  for (const event of events) details.get(event.userId)?.recentEvents.push(rowToEvent(event));
+  return users.map((u) => ({
+    ...u,
+    ...(details.get(u.id) ?? { identities: [], tokens: [], recentEvents: [] }),
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Event audit
 // ---------------------------------------------------------------------------

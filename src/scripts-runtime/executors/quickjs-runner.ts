@@ -14,6 +14,7 @@ import { SDK_NAMESPACES, type SdkNamespaceRegistry } from "../sdk-allowlist";
 import { runtimeFetch } from "../stdlib/fetch";
 import { table } from "../stdlib/table";
 import { SwarmConfig } from "../swarm-config";
+import { type SwarmToolErrorInit, swarmToolErrorFields } from "../swarm-tool-error";
 import { bundleForQuickJS, USER_SCRIPT_FILE } from "./quickjs-bundle";
 import { SANDBOX_EPILOGUE, SANDBOX_PRELUDE } from "./quickjs-prelude";
 import { SANDBOX_STRUCTURED_CLONE } from "./quickjs-structured-clone";
@@ -81,7 +82,11 @@ const MAX_STACK_BYTES = 1024 * 1024;
 const MAX_RANDOM_BYTES = 1024 * 1024;
 const TIMEOUT_EXIT_CODE = 124;
 
-type ErrorPayload = { name: string; message: string; stack: string };
+type ErrorPayload = {
+  name: string;
+  message: string;
+  stack: string;
+} & Partial<Pick<SwarmToolErrorInit, "code" | "tool" | "status" | "suggestions">>;
 type Outcome = { ok: true; result: unknown } | { ok: false; error: ErrorPayload };
 
 class CappedLog {
@@ -112,7 +117,13 @@ class CappedLog {
 
 function errorPayload(error: unknown): ErrorPayload {
   if (error instanceof Error) {
-    return { name: error.name || "Error", message: error.message, stack: error.stack ?? "" };
+    // A SwarmToolError keeps code/tool/status so the sandbox can rebuild it.
+    return {
+      name: error.name || "Error",
+      message: error.message,
+      stack: error.stack ?? "",
+      ...swarmToolErrorFields(error),
+    };
   }
   if (error && typeof error === "object" && "message" in error) {
     const record = error as Record<string, unknown>;

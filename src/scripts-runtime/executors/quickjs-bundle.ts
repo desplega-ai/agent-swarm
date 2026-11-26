@@ -1,4 +1,5 @@
 import { DURABLE_OBJECT_BASE_JS } from "../durable-object-base";
+import { SWARM_TOOL_ERROR_CODES, SWARM_TOOL_ERROR_JS } from "../swarm-tool-error";
 import { SourceMapReader } from "./sourcemap";
 
 /**
@@ -30,6 +31,9 @@ export const Redacted = s.Redacted;
 
 const SWARM_SDK_MODULE = `${DURABLE_OBJECT_BASE_JS}
 export { DurableObject };
+// The prelude already created the class; this returns the same global one.
+export const SwarmToolError = ${SWARM_TOOL_ERROR_JS};
+export const SWARM_TOOL_ERROR_CODES = ${JSON.stringify(SWARM_TOOL_ERROR_CODES)};
 export function createSwarmSdk() {
   return globalThis.__swarm_ctx.swarm;
 }

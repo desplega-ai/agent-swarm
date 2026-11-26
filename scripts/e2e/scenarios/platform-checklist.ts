@@ -8,6 +8,8 @@ export const platformChecklist: Scenario = {
   name: "platform-checklist",
   order: 652,
   async run(ctx) {
+    // Keep an active admin when the checklist user becomes a requester on a fresh stack.
+    await createUser(ctx, "checklist-admin");
     const userId = await createUser(ctx, "checklist");
     expectStatus(
       await ctx.api("PUT", `/api/users/${userId}/roles`, {

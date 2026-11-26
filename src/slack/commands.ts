@@ -82,7 +82,7 @@ export function registerCommandHandler(app: App): void {
     await ack();
     console.log("[Slack] /agent-swarm-help command invoked");
 
-    const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);
+    const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", true);
 
     const sections = [
       `*How to assign tasks:*

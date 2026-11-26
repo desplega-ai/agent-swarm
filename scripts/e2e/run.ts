@@ -48,6 +48,7 @@ import {
   printTotals,
   type ScenarioResult,
   SkipError,
+  type StorageCounts,
   writeReports,
 } from "./report";
 import { rerunPlan, settleRerun } from "./rerun";
@@ -488,6 +489,93 @@ async function bootStack(options: Options, manifest: CoverageManifest, journalPa
   }
 }
 
+type ProcessWriteStats = {
+  commits: number;
+  readOnlyCommits: number;
+  rollbacks: number;
+  writeStatements: number;
+  windows: Record<
+    string,
+    {
+      requests: number;
+      maxRequestCommits: number;
+      maxRequestCommitsPath: string;
+      maxRequestWriteStatements: number;
+      maxRequestWriteStatementsPath: string;
+    }
+  >;
+};
+
+/**
+ * `--write-stats`: the file of each API process of the run (src/be/write-stats.ts). Each
+ * is cumulative and rewritten after each transaction, so processes that started or
+ * stopped during a scenario count too.
+ */
+async function readWriteStats(dir: string): Promise<ProcessWriteStats[]> {
+  const files = [...new Bun.Glob("*.json").scanSync(dir)];
+  return Promise.all(
+    files.map(async (file) => (await Bun.file(`${dir}/${file}`).json()) as ProcessWriteStats),
+  );
+}
+
+/** The API processes read this file at each request start: requests then belong to `name`. */
+async function setWriteStatsWindow(dir: string, name: string): Promise<void> {
+  await Bun.write(`${dir}/window.tmp`, name);
+  await Bun.$`mv -f ${`${dir}/window.tmp`} ${`${dir}/window`}`.quiet();
+}
+
+function sumTotals(stats: ProcessWriteStats[]) {
+  return stats.reduce(
+    (sum, s) => ({
+      commits: sum.commits + s.commits,
+      readOnlyCommits: sum.readOnlyCommits + s.readOnlyCommits,
+      rollbacks: sum.rollbacks + s.rollbacks,
+      writeStatements: sum.writeStatements + s.writeStatements,
+    }),
+    { commits: 0, readOnlyCommits: 0, rollbacks: 0, writeStatements: 0 },
+  );
+}
+
+/** `http POST api/apps/<uuid>` becomes `http POST api/apps/:id`, so two runs compare. */
+function requestLabel(path: string): string {
+  return path.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ":id");
+}
+
+/** Totals are differences of the sums; the request maximums come from the scenario's window. */
+function scenarioCounts(
+  name: string,
+  before: ProcessWriteStats[],
+  after: ProcessWriteStats[],
+): StorageCounts {
+  const start = sumTotals(before);
+  const end = sumTotals(after);
+  const counts: StorageCounts = {
+    commits: end.commits - start.commits,
+    readOnlyCommits: end.readOnlyCommits - start.readOnlyCommits,
+    rollbacks: end.rollbacks - start.rollbacks,
+    writeStatements: end.writeStatements - start.writeStatements,
+    requests: 0,
+    maxRequestCommits: 0,
+    maxRequestCommitsPath: "",
+    maxRequestWriteStatements: 0,
+    maxRequestWriteStatementsPath: "",
+  };
+  for (const process of after) {
+    const window = process.windows[name];
+    if (!window) continue;
+    counts.requests += window.requests;
+    if (window.maxRequestCommits > counts.maxRequestCommits) {
+      counts.maxRequestCommits = window.maxRequestCommits;
+      counts.maxRequestCommitsPath = requestLabel(window.maxRequestCommitsPath);
+    }
+    if (window.maxRequestWriteStatements > counts.maxRequestWriteStatements) {
+      counts.maxRequestWriteStatements = window.maxRequestWriteStatements;
+      counts.maxRequestWriteStatementsPath = requestLabel(window.maxRequestWriteStatementsPath);
+    }
+  }
+  return counts;
+}
+
 /** Run one scenario, then stop its pollers and scripted answers so none outlive it. */
 async function runInStack(
   scenario: Scenario,
@@ -643,6 +731,9 @@ async function main(): Promise<number> {
   }
   // A fresh directory: the report unions every lcov in it, and stale ones would count.
   if (options.coverageDir) await Bun.$`rm -rf ${options.coverageDir}`.quiet();
+  // A fresh directory too: the counts of each scenario are differences of its sums.
+  const writeStatsDir = options.writeStatsDir;
+  if (writeStatsDir) await Bun.$`rm -rf ${writeStatsDir} && mkdir -p ${writeStatsDir}`.quiet();
   // CLI children write their lcov next to the API's, so rule 3 sees CLI lines too.
   setCliCoverageDir(options.coverageDir);
   const { sut, db, ctx, observe: observeMain } = await bootStack(options, manifest, journalPath);
@@ -663,6 +754,11 @@ async function main(): Promise<number> {
       const file = `${EXTRA_JOURNAL_PREFIX}${scenario.name}-${extraJournals}.jsonl`;
       return { file, path: `${visualsDir}/${file}` };
     };
+    let countsBefore: ProcessWriteStats[] | undefined;
+    if (writeStatsDir) {
+      countsBefore = await readWriteStats(writeStatsDir);
+      await setWriteStatsWindow(writeStatsDir, scenario.name);
+    }
     const result = await runInStack(
       scenario,
       ctx,
@@ -674,6 +770,14 @@ async function main(): Promise<number> {
       },
       slackJournal,
     );
+    if (writeStatsDir && countsBefore) {
+      await setWriteStatsWindow(writeStatsDir, "");
+      result.storage = scenarioCounts(
+        scenario.name,
+        countsBefore,
+        await readWriteStats(writeStatsDir),
+      );
+    }
     scenarioResults.push(result);
     printScenario(result);
   }

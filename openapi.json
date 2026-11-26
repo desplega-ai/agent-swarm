@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.15.0",
+    "version": "2.15.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2139,7 +2139,8 @@
               "system.profile_sync_reconciled",
               "system.profile_sync_conflict",
               "script.global_upsert",
-              "schedule.deleted"
+              "schedule.deleted",
+              "data.query"
             ]
           },
           "status": {
@@ -3707,6 +3708,12 @@
           },
           "handledNote": {
             "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SteeringAttachment"
+            }
           }
         },
         "required": [
@@ -3718,6 +3725,32 @@
           "source",
           "createdByKind",
           "createdAt"
+        ]
+      },
+      "SteeringAttachment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "name"
         ]
       },
       "AgentLog": {
@@ -8653,6 +8686,17 @@
             "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
             "name": "X-Runtime-Instance-ID",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[\\x21-\\x7E]{1,255}$",
+              "description": "Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. The first successful call of a tool that is not read-only runs it and records its result; a later call with the same key and tool returns that result (with `Idempotent-Replayed: true`) and runs nothing, whatever its args. A call that fails or that the tool refuses records nothing. A second call while the first still runs waits for it, then gets a 409. Read-only tools ignore the key. Records expire after 7 days. Durable script runs send one on every ctx.swarm call."
+            },
+            "required": false,
+            "description": "Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. The first successful call of a tool that is not read-only runs it and records its result; a later call with the same key and tool returns that result (with `Idempotent-Replayed: true`) and runs nothing, whatever its args. A call that fails or that the tool refuses records nothing. A second call while the first still runs waits for it, then gets a 409. Read-only tools ignore the key. Records expire after 7 days. Durable script runs send one on every ctx.swarm call.",
+            "name": "Idempotency-Key",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -8670,6 +8714,10 @@
                     "type": "object",
                     "additionalProperties": {},
                     "default": {}
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -8705,6 +8753,16 @@
           },
           "404": {
             "description": "Tool not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A call with the same Idempotency-Key is still running",
             "content": {
               "application/json": {
                 "schema": {
@@ -8756,6 +8814,27 @@
           },
           "404": {
             "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Liveness update conflicted after retries. Retry after the delay in `Retry-After`.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Seconds to wait before retrying the ping."
+                },
+                "required": true,
+                "description": "Seconds to wait before retrying the ping."
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -9443,6 +9522,96 @@
           },
           "403": {
             "description": "Permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/catalog": {
+      "get": {
+        "summary": "Read the app component catalog",
+        "description": "No query: every component (one line, child slots) and action type. `component` returns its props schema (`prop` drills into one prop), `action` an action step's params, `topic=expressions` the binding reference.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "component",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "prop",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "action",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "expressions"
+              ]
+            },
+            "required": false,
+            "name": "topic",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "More than one of component, action and topic, or prop without component",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown component, prop or action; names the closest",
             "content": {
               "application/json": {
                 "schema": {
@@ -10568,7 +10737,7 @@
       },
       "patch": {
         "summary": "Patch an app",
-        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.",
+        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries. `ops` applies JSON-pointer add/replace/remove/test ops instead; the first failing op stores nothing.",
         "tags": [
           "Apps"
         ],
@@ -10607,6 +10776,34 @@
                   "definition": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "ops": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "add",
+                            "replace",
+                            "remove",
+                            "test"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "op",
+                        "path"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
                   },
                   "migration": {
                     "type": "object",
@@ -11954,6 +12151,17 @@
                         },
                         "durationMs": {
                           "type": "number"
+                        },
+                        "run": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ]
                         }
                       },
                       "required": [
@@ -11991,12 +12199,24 @@
                             "superseded",
                             "skipped"
                           ]
+                        },
+                        "run": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ]
                         }
                       },
                       "required": [
                         "ok",
                         "taskId",
-                        "status"
+                        "status",
+                        "run"
                       ]
                     },
                     {
@@ -12145,6 +12365,174 @@
           },
           "409": {
             "description": "App definition needs repair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apps/{id}/action-runs/{runId}": {
+      "get": {
+        "summary": "Read or wait on an app action run",
+        "description": "`runId` is the `run.id` an action returned. A script action's run settles when it and every run its script launched or called have finished; a task action's run settles with its task. `waitSeconds` (0-25) holds the request until the run settles or the wait ends.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 25
+            },
+            "required": false,
+            "name": "waitSeconds",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Action run state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "succeeded",
+                        "failed"
+                      ]
+                    },
+                    "settled": {
+                      "type": "boolean"
+                    },
+                    "runs": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "running": {
+                          "type": "number"
+                        },
+                        "completed": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "running",
+                        "completed",
+                        "failed",
+                        "truncated"
+                      ]
+                    },
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "scriptName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "scriptName",
+                          "error"
+                        ]
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "elapsedMs": {
+                      "type": "number"
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "state",
+                    "settled",
+                    "elapsedMs"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "App or action run not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -24367,6 +24755,94 @@
         }
       }
     },
+    "/api/link-preview": {
+      "get": {
+        "summary": "Get the Open Graph preview of an external link",
+        "description": "Fetches the page server-side (cached) and returns its title, description, image and site name. `ok: false` when the page could not be read. Loopback and private hosts are refused with 400.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "required": true,
+            "name": "url",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The preview, or `ok: false` with empty fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "image": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "siteName": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "ok",
+                    "title",
+                    "description",
+                    "image",
+                    "siteName"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing, malformed or refused URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "post": {
         "summary": "Store a single event",
@@ -24423,7 +24899,8 @@
                       "system.profile_sync_reconciled",
                       "system.profile_sync_conflict",
                       "script.global_upsert",
-                      "schedule.deleted"
+                      "schedule.deleted",
+                      "data.query"
                     ]
                   },
                   "status": {
@@ -24571,7 +25048,8 @@
                 "system.profile_sync_reconciled",
                 "system.profile_sync_conflict",
                 "script.global_upsert",
-                "schedule.deleted"
+                "schedule.deleted",
+                "data.query"
               ]
             },
             "required": false,
@@ -24803,7 +25281,8 @@
                             "system.profile_sync_reconciled",
                             "system.profile_sync_conflict",
                             "script.global_upsert",
-                            "schedule.deleted"
+                            "schedule.deleted",
+                            "data.query"
                           ]
                         },
                         "status": {
@@ -36734,7 +37213,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min, leads that can take work (status idle or busy), and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (whether Files is on and, when off, what is missing; the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state; internal_ai reports the provider policy for task titles, session summaries and llm memory ratings (INTERNAL_LLM_PROVIDER, the credential kinds tried in order, and the TASK_AUTO_TITLE_MODEL and MEMORY_RATER_MODEL pins); github reports the GitHub web base (GITHUB_URL) for PR and repo links.",
         "tags": [
           "Status"
         ],
@@ -37224,6 +37703,38 @@
                       "required": [
                         "web_url",
                         "enterprise"
+                      ]
+                    },
+                    "internal_ai": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string"
+                        },
+                        "order": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "task_title_model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "memory_rater_model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "order",
+                        "task_title_model",
+                        "memory_rater_model"
                       ]
                     }
                   },
@@ -40398,6 +40909,10 @@
                               "totalCostUsd": {
                                 "type": "number",
                                 "minimum": 0
+                              },
+                              "runModel": {
+                                "type": "string",
+                                "description": "Latest named model reported by a harness session."
                               }
                             },
                             "required": [
@@ -40669,6 +41184,16 @@
                   },
                   "draft": {
                     "type": "boolean"
+                  },
+                  "slackChannelId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Slack channel the task's progress and outcome post to. Set together with `slackThreadTs`. Needs `task.slack.thread.bind`."
+                  },
+                  "slackThreadTs": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Slack thread ts in `slackChannelId` the task posts into."
                   }
                 },
                 "required": [
@@ -40700,7 +41225,7 @@
             }
           },
           "403": {
-            "description": "Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
+            "description": "Parent/session access denied, unauthorized chat-thread or Slack-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read",
             "content": {
               "application/json": {
                 "schema": {
@@ -41123,6 +41648,14 @@
                   },
                   "requestedByUserId": {
                     "type": "string"
+                  },
+                  "attachmentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 20
                   }
                 },
                 "required": [
@@ -55832,7 +56365,14 @@
                 "properties": {
                   "source": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "Inline TypeScript source. Pass this or `name`."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "A global script to run instead of `source`. A user token must pass it, and only names in SCRIPT_RUN_USER_ALLOWLIST: the run executes as the script's owning agent."
                   },
                   "args": {},
                   "background": {
@@ -55851,11 +56391,12 @@
                   },
                   "requestedByUserId": {
                     "type": "string"
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
-                },
-                "required": [
-                  "source"
-                ]
+                }
               }
             }
           }
@@ -55906,8 +56447,28 @@
               }
             }
           },
+          "403": {
+            "description": "A user token named a script outside SCRIPT_RUN_USER_ALLOWLIST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Global script not found, or parentScriptRunId names no running run of the calling agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "Existing idempotent run returned",
+            "description": "Existing idempotent run returned. A key another caller used answers 409 with an error and no run.",
             "content": {
               "application/json": {
                 "schema": {
@@ -56218,6 +56779,16 @@
         "responses": {
           "204": {
             "description": "Script run cancelled, or already terminal"
+          },
+          "403": {
+            "description": "A scoped user may cancel only the runs it launched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Script run not found",
@@ -64946,7 +65517,12 @@
                   },
                   "idempotencyKey": {
                     "type": "string",
-                    "maxLength": 200
+                    "maxLength": 200,
+                    "description": "Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again."
+                  },
+                  "parentScriptRunId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 }
               }
@@ -65125,7 +65701,7 @@
             }
           },
           "404": {
-            "description": "Script not found",
+            "description": "Script not found, or parentScriptRunId names no running run of the calling agent",
             "content": {
               "application/json": {
                 "schema": {

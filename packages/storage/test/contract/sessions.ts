@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   type NewSessionCost,
+  type NewSessionLog,
+  SESSION_LOG_BATCH_ROWS,
   type SessionSummarySpec,
   type SessionsRepository,
   type SessionTreeRules,
@@ -106,6 +108,37 @@ export function sessionsContract(engine: ContractEngine): void {
       ]);
     });
 
+    test("batch log insert keeps array order and values across statements", async () => {
+      await repo.insertLogs([]);
+      const logs: NewSessionLog[] = Array.from(
+        { length: SESSION_LOG_BATCH_ROWS * 2 + 1 },
+        (_, i) => ({
+          id: `b${i}`,
+          taskId: i % 2 === 0 ? "t1" : null,
+          sessionId: "s1",
+          iteration: 0,
+          cli: "claude",
+          content: `line ${i}`,
+          lineNumber: i + 7,
+          reasoningChars: i === 3 ? 12 : null,
+          reasoningKind: i === 3 ? "reasoning" : null,
+        }),
+      );
+      await repo.insertLogs(logs);
+      expect(await repo.lastLogLineNumber("s1", 0)).toBe(logs.length + 6);
+      const rows = await repo.listLogsBySession("s1", 0);
+      expect(rows.map((row) => row.id)).toEqual(logs.map((log) => log.id));
+      expect(rows.map((row) => row.lineNumber)).toEqual(logs.map((log) => log.lineNumber));
+      expect(rows[0]?.taskId).toBe("t1");
+      expect(rows[1]?.taskId).toBeNull();
+      expect(rows[0]?.createdAt).toMatch(ISO_MS);
+      const reasoning = await storage.executor.get<{
+        reasoningChars: number;
+        reasoningKind: string;
+      }>(sql`SELECT "reasoningChars", "reasoningKind" FROM session_logs WHERE id = 'b3'`);
+      expect(reasoning).toEqual({ reasoningChars: 12, reasoningKind: "reasoning" });
+    });
+
     test("claude reasoning lines carry the message id and can be marked as an update", async () => {
       const since = new Date(Date.now() - 60_000).toISOString();
       await repo.insertLog({
@@ -196,6 +229,8 @@ export function sessionsContract(engine: ContractEngine): void {
       expect(await repo.dailySpendGlobal("2026-11-21")).toBe(3);
       expect(await repo.dailySpendForUser("u1", "2026-11-21")).toBe(1);
       expect(await repo.dailySpendForUser("u1", "2026-11-19")).toBe(0);
+      expect(await repo.dailySpendGlobal("2026-11-20")).toBe(4);
+      expect(await repo.dailySpendGlobal("2026-02-30")).toBe(0);
     });
 
     test("request compositions: seq, count, order with ties", async () => {

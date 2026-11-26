@@ -1,7 +1,7 @@
 /**
  * Task title generation: a short display title for a task prompt.
  *
- * Consumer of `completeStructuredWithModel`. Walks `TASK_TITLE_MODEL_CANDIDATES`
+ * Consumer of `completeStructuredWithModel`. Walks `buildTaskTitlePlan`
  * (provider order, then model order) and returns the first title a configured
  * credential produces. Every candidate is a cheap, fast model: one title costs
  * well under a tenth of a cent, so thousands of weekly tasks stay in cents.
@@ -15,7 +15,7 @@ import { z } from "zod";
 import { scrubSecrets } from "../secret-scrubber.js";
 import { completeStructuredWithModel } from "./complete-structured.js";
 import { type CredentialKind, type ResolvedCredential, resolveCredentials } from "./credentials.js";
-import { kindForModelString } from "./models.js";
+import { internalProviderOrder, kindForModelString } from "./models.js";
 
 /** Longest generated title. The PATCH /api/tasks/{id}/title route allows 120. */
 export const TASK_TITLE_MAX_CHARS = 100;
@@ -36,13 +36,11 @@ export interface TaskTitleCandidateGroup {
 }
 
 /**
- * Provider order, then model order within a provider. Cheapest and fastest
- * first: pay-per-token API keys before subscription OAuth, and the `claude -p`
- * shellout last (it spawns a full CLI process per call).
- *
- * `fireworks` and `amazon-bedrock` are appended after every kind that shipped
- * before them, matching `CREDENTIAL_KIND_PRECEDENCE`: an environment that
- * already titles through OpenRouter/Anthropic/OpenAI keeps doing so.
+ * Models per credential kind, cheapest and fastest first. Which kinds are
+ * tried, and in what order, comes from `internalProviderOrder` (shared with
+ * the session summary and the `llm` rater): the OpenRouter group is used only
+ * when `INTERNAL_LLM_PROVIDER=openrouter` or `TASK_AUTO_TITLE_MODEL` pins an
+ * `openrouter/…` model.
  *
  * Model prices (input / output, USD per million tokens, models.dev snapshot):
  *   deepseek-v4.1-flash 0.034 / 0.137 · claude-haiku-5.5 0.10 / 0.50 ·
@@ -87,31 +85,29 @@ export const TASK_TITLE_MODEL_CANDIDATES: readonly TaskTitleCandidateGroup[] = [
 export { kindForModelString };
 
 /**
- * The candidate list for one environment. `TASK_AUTO_TITLE_MODEL` moves its
- * provider to the front and puts the pinned model first inside it; the rest of
- * the list stays as fallback. An unknown provider is ignored with a warning.
- *
- * `TASK_AUTO_TITLE_MODEL` that names a model string we do not recognise as a
- * provider prefix is exactly why `kindForModelString` now knows
- * `fireworks/…` and `amazon-bedrock/…`: without that, pinning a Bedrock judge
- * would have logged "unsupported provider" and been silently dropped.
+ * The candidate list for one environment: `internalProviderOrder` gives the
+ * kinds, `TASK_TITLE_MODEL_CANDIDATES` the models inside each. A
+ * `TASK_AUTO_TITLE_MODEL` pin selects its provider (moved first) and runs
+ * before that provider's own candidates. An unknown provider is ignored with
+ * a warning.
  */
 export function buildTaskTitlePlan(
   env: Record<string, string | undefined> = process.env,
 ): readonly TaskTitleCandidateGroup[] {
-  const pinned = env[TASK_TITLE_MODEL_ENV]?.trim();
-  if (!pinned) return TASK_TITLE_MODEL_CANDIDATES;
-  const kind = kindForModelString(pinned);
-  if (!kind) {
+  let pinned = env[TASK_TITLE_MODEL_ENV]?.trim() || undefined;
+  if (pinned && !kindForModelString(pinned)) {
     console.warn(
       `[task-title] ${TASK_TITLE_MODEL_ENV}=${pinned} names an unsupported provider; ignored`,
     );
-    return TASK_TITLE_MODEL_CANDIDATES;
+    pinned = undefined;
   }
-  const own = TASK_TITLE_MODEL_CANDIDATES.find((group) => group.kind === kind);
-  const rest = TASK_TITLE_MODEL_CANDIDATES.filter((group) => group.kind !== kind);
-  const models = [pinned, ...(own?.models ?? []).filter((model) => model !== pinned)];
-  return [{ kind, models }, ...rest];
+  const pinnedKind = pinned ? kindForModelString(pinned) : null;
+  return internalProviderOrder(env, { pinnedModel: pinned }).map((kind) => {
+    const own = TASK_TITLE_MODEL_CANDIDATES.find((group) => group.kind === kind)?.models ?? [];
+    const models =
+      pinned && kind === pinnedKind ? [pinned, ...own.filter((model) => model !== pinned)] : own;
+    return { kind, models };
+  });
 }
 
 const SIBLING_OPEN = "<sibling_tasks_in_progress>";

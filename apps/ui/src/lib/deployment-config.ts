@@ -3,6 +3,7 @@ interface UiEnvironment {
   VITE_API_KEY?: string;
   VITE_USER_ID?: string;
   VITE_DEMO_MODE?: string | boolean;
+  VITE_AGENT_PREVIEW?: string | boolean;
 }
 
 export interface UiDeploymentConfig {
@@ -10,6 +11,12 @@ export interface UiDeploymentConfig {
   apiKey: string | null;
   userId: string | null;
   demoMode: boolean;
+  /**
+   * Set by `bun run ui:dev` and `agent-swarm ui-dev` (agent preview loads): the dashboard sends no UI telemetry and
+   * mounts no nudge or popup overlays, so screenshots stay clean and agent traffic stays out
+   * of product analytics.
+   */
+  agentPreview: boolean;
 }
 
 function optionalString(value: string | undefined): string | null {
@@ -40,8 +47,23 @@ export function parseUiDeploymentConfig(env: UiEnvironment): UiDeploymentConfig 
     apiKey,
     userId,
     demoMode: enabled(env.VITE_DEMO_MODE),
+    agentPreview: enabled(env.VITE_AGENT_PREVIEW),
   };
 }
 
-export const uiDeploymentConfig = parseUiDeploymentConfig(import.meta.env);
+/**
+ * `agent-swarm ui-dev` serves a prebuilt dashboard and sets the same keys on this window
+ * global in index.html (src/commands/ui-dev.ts), since build-time env is already baked in.
+ */
+function runtimeUiEnvironment(): UiEnvironment {
+  const value = (globalThis as { __AGENT_SWARM_UI_CONFIG__?: unknown }).__AGENT_SWARM_UI_CONFIG__;
+  return value && typeof value === "object" ? (value as UiEnvironment) : {};
+}
+
+export const uiDeploymentConfig = parseUiDeploymentConfig({
+  ...import.meta.env,
+  ...runtimeUiEnvironment(),
+});
 export const isDemoMode = uiDeploymentConfig.demoMode;
+/** One switch for agent preview loads; each telemetry or nudge surface checks it. */
+export const isAgentPreview = uiDeploymentConfig.agentPreview;

@@ -128,7 +128,7 @@ function withoutCallbackButtons(children: CardChild[]): CardChild[] {
 export async function chatRelayUiSpec(
   taskId: string,
 ): Promise<{ card: CardElement | null; fallbackText: string } | null> {
-  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", false)) return null;
+  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", true)) return null;
   const stored = await getTaskUiSpec(taskId);
   if (!stored) return null;
   try {

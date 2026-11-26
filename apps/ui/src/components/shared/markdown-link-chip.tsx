@@ -2,15 +2,12 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   Cable,
-  CircleDot,
   ClipboardCheck,
   Clock,
   Contact,
   FileClock,
   FileText,
   FolderGit,
-  GitCommitHorizontal,
-  GitPullRequest,
   Globe,
   LayoutGrid,
   Link2,
@@ -27,22 +24,24 @@ import type { AgentTask } from "@/api/types";
 import { useOptionalStatusContext } from "@/app/status-context";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { useLinkPreviewClick } from "@/components/link-preview/link-preview-state";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { useCombLinks } from "@/hooks/use-comb-links";
 import { shortId } from "@/lib/short-id";
 import {
   DASHBOARD_ROUTES,
   type DashboardRoute,
+  type ExternalProvider,
   githubLabel,
-  githubTitle,
   parseSwarmLink,
   type SwarmLink,
   type SwarmLinkOrigins,
 } from "@/lib/swarm-links";
 import { taskListTitle } from "@/lib/task-title";
 import { cn } from "@/lib/utils";
+import { BrandLogo } from "./brand-logo";
 import { InAppOrExternalLink } from "./in-app-or-external-link";
+import { LinkHoverBody } from "./link-hover-card";
 
 /** The sidebar's icon for each route. */
 const ROUTE_ICONS: Record<DashboardRoute, LucideIcon> = {
@@ -189,23 +188,25 @@ function textOf(node: HastNode | undefined): string {
 
 const withoutScheme = (value: string) => value.replace(/^https?:\/\//i, "").replace(/\/$/, "");
 
-const GITHUB_ICONS = {
-  pull: GitPullRequest,
-  ref: GitPullRequest,
-  issue: CircleDot,
-  commit: GitCommitHorizontal,
-  repo: FolderGit,
-} as const;
+/** The provider mark in front of an external chip (a file in `public/integration-logos/`). */
+const PROVIDER_LOGOS: Record<ExternalProvider | "github", string> = {
+  github: "/integration-logos/github.svg",
+  gitlab: "/integration-logos/gitlab.svg",
+  linear: "/integration-logos/linear.svg",
+  jira: "/integration-logos/jira.svg",
+  slack: "/integration-logos/slack.svg",
+};
 
 /**
- * One parsed link as a chip: the kind's icon and a short label. A dashboard
- * link reads as its name when the dashboard has it ("Page cfd9bc4b" otherwise)
- * and opens in the same tab. A drive file reads as its name, with the path in
- * the tooltip, and opens in Comb while Comb is connected, else in a new tab. A
- * share link reads "Shared file". A GitHub PR / issue / commit / repo reads
- * `repo#N`, `repo@sha` or `owner/repo` and opens in a new tab. `label`
- * replaces the derived text (a cell that shows `agent-swarm#2605` over a PR
- * URL, or markdown link text that is not the URL).
+ * One parsed link as a chip: an icon and a short label, with a hover card
+ * (`LinkHoverBody`). A dashboard link reads as its name when the dashboard
+ * has it ("Page cfd9bc4b" otherwise), shows its route's icon and opens in
+ * the same tab. A drive file reads as its name and opens in Comb while Comb
+ * is connected, else in a new tab. A share link reads "Shared file". GitHub,
+ * GitLab, Linear, Jira and Slack links show the provider's logo and read
+ * `repo#N`, `repo!N`, `repo@sha`, `ENG-42` or "Slack thread", and open in a
+ * new tab. `label` replaces the derived text (a cell that shows
+ * `agent-swarm#2605` over a PR URL, or markdown link text that is not the URL).
  */
 export function SwarmLinkView({
   link,
@@ -217,7 +218,7 @@ export function SwarmLinkView({
   link: SwarmLink;
   label?: ReactNode;
   className?: string;
-  /** Skip the hover tooltip, for a chip inside something that already explains it. */
+  /** Skip the hover card, for a chip inside something that already explains it. */
   noTip?: boolean;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }) {
@@ -227,57 +228,64 @@ export function SwarmLinkView({
   const previewClick = useLinkPreviewClick(link.href, useSwarmLinkOrigins());
   let icon: ReactNode;
   let label: ReactNode;
-  let tip: string;
   let to: string | null = null;
   const iconClass = "size-3.5 shrink-0 self-center text-muted-foreground";
   if (link.type === "dashboard") {
     const Icon = ROUTE_ICONS[link.route];
     icon = <Icon aria-hidden className={iconClass} />;
     label = name ?? `${DASHBOARD_ROUTES[link.route]} ${shortId(link.id)}`;
-    tip = `${DASHBOARD_ROUTES[link.route]} ${link.id}`;
     to = link.path;
   } else if (link.type === "file") {
     icon = <FileKindIcon name={link.name} isFolder={link.folder} className={iconClass} />;
     label = link.name;
-    tip = link.path;
     to = combTo;
-  } else if (link.type === "github") {
-    const Icon = GITHUB_ICONS[link.kind];
-    icon = <Icon aria-hidden className={iconClass} />;
-    label = githubLabel(link);
-    tip = githubTitle(link);
+  } else if (link.type === "github" || link.type === "external") {
+    icon = (
+      <BrandLogo
+        src={PROVIDER_LOGOS[link.type === "github" ? "github" : link.provider]}
+        className={iconClass}
+      />
+    );
+    label = link.type === "github" ? githubLabel(link) : link.label;
   } else {
     icon = <Link2 aria-hidden className={iconClass} />;
     label = link.name ?? "Shared file";
-    tip = "Shared agent-fs file";
   }
+  const chip = (
+    <InAppOrExternalLink
+      to={to}
+      href={link.href}
+      data-slot="swarm-link"
+      onClick={(event) => {
+        onClick?.(event);
+        previewClick?.(event);
+      }}
+      // `!`: the unlayered `.prose-chat a` rules would underline it on hover.
+      className={cn(
+        "hover-linger inline-flex max-w-full items-baseline gap-1 rounded-md bg-muted px-1.5 font-medium text-primary no-underline! transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60",
+        // A touch screen: a 40 px tap area around the one-line chip.
+        "hit-area",
+        className,
+      )}
+    >
+      {icon}
+      <span className="min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap">
+        {override ?? label}
+      </span>
+    </InAppOrExternalLink>
+  );
+  if (noTip) return chip;
   return (
-    <Tooltip open={noTip ? false : undefined}>
-      <TooltipTrigger asChild>
-        <InAppOrExternalLink
-          to={to}
-          href={link.href}
-          data-slot="swarm-link"
-          onClick={(event) => {
-            onClick?.(event);
-            previewClick?.(event);
-          }}
-          // `!`: the unlayered `.prose-chat a` rules would underline it on hover.
-          className={cn(
-            "hover-linger inline-flex max-w-full items-baseline gap-1 rounded-md bg-muted px-1.5 font-medium text-primary no-underline! transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/60",
-            // A touch screen: a 40 px tap area around the one-line chip.
-            "hit-area",
-            className,
-          )}
-        >
-          {icon}
-          <span className="min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap">
-            {override ?? label}
-          </span>
-        </InAppOrExternalLink>
-      </TooltipTrigger>
-      <TooltipContent>{tip}</TooltipContent>
-    </Tooltip>
+    <HoverCard openDelay={400} closeDelay={100}>
+      <HoverCardTrigger asChild>{chip}</HoverCardTrigger>
+      <HoverCardContent
+        align="start"
+        collisionPadding={8}
+        className="w-80 max-w-[calc(100vw-1rem)] overflow-hidden p-0"
+      >
+        <LinkHoverBody link={link} name={name} />
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 

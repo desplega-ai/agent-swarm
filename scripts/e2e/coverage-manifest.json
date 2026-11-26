@@ -225,7 +225,7 @@
   ],
   "flows": {
     "storage-engine-parity": {
-      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention and db-query denial.",
+      "description": "Behavior a second storage engine must match: upgrade from a base-commit database, tasks that hold a historical status or source, the SQLite-to-Postgres data copy, search, LIKE case, text and list order, timestamps, values, error mapping, triggers, concurrent claims, retention, db-query denial and db-query JSON params.",
       "scenarios": [
         "upgrade-base-db",
         "tasks-historical-values",
@@ -237,15 +237,18 @@
         "divergence-vector-search",
         "divergence-like-case",
         "divergence-seeded-schedule-sql",
+        "upgrade-seeded-schedule-operator-fields",
         "divergence-text-order",
         "divergence-concurrent-schedule-claim",
         "stress-poll-claim",
         "stress-task-finish",
         "stress-task-create",
         "stress-token-touch",
+        "ping-serialization-retry",
         "divergence-tracker-dedup",
         "divergence-retention",
         "divergence-db-query-denial",
+        "divergence-db-query-json-params",
         "divergence-list-order",
         "divergence-timestamps",
         "divergence-values",
@@ -311,12 +314,17 @@
       "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
       "scenarios": [
         "knowledge-apps",
+        "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
+        "knowledge-apps-catalog",
+        "knowledge-apps-closest-bounds",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
         "knowledge-apps-log-stream",
+        "knowledge-apps-patch-node",
         "knowledge-apps-primitives",
-        "knowledge-apps-session-thread-files"
+        "knowledge-apps-session-thread-files",
+        "knowledge-apps-template-refs"
       ]
     },
     "asset-namespaces": {
@@ -436,7 +444,7 @@
     },
     "kv": {
       "description": "KV store over HTTP and MCP: namespaces, types, TTL, views, authorization, and the 24 hour MCP overflow spill.",
-      "scenarios": ["script-kv"]
+      "scenarios": ["script-kv", "kv-app-namespace-read"]
     },
     "linear-provider-emulated": {
       "description": "Against @emulators/linear: OAuth consent, actor=app install, code exchange, refresh and revoke; delegating a Todo issue creates a task and acknowledges the AgentSession, a Backlog issue is gated, completion ends the session with the output, and Canceled cancels the task; LINEAR_URL and LINEAR_API_URL cannot be stored in swarm_config",
@@ -600,8 +608,17 @@
       ]
     },
     "script-runs-durable": {
-      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, and the refusal under SCRIPT_EXECUTOR=quickjs.",
-      "scenarios": ["script-runs-durable", "script-run-storage", "script-runs-executor-setting"]
+      "description": "Durable background script run journals raw-llm, swarm-script and agent-task steps (simulated worker completes the task), internal journal routes, cancel, cap, MCP launch/get/list, the refusal under SCRIPT_EXECUTOR=quickjs, and the parent link on every run a background run starts.",
+      "scenarios": [
+        "script-runs-durable",
+        "script-run-storage",
+        "script-runs-executor-setting",
+        "script-background-run-tree"
+      ]
+    },
+    "rbac-integration-role": {
+      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events, durable script runs and Slack-thread-bound task creation, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
+      "scenarios": ["rbac-integration-role"]
     },
     "script-sandbox-identity": {
       "description": "Durable script runs and argsSchema extraction at upsert run user code under the native executor's sandbox identity, and both still complete.",
@@ -612,8 +629,12 @@
       "scenarios": ["script-saved-lifecycle"]
     },
     "script-sdk-calls": {
-      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
-      "scenarios": ["script-sdk-calls", "script-memory-rate"]
+      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API. Failed calls throw a typed SwarmToolError, and an unknown ctx.swarm method names the closest exposed ones.",
+      "scenarios": ["script-sdk-calls", "script-memory-rate", "script-tool-errors"]
+    },
+    "script-tool-idempotency": {
+      "description": "An Idempotency-Key on the scripts MCP bridge runs a write once and answers repeats from the first result; read-only tools, refusals and unkeyed calls run every time, and keys are scoped to the caller. One-off runs dedupe with an explicit per-call key, or with a run-level idempotencyKey on the script-run tool or API that keys every call, nested script_run included. A durable run re-executed after an API restart repeats none of its ctx.swarm writes.",
+      "scenarios": ["script-tool-idempotency"]
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
@@ -622,6 +643,10 @@
     "session-followup-context": {
       "description": "The task and session reads a Lead's Sessions follow-up preamble and the composer's parent pick depend on: parentTaskId, isLeadTask, task text and attachments along a Lead / worker / review chain",
       "scenarios": ["core-session-followup-turns"]
+    },
+    "data": {
+      "description": "data-query and ctx.data.query as the agent's own key over an agent-fs stub: rows, a card table, a sheet with literal '=' text, sqlite/duckdb and missing-path refusals, agent-fs error text and code, the MCP and script row caps, one data.query event per call without the SQL text, and with OTLP on no SQL literal or result row in the exported tool span",
+      "scenarios": ["data-query", "data-query-otel"]
     },
     "sheets": {
       "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab/import-xlsx/export-xlsx as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, an xlsx round trip with its refusals, ctx.sheets in both executors",
@@ -661,7 +686,7 @@
       ]
     },
     "slack-conversations": {
-      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button",
+      "description": "Mention to task, thread follow-up, failed outcome, file share, reaction override, exactly-once relay across an API restart, output citations, output card from a stored uiSpec, pre-task-create block, Sessions follow-ups mirrored into the thread, the native Stop button, 👍/👎 answer feedback",
       "scenarios": [
         "slack-mention",
         "slack-follow-up",
@@ -675,6 +700,7 @@
         "slack-task-output-citations",
         "slack-task-tree-toggle",
         "slack-stop-button",
+        "slack-feedback-buttons",
         "slack-task-output-ui-spec",
         "slack-pre-task-create-block",
         "slack-cancelled-task"
@@ -862,7 +888,7 @@
       "scenarios": ["route-caller-identity"]
     },
     "llm-emulator-backend": {
-      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429, and task auto-titling lands a title from a streamed set_title tool call",
+      "description": "With @emulators/ai as the inference backend, raw-llm returns text and a schema object and retries past an injected 429; task auto-titling uses the claude CLI when a Claude token and an OpenRouter key are both set, and lands a title from a streamed set_title tool call only after INTERNAL_LLM_PROVIDER=openrouter",
       "scenarios": ["llm-emulate-ai"]
     },
     "post-onboarding-checklist": {
@@ -870,8 +896,8 @@
       "scenarios": ["platform-checklist"]
     },
     "outbound-url-guards": {
-      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, and discovered OAuth endpoints are validated",
-      "scenarios": ["platform-outbound-url-guards"]
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, discovered OAuth endpoints are validated, and the link-preview route refuses private hosts",
+      "scenarios": ["platform-outbound-url-guards", "link-preview"]
     },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",
@@ -887,6 +913,10 @@
         "cli-api",
         "cli-controller"
       ]
+    },
+    "ui-dev-tooling": {
+      "description": "`bun run ui:dev` and `agent-swarm ui-dev` against a running swarm as a black box: ready line, same-origin proxy, injected connection, slug lookup, usage errors and teardown",
+      "scenarios": ["ui-dev-remote"]
     }
   }
 }

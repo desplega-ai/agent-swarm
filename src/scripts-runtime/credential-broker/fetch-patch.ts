@@ -68,6 +68,50 @@ function applyQueryTemplates(url: URL, bindings: ResolvedCredentialBinding[]): b
   return modified;
 }
 
+/**
+ * A failed fetch reports the URL it tried (Bun sets `error.path`, a pinned
+ * egress-guard hop names the address it dialed). After substitution that URL
+ * holds the credential, so the error is rewritten to the caller's URL, and
+ * any other text that embeds a substituted value shows its placeholder.
+ */
+function restoreCallerUrlOnError(
+  error: unknown,
+  callerHref: string,
+  sentUrl: URL,
+  bindings: ResolvedCredentialBinding[],
+): unknown {
+  if (typeof error !== "object" || error === null) return error;
+  const replacements: [string, string][] = [
+    [sentUrl.href, callerHref],
+    [sentUrl.search, new URL(callerHref).search],
+  ];
+  for (const binding of bindings) {
+    if (!binding.value) continue;
+    for (const form of new Set([
+      binding.value,
+      encodeURIComponent(binding.value),
+      new URLSearchParams({ v: binding.value }).toString().slice(2),
+    ])) {
+      replacements.push([form, binding.placeholder]);
+    }
+  }
+  const scrub = (text: string) =>
+    replacements.reduce((acc, [from, to]) => (from ? acc.split(from).join(to) : acc), text);
+  const record = error as Record<string, unknown>;
+  for (const key of new Set(["message", "stack", ...Object.keys(record)])) {
+    const value = record[key];
+    if (typeof value !== "string") continue;
+    const next = key === "path" || key === "url" ? callerHref : scrub(value);
+    if (next === value) continue;
+    try {
+      record[key] = next;
+    } catch {
+      // shortcut: a read-only field keeps its text; no fetch error seen so far has one.
+    }
+  }
+  return error;
+}
+
 function assertNoFailedBinding(
   failedBindings: FailedCredentialBinding[],
   hostname: string,
@@ -134,6 +178,10 @@ export function patchFetchWithCredentialBroker(
       newHeaders.set(key, value);
     }
 
+    // The caller's URL, still holding its placeholders. Everything handed back to
+    // the caller (Response.url, error text, the base of a relative redirect) uses
+    // it, so a query-template value never travels back into script code.
+    const callerHref = url.href;
     const urlModified = applyQueryTemplates(url, bindings);
 
     // Once the broker follows a redirect it keeps following every later hop,
@@ -159,17 +207,28 @@ export function patchFetchWithCredentialBroker(
       redirect: "manual",
     };
     const nextUrl = urlModified ? url.href : input instanceof Request ? input.url : input;
-    const response = await originalFetch(nextUrl, mergedInit);
+    let response: Response;
+    try {
+      response = await originalFetch(nextUrl, mergedInit);
+    } catch (error) {
+      const applied = bindings.filter((binding) => binding.allowedHosts.includes(hostname));
+      throw restoreCallerUrlOnError(error, callerHref, url, applied);
+    }
+    if (urlModified)
+      Object.defineProperty(response, "url", { value: callerHref, configurable: true });
     const location = response.headers.get("location");
     if (redirectMode === "manual" || !REDIRECT_STATUSES.has(response.status) || !location) {
       return response;
     }
     if (redirectMode === "error")
-      throw new TypeError(`fetch redirect refused (redirect: "error"): ${url.href}`);
+      throw new TypeError(`fetch redirect refused (redirect: "error"): ${callerHref}`);
     if (hop >= MAX_REDIRECTS)
-      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${url.href}`);
+      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${callerHref}`);
     await response.body?.cancel().catch(() => {});
-    const next = new URL(location, url);
+    // Resolve against the caller's URL: a Location that keeps the query (a fragment,
+    // an empty path) then carries the placeholder, and the next hop substitutes it
+    // again only for an allowed host, so no later error or hop holds the value.
+    const next = new URL(location, callerHref);
     // Re-enter with the caller's placeholder headers, not the substituted ones.
     const hopRequest = nextHopRequest(response.status, url, next, {
       method: callerInit.method ?? "GET",

@@ -73,6 +73,11 @@ export type RunScriptInput = {
    * calls so their writes get the same audit person. The api re-checks ownership.
    */
   sourceTaskId?: string;
+  /**
+   * Set when the run was started with an `idempotencyKey`: every `ctx.swarm`
+   * call in the run derives its own key from it (`<prefix>:<method>:<ordinal>`).
+   */
+  toolCallKeyPrefix?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   mcpBaseUrl?: string;
@@ -126,6 +131,9 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
         : {}),
       ...(input.sourceTaskId
         ? { auditSourceTaskId: { value: input.sourceTaskId, isSecret: false as const } }
+        : {}),
+      ...(input.toolCallKeyPrefix
+        ? { toolCallKeyPrefix: { value: input.toolCallKeyPrefix, isSecret: false as const } }
         : {}),
     },
     user: input.userConfig ?? {},

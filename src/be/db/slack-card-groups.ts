@@ -22,6 +22,8 @@ export type SlackOutcomeGroupHost = {
   contextKey: string;
   permalink: string | null;
   conclusionKind: string | null;
+  /** When the card was first delivered to Slack. */
+  postedAt: string;
   /** Task ids merged into the card, oldest first. */
   mergedTaskIds: string[];
 };
@@ -33,6 +35,7 @@ type HostRow = {
   context_key: string;
   permalink: string | null;
   conclusion_kind: string | null;
+  finalized_at: string;
 };
 
 async function mergedTaskIds(hostId: string): Promise<string[]> {
@@ -48,6 +51,7 @@ async function toHost(row: HostRow): Promise<SlackOutcomeGroupHost> {
     contextKey: row.context_key,
     permalink: row.permalink,
     conclusionKind: row.conclusion_kind,
+    postedAt: row.finalized_at,
     mergedTaskIds: await mergedTaskIds(row.id),
   };
 }
@@ -72,13 +76,23 @@ export async function getLatestSlackOutcomeGroupHost(
 export async function getSlackOutcomeGroupOf(
   messageId: string,
 ): Promise<SlackOutcomeGroupHost | null> {
+  const host = await getSlackOutcomeCardOf(messageId);
+  return host && host.mergedTaskIds.length > 0 ? host : null;
+}
+
+/**
+ * The delivered card that shows outcome row `messageId`: its host when the
+ * row was merged, else the row itself. Null when that card is not a
+ * delivered, unmerged card (pending, abandoned, or an unknown row).
+ */
+export async function getSlackOutcomeCardOf(
+  messageId: string,
+): Promise<SlackOutcomeGroupHost | null> {
   const own = await getStorage().repos.slack.findMergedIntoId(messageId);
   if (!own) return null;
   const hostId = own.merged_into_id ?? messageId;
   const row: HostRow | null = await getStorage().repos.slack.findOutcomeHost(hostId);
-  if (!row) return null;
-  const host = await toHost(row);
-  return host.mergedTaskIds.length > 0 ? host : null;
+  return row ? await toHost(row) : null;
 }
 
 /**

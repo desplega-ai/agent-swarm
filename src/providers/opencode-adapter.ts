@@ -1124,6 +1124,7 @@ export class OpencodeAdapter implements ProviderAdapter {
           "X-Source-Task-Id": taskId,
           ...(config.contextKey ? { "X-Context-Key": config.contextKey } : {}),
           ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
+          ...config.traceHeaders,
         },
       },
       ...installedMcp,

@@ -4,13 +4,14 @@ import { type AppValidationIssue, collectScriptReferences } from "../apps/defini
 import { getScriptAppTypes } from "../apps/script-types";
 import { listAppRecords } from "../apps/store";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
+import { getAgentById, getScriptRun, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import {
   getScriptApiConnectionDescriptors,
   getScriptApiTypes,
   getScriptMcpConnectionDescriptors,
   getScriptMcpTypes,
+  loadScriptConnectionCatalog,
 } from "../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import {
@@ -35,6 +36,7 @@ import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import { runScriptWithRunCredential } from "../be/scripts/run-credential";
 import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
+import { isDerivedRunToolCallKey, runToolCallKeyPrefix } from "../be/scripts/tool-call-idempotency";
 import {
   scriptSdkTypesWithGeneratedApis,
   scriptStdlibTypesWithGeneratedApis,
@@ -62,7 +64,7 @@ import {
   ScriptScopeSchema,
   ScriptVersionRecordSchema,
 } from "../types";
-import { getCurrentRunProvenance, getRequestAuth } from "../utils/request-auth-context";
+import { authUser, getCurrentRunProvenance, getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { refuseAgentTokenWithout } from "./request-principal";
 import { route, runtimeInstanceHeader } from "./route-def";
@@ -92,7 +94,20 @@ const runBodySchema = z
     scope: ScriptScopeSchema.optional(),
     fsMode: ScriptFsModeSchema.default("none"),
     executor: ScriptExecutorNameSchema.nullable().optional(),
-    idempotencyKey: z.string().max(200).optional(),
+    idempotencyKey: z
+      .string()
+      .max(200)
+      .optional()
+      .describe(
+        "Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again.",
+      ),
+    /**
+     * The run this one works for, so it joins that run's tree. A background
+     * run's `ctx.step.swarmScript` and `ctx.swarm.script_run` set it; a run
+     * token's own provenance wins. It must name a running run of the calling
+     * agent (404 otherwise).
+     */
+    parentScriptRunId: z.string().min(1).optional(),
   })
   .refine((body) => Boolean(body.name) !== Boolean(body.source), {
     message: "Provide exactly one of name or source",
@@ -313,7 +328,10 @@ const runRoute = route({
   responses: {
     200: { description: "Script run completed", schema: scriptRunResponseSchema },
     400: { description: "Validation error" },
-    404: { description: "Script not found" },
+    404: {
+      description:
+        "Script not found, or parentScriptRunId names no running run of the calling agent",
+    },
     409: { description: "Object busy, re-entry, or lease lost" },
     501: { description: "workspace-rw scripts are not supported in v1" },
   },
@@ -824,6 +842,20 @@ export async function handleScripts(
       return true;
     }
 
+    // Same rule as POST /api/script-runs: a body-named parent is trusted only as
+    // the caller's own live run, and a user caller or a run token ignores it.
+    const parentScriptRunId =
+      authUser(getRequestAuth(req)) || callerProvenance?.sourceScriptRunId
+        ? undefined
+        : parsed.body.parentScriptRunId;
+    if (parentScriptRunId) {
+      const parent = await getScriptRun(parentScriptRunId);
+      if (parent?.agentId !== agent.id || parent.status !== "running") {
+        jsonError(res, "parentScriptRunId does not name a running run of this agent", 404);
+        return true;
+      }
+    }
+
     // Per-boot identity of the invoking worker process. Carried into the
     // script runtime as system context so SDK work-acquisition calls present
     // the same runtime the worker itself would — never script input.
@@ -907,16 +939,27 @@ export async function handleScripts(
       sourceScriptRunId: runId,
     };
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
+    const connectionCatalog = await loadScriptConnectionCatalog();
     const runContext = {
       agentId: agent.id,
       runtimeInstanceId,
       sourceTaskId,
+      // A keyed run keys every ctx.swarm call it makes, nested script_run included.
+      ...(parsed.body.idempotencyKey
+        ? { toolCallKeyPrefix: runToolCallKeyPrefix(parsed.body.idempotencyKey) }
+        : {}),
       egressSecrets: credentials.egressSecrets,
       failedBindings: credentials.failedBindings,
       userConfig: credentials.userConfig,
       agentFs: credentials.agentFs,
-      apiConnections: await getScriptApiConnectionDescriptors({ agentId: agent.id }),
-      mcpConnections: await getScriptMcpConnectionDescriptors({ agentId: agent.id }),
+      apiConnections: await getScriptApiConnectionDescriptors(
+        { agentId: agent.id },
+        connectionCatalog,
+      ),
+      mcpConnections: await getScriptMcpConnectionDescriptors(
+        { agentId: agent.id },
+        connectionCatalog,
+      ),
     };
     let output: RunScriptOutput;
     let object: { id: string; stateVersion: number; destroyed: boolean } | undefined;
@@ -991,7 +1034,7 @@ export async function handleScripts(
 
     // Persist output to KV when idempotencyKey is provided and run succeeded
     let kvSaved: { namespace: string; key: string } | undefined;
-    if (parsed.body.idempotencyKey && ok) {
+    if (parsed.body.idempotencyKey && ok && !isDerivedRunToolCallKey(parsed.body.idempotencyKey)) {
       const kvNamespace = `script:executions`;
       const kvKey = parsed.body.idempotencyKey;
       const kvValue = {
@@ -1065,6 +1108,7 @@ export async function handleScripts(
         error: runError,
         startedAt,
         finishedAt: new Date().toISOString(),
+        parentScriptRunId,
       });
     } catch {
       // swallow — the run already executed; persistence is observability only.

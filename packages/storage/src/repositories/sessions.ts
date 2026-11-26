@@ -1,6 +1,6 @@
 import { nowIso } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { EMPTY, type SqlQuery, sql, sqlIdent, sqlList, sqlWhere } from "../sql";
+import { EMPTY, type SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 import type { TaskRow } from "./tasks";
 
 /** One task of a root chain (`t.*`) with the summed session cost of that task. */
@@ -28,6 +28,12 @@ export type SessionLogRow = {
   lineNumber: number;
   createdAt: string;
 };
+
+/**
+ * Rows per multi-row `session_logs` insert (9 bound parameters each): 900 stays
+ * under 999, the oldest SQLite limit.
+ */
+export const SESSION_LOG_BATCH_ROWS = 100;
 
 export type NewSessionLog = {
   id: string;
@@ -494,6 +500,11 @@ export interface SessionsRepository {
   /** Inserts one line; `createdAt` is the engine's current time. */
   insertLog(log: NewSessionLog): Promise<void>;
   /**
+   * Inserts lines in array order, one multi-row statement per
+   * `SESSION_LOG_BATCH_ROWS` rows; insert order equals array order.
+   */
+  insertLogs(logs: readonly NewSessionLog[]): Promise<void>;
+  /**
    * Claude reasoning lines of a session written at or after `since`, with the
    * message id read from the content. Unordered: the caller indexes them by
    * `lineNumber`.
@@ -900,6 +911,20 @@ export abstract class BaseSessionsRepository implements SessionsRepository {
     await this.db.run(sql`
       INSERT INTO session_logs (id, "taskId", "sessionId", iteration, cli, content, "lineNumber", "createdAt", "reasoningChars", "reasoningKind")
       VALUES (${log.id}, ${log.taskId}, ${log.sessionId}, ${log.iteration}, ${log.cli}, ${log.content}, ${log.lineNumber}, ${nowIso}, ${log.reasoningChars}, ${log.reasoningKind})`);
+  }
+
+  async insertLogs(logs: readonly NewSessionLog[]): Promise<void> {
+    for (let start = 0; start < logs.length; start += SESSION_LOG_BATCH_ROWS) {
+      const values = logs
+        .slice(start, start + SESSION_LOG_BATCH_ROWS)
+        .map(
+          (log) =>
+            sql`(${log.id}, ${log.taskId}, ${log.sessionId}, ${log.iteration}, ${log.cli}, ${log.content}, ${log.lineNumber}, ${nowIso}, ${log.reasoningChars}, ${log.reasoningKind})`,
+        );
+      await this.db.run(sql`
+        INSERT INTO session_logs (id, "taskId", "sessionId", iteration, cli, content, "lineNumber", "createdAt", "reasoningChars", "reasoningKind")
+        VALUES ${sqlJoin(values, sql`, `)}`);
+    }
   }
 
   /** JSON extraction and the index hint are engine-specific. */

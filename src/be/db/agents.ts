@@ -14,6 +14,7 @@ import type {
 } from "../../types";
 import { AgentAvatarSchema, AgentSlackIconSchema } from "../../types";
 import { isEnvFlagEnabled } from "../../utils/env-flag";
+import { memoizedRead } from "../request-memo";
 import { getStorage } from "../storage";
 
 const agentsRepo = () => getStorage().repos.agents;
@@ -219,8 +220,10 @@ export async function createAgent(
 }
 
 export async function getAgentById(id: string): Promise<Agent | null> {
-  const row = await agentsRepo().findAgentById(id);
-  return row ? rowToAgent(row) : null;
+  return memoizedRead("agent", id, async () => {
+    const row = await agentsRepo().findAgentById(id);
+    return row ? rowToAgent(row) : null;
+  });
 }
 
 /**
@@ -485,6 +488,13 @@ export async function deleteAgent(id: string): Promise<boolean> {
  */
 export async function getActiveTaskCount(agentId: string): Promise<number> {
   return agentsRepo().countActiveTasks(agentId);
+}
+
+/** `getActiveTaskCount` for many agents in one query. An agent with no active task maps to absent. */
+export async function getActiveTaskCounts(
+  agentIds: readonly string[],
+): Promise<Map<string, number>> {
+  return agentsRepo().countActiveTasksByAgent(agentIds);
 }
 
 /**

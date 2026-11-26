@@ -135,6 +135,17 @@ export default defineConfig({
         target: process.env.VITE_PROXY_TARGET || "http://localhost:3013",
         changeOrigin: true,
       },
+      // Page bodies and the page Browser SDK proxy, for a dashboard whose API URL is this
+      // dev server's origin (`bun run ui:dev`): the page frame and its cookie stay same-origin.
+      // A regex key: a plain "/p" prefix would also catch the dashboard's /pages routes.
+      "^/p/": {
+        target: process.env.VITE_PROXY_TARGET || "http://localhost:3013",
+        changeOrigin: true,
+      },
+      "/@swarm/": {
+        target: process.env.VITE_PROXY_TARGET || "http://localhost:3013",
+        changeOrigin: true,
+      },
     },
   },
   build: {

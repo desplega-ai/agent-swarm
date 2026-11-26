@@ -70,6 +70,8 @@ Tasks that haven't started yet (`unassigned`, `offered`, `pending`) also accept 
 
 Open an in-progress task and use the steering composer. The mode selector follows `supportedSteerModes`, and the result reports whether the message interrupted, queued, or became a follow-up. The task page's Steering section refreshes the message lifecycle from the API.
 
+Attach files the way you would on a follow-up: pick them, paste a screenshot, or drop them on the box. A send uploads them to the task, then steers with their ids. If one upload fails, nothing is sent and the text and files stay in the box. A voice clip still sends a follow-up task, because only a new task gets its transcript.
+
 ### MCP
 
 `steer-task` is available on both the agent and user MCP surfaces:
@@ -119,6 +121,8 @@ curl -X POST "http://localhost:3013/api/tasks/$TASK_ID/steer" \
     "onUnsupported": "degrade"
   }'
 ```
+
+To send files, upload each one to the task first (`POST /api/fs/tasks/{id}/files?name=<file>`, raw body), then pass the returned ids as `"attachmentIds": ["<id>", ...]` (at most 20). An id that is not an attachment of that task is a 400. The worker receives the message with one fetch command per file, and a message that becomes a follow-up task names the files in its text. No harness gets the image bytes inline: the agent fetches them, as it does a task's attachments.
 
 Inspect the audit trail with `GET /api/tasks/{id}/steering-messages`. Worker delivery callbacks live under `/api/steering-messages/{id}/{delivered,undeliverable,handled}` and require the assigned worker's `X-Agent-ID`; normal clients should not call them.
 

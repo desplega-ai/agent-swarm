@@ -124,6 +124,9 @@ export default function AppsListingPage() {
     () => [
       {
         ...FAVORITE_COLUMN,
+        minWidth: 52,
+        maxWidth: 52,
+        suppressSizeToFit: true,
         cellRenderer: (params: { data: AppListItem | undefined }) =>
           params.data ? favoriteControl(params.data) : null,
       },

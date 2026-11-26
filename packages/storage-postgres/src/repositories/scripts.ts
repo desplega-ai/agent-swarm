@@ -95,7 +95,7 @@ export class PostgresScriptsRepository extends BaseScriptsRepository {
 
   listActiveScriptRuns(): Promise<ScriptRunRow[]> {
     return this.db.query<ScriptRunRow>(
-      sql`${this.scriptRunSelect} WHERE r.status IN ('running', 'paused') ORDER BY r."_rowid"`,
+      sql`${this.scriptRunSelect} WHERE r.status IN ('running', 'paused') AND r.kind <> 'inline' ORDER BY r."_rowid"`,
     );
   }
 

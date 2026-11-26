@@ -954,7 +954,7 @@ export class StorageMemoryStore implements MemoryStore {
     // read and the UPDATE and silently win.
     const storage = getStorage();
     const repo = storage.repos.memory;
-    const { result, ftsContent } = await storage.transaction(async () => {
+    return await storage.transaction(async (): Promise<MemoryEditResult> => {
       const row = input.id
         ? await repo.findMemoryById(input.id)
         : await repo.findFirstChunk({
@@ -995,14 +995,11 @@ export class StorageMemoryStore implements MemoryStore {
       const contentChanged = !moveOnly && nextHash !== row.contentHash;
       if (!contentChanged && !moving) {
         return {
-          result: {
-            memory: rowToAgentMemory(row),
-            changed: false,
-            previousVersion,
-            version: previousVersion,
-            contentHash: nextHash,
-          },
-          ftsContent: null,
+          memory: rowToAgentMemory(row),
+          changed: false,
+          previousVersion,
+          version: previousVersion,
+          contentHash: nextHash,
         };
       }
 
@@ -1077,31 +1074,26 @@ export class StorageMemoryStore implements MemoryStore {
         });
       }
 
+      // Same transaction as the row update: a search never sees the new
+      // content with the old full-text row, or the reverse.
+      if (contentChanged) await this.syncFtsRow(row.id, row.name, nextContent);
+
       return {
-        result: {
-          memory: rowToAgentMemory({
-            ...row,
-            content: nextContent,
-            contentHash: nextHash,
-            version: nextVersion,
-            updatedAt: now,
-            key: moving ? input.newKey! : row.key,
-            expiresAt,
-          }),
-          changed: true,
-          previousVersion,
-          version: nextVersion,
+        memory: rowToAgentMemory({
+          ...row,
+          content: nextContent,
           contentHash: nextHash,
-        },
-        ftsContent: contentChanged ? nextContent : null,
+          version: nextVersion,
+          updatedAt: now,
+          key: moving ? input.newKey! : row.key,
+          expiresAt,
+        }),
+        changed: true,
+        previousVersion,
+        version: nextVersion,
+        contentHash: nextHash,
       };
     });
-
-    if (ftsContent !== null) {
-      await this.syncFtsRow(result.memory.id, result.memory.name, ftsContent);
-    }
-
-    return result;
   }
 
   async listForCuration(

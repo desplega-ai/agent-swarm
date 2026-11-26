@@ -501,6 +501,8 @@ export interface AgentTask {
   output?: string;
   progress?: string;
   model?: string;
+  /** Latest named model reported by a harness session, on task-list rows. */
+  runModel?: string;
   modelTier?: ModelTier;
   /** Concrete model the server resolved when a worker claimed the task. */
   resolvedModel?: string;
@@ -634,6 +636,14 @@ export interface SteeringMessage {
   createdAt: string;
   deliveredAt?: string;
   handledAt?: string;
+  /** Files sent with the message: task attachments of `taskId` (each names its own task). */
+  attachments?: {
+    id: string;
+    taskId: string;
+    name: string;
+    mimeType?: string;
+    sizeBytes?: number;
+  }[];
 }
 
 export interface SteeringMessagesResponse {
@@ -3431,11 +3441,16 @@ export interface DbQueryRequest {
   params?: unknown[];
 }
 
+/** SQL dialect of the API's storage engine. */
+export type DbQueryDialect = "sqlite" | "postgres";
+
 export interface DbQueryResponse {
   columns: string[];
   rows: unknown[][];
   elapsed: number;
   total: number;
+  /** Absent on an API from before the Postgres engine (SQLite only). */
+  dialect?: DbQueryDialect;
 }
 
 // Budgets & Pricing — see src/types.ts in the API repo for the source of truth.
@@ -4013,6 +4028,16 @@ export interface PageFeedbackResult {
  * one exposes `agentId` (the listing is bearer-gated, so the creator is
  * visible) — used by the SPA's `/pages` page for the "My pages only" toggle.
  */
+/** `GET /api/link-preview`: `ok: false` when the page could not be read. */
+export interface LinkPreview {
+  url: string;
+  ok: boolean;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  siteName: string | null;
+}
+
 export interface PageListItem {
   id: string;
   key: string;

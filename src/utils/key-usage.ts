@@ -19,11 +19,11 @@ type UsageWindow = { utilization?: number; resetsAt?: number; durationMins?: num
 export const CREDENTIAL_SELECTION_STRATEGIES = ["pace", "usage"] as const;
 export type CredentialSelectionStrategy = (typeof CREDENTIAL_SELECTION_STRATEGIES)[number];
 
-/** Parses the setting. Anything but `pace` is `usage`, the default until `pace` has soaked. */
+/** Parses the setting. Anything but an explicit `usage` is `pace`, the default. */
 export function credentialSelectionStrategy(
   value: string | undefined,
 ): CredentialSelectionStrategy {
-  return value?.trim().toLowerCase() === "pace" ? "pace" : "usage";
+  return value?.trim().toLowerCase() === "usage" ? "usage" : "pace";
 }
 
 /**

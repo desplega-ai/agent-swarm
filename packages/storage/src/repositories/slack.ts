@@ -289,6 +289,8 @@ export interface SlackRepository {
   findSlackTreeByContextKey(contextKey: string): Promise<SlackMessageRow | null>;
   findSlackTreeByThread(channelId: string, threadTs: string): Promise<SlackMessageRow | null>;
   findSlackOutcomeByTask(taskId: string): Promise<SlackMessageRow | null>;
+  /** The outcome cards of `taskIds`, at most one per task, in no order. */
+  findSlackOutcomesByTaskIds(taskIds: readonly string[]): Promise<SlackMessageRow[]>;
   findSlackMessageByChannelTs(channelId: string, ts: string): Promise<SlackMessageRow | null>;
   /**
    * Finalized deferral outcome cards whose latest wake-up task is terminal and
@@ -323,6 +325,39 @@ export interface SlackRepository {
 
 export abstract class BaseSlackRepository implements SlackRepository {
   constructor(protected readonly db: SqlExecutor) {}
+
+  private renderV2StateCache?: {
+    expiresAt: number;
+    value: ReturnType<SlackRepository["getRenderV2State"]>;
+  };
+
+  /** Open transactions that wrote an activation column; while any is open, reads skip the cache. */
+  private renderV2StatePendingWrites = 0;
+
+  private invalidateRenderV2State(): void {
+    this.renderV2StateCache = undefined;
+    const client = this.db.client;
+    if (!client.inTransaction()) return;
+    // Until COMMIT, a read on another connection still sees the old row, and
+    // afterCommit runs a turn after COMMIT. Clearing the cache in a hook would
+    // let a read in that gap return the old row, so reads bypass the cache
+    // until this transaction ends instead.
+    // shortcut: a nested transaction whose rollback the caller catches drops
+    // this afterCommit hook while the outer one commits, so the count never
+    // drops and reads keep bypassing the cache (correct, just uncached). No
+    // caller writes the activation columns inside a transaction today; add a
+    // client hook for "outermost transaction ended" if one starts to.
+    this.renderV2StatePendingWrites += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.renderV2StatePendingWrites -= 1;
+      this.renderV2StateCache = undefined;
+    };
+    client.afterCommit(release);
+    client.onAttemptRollback(release);
+  }
 
   touchInboundDuplicate(dedupKey: string, now: string): Promise<SlackInboundReceiptRow | null> {
     return this.db.get<SlackInboundReceiptRow>(sql`
@@ -629,14 +664,31 @@ export abstract class BaseSlackRepository implements SlackRepository {
     activated_at: string;
     delegation_activated_at: string | null;
   } | null> {
-    return this.db.get(sql`
+    // Transactional reads must see their own writes and never publish uncommitted
+    // state. Reads during an open singleton write must not cache the pre-commit row.
+    if (this.db.client.inTransaction() || this.renderV2StatePendingWrites > 0) {
+      return this.db.get(sql`
+        SELECT activated_at, delegation_activated_at FROM slack_render_v2_state WHERE id = 1`);
+    }
+    if (this.renderV2StateCache && this.renderV2StateCache.expiresAt > Date.now()) {
+      return this.renderV2StateCache.value;
+    }
+    const value = this.db.get<{ activated_at: string; delegation_activated_at: string | null }>(sql`
       SELECT activated_at, delegation_activated_at FROM slack_render_v2_state WHERE id = 1`);
+    // Other API processes can activate the singleton: refresh at least every 30 seconds.
+    const entry = { expiresAt: Date.now() + 30_000, value };
+    this.renderV2StateCache = entry;
+    void value.catch(() => {
+      if (this.renderV2StateCache === entry) this.renderV2StateCache = undefined;
+    });
+    return value;
   }
 
   async ensureRenderV2Activation(activatedAt: string): Promise<void> {
     await this.db.run(sql`
       INSERT INTO slack_render_v2_state (id, activated_at) VALUES (1, ${activatedAt})
       ON CONFLICT(id) DO NOTHING`);
+    this.invalidateRenderV2State();
   }
 
   async ensureDelegationActivation(activatedAt: string): Promise<void> {
@@ -646,6 +698,7 @@ export abstract class BaseSlackRepository implements SlackRepository {
       ON CONFLICT(id) DO UPDATE SET
         delegation_activated_at = COALESCE(slack_render_v2_state.delegation_activated_at,
           excluded.delegation_activated_at)`);
+    this.invalidateRenderV2State();
   }
 
   // ---- slack_messages ----
@@ -776,6 +829,12 @@ export abstract class BaseSlackRepository implements SlackRepository {
   findSlackOutcomeByTask(taskId: string): Promise<SlackMessageRow | null> {
     return this.db.get<SlackMessageRow>(sql`
       SELECT * FROM slack_messages WHERE task_id = ${taskId} AND kind = 'outcome' LIMIT 1`);
+  }
+
+  async findSlackOutcomesByTaskIds(taskIds: readonly string[]): Promise<SlackMessageRow[]> {
+    if (taskIds.length === 0) return [];
+    return this.db.query<SlackMessageRow>(sql`
+      SELECT * FROM slack_messages WHERE task_id IN (${sqlList(taskIds)}) AND kind = 'outcome'`);
   }
 
   findSlackMessageByChannelTs(channelId: string, ts: string): Promise<SlackMessageRow | null> {

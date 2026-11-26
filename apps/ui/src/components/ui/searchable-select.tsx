@@ -173,7 +173,13 @@ function OptionsCombobox({
       </PopoverTrigger>
       <PopoverContent
         {...contentAttrs}
-        className={cn("w-(--radix-popover-trigger-width) min-w-[220px] p-0", contentClassName)}
+        // At least as wide as the trigger, as wide as the longest option, capped so a
+        // long list never runs off a phone. A narrow trigger no longer truncates
+        // every option to the same prefix.
+        className={cn(
+          "w-max min-w-[max(220px,var(--radix-popover-trigger-width))] max-w-[min(560px,90vw)] p-0",
+          contentClassName,
+        )}
         align="start"
       >
         <Command filter={tokenFilter}>
@@ -199,7 +205,9 @@ function OptionsCombobox({
                       className={cn("h-4 w-4 shrink-0", selected ? "opacity-100" : "opacity-0")}
                     />
                     {option.icon}
-                    <span className="truncate">{option.label}</span>
+                    <span className="min-w-0 [overflow-wrap:anywhere]" title={option.label}>
+                      {option.label}
+                    </span>
                     {option.hint ? (
                       <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
                         {option.hint}

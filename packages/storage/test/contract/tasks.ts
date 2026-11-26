@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   jsonText,
+  type NewTaskRow,
   type Storage,
   sql,
   sqlIdent,
@@ -58,6 +59,74 @@ const TASK_JSON_COLUMNS = new Set([
   "slackParticipants",
   "tags",
 ]);
+
+/** A `NewTaskRow` with only the text set: every optional column is null. */
+function newTaskRow(id: string, task: string): NewTaskRow {
+  const none = null;
+  return {
+    id,
+    key: `shared/task:${id}/`,
+    agentId: none,
+    creatorAgentId: none,
+    task,
+    status: "unassigned",
+    source: "api",
+    routing_reason: none,
+    routing_source: none,
+    routing_note: none,
+    taskType: none,
+    tags: "[]",
+    priority: 50,
+    dependsOn: "[]",
+    offeredTo: none,
+    offeredAt: none,
+    slackChannelId: none,
+    slackThreadTs: none,
+    slackTriggerMessageTs: none,
+    slackUserId: none,
+    slackParticipants: none,
+    vcsProvider: none,
+    vcsRepo: none,
+    vcsEventType: none,
+    vcsNumber: none,
+    vcsCommentId: none,
+    vcsAuthor: none,
+    vcsUrl: none,
+    vcsInstallationId: none,
+    vcsNodeId: none,
+    agentmailInboxId: none,
+    agentmailMessageId: none,
+    agentmailThreadId: none,
+    mentionMessageId: none,
+    mentionChannelId: none,
+    dir: none,
+    parentTaskId: none,
+    dispatchedByTaskId: none,
+    model: none,
+    modelTier: none,
+    effort: none,
+    profile: none,
+    modelGroup: none,
+    fallbackHops: none,
+    scheduleId: none,
+    workflowRunId: none,
+    workflowRunStepId: none,
+    outputSchema: none,
+    followUpConfig: none,
+    requestedByUserId: none,
+    requestedByUserIdInherited: false,
+    contextKey: none,
+    routingAffinity: none,
+    swarmVersion: "1.0.0",
+    createdAt: T0,
+    lastUpdatedAt: T0,
+    created_by: none,
+    updated_by: none,
+    isHumanFree: false,
+    sourceStepId: none,
+    sourceScriptRunId: none,
+  };
+}
 
 export function tasksContract(engine: ContractEngine): void {
   describe(`tasks repository [${engine.name}]`, () => {
@@ -705,8 +774,9 @@ export function tasksContract(engine: ContractEngine): void {
       await seedTask(storage, { id: "f2", task: "beta" });
       await seedTask(storage, { id: "f3", task: "gamma" });
       expect(await repo.getTaskFtsIndexedThrough()).toBe(0);
-      // Until the mark is complete, search is the substring match.
-      expect(await repo.countTasks({ search: "lph" })).toBe(1);
+      // Until the mark is complete, a row past it still matches (SQLite: the
+      // substring match; Postgres: the token match on the row's text).
+      expect(await repo.countTasks({ search: "alph" })).toBe(1);
       expect(await storage.transaction(() => repo.indexTaskFtsBatch(2))).toEqual({
         changes: 2,
         done: false,
@@ -727,6 +797,68 @@ export function tasksContract(engine: ContractEngine): void {
       expect(await repo.countTasks({ search: "lph" })).toBe(0);
     });
 
+    const writeTask = (id: string, task: string) =>
+      repo.insertSimpleTask({
+        id,
+        key: `shared/task:${id}/`,
+        agentId: "a1",
+        task,
+        status: "pending",
+        source: "api",
+        slackChannelId: null,
+        slackThreadTs: null,
+        slackUserId: null,
+        swarmVersion: "1.0.0",
+        isHumanFree: false,
+      });
+    const found = async (search: string) =>
+      ((await repo.listTasks({ search }, { limit: 50, offset: 0 }, "full")) as TaskRow[])
+        .map((row) => row.id)
+        .sort();
+
+    test("task search follows each write of the task text and title", async () => {
+      const inserted = await repo.insertTask(newTaskRow("w0", "inserted heron text"));
+      expect(inserted?.id).toBe("w0");
+      expect(await found("heron text")).toEqual(["w0"]);
+
+      expect((await writeTask("w1", "first draft words"))?.id).toBe("w1");
+      expect(await found("draft words")).toEqual(["w1"]);
+      await storage.executor.run(sql`UPDATE agent_tasks SET status = 'draft' WHERE id = 'w1'`);
+      expect(await repo.appendDraftTaskText("w1", " appended tail", T1)).toBe(1);
+      expect(await repo.appendDraftTaskText("w0", " not a draft", T1)).toBe(0);
+      expect(await found("words appended tail")).toEqual(["w1"]);
+      expect(await found("not a draft")).toEqual([]);
+
+      await writeTask("w2", "pending original");
+      const fold = {
+        taskId: "w2",
+        expectedTask: "pending original",
+        nextTask: "folded replacement",
+        toDraft: false,
+        slackParticipants: null,
+        now: T1,
+      };
+      expect(await repo.foldPendingTaskText(fold)).toBe(1);
+      expect(await repo.foldPendingTaskText(fold)).toBe(0);
+      expect(await found("folded replacement")).toEqual(["w2"]);
+      expect(await found("original")).toEqual([]);
+
+      expect((await repo.setTaskTitleIfUnset("w2", "osprey title"))?.title).toBe("osprey title");
+      expect(await repo.setTaskTitleIfUnset("w2", "kestrel title")).toBeNull();
+      expect(await found("osprey")).toEqual(["w2"]);
+      expect(await found("kestrel")).toEqual([]);
+      expect((await repo.setTaskTitle("w2", "kestrel title"))?.title).toBe("kestrel title");
+      expect(await found("osprey")).toEqual([]);
+      expect(await found("kestrel title")).toEqual(["w2"]);
+      await repo.setTaskTitle("w2", null);
+      expect(await found("kestrel")).toEqual([]);
+      expect(await found("folded")).toEqual(["w2"]);
+      expect(await repo.countTasks({ search: "folded" })).toBe(1);
+
+      expect(await repo.deleteTask("w1")).toBe(1);
+      expect(await found("appended")).toEqual([]);
+    });
+
     test("task search: a phrase with a prefix on the last word, in one column, or an id prefix", async () => {
       const corpus: Record<string, string> = {
         t1: "amber falcon crosses the river",
@@ -739,12 +871,10 @@ export function tasksContract(engine: ContractEngine): void {
         t8: "falcons circle the copper tower",
         t9: "fix src/be/db.ts: deploy-helper's v1.2 run_id",
       };
-      for (const [id, task] of Object.entries(corpus)) await seedTask(storage, { id, task });
-      await seedTask(storage, { id: "ab-title", task: "ends with copper", title: "kettle lid" });
-      const found = async (search: string) =>
-        ((await repo.listTasks({ search }, { limit: 50, offset: 0 }, "full")) as TaskRow[])
-          .map((row) => row.id)
-          .sort();
+      // Repository writes, which keep the search index of every engine.
+      for (const [id, task] of Object.entries(corpus)) await writeTask(id, task);
+      await writeTask("ab-title", "ends with copper");
+      await repo.setTaskTitle("ab-title", "kettle lid");
       expect(await found("falcon")).toEqual(["t1", "t2", "t3", "t8"]);
       expect(await found("amber falcon")).toEqual(["t1", "t2"]);
       expect(await found("river")).toEqual(["t1", "t4", "t5"]);
@@ -1348,6 +1478,7 @@ export function tasksContract(engine: ContractEngine): void {
         source: "ui",
         created_by_user_id: null,
         created_by_agent_id: null,
+        attachments: null,
       };
       const m1 = await repo.insertSteeringMessage({
         ...base,
@@ -1362,8 +1493,15 @@ export function tasksContract(engine: ContractEngine): void {
         created_by_kind: "agent",
         created_by_agent_id: "ag",
       });
-      await repo.insertSteeringMessage({ ...base, id: "m3", created_by_kind: "system" });
+      await repo.insertSteeringMessage({
+        ...base,
+        id: "m3",
+        created_by_kind: "system",
+        attachments: '[{"id":"a1"}]',
+      });
       expect((await repo.findSteeringMessage("m1"))?.sender_name).toBe("Ann");
+      expect((await repo.findSteeringMessage("m1"))?.attachments).toBeNull();
+      expect((await repo.findSteeringMessage("m3"))?.attachments).toBe('[{"id":"a1"}]');
       expect((await repo.findSteeringMessage("m2"))?.sender_name).toBe("ag");
       expect((await repo.findSteeringMessage("m3"))?.sender_name).toBeNull();
       expect(ids(await repo.listPendingSteeringForAgent("ag"))).toEqual(["m1", "m2", "m3"]);
@@ -1834,6 +1972,16 @@ export function tasksContract(engine: ContractEngine): void {
         oldestTaskId: "q2",
         oldestClaimableAt: "2026-11-21T10:30:00.000Z",
       });
+    });
+
+    test("countFailedSince skips cascade failures and older finishes", async () => {
+      expect(await repo.countFailedSince(T1)).toBe(0);
+      await seedTask(storage, { id: "f1", status: "failed", finishedAt: T1 });
+      await seedTask(storage, { id: "f2", status: "failed", statusKind: "agent", finishedAt: T1 });
+      await seedTask(storage, { id: "c", status: "failed", statusKind: "cascade", finishedAt: T1 });
+      await seedTask(storage, { id: "old", status: "failed", finishedAt: T0 });
+      await seedTask(storage, { id: "ok", status: "completed", finishedAt: T1 });
+      expect(await repo.countFailedSince(T1)).toBe(2);
     });
 
     test("install and tree aggregates", async () => {

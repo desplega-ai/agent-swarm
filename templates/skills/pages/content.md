@@ -34,6 +34,9 @@ sheet. A plan, diagram or map to think through is a board. Both are editable
 agent-fs files; see the `boards-and-sheets` skill. To show one inside a page,
 embed it with `<swarm-object>` (section below).
 
+Data from CSV, Parquet or xlsx files on the drive: query it with `data-query`
+(the `data` skill), save the result with `sheet: {path}`, then embed that sheet.
+
 Do **not** use pages for:
 
 - In-flight progress notes: use `store-progress.progress`
@@ -621,6 +624,8 @@ Before publishing:
 ## QA a published page
 
 To check a page by screenshot, open it from an origin its data endpoints allow. A page that fetches live data from a CORS-restricted endpoint falls back to its baked values when opened from any other origin (for example an internal service hostname), so a screenshot there proves layout only, never the live numbers. Check every element you changed and its neighbours at the viewport readers use.
+
+To see a page inside the dashboard, run `agent-swarm ui-dev --page <id|slug>` in the background and open the `url` of its `UI_DEV_READY {json}` line. It needs no repo checkout; when you change dashboard code, `bun run ui:dev` from an agent-swarm checkout does the same with hot reload. It works for every content type and auth mode: the local server proxies `/p/*` and `/@swarm/*` on its own origin, so authed pages get their session and SDK calls. A password page still asks for the password. It acts with your swarm key: in prod, do not submit forms unless the task asks. Runbook: `runbooks/app-and-page-dev.md`.
 
 ## Auth Modes
 

@@ -25,7 +25,7 @@ import { completeStructuredWithModel } from "./complete-structured.js";
 import type { ResolvedCredential } from "./credentials.js";
 
 export interface SummarizeSessionOptions {
-  /** Diagnostic tag only — propagated into `callerTag`, not into `completeStructured` directly. */
+  /** Propagated into `callerTag`, and moves this harness's own credential kinds first. */
   harness: "claude" | "pi" | "opencode" | "codex";
   /** Pre-truncated transcript text. */
   transcript: string;
@@ -111,6 +111,7 @@ export async function summarizeSession(
       "You are an expert at extracting durable, generalizable learnings from agent sessions.",
     userPrompt,
     callerTag: `session-summary:${opts.harness}`,
+    harness: opts.harness,
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
     env: opts.env,

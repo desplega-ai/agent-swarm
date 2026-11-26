@@ -250,6 +250,15 @@ export type ScriptConnectionRow = {
   updated_by: string | null;
 };
 
+/**
+ * The columns a script run and a reachability check read. It leaves out the
+ * stored OpenAPI spec and the generated types, the largest columns of a row.
+ */
+export type ScriptConnectionCatalogRow = Pick<
+  ScriptConnectionRow,
+  "slug" | "kind" | "scope" | "scope_id" | "enabled" | "generated_runtime_json"
+>;
+
 /** Every content column of a connection (insert and full update). */
 export type ScriptConnectionWrite = {
   slug: string;
@@ -349,6 +358,27 @@ export type NewScriptRunRow = {
   created_by: string | null;
   updated_by: string | null;
   startedAt: string;
+  parentScriptRunId: string | null;
+};
+
+/** Bounds of a run tree read: rows in all, root included, and levels below the root. */
+export type ScriptRunTreeBounds = { maxRows: number; maxDepth: number };
+
+/** Root first, then the descendants by start time. */
+function sortTree(rows: ScriptRunTreeRow[]): ScriptRunTreeRow[] {
+  const [root, ...rest] = rows;
+  rest.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+  return root ? [root, ...rest] : rows;
+}
+
+/** One run of a run tree (`listScriptRunTree`). */
+export type ScriptRunTreeRow = {
+  id: string;
+  scriptName: string | null;
+  status: string;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
 };
 
 export type NewInlineScriptRunRow = {
@@ -361,7 +391,8 @@ export type NewInlineScriptRunRow = {
   output: string | null;
   error: string | null;
   startedAt: string;
-  finishedAt: string;
+  /** Null for a run recorded as `running` before it executes (an app action's root). */
+  finishedAt: string | null;
   requestedByUserId: string | null;
   created_by: string | null;
   updated_by: string | null;
@@ -530,6 +561,8 @@ export interface ScriptsRepository {
   // ---- script_connections ----
   /** Ordered by slug, scope, scope_id (unique by the slug/scope index). */
   listConnections(): Promise<ScriptConnectionRow[]>;
+  /** {@link listConnections} with the catalog columns only, in the same order. */
+  listConnectionCatalog(): Promise<ScriptConnectionCatalogRow[]>;
   findConnectionById(id: string): Promise<ScriptConnectionRow | null>;
   /** NULL and '' scope ids compare equal. */
   findConnectionBySlug(
@@ -567,6 +600,14 @@ export interface ScriptsRepository {
   findScriptRunByIdempotencyKey(idempotencyKey: string): Promise<ScriptRunRow | null>;
   insertScriptRun(row: NewScriptRunRow): Promise<ScriptRunRow | null>;
   insertInlineScriptRun(row: NewInlineScriptRunRow): Promise<ScriptRunRow | null>;
+  /**
+   * The run and every descendant over `parentScriptRunId`, at most `limit`
+   * rows, root first. Empty when the root does not exist.
+   */
+  listScriptRunTree(
+    rootId: string,
+    bounds: ScriptRunTreeBounds,
+  ): Promise<{ rows: ScriptRunTreeRow[]; truncated: boolean }>;
   /** Newest `startedAt` first, then insertion order (newest first). */
   listScriptRuns(
     f: ScriptRunListFilter,
@@ -584,7 +625,7 @@ export interface ScriptsRepository {
     update: ScriptRunColumnUpdate,
     guard?: "not-terminal" | "running",
   ): Promise<number>;
-  /** Running and paused runs with their stored source, in insertion order. */
+  /** Running and paused supervised (non-inline) runs with their stored source, in insertion order. */
   listActiveScriptRuns(): Promise<ScriptRunRow[]>;
 
   // ---- script_run_journal ----
@@ -995,6 +1036,12 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
     );
   }
 
+  listConnectionCatalog(): Promise<ScriptConnectionCatalogRow[]> {
+    return this.db.query<ScriptConnectionCatalogRow>(
+      sql`SELECT slug, kind, scope, scope_id, enabled, generated_runtime_json FROM script_connections ORDER BY slug ASC, scope ASC, COALESCE(scope_id, '') ASC`,
+    );
+  }
+
   findConnectionById(id: string): Promise<ScriptConnectionRow | null> {
     return this.db.get<ScriptConnectionRow>(sql`SELECT * FROM script_connections WHERE id = ${id}`);
   }
@@ -1097,11 +1144,52 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
     return this.db.get<ScriptRunRow>(sql`
       INSERT INTO script_runs
         (id, "agentId", "scriptName", source, "sourceHash", args, "idempotencyKey",
-         "requestedByUserId", "sourceTaskId", created_by, updated_by, "startedAt")
+         "requestedByUserId", "sourceTaskId", created_by, updated_by, "startedAt",
+         "parentScriptRunId")
       VALUES (${r.id}, ${r.agentId}, ${r.scriptName}, '', ${r.sourceHash}, ${r.args},
         ${r.idempotencyKey}, ${r.requestedByUserId}, ${r.sourceTaskId}, ${r.created_by},
-        ${r.updated_by}, ${r.startedAt})
+        ${r.updated_by}, ${r.startedAt}, ${r.parentScriptRunId})
       RETURNING *`);
+  }
+
+  async listScriptRunTree(
+    rootId: string,
+    bounds: ScriptRunTreeBounds,
+  ): Promise<{ rows: ScriptRunTreeRow[]; truncated: boolean }> {
+    // One LIMITed query per level instead of a recursive CTE: Postgres rejects
+    // LIMIT in a recursive term, and an outer LIMIT after ORDER BY still walks
+    // the whole tree. Here each read stops at the rows still allowed: the
+    // ORDER BY matches idx_script_runs_parent_started, so neither engine sorts
+    // a wide level before the LIMIT (test: script-run-tree-plan on both engines).
+    const cols = sql`id, "scriptName", status, error, "startedAt", "finishedAt"`;
+    const root = await this.db.get<ScriptRunTreeRow>(
+      sql`SELECT ${cols} FROM script_runs WHERE id = ${rootId}`,
+    );
+    if (!root) return { rows: [], truncated: false };
+    const rows = [root];
+    const seen = new Set([root.id]);
+    let frontier = [root.id];
+    for (let depth = 1; frontier.length > 0; depth++) {
+      const room = bounds.maxRows - rows.length;
+      // At a bound, one probe row tells whether the tree goes on (`truncated`).
+      const atBound = room <= 0 || depth > bounds.maxDepth;
+      const level = await this.db.query<ScriptRunTreeRow>(sql`
+        SELECT ${cols} FROM script_runs
+        WHERE "parentScriptRunId" IN (${sqlList(frontier)})
+        ORDER BY "parentScriptRunId", "startedAt", id
+        LIMIT ${atBound ? 1 : room + 1}`);
+      // A revisited id is a parent cycle: drop it so the walk still ends.
+      const fresh = level.filter((r) => !seen.has(r.id));
+      if (atBound) return { rows: sortTree(rows), truncated: fresh.length > 0 };
+      // shortcut: a cycle row can fill the probe slot and read as truncated; cycles need a hand-edited parent.
+      const truncated = level.length > room;
+      const kept = fresh.slice(0, room);
+      for (const r of kept) seen.add(r.id);
+      rows.push(...kept);
+      if (truncated) return { rows: sortTree(rows), truncated: true };
+      frontier = kept.map((r) => r.id);
+    }
+    return { rows: sortTree(rows), truncated: false };
   }
 
   insertInlineScriptRun(r: NewInlineScriptRunRow): Promise<ScriptRunRow | null> {
@@ -1142,7 +1230,8 @@ export abstract class BaseScriptsRepository implements ScriptsRepository {
 
   async countActiveScriptRuns(): Promise<number> {
     const row = await this.db.get<{ count: number }>(
-      sql`SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')`,
+      // Inline rows run in-process, never under the supervisor or its cap.
+      sql`SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused') AND kind <> 'inline'`,
     );
     return row?.count ?? 0;
   }

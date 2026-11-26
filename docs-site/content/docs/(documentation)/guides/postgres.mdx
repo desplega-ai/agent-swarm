@@ -64,9 +64,20 @@ ALTER DEFAULT PRIVILEGES FOR ROLE swarm IN SCHEMA public GRANT SELECT ON TABLES 
 
 Then set `DATABASE_QUERY_URL` and restart. At start the API probes the role: it must not read the denied tables or write. If the probe fails, `db-query` is off and the log says why.
 
+### SQL rules for db-query
+
+On Postgres, `db-query` runs Postgres SQL:
+
+- Parameters are `$1`, `$2`, and so on, not `?`.
+- Quote every identifier that has an uppercase letter: `"taskId"`, `"createdAt"`.
+- Flags are `boolean`: `"isLead"`, not `"isLead" = 1`.
+- Pass a JSON list as a string with `$1::text::jsonb`, or as a real array with `$1::jsonb`. SQLite reads the same string with `json_each(?)`. A string param in a `json` or `jsonb` position must be JSON text: `'abc'` fails.
+
 ## Move a SQLite database to Postgres
 
 `agent-swarm db-copy` copies the SQLite file into an empty Postgres database in one transaction, then compares the row count and a checksum of each table.
+
+This section is the short form. For a swarm with data, scripts and dashboards, follow [Migrate a SQLite swarm to PostgreSQL](/docs/migrations/sqlite-to-postgres): it covers the SQL that the copy does not move, the rehearsal, the first hour and rollback.
 
 Rehearse the move on a scratch copy. Set `DATABASE_QUERY_URL` for the test API and run every custom dashboard against the copied data. Compare its results with SQLite. A query can pass the copy's planning check and still fail on a value in a stored row.
 

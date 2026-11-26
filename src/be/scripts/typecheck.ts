@@ -6,6 +6,8 @@ import {
   scriptAppTypesWarnings,
 } from "@/apps/script-types";
 import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
+import { REST_ROUTED_SDK_METHODS } from "@/scripts-runtime/sdk-allowlist";
+import { SWARM_TOOL_ERROR_CODES } from "@/scripts-runtime/swarm-tool-error";
 import type { ScriptTypeContext } from "./type-contributors";
 
 /**
@@ -419,6 +421,46 @@ export interface BoardsNamespace {
   removeElements(args: BoardRemoveArgs): Promise<BoardResult & { removed: string[] }>;
 }
 
+export type DataQueryTable = string | { path: string; format?: string };
+
+export interface DataQueryArgs {
+  /** One read-only DuckDB query. Name a file in table position: \`FROM '/shared/x/sales.csv'\`. */
+  sql: string;
+  /** Table name -> drive path, or {path, format} to override format detection. */
+  tables?: Record<string, DataQueryTable>;
+  /** Default 1,000, at most 10,000. Aggregate in SQL rather than raising it. */
+  maxRows?: number;
+  /** Another drive your agent-fs key can read. Default: your default drive. */
+  driveId?: string;
+  /** Also return \`card\`: a uiSpec spec with the first 100 rows as a Table. */
+  card?: boolean;
+  /** Save the result as a new sheet (create-only). */
+  sheet?: { path: string; title?: string; tab?: string };
+  /** Label for the usage event (e.g. \`workflow\`, \`qa\`). */
+  origin?: string;
+}
+
+export interface DataQueryResult {
+  message: string;
+  columns: Array<{ name: string; type: string }>;
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  truncated: boolean;
+  files: Array<{ table: string; path: string; format: string }>;
+  elapsedMs: number;
+  output: "rows" | "card" | "sheet";
+  card?: { root: string; elements: Record<string, unknown> };
+  sheet?: { object: PrimitiveObject; link: string | null };
+}
+
+/**
+ * SQL over tabular files (csv, tsv, parquet, json, ndjson, xlsx) on your agent-fs drive, as your
+ * own agent-fs identity. Throws on a refusal. Big scans: raise the script \`timeout\` (agent-fs stops at 30 s).
+ */
+export interface DataNamespace {
+  query(args: DataQueryArgs): Promise<DataQueryResult>;
+}
+
 export interface SwarmSdk {
   // --- memory ---
   memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string; keyPrefix?: string }): Promise<unknown>;
@@ -468,6 +510,8 @@ export interface SwarmSdk {
   sheets_addTab(args: SheetRef & { name: string; after?: string }): Promise<unknown>;
   sheets_importXlsx(args: SheetImportXlsxArgs): Promise<unknown>;
   sheets_exportXlsx(args: SheetExportXlsxArgs): Promise<unknown>;
+  // --- data (prefer ctx.data.*, which unwraps and throws) ---
+  data_query(args: DataQueryArgs): Promise<unknown>;
   // --- boards (prefer ctx.boards.*, which unwraps and throws) ---
   boards_create(args: BoardCreateArgs): Promise<unknown>;
   boards_get(args: BoardRef & { detail?: "summary" | "full" }): Promise<unknown>;
@@ -673,7 +717,13 @@ export interface SwarmSdk {
   mcpServer_uninstall(args: Record<string, unknown>): Promise<unknown>;
 
   // --- pages & metrics ---
-  app_get(args: { appId: string }): Promise<unknown>;
+  app_catalog(args?: {
+    component?: string;
+    prop?: string;
+    action?: string;
+    topic?: "expressions";
+  }): Promise<unknown>;
+  app_get(args: { appId: string; path?: string; outline?: boolean }): Promise<unknown>;
   app_history(args: { appId: string; limit?: number }): Promise<unknown>;
   app_diff(args: { appId: string; from?: number; to?: number }): Promise<unknown>;
   app_list(args?: Record<string, never>): Promise<unknown>;
@@ -684,6 +734,21 @@ export interface SwarmSdk {
     definition?: Record<string, unknown>;
     migration?: Record<string, unknown>;
     forceElementBreak?: string[];
+    ops?: Array<{ op: "add" | "replace" | "remove" | "test"; path: string; value?: unknown }>;
+    dryRun?: boolean;
+    includeApp?: boolean;
+  }): Promise<unknown>;
+  app_patchNode(args: {
+    appId: string;
+    page?: string;
+    element?: string;
+    nodeId: string;
+    props?: Record<string, unknown>;
+    set?: Record<string, unknown>;
+    remove?: true;
+    create?: { parentId: string; index?: number; node: Record<string, unknown> };
+    dryRun?: boolean;
+    includeApp?: boolean;
   }): Promise<unknown>;
   app_query(args: {
     appId: string;
@@ -926,6 +991,49 @@ export type ScriptCaller =
   | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
   | null;
 
+export type SwarmToolErrorCode = ${SWARM_TOOL_ERROR_CODES.map((code) => JSON.stringify(code)).join(" | ")};
+
+/** The second argument of \`new SwarmToolError(message, init)\`. */
+export interface SwarmToolErrorInit {
+  code: SwarmToolErrorCode;
+  tool: string;
+  status?: number;
+  suggestions?: string[];
+  cause?: unknown;
+}
+
+/**
+ * What a failed \`ctx.swarm.*\`, \`ctx.<namespace>.*\` or \`ctx.db.query\` call throws.
+ * Branch on \`code\` instead of matching the message:
+ * \`unknown_tool\` (no such method; \`suggestions\` names the closest ones),
+ * \`not_exposed\` (a lifecycle or credential tool kept from scripts),
+ * \`invalid_args\`, \`permission\`, \`not_found\`, \`rate_limited\`, \`timeout\`,
+ * \`refused\` (the tool declined the call) and \`upstream\` (any other failure).
+ * Calls that return \`{ success, status, data }\` still return a failed status instead of throwing.
+ *
+ * @example
+ * import { SwarmToolError } from "swarm-sdk";
+ * try { await ctx.swarm.kv_getOrNull({ key }); }
+ * catch (err) { if (SwarmToolError.is(err) && err.code === "rate_limited") { ... } }
+ */
+export class SwarmToolError extends Error {
+  constructor(
+    message: string,
+    init: SwarmToolErrorInit,
+  );
+  readonly name: "SwarmToolError";
+  readonly code: SwarmToolErrorCode;
+  /** The SDK method called, e.g. \`kv_get\`. */
+  readonly tool: string;
+  /** HTTP status of the failed call, when there was one. */
+  readonly status?: number;
+  readonly suggestions?: string[];
+  /** True for a SwarmToolError; also works on one rebuilt across the sandbox boundary. */
+  static is(value: unknown): value is SwarmToolError;
+}
+
+export const SWARM_TOOL_ERROR_CODES: readonly SwarmToolErrorCode[];
+
 export abstract class DurableObject<S> {
   constructor(id: string);
   readonly id: string;
@@ -936,12 +1044,42 @@ export abstract class DurableObject<S> {
   static idleTtlSec?: number;
 }
 
+/**
+ * Second argument of any \`ctx.swarm.<tool>\` call.
+ *
+ * \`idempotencyKey\` runs a write at most once per key: a later call of the same tool with
+ * the same key returns the first call's result and does nothing (args are not compared).
+ * Keys are scoped to the calling agent and kept 7 days. Read-only tools ignore it. Only
+ * tools that go through the MCP bridge take it: a REST-routed method (kv_*, memory_search,
+ * task_get, schedule_*, workflow_*, script_run, ...) has no options argument, and throws
+ * \`invalid_args\` if one is passed anyway. Durable runs
+ * (\`launch-script-run\`) key every call from the run id, tool and call ordinal by
+ * themselves, so a respawned run does not repeat its sends; pass a key to override that.
+ * A one-off run started with an \`idempotencyKey\` (\`script-run\` tool or API) does the
+ * same from that key, and hands a derived key to each nested \`script_run\` and
+ * \`workflow_trigger\` that sets none.
+ */
+export interface SwarmCallOptions {
+  idempotencyKey?: string;
+}
+
+/** Adds the optional \`SwarmCallOptions\` argument to every method of \`T\`. */
+export type WithSwarmCallOptions<T> = {
+  [K in keyof T]: T[K] extends (...args: infer P) => infer R
+    ? (...args: [...P, options?: SwarmCallOptions]) => R
+    : T[K];
+};
+
+/** Methods routed to a REST endpoint, not the MCP bridge: they take no \`SwarmCallOptions\`. */
+type SwarmSdkRestRoutedMethods = ${REST_ROUTED_SDK_METHODS.map((name) => JSON.stringify(name)).join(" | ")};
+
 export interface ScriptContext {
   /** Frozen caller identity supplied by the host. */
   caller: ScriptCaller;
   run?: ScriptRunContext;
   step?: ScriptWorkflowSteps;
-  swarm: SwarmSdk & { config: SwarmConfig };
+  swarm: WithSwarmCallOptions<Omit<SwarmSdk, SwarmSdkRestRoutedMethods>> &
+    Pick<SwarmSdk, Extract<keyof SwarmSdk, SwarmSdkRestRoutedMethods>> & { config: SwarmConfig };
   api: ScriptApiRegistry;
   mcp: ScriptMcpRegistry;
   /** The run's virtual filesystem. Same files as \`ctx.sh\` sees. */
@@ -963,6 +1101,8 @@ export interface ScriptContext {
   sheets: SheetsNamespace;
   /** Excalidraw boards on your default agent-fs drive (board-* tools). */
   boards: BoardsNamespace;
+  /** SQL over tabular files on your agent-fs drive (data-query tool). */
+  data: DataNamespace;
 }
 
 /**

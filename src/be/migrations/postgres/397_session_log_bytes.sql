@@ -1,4 +1,4 @@
--- Same durable accounting as SQLite migration 377. Timestamp stays text:
+-- Same durable accounting as SQLite migration 397. Timestamp stays text:
 -- callers and repository reads use the same ISO representation on both engines.
 CREATE TABLE IF NOT EXISTS session_log_bytes (
     "sessionId" TEXT PRIMARY KEY,

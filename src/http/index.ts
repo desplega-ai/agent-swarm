@@ -33,6 +33,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { withRequestMemo } from "../be/request-memo";
 import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
@@ -40,9 +41,13 @@ import { startSavingsRollup, stopSavingsRollup } from "../be/savings/rollup";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { getStorage } from "../be/storage";
+import { readEngineStats } from "../be/storage-root";
+import { readSwarmStateStats } from "../be/swarm-state-stats";
 import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
+import { withRequestWriteScope } from "../be/write-stats";
 import { initBitbucket } from "../bitbucket";
 import {
   loadEnabledExtensions,
@@ -57,8 +62,12 @@ import { initJira } from "../jira";
 import { initLinear } from "../linear";
 import {
   initOtel,
+  isPgMetricsEnabled,
   isPollTracingEnabled,
+  isSwarmMetricsEnabled,
+  startPostgresStatsMetrics,
   startSpan,
+  startSwarmStateMetrics,
   withRemoteContext,
   withSpanContext,
 } from "../otel";
@@ -70,7 +79,7 @@ import { attachRealtimeTransport } from "../realtime/transport";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
-import { telemetry } from "../telemetry";
+import { setTelemetryDbEngine, telemetry } from "../telemetry";
 import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
@@ -114,6 +123,7 @@ import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
+import { handleLinkPreview } from "./link-preview";
 import {
   closeIdleMcpTransports,
   DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS,
@@ -457,6 +467,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePageProxy(req, res),
         () => handlePages(req, res, pathSegments, queryParams, myAgentId),
         () => handleDesignSystem(req, res, pathSegments, queryParams, myAgentId),
+        () => handleLinkPreview(req, res, pathSegments, queryParams),
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
@@ -506,9 +517,12 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     };
 
-    // Name the entry point for the event-loop stall line.
-    await withLoopPath(loopPathForRequest(req.method, pathSegments), () =>
-      span ? withSpanContext(span, handleRequest) : handleRequest(),
+    // Name the entry point for the event-loop stall line (and the e2e commit budget).
+    const loopPath = loopPathForRequest(req.method, pathSegments);
+    await withLoopPath(loopPath, () =>
+      withRequestWriteScope(loopPath, () =>
+        withRequestMemo(() => (span ? withSpanContext(span, handleRequest) : handleRequest())),
+      ),
     );
   });
 });
@@ -842,6 +856,10 @@ startScratchScriptGc();
 initialize();
 
 await initOtel("api");
+// Postgres server gauges (pg_stat_*), read once per metric export over the engine pool.
+if (isPostgresEngine() && isPgMetricsEnabled()) startPostgresStatsMetrics(readEngineStats);
+// Swarm state gauges (failed tasks, approvals, queue) on any engine.
+if (isSwarmMetricsEnabled()) startSwarmStateMetrics(() => readSwarmStateStats());
 
 httpServer
   .listen(port, async () => {
@@ -886,6 +904,8 @@ httpServer
     const telemetrySetConfig = async (key: string, value: string) => {
       await upsertSwarmConfig({ scope: "global", key, value });
     };
+    // Every event of this process carries the storage engine (`db_engine`).
+    setTelemetryDbEngine(getStorage().capabilities.dbQueryDialect);
     // Also keeps the accessors so turning telemetry on at runtime re-inits it.
     await initApiTelemetry(telemetryGetConfig, telemetrySetConfig);
     telemetry.server("started", { port });
@@ -1021,8 +1041,10 @@ httpServer
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
 
-    // Index the task rows migration 256 left out, in batches. Task search
-    // stays on LIKE until it finishes. See src/be/db/tasks/search-index.ts.
+    // Index the task rows migration 256 (SQLite) or 391 (Postgres) left out,
+    // in batches. Until it finishes, SQLite search stays on LIKE and Postgres
+    // search matches those rows through the expression indexes of 368. See
+    // src/be/db/tasks/search-index.ts.
     void startTaskSearchBackfill();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)

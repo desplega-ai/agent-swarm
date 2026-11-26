@@ -28,6 +28,7 @@ import type {
   MetricColumnUpdate,
   MetricRow,
   MetricVersionRow,
+  NewSessionLog,
   PageColumnUpdate,
   PageRow,
   PageVersionRow,
@@ -44,7 +45,6 @@ import type {
   SkillFileRow,
   SkillRow,
   SkillWithInstallRow,
-  SlackMessageRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
@@ -184,6 +184,7 @@ import {
   OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+  type SteeringAttachment,
   type UserAvatar,
 } from "../types";
 import {
@@ -260,6 +261,7 @@ import {
   createContextVersion,
   getLatestContextVersion,
 } from "./db/context-versions";
+import { decodeKvRow, encodeKvValue, type KvRow } from "./db/kv";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageFilter } from "./db/page-search";
 import { parsePageThemeTokens } from "./db/page-theme-tokens";
@@ -293,6 +295,7 @@ import {
   sessionPageFields,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
+import { rowToSlackMessage } from "./db/slack-messages";
 import { taskAttachmentWrite } from "./db/tasks/attachment-write";
 import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
@@ -307,6 +310,7 @@ import {
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
+import { parseSteeringAttachments } from "./db/tasks/steering-attachments";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
@@ -323,6 +327,7 @@ import {
   wakeParentsOfDeletedRuns,
 } from "./db/workflow-runs";
 import { rowToWorkflow, type WorkflowRow } from "./db/workflows/read";
+import { invalidateScriptConnectionCatalog } from "./script-connection-catalog";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -358,6 +363,7 @@ export {
   ExtensionAgentAssignmentError,
   extensionAgentAssignmentError,
   getActiveTaskCount,
+  getActiveTaskCounts,
   getAgentById,
   getAgentDailyTaskCounts,
   getAgentHarnessProviders,
@@ -710,30 +716,6 @@ export function isPendingSlackMessage(record: SlackMessageRecord): boolean {
 /** True when the renderer must not touch this card again: delivered, or given up on. */
 export function isSettledSlackMessage(record: SlackMessageRecord): boolean {
   return !!record.finalizedAt || !!record.deliveryAbandonedAt;
-}
-
-function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
-  return {
-    id: row.id,
-    contextKey: row.context_key,
-    channelId: row.channel_id,
-    threadTs: row.thread_ts,
-    ts: row.ts,
-    kind: row.kind as SlackMessageKind,
-    taskId: row.task_id ?? undefined,
-    permalink: row.permalink ?? undefined,
-    finalizedAt: row.finalized_at ?? undefined,
-    streamChunksAppended: row.stream_chunks_appended,
-    conclusionKind: (row.conclusion_kind as SlackConclusionKind | null) ?? undefined,
-    deferralResolvedAt: row.deferral_resolved_at ?? undefined,
-    deferralAbandonedAt: row.deferral_abandoned_at ?? undefined,
-    deliveryAttempts: row.delivery_attempts,
-    deliveryAbandonedAt: row.delivery_abandoned_at ?? undefined,
-    deliveryLastError: row.delivery_last_error ?? undefined,
-    closedAt: row.closed_at ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 export async function recordSlackMessage(input: {
@@ -1551,6 +1533,7 @@ function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
     deliveredAt: row.delivered_at ?? undefined,
     handledAt: row.handled_at ?? undefined,
     handledNote: row.handled_note ?? undefined,
+    attachments: parseSteeringAttachments(row.attachments),
   };
 }
 
@@ -1562,6 +1545,7 @@ export interface CreateSteeringMessageArgs {
   createdByKind: SteeringMessage["createdByKind"];
   createdByUserId?: string;
   createdByAgentId?: string;
+  attachments?: SteeringAttachment[];
 }
 
 export async function createSteeringMessage(
@@ -1577,6 +1561,7 @@ export async function createSteeringMessage(
     created_by_kind: args.createdByKind,
     created_by_user_id: args.createdByUserId ?? null,
     created_by_agent_id: args.createdByAgentId ?? null,
+    attachments: args.attachments?.length ? JSON.stringify(args.attachments) : null,
   });
   if (!row) throw new Error("Failed to create steering message");
 
@@ -1595,6 +1580,7 @@ export async function createSteeringMessage(
         steeringMessageId: id,
         mode: args.mode,
         source: args.source,
+        ...(args.attachments?.length ? { attachmentCount: args.attachments.length } : {}),
       },
     });
   } catch {}
@@ -3617,27 +3603,9 @@ export interface InboxSummary {
 
 export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
   const messaging = getStorage().repos.messaging;
-  const channels = await getAllChannels();
-  let unreadCount = 0;
-  let mentionsCount = 0;
-
-  for (const channel of channels) {
-    // Check if this channel is already being processed
-    const readState = await messaging.findChannelReadState(agentId, channel.id);
-
-    const lastReadAt = readState?.lastReadAt ?? null;
-    const isProcessing =
-      readState?.processing_since !== null && readState?.processing_since !== undefined;
-
-    // Skip channels that are already being processed
-    if (isProcessing) continue;
-
-    // Count unread (excluding own messages)
-    unreadCount += await messaging.countUnreadChannelMessages(channel.id, agentId, lastReadAt);
-
-    // Count mentions in unread
-    mentionsCount += await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
-  }
+  // One grouped count over every channel the agent is not processing, in place
+  // of a read state and two counts per channel.
+  const { unreadCount, mentionsCount } = await messaging.countUnreadInbox(agentId);
 
   const tasks = getStorage().repos.tasks;
   // Count offered tasks for this agent
@@ -3652,22 +3620,28 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
   // Get recent unread @mentions (up to 3)
   const recentMentions: MentionPreview[] = [];
   const mentionMessages = await getMentionsForAgent(agentId, { unreadOnly: false });
+  // Every read mark and channel name in one statement each, loaded on first
+  // use, not one statement per mention.
+  let lastReadAtByChannel: Map<string, string | null> | null = null;
+  let channelNames: Map<string, string> | null = null;
 
   // Filter to only unread mentions and limit to 3
   for (const msg of mentionMessages) {
     if (recentMentions.length >= 3) break;
 
     // Check if message is unread (by checking against read state per channel)
-    const lastReadAt = await getLastReadAt(agentId, msg.channelId);
+    lastReadAtByChannel ??= new Map(
+      (await messaging.listChannelReadStates(agentId)).map((s) => [s.channelId, s.lastReadAt]),
+    );
+    const lastReadAt = lastReadAtByChannel.get(msg.channelId) ?? null;
     if (lastReadAt && new Date(msg.createdAt) <= new Date(lastReadAt)) {
       continue; // Already read
     }
 
-    // Get channel name
-    const channel = await getChannelById(msg.channelId);
+    channelNames ??= new Map((await getAllChannels()).map((c) => [c.id, c.name]));
 
     recentMentions.push({
-      channelName: channel?.name ?? "unknown",
+      channelName: channelNames.get(msg.channelId) ?? "unknown",
       agentName: msg.agentName ?? "Unknown",
       content: msg.content.length > 100 ? `${msg.content.slice(0, 100)}...` : msg.content,
       createdAt: msg.createdAt,
@@ -3695,50 +3669,28 @@ export async function claimMentions(
 ): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
   const messaging = getStorage().repos.messaging;
-  const channels = await getAllChannels();
   const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
     [];
 
-  for (const channel of channels) {
-    // Check if this channel is already being processed
-    const readState = await messaging.findChannelReadState(agentId, channel.id);
+  // Channels already being processed are left out by the read.
+  for (const unread of await messaging.listUnreadChannelMentions(agentId)) {
+    const { channelId, lastReadAt, count: mentionCount } = unread;
+    // dryRun: report what a claim would take, without the write (idle-poll probe).
+    if (opts?.dryRun) {
+      claimedChannels.push({ channelId, lastReadAt, mentionsCount: mentionCount });
+      continue;
+    }
+    // Atomically claim mentions for this channel
+    const changes = await messaging.claimChannelMentions(
+      agentId,
+      channelId,
+      lastReadAt || new Date(0).toISOString(),
+      now,
+    );
 
-    const lastReadAt = readState?.lastReadAt ?? null;
-    const isProcessing =
-      readState?.processing_since !== null && readState?.processing_since !== undefined;
-
-    // Skip channels that are already being processed
-    if (isProcessing) continue;
-
-    // Check if there are unread mentions
-    const mentionCount = await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
-
-    if (mentionCount > 0) {
-      // dryRun: report what a claim would take, without the write (idle-poll probe).
-      if (opts?.dryRun) {
-        claimedChannels.push({
-          channelId: channel.id,
-          lastReadAt,
-          mentionsCount: mentionCount,
-        });
-        continue;
-      }
-      // Atomically claim mentions for this channel
-      const changes = await messaging.claimChannelMentions(
-        agentId,
-        channel.id,
-        lastReadAt || new Date(0).toISOString(),
-        now,
-      );
-
-      // Only add to claimed list if we actually claimed it (not already processing)
-      if (changes > 0) {
-        claimedChannels.push({
-          channelId: channel.id,
-          lastReadAt,
-          mentionsCount: mentionCount,
-        });
-      }
+    // Only add to claimed list if we actually claimed it (not already processing)
+    if (changes > 0) {
+      claimedChannels.push({ channelId, lastReadAt, mentionsCount: mentionCount });
     }
   }
 
@@ -4112,8 +4064,16 @@ export async function createSessionLogs(logs: {
       // Consecutive Claude thinking lines of one message just before the current line.
       let run = 0;
       let runMessageId: string | undefined;
+      // Rows are buffered and written as multi-row INSERTs. The buffer is
+      // flushed before each classifyClaudeUpdate, which reads the rows stored
+      // so far, so it sees exactly what the one-insert-per-line loop showed it.
+      const pending: NewSessionLog[] = [];
+      const flush = async () => {
+        if (pending.length === 0) return;
+        await getStorage().repos.sessions.insertLogs(pending.splice(0));
+      };
       for (const [index, { content, reasoning }] of accepted.entries()) {
-        await getStorage().repos.sessions.insertLog({
+        pending.push({
           id: crypto.randomUUID(),
           taskId: logs.taskId ?? null,
           sessionId: logs.sessionId,
@@ -4130,6 +4090,7 @@ export async function createSessionLogs(logs: {
           // Only a run of 2+ can hold an update. A run that reaches the batch
           // start may continue in an earlier POST, so the DB decides that case.
           if (before >= 2 || before === index) {
+            await flush();
             await classifyClaudeUpdate(logs.sessionId, toolMessageId, lineNumber);
           }
         }
@@ -4143,6 +4104,7 @@ export async function createSessionLogs(logs: {
         }
         lineNumber++;
       }
+      await flush();
       return { exhausted: budgetExhausted, stored: accepted.length };
     });
     exhausted = result.exhausted;
@@ -8644,6 +8606,7 @@ export async function deleteMcpServer(id: string): Promise<DeleteMcpServerResult
 
   return await storage.transaction(async () => {
     const deleted = await storage.repos.mcpServers.deleteMcpServerCascade(id);
+    if (deleted.scriptConnections > 0) invalidateScriptConnectionCatalog();
     return {
       deleted: deleted.servers > 0,
       deletedScriptConnectionCount: deleted.scriptConnections,
@@ -10401,65 +10364,6 @@ export async function hasFirstCompletedTask(): Promise<boolean> {
 //     need to mention an explicit timestamp keeps the math identical at ms
 //     resolution.
 
-interface KvRow {
-  namespace: string;
-  key: string;
-  value: string;
-  value_type: KvValueType;
-  expires_at: number | null;
-  created_at: number;
-  updated_at: number;
-}
-
-function decodeKvRow(row: KvRow): KvEntry {
-  let value: unknown;
-  if (row.value_type === "json") {
-    try {
-      value = JSON.parse(row.value);
-    } catch {
-      // Stored JSON is corrupt — surface as raw string rather than throwing
-      // on read; the row is still recoverable by the caller.
-      value = row.value;
-    }
-  } else if (row.value_type === "integer") {
-    value = Number(row.value);
-  } else {
-    value = row.value;
-  }
-  return {
-    namespace: row.namespace,
-    key: row.key,
-    value,
-    valueType: row.value_type,
-    expiresAt: row.expires_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function encodeKvValue(value: unknown, valueType: KvValueType): string {
-  if (valueType === "json") {
-    return JSON.stringify(value);
-  }
-  if (valueType === "integer") {
-    if (typeof value === "number") {
-      if (!Number.isInteger(value) || !Number.isSafeInteger(value)) {
-        throw new Error("integer value must be a JS-safe integer");
-      }
-      return String(value);
-    }
-    if (typeof value === "string" && /^-?\d+$/.test(value)) {
-      return value;
-    }
-    throw new Error("integer value must be a JS-safe integer");
-  }
-  // 'string'
-  if (typeof value !== "string") {
-    throw new Error("string value must be a string");
-  }
-  return value;
-}
-
 /**
  * Get a single KV entry. Returns null if missing OR expired; expired rows are
  * deleted inline (single-row DELETE WHERE) so the row count stays bounded over
@@ -10823,6 +10727,7 @@ export async function createScriptRun(data: {
   sourceTaskId?: string;
   createdBy?: string;
   updatedBy?: string;
+  parentScriptRunId?: string;
 }): Promise<{ run: ScriptRun; existing: boolean }> {
   const storage = getStorage();
   return storage.transaction(async () => {
@@ -10850,6 +10755,9 @@ export async function createScriptRun(data: {
       updated_by: data.updatedBy ?? data.createdBy ?? null,
       // ISO like finishedAt and the inline path, not the column's datetime('now') default.
       startedAt: new Date().toISOString(),
+      // A run launched through another run's token joins that run's tree.
+      parentScriptRunId:
+        getCurrentRunProvenance()?.sourceScriptRunId ?? data.parentScriptRunId ?? null,
     });
     if (!row) throw new Error("Failed to create script run");
     return { run: rowToScriptRun({ ...row, storedSource: data.source }), existing: false };
@@ -10857,8 +10765,9 @@ export async function createScriptRun(data: {
 }
 
 // Persist a synchronous inline run (POST /api/scripts/run) as an already-terminal
-// row. Unlike createScriptRun these never get a journal and never use the
-// idempotencyKey column (inline idempotency lives in the kv table).
+// row, or (an app action's root) as `running` before it executes, finished later
+// with updateScriptRunIfRunning. Unlike createScriptRun these never get a journal
+// and never use the idempotencyKey column (inline idempotency lives in the kv table).
 export async function recordInlineScriptRun(data: {
   id: string;
   agentId: string;
@@ -10868,15 +10777,17 @@ export async function recordInlineScriptRun(data: {
   objectScriptId?: string;
   objectId?: string;
   objectMethod?: string;
-  status: "completed" | "failed";
+  status: "running" | "completed" | "failed";
   output?: unknown;
   error?: ScrubbedText;
   startedAt: string;
-  finishedAt: string;
+  finishedAt?: string;
   requestedByUserId?: string;
   createdBy?: string;
   /** Set when this run originated from an external API endpoint (POST /api/x/script/<id>). */
   apiEndpointId?: string | null;
+  /** A checked caller-named parent; a run token's provenance wins over it. */
+  parentScriptRunId?: string;
 }): Promise<ScriptRun> {
   // The run already executed, so args and output are a record, not an input:
   // redact them here so every caller is covered.
@@ -10896,7 +10807,7 @@ export async function recordInlineScriptRun(data: {
       output,
       error: data.error ?? null,
       startedAt: data.startedAt,
-      finishedAt: data.finishedAt,
+      finishedAt: data.finishedAt ?? null,
       requestedByUserId: data.requestedByUserId ?? null,
       created_by: data.createdBy ?? null,
       updated_by: data.createdBy ?? null,
@@ -10904,7 +10815,7 @@ export async function recordInlineScriptRun(data: {
       // A run called through another script run's token (a nested
       // ctx.swarm.script_run) records that run and its workflow step.
       sourceStepId: provenance?.sourceStepId ?? null,
-      parentScriptRunId: provenance?.sourceScriptRunId ?? null,
+      parentScriptRunId: provenance?.sourceScriptRunId ?? data.parentScriptRunId ?? null,
       objectScriptId: data.objectScriptId ?? null,
       objectId: data.objectId ?? null,
       objectMethod: data.objectMethod ?? null,
