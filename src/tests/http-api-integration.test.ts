@@ -665,12 +665,12 @@ describe("Tasks", () => {
   });
 
   test("POST /api/tasks — client-supplied parentTaskId + contextKey cannot persist a Slack route/contextKey mismatch", async () => {
-    // POST /api/tasks doesn't accept slackChannelId/slackThreadTs directly,
-    // but a slack-family contextKey backfills them (src/be/db.ts). Build a
-    // parent whose Slack unit lives in channel A this way.
+    // A slack-family contextKey backfills slackChannelId/slackThreadTs
+    // (src/be/db.ts). Build a parent whose Slack unit lives in channel A this
+    // way. Binding a Slack thread needs task.slack.thread.bind, which only the
+    // operator key holds, so these calls send no agent id.
     const contextKeyA = slackContextKey({ channelId: "HTTP_CHAN_A", threadTs: "1111.1111" });
     const parent = await post("/api/tasks", {
-      agentId: ids.leadAgent,
       body: {
         task: "HTTP parent task in channel A",
         contextKey: contextKeyA,
@@ -684,7 +684,6 @@ describe("Tasks", () => {
     // client-supplied parentTaskId + contextKey shape the reviewer flagged.
     const contextKeyB = slackContextKey({ channelId: "HTTP_CHAN_B", threadTs: "2222.2222" });
     const child = await post("/api/tasks", {
-      agentId: ids.leadAgent,
       body: {
         task: "HTTP child task claiming a different channel via contextKey",
         parentTaskId: parent.body.id,
