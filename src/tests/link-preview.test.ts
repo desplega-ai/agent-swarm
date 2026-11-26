@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   clearLinkPreviewCache,
   getLinkPreview,
@@ -25,6 +25,7 @@ const PAGE = `<html><head>
 </head></html>`;
 
 beforeEach(() => clearLinkPreviewCache());
+afterEach(() => mock.restore());
 
 describe("parseOpenGraph", () => {
   test("reads og tags in any attribute order and resolves a relative image", () => {
@@ -34,6 +35,20 @@ describe("parseOpenGraph", () => {
       image: "https://github.com/og.png",
       siteName: "GitHub",
     });
+  });
+
+  test("drops an og:image URL longer than 2048 chars instead of caching it", () => {
+    const long = `https://cdn.example.com/${"a".repeat(3000)}.png`;
+    const parsed = parseOpenGraph(
+      `<title>T</title><meta property="og:image" content="${long}">`,
+      "https://example.com/",
+    );
+    expect(parsed.image).toBeNull();
+    const ok = parseOpenGraph(
+      `<meta property="og:image" content="https://cdn.example.com/og.png">`,
+      "https://example.com/",
+    );
+    expect(ok.image).toBe("https://cdn.example.com/og.png");
   });
 
   test("falls back to <title> and meta description, drops a non-http image", () => {
@@ -136,4 +151,59 @@ describe("getLinkPreview", () => {
     ).rejects.toBeInstanceOf(LinkPreviewRefusedError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  test(
+    "an endless body stops at the 512 KB cap and still reads the title",
+    async () => {
+      const chunk = new Uint8Array(64 * 1024).fill(0x20);
+      const head = new TextEncoder().encode("<html><head><title>Endless</title></head><body>");
+      let pulled = 0;
+      let first = true;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          // Endless from the reader's view; a hard stop at 4 MB keeps a broken cap from hanging the run.
+          if (pulled >= 4 * 1024 * 1024) return controller.close();
+          const next = first ? new Uint8Array([...head, ...chunk.subarray(head.length)]) : chunk;
+          first = false;
+          pulled += next.byteLength;
+          controller.enqueue(next);
+        },
+      });
+      const deps = {
+        fetch: (async () => html(body as unknown as string)) as unknown as typeof fetch,
+        resolve: PUBLIC,
+      };
+      const preview = await getLinkPreview("https://example.com/endless", deps);
+      expect(preview).toMatchObject({ ok: true, title: "Endless" });
+      // The reader stops at the cap: 8 chunks of 64 KB, plus at most the stream's lookahead.
+      expect(pulled).toBeGreaterThanOrEqual(512 * 1024);
+      expect(pulled).toBeLessThanOrEqual(512 * 1024 + 2 * 64 * 1024);
+    },
+    { timeout: 5_000 },
+  );
+
+  test(
+    "the fetch carries the timeout signal: a fired timeout reads ok:false",
+    async () => {
+      const aborted = new AbortController();
+      aborted.abort(new DOMException("timed out", "TimeoutError"));
+      const timeoutSpy = spyOn(AbortSignal, "timeout").mockReturnValue(aborted.signal);
+      const fetchMock = (async (_input: unknown, init?: RequestInit) => {
+        const signal = init?.signal;
+        if (!signal) return html(PAGE);
+        // Honors the signal like a real fetch: rejects once it aborts, else hangs.
+        return await new Promise<Response>((_resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }) as unknown as typeof fetch;
+      const preview = await getLinkPreview("https://example.com/slow", {
+        fetch: fetchMock,
+        resolve: PUBLIC,
+      });
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+      expect(preview).toMatchObject({ ok: false, title: null });
+    },
+    { timeout: 5_000 },
+  );
 });

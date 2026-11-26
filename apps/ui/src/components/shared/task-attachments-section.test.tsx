@@ -357,6 +357,18 @@ describe("link attachments", () => {
     }
   });
 
+  test("the task page's link chip keeps the delete action; the prompt bubble stays read-only", () => {
+    agentFs = COMB_OFF;
+    const page = render(<TaskAttachmentsSection taskId="task-1" attachments={[pr, report]} />);
+    expect(page).toContain('aria-label="Delete GitHub pull request #3705"');
+    expect(page).toContain('aria-label="Delete report.md"');
+    const bubble = render(
+      <TaskPromptAttachments taskId="task-1" attachments={[pr]} from="agent" />,
+    );
+    expect(bubble).toContain('data-slot="swarm-link"');
+    expect(bubble).not.toContain("Delete");
+  });
+
   test("the task page's list hides a linked PR and keeps the file", () => {
     agentFs = COMB_OFF;
     const html = render(

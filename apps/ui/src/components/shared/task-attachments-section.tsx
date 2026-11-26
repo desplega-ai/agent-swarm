@@ -658,35 +658,12 @@ function AttachmentRow({
               </Button>
             ) : null}
             {onDelete ? (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-6 text-muted-foreground hover:text-status-error-strong"
-                    disabled={deleting}
-                    aria-label={`Delete ${name}`}
-                    title="Delete"
-                  >
-                    {deleting ? <Spinner className="size-3" /> : <Trash2 />}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete attachment</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This removes {name} from the task. This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Keep</AlertDialogCancel>
-                    <AlertDialogAction variant="destructive" onClick={() => onDelete(attachment)}>
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <DeleteAttachmentButton
+                attachment={attachment}
+                name={name}
+                deleting={deleting}
+                onDelete={onDelete}
+              />
             ) : null}
           </div>
         </div>
@@ -759,16 +736,89 @@ function AttachmentRow({
   );
 }
 
+/** The trash button with its confirm dialog, shared by file rows and link chips. */
+function DeleteAttachmentButton({
+  attachment,
+  name,
+  deleting,
+  onDelete,
+}: {
+  attachment: TaskAttachment;
+  name: string;
+  deleting?: boolean;
+  onDelete: (attachment: TaskAttachment) => void;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          className="size-6 text-muted-foreground hover:text-status-error-strong"
+          disabled={deleting}
+          aria-label={`Delete ${name}`}
+          title="Delete"
+        >
+          {deleting ? <Spinner className="size-3" /> : <Trash2 />}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete attachment</AlertDialogTitle>
+          <AlertDialogDescription>
+            This removes {name} from the task. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={() => onDelete(attachment)}>
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 /**
  * A link attachment as a chip, never a file card: a PR, an issue or a swarm
  * link reads as its smart chip (`SwarmLinkView`, with its hover card), any
  * other URL as a plain link chip with the attachment's name.
  */
-function UrlAttachmentChip({ attachment }: { attachment: TaskAttachment }) {
+function UrlAttachmentChip({
+  attachment,
+  onDelete,
+  deleting,
+}: {
+  attachment: TaskAttachment;
+  /** Task page only: the prompt bubble's chips stay read-only. */
+  onDelete?: (attachment: TaskAttachment) => void;
+  deleting?: boolean;
+}) {
   const origins = useSwarmLinkOrigins();
   const url = attachment.url ?? "";
   const link = url ? parseSwarmLink(url, origins) : null;
-  if (link) return <SwarmLinkView link={link} className="text-sm" />;
+  const chip = link ? (
+    <SwarmLinkView link={link} className="text-sm" />
+  ) : (
+    <PlainUrlChip attachment={attachment} url={url} />
+  );
+  if (!onDelete) return chip;
+  return (
+    <span className="inline-flex max-w-full items-center gap-0.5">
+      {chip}
+      <DeleteAttachmentButton
+        attachment={attachment}
+        name={attachment.name || hostOf(url) || url}
+        deleting={deleting}
+        onDelete={onDelete}
+      />
+    </span>
+  );
+}
+
+function PlainUrlChip({ attachment, url }: { attachment: TaskAttachment; url: string }) {
   return (
     <a
       href={url}
@@ -986,7 +1036,12 @@ export function TaskAttachmentsSection({
       {links.length > 0 ? (
         <div className="flex flex-wrap gap-1.5 px-2 py-1">
           {links.map((a) => (
-            <UrlAttachmentChip key={a.id} attachment={a} />
+            <UrlAttachmentChip
+              key={a.id}
+              attachment={a}
+              onDelete={handleDelete}
+              deleting={remove.isPending && remove.variables === a.id}
+            />
           ))}
         </div>
       ) : null}

@@ -23,6 +23,8 @@ export class LinkPreviewRefusedError extends Error {}
 
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_HTML_BYTES = 512 * 1024;
+// A longer og:image URL is dropped, so a hostile page cannot fill the cache with it.
+const MAX_IMAGE_URL_CHARS = 2048;
 const OK_TTL_MS = 6 * 60 * 60_000;
 const FAIL_TTL_MS = 10 * 60_000;
 // shortcut: a per-process Map, not shared across API replicas; move to KV if previews get hot.
@@ -89,7 +91,8 @@ export function parseOpenGraph(html: string, pageUrl: string): Omit<LinkPreview,
   if (rawImage) {
     try {
       const resolved = new URL(decodeEntities(rawImage.trim()), pageUrl);
-      if (resolved.protocol === "https:" || resolved.protocol === "http:") image = resolved.href;
+      const httpScheme = resolved.protocol === "https:" || resolved.protocol === "http:";
+      if (httpScheme && resolved.href.length <= MAX_IMAGE_URL_CHARS) image = resolved.href;
     } catch {
       image = null;
     }
