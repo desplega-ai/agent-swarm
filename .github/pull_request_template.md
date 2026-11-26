@@ -9,7 +9,6 @@ The "PR Body" check enforces this template. Local check:
 - Every ## section is required, except sections marked:
   "optional", "bot" (required only when desplega-bot is the author), "outline" (skip only when Risk is low and the diff is 50 lines or fewer).
 - The check fails on a missing part. Length: it warns above a target and fails far above it (Why: 40 words, prose: 300 words).
-- Until 2026-11-26 the newer rules only warn: Before / after, the link format of Swarm provenance, the control of a fix, the length limits.
 
 Risk is how deep to read. Urgency is when. Set Risk yourself. Copy Urgency from the request, and write "nice to have" when the request gives none.
 - high: migration, auth/RBAC, secrets or scrubbing, billing/cost, data deletion, prompt or claim/routing changes that hit every agent, a public API or SDK break. The reviewer reads every 🔍 row. Adds the risk:high label.
@@ -22,8 +21,6 @@ Links:
 - Doc (plan, research, report): the agent-fs live app link, under ## Swarm provenance. A share-create link only when the requester asks for one or a reader has no agent-fs login.
 - Swarm task, session and workflow-run links, durable agent-fs paths and Slack permalinks: only under ## Swarm provenance.
 -->
-
-<!-- new rules fail from: 2026-11-26 -->
 
 **Why:** <!-- max words: 25 --> <!-- hard max words: 40 --> <!-- One sentence: who sees what after the merge. Not how it works. Link public sources only (Fixes #N). -->
 
