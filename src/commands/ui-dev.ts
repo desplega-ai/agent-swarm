@@ -248,6 +248,14 @@ function withoutHopHeaders(source: Headers): Headers {
   return headers;
 }
 
+/** No CORS grant from the UI host: the key-bearing HTML stays same-origin only. */
+function withoutCorsHeaders(headers: Headers): Headers {
+  for (const name of [...headers.keys()]) {
+    if (name.startsWith("access-control-")) headers.delete(name);
+  }
+  return headers;
+}
+
 /** `agent-swarm ui-dev` (src/cli.tsx routes here; its COMMAND_HELP holds the help text). */
 export async function runUiDev(argv: string[]): Promise<number> {
   const uiUrl = getAppUrl();
@@ -274,6 +282,8 @@ export async function runUiDev(argv: string[]): Promise<number> {
 
   const { apiUrl, port } = session.options;
   const origin = `http://127.0.0.1:${port}`;
+  // A DNS-rebound name reaches the loopback socket with its own Host: refuse it.
+  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   // shortcut: swarm key in a loopback-only HTML response; upgrade to a per-run user token
   // (POST /api/users/{id}/mcp-tokens, revoked on exit) if this is ever served beyond loopback.
   const config = {
@@ -293,6 +303,9 @@ export async function runUiDev(argv: string[]): Promise<number> {
       idleTimeout: 0,
       // shortcut: no WebSocket proxy (only Comb file presence uses one); add it if a view needs it.
       async fetch(req) {
+        if (!allowedHosts.has((req.headers.get("host") ?? "").toLowerCase())) {
+          return new Response("ui-dev: Host must be 127.0.0.1 or localhost\n", { status: 403 });
+        }
         const url = new URL(req.url);
         const toApi = API_PATH.test(url.pathname);
         const headers = withoutHopHeaders(req.headers);
@@ -314,6 +327,7 @@ export async function runUiDev(argv: string[]): Promise<number> {
           return new Response(`ui-dev: upstream unreachable: ${String(error)}`, { status: 502 });
         }
         const resHeaders = withoutHopHeaders(res.headers);
+        if (!toApi) withoutCorsHeaders(resHeaders);
         if (!toApi && (res.headers.get("content-type") ?? "").includes("text/html")) {
           const html = injectRuntimeConfig(await res.text(), config);
           return new Response(html, { status: res.status, headers: resHeaders });

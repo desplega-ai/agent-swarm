@@ -85,6 +85,9 @@ export async function main(argv: string[]): Promise<number> {
       cwd: resolve(repoRoot, "apps/ui"),
       env: {
         ...process.env,
+        // Vite's default Host allowlist (loopback and IPs) blocks DNS rebinding of the keyed
+        // bundle; an inherited VITE_ALLOWED_HOSTS=* would turn it off.
+        VITE_ALLOWED_HOSTS: "",
         VITE_API_URL: origin,
         VITE_API_KEY: apiKey,
         VITE_USER_ID: user.id,

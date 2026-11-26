@@ -40,7 +40,7 @@ Vite logs go to stderr. The process holds until SIGINT or SIGTERM and stops the 
   - no CORS allowlist entry is needed for the port;
   - a page's CSP `frame-ancestors 'self'` matches the dashboard, so HTML pages frame on any API, prod included;
   - the page-session cookie and the page's Browser SDK calls (`/@swarm/api/*`) stay first-party.
-- The key sits in a loopback-only bundle or HTML response. Never expose either server beyond `127.0.0.1`.
+- The key sits in a loopback-only bundle or HTML response. Never expose either server beyond `127.0.0.1`. `ui-dev` answers 403 to any Host other than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) and drops the `APP_URL` host's `access-control-*` headers, so no other origin can read that HTML.
 - Both set `VITE_AGENT_PREVIEW=1` (`isAgentPreview` in `apps/ui/src/lib/deployment-config.ts`): the dashboard sends no UI telemetry and mounts no self-opening nudge or popup (GitHub star toast, feedback, org name, lead credential, first-task invite, home banners). The API still records its own events for the calls the preview makes.
 
 ## Pages

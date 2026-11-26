@@ -115,7 +115,7 @@ export const uiDevRemote: Scenario = {
           email,
           "--json",
         ],
-        env,
+        { ...env, VITE_ALLOWED_HOSTS: "*" },
         async (ready) => {
           const url = new URL(asString(ready.url, "ready url"));
           expect(url.origin === `http://127.0.0.1:${port}`, `ready url origin: ${url.origin}`);
@@ -127,6 +127,9 @@ export const uiDevRemote: Scenario = {
           const shell = await fetch(url);
           expect(shell.status === 200, `dashboard shell HTTP ${shell.status}`);
           expect((await shell.text()).includes('id="root"'), "dashboard shell HTML");
+          // The keyed bundle refuses a DNS-rebound Host, even with VITE_ALLOWED_HOSTS=* set.
+          const rebound = await fetch(url, { headers: { Host: `rebind.example:${port}` } });
+          expect(rebound.status === 403, `foreign Host HTTP ${rebound.status}`);
 
           // The API sits behind the dev server's own origin.
           const health = await fetch(`${url.origin}/health`);
@@ -207,8 +210,13 @@ export const uiDevRemote: Scenario = {
           if (path.startsWith("/assets/")) {
             return new Response("export {};", { headers: { "content-type": "text/javascript" } });
           }
+          // A permissive CORS grant on the UI host must not survive the proxy.
           return new Response(shellHtml(!path.startsWith("/old")), {
-            headers: { "content-type": "text/html; charset=utf-8" },
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+              "access-control-allow-origin": "*",
+              "access-control-allow-credentials": "true",
+            },
           });
         },
       });
@@ -247,8 +255,26 @@ export const uiDevRemote: Scenario = {
                 "the cli ready line carries the key",
               );
 
-              const shell = await (await fetch(url)).text();
+              const shellRes = await fetch(url, { headers: { Origin: "https://evil.example" } });
+              const shell = await shellRes.text();
               expect(shell.includes('id="root"'), "cli dashboard shell HTML");
+              const cors = [...shellRes.headers.keys()].filter((h) =>
+                h.startsWith("access-control-"),
+              );
+              expect(cors.length === 0, `cli shell keeps CORS headers: ${cors.join(", ")}`);
+              // DNS rebinding: a foreign Host gets 403 and no key; localhost:<port> is served.
+              const rebound = await fetch(url, {
+                headers: { Host: `rebind.example:${cliPort}` },
+              });
+              const reboundBody = await rebound.text();
+              expect(rebound.status === 403, `cli foreign Host HTTP ${rebound.status}`);
+              expect(!reboundBody.includes(ctx.apiKey), "the 403 body carries the key");
+              const local = await fetch(url, { headers: { Host: `localhost:${cliPort}` } });
+              expect(local.status === 200, `cli localhost Host HTTP ${local.status}`);
+              expect(
+                (await local.text()).includes("window.__AGENT_SWARM_UI_CONFIG__="),
+                "cli serves localhost:<port>",
+              );
               expect(
                 shell.includes("window.__AGENT_SWARM_UI_CONFIG__="),
                 "cli injects the connection",
