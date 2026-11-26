@@ -395,7 +395,7 @@ function slackConclusionSettleSeconds(): number {
 /**
  * A Lead follow-up that finishes within this long of the previous card's first
  * post edits that card. Slack sends no notification for an edit, so a later
- * one posts its answer as a new reply and the previous card points at it.
+ * one posts its answer as a new reply and the previous card is deleted.
  */
 function slackCardMergeWindowMs(): number {
   return positiveEnvNumber(process.env.SLACK_CARD_MERGE_WINDOW_SEC, 120) * 1000;
@@ -2208,7 +2208,7 @@ type LeadFollowUpMergeTarget = { group: SlackOutcomeGroupHost; members: AgentTas
  * - neither task has a ui-spec card.
  * The edit sends no notification, so the caller merges only a quick completed
  * follow-up (see isQuickLeadFollowUp): a failure always posts its own card,
- * and a slow follow-up's new reply turns the card into a pointer.
+ * and a slow follow-up's new reply replaces the card (deletes it).
  */
 async function leadFollowUpMergeTarget(
   task: AgentTask,
@@ -2296,13 +2296,34 @@ async function mergeLeadFollowUpCard(
 }
 
 /**
- * Edits the card a slow Lead follow-up skipped down to a pointer at the
- * follow-up's new reply, so the thread does not end on a stale answer. Best
- * effort: the new reply already carries the answer, so a failure only logs.
+ * Removes the card a slow Lead follow-up skipped, once the follow-up's new
+ * reply is posted, so the thread does not end on a stale answer. When Slack
+ * refuses the delete, the card is edited down to a pointer at the new reply
+ * instead. Best effort: the new reply already carries the answer, so a
+ * failure only logs.
  */
-async function pointCardAtNewReply(task: AgentTask, group: SlackOutcomeGroupHost): Promise<void> {
+async function retireCardSkippedByNewReply(
+  task: AgentTask,
+  group: SlackOutcomeGroupHost,
+): Promise<void> {
   const app = getSlackApp();
   if (!app || !task.slackChannelId) return;
+  try {
+    await callSlackWithRetry(app.client, "chat.delete", {
+      channel: task.slackChannelId,
+      ts: group.ts,
+    });
+    console.log(
+      `[Slack] Deleted the card of task ${group.taskId}: the reply of task ${task.id} replaces it`,
+    );
+    return;
+  } catch (error) {
+    if (isSlackMessageNotFound(error)) return;
+    console.warn(
+      `[Slack] Could not delete the card of task ${group.taskId}; pointing it at the reply of task ${task.id} instead:`,
+      slackErrorSummary(error),
+    );
+  }
   const text = task.status === "failed" ? "❌ Failed ↓" : "✅ Done ↓";
   try {
     await callSlackWithRetry(app.client, "chat.update", {
@@ -2715,7 +2736,7 @@ async function processSlackThread(
       if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
         // shortcut: only a first attempt looks for the previous card, so a retried
-        // slow follow-up leaves that card unpointed; check pending cards too if that shows up.
+        // slow follow-up leaves that card in place; check pending cards too if that shows up.
         const mergeTarget = card ? null : await leadFollowUpMergeTarget(task, tasks);
         const quick = !!mergeTarget && isQuickLeadFollowUp(task, mergeTarget.group);
         if (
@@ -2733,7 +2754,7 @@ async function processSlackThread(
         if (outcome) {
           noteOutcomeDeliverySuccess(task.id);
           await finalizeTerminalSlackReactions([task]);
-          if (mergeTarget && !quick) await pointCardAtNewReply(task, mergeTarget.group);
+          if (mergeTarget && !quick) await retireCardSkippedByNewReply(task, mergeTarget.group);
         }
         outcomeCreated ||= !!outcome;
       } catch (error) {

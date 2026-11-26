@@ -240,7 +240,7 @@ A Lead follow-up or resume result can merge into the previous outcome card of th
 - The previous card is from the same agent, answers the same Slack ask, and is a plain completed result. A deferral, conclusion, delegated-child or Block Kit card is never a merge target.
 - No message, from a person or a bot, came after the previous card.
 
-An edit sends no notification, so only a quick completed follow-up merges: one that finished within `SLACK_CARD_MERGE_WINDOW_SEC` seconds (default `120`) of the previous card's first post, with merged text that fits one card. A quick failed follow-up posts its own card and leaves the previous card as it is. A slower follow-up posts its answer as a new reply, which notifies the requester, and the previous card is edited down to `✅ Done ↓` (or `❌ Failed ↓`).
+An edit sends no notification, so only a quick completed follow-up merges: one that finished within `SLACK_CARD_MERGE_WINDOW_SEC` seconds (default `120`) of the previous card's first post, with merged text that fits one card. A quick failed follow-up posts its own card and leaves the previous card as it is. A slower follow-up posts its answer as a new reply, which notifies the requester, and then deletes the previous card. If Slack refuses the delete, the previous card is edited down to `✅ Done ↓` (or `❌ Failed ↓`) instead.
 
 Set `SLACK_RENDER_V2_QUIET_LEAD_THREADS=true` to keep Lead threads to the Lead's replies: a Lead deferral posts no ⏳ waiting card, and a successful Lead follow-up that ends without `slack-reply` posts no card; failed or cancelled follow-ups and resumed asks still post their cards. See [Quiet Lead threads](/docs/ui/configuration#quiet-lead-threads-in-slack).
 

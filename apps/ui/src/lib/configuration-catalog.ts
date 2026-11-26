@@ -1383,7 +1383,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SLACK_CARD_MERGE_WINDOW_SEC",
         label: "Follow-up card merge window",
         description:
-          "Seconds after a Lead card posts during which a Lead follow-up edits that card instead of posting a new reply. Slack sends no notification for an edit, so a slower follow-up posts a new reply and the earlier card becomes a pointer to it.",
+          "Seconds after a Lead card posts during which a Lead follow-up edits that card instead of posting a new reply. Slack sends no notification for an edit, so a slower follow-up posts a new reply and the earlier card is deleted.",
         kind: "number",
         unit: "s",
         defaultValue: "120",

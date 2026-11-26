@@ -18,9 +18,9 @@ import {
 // chat.update, no new message), so the thread reads as one answer. A later
 // message in the thread keeps the follow-up a separate card. A follow-up that
 // finishes after SLACK_CARD_MERGE_WINDOW_SEC posts a new reply, because an
-// edit sends no notification, and the previous card becomes a pointer.
-// A failed follow-up always posts its own card; a slow one also turns the
-// previous card into a pointer.
+// edit sends no notification, and the previous card is deleted after that
+// reply posts. When Slack refuses the delete, the previous card is edited
+// down to a pointer instead. A failed follow-up always posts its own card.
 //
 // Runs with render v2 on and delegation off, the production state.
 
@@ -116,25 +116,26 @@ async function setMergeWindow(ctx: ScenarioContext, seconds: string): Promise<vo
     [200],
     "set SLACK_CARD_MERGE_WINDOW_SEC",
   );
-  expectStatus(
-    await ctx.api("POST", "/api/config/reload", { body: {} }),
-    [200],
-    "reload config",
-  );
+  expectStatus(await ctx.api("POST", "/api/config/reload", { body: {} }), [200], "reload config");
 }
 
-/** A follow-up that ends after the 1s merge window: own card, and the ask's card points at it. */
+/**
+ * A follow-up that ends after the 1s merge window: own card, then the ask's
+ * card is deleted. With `pointer` set, Slack refuses that delete, and the
+ * ask's card is edited down to `pointer` instead.
+ */
 async function expectSlowFollowUpReply(
   ctx: ScenarioContext,
   workerId: string,
   label: string,
   status: "completed" | "failed",
-  pointer: string,
+  pointer?: string,
 ): Promise<void> {
   const ask = await delegatedAsk(ctx, workerId, label);
   const host = outcomeRow(ctx, ask.askTaskId);
   if (!host) throw new Error(`The ${label} ask ${ask.askTaskId} has no outcome row`);
   await Bun.sleep(1_500);
+  if (pointer) ctx.slack.injectFault({ method: "chat.delete", error: "cant_delete_message" });
   const answer = `follow-up review ${label} ${ctx.nonce}`;
   await finish(
     ctx,
@@ -152,11 +153,32 @@ async function expectSlowFollowUpReply(
     ownCard.length === 1 && ownCard[0]?.ts === row.ts,
     `The slow ${label} follow-up did not post a new reply: ${JSON.stringify(ownCard.map((m) => m.ts))}`,
   );
+  const deleteCall = await ctx.slack.waitForApiCall("chat.delete", {
+    timeoutMs: 30_000,
+    where: (call) => call.args.ts === host.ts && call.args.channel === GENERAL,
+  });
+  // The delete must come after the new reply, so a failed post never loses the card.
+  const calls = ctx.slack.apiCalls();
+  const replyAt = calls.findIndex((call) => JSON.stringify(call.args).includes(answer));
+  expect(
+    replyAt >= 0 && replyAt < calls.indexOf(deleteCall),
+    `The ${label} ask's card was deleted before the new reply posted`,
+  );
+  const hostCard = () => ctx.slack.messages(GENERAL).find((message) => message.ts === host.ts);
+  if (!pointer) {
+    expect(deleteCall.ok, `chat.delete of the ${label} ask's card failed: ${deleteCall.error}`);
+    expect(!hostCard(), `The ${label} ask's card is still in the thread after its delete`);
+    return;
+  }
+  expect(!deleteCall.ok, `The injected chat.delete fault did not hit the ${label} ask's card`);
   const pointed = await pollUntil(() => {
-    const card = ctx.slack.messages(GENERAL).find((message) => message.ts === host.ts);
+    const card = hostCard();
     return card?.text === pointer && !JSON.stringify(card).includes(ask.askOutput);
   }, 30_000);
-  expect(pointed, `The ${label} ask's card was not edited down to "${pointer}"`);
+  expect(
+    pointed,
+    `The ${label} ask's card was not edited down to "${pointer}" after the delete failed`,
+  );
 }
 
 export const slackFollowUpCardMerge: Scenario = {
@@ -255,10 +277,11 @@ export const slackFollowUpCardMerge: Scenario = {
     );
 
     // 4. A follow-up past the merge window posts a new reply, so the requester
-    // is notified, and the ask's card becomes a pointer to it.
+    // is notified, and the ask's card is then deleted. When Slack refuses the
+    // delete, the ask's card becomes a pointer to the new reply.
     await setMergeWindow(ctx, "1");
     try {
-      await expectSlowFollowUpReply(ctx, workerId, "slow-done", "completed", "✅ Done ↓");
+      await expectSlowFollowUpReply(ctx, workerId, "slow-done", "completed");
       await expectSlowFollowUpReply(ctx, workerId, "slow-failed", "failed", "❌ Failed ↓");
     } finally {
       await setMergeWindow(ctx, "120");
