@@ -42,8 +42,12 @@ const READ_STARTS = new Set([
 ]);
 // A WITH clause can lead into a write (`WITH x AS (...) DELETE FROM t`).
 const WRITE_WORDS = new Set(["insert", "update", "delete", "merge"]);
-const DOLLAR_TAG = /\$(?:[A-Za-z_]\w*)?\$/y;
-const WORD = /[A-Za-z_][\w$]*/y;
+// DuckDB's lexer counts every byte >= 0x80 as an identifier character, in dollar tags
+// (`$é$`) and names (`é$$`) alike. UTF-16 surrogates fall inside \u0080-\uffff too.
+const IDENT_START = /[A-Za-z_\u0080-\uffff]/;
+const IDENT_CHAR = /[\w$\u0080-\uffff]/;
+const DOLLAR_TAG = /\$(?:[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/y;
+const WORD = /[A-Za-z_\u0080-\uffff][\w$\u0080-\uffff]*/y;
 
 /**
  * The first reason `sql` is not read-only, or null. Splits on top-level `;` and skips strings,
@@ -51,8 +55,7 @@ const WORD = /[A-Za-z_][\w$]*/y;
  */
 export function writeStatement(sql: string): string | null {
   const statements: string[][] = [[]];
-  // DuckDB's lexer counts every byte >= 0x80 as an identifier character (`é$$` is one name).
-  const ident = (ch: string | undefined) => ch !== undefined && /[\w$\u0080-\uffff]/.test(ch);
+  const ident = (ch: string | undefined) => ch !== undefined && IDENT_CHAR.test(ch);
   const match = (re: RegExp, at: number) => {
     re.lastIndex = at;
     return re.exec(sql)?.[0] ?? null;
@@ -100,7 +103,7 @@ export function writeStatement(sql: string): string | null {
     } else if (c === ";") {
       statements.push([]);
       i++;
-    } else if (/[A-Za-z_]/.test(c)) {
+    } else if (IDENT_START.test(c)) {
       const w = match(WORD, i) as string;
       statements.at(-1)?.push(w.toLowerCase());
       i += w.length;
