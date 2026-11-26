@@ -295,6 +295,17 @@ agent-swarm x composio POST /tool_router/session --body '{"user_id":"swarm-user-
 See [The `x` command](/docs/reference/x-command) for the Composio workflow,
 `swarm_x` MCP equivalent, and safety rules.
 
+### app-shot
+
+Render a swarm app in headless Chromium as the calling agent and report what it shows. It opens `$APP_URL/apps/<appId>`, forwards the dashboard's API calls to `MCP_BASE_URL` with the agent's key (the page never holds the key), waits until the app's API reads settle, and prints screenshots, console errors, failed requests and `render ok` or `render FAILED`. Screenshots upload to agent-fs when the `agent-fs` CLI is on `PATH`. Needs Playwright with Chromium (the `worker-full` image).
+
+```bash
+agent-swarm app-shot <appId>
+agent-swarm app-shot <appId> --page runs --viewport 375x812 --click 'role=tab[name="Errors"]' --json
+```
+
+Exit 0 is a clean render, 1 a failed render, 2 a missing `APP_URL`, key, user or browser.
+
 ### docs
 
 Show the documentation URL. All pages are also available in markdown format by appending `.md` to the URL.

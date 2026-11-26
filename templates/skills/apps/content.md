@@ -1349,10 +1349,12 @@ The tool returns `{ appId, url: "/apps/<id>" }`. Open that URL to verify the liv
 ## View and screenshot a live app
 
 - An app renders at `<dashboard>/apps/<id>`. Two view modes are set by query string: `?mode=full` (full-viewport overlay with a slim header) and `?mode=chromeless` (only the rendered page, the embed surface). `app.navigate` keeps only `?mode`.
-- Logged-in browser: a fresh dashboard has no connection and redirects to /setup. Seed the localStorage key `agent-swarm-connections` with `{connections:[{id,name,apiUrl,apiKey}],activeId}`. Build the value from an env var and pipe it to `agent-browser eval --stdin`, so the key never reaches a command line. Reload, then pick a user in the "Who are you?" dialog.
-- Apps scroll inside an inner canvas, so a full-page screenshot captures only the viewport. Scroll the canvas or raise the viewport height. For mobile, set a 375px-wide viewport before the screenshot.
+- Check an app after every write with `agent-swarm app-shot <appId>` (worker-full image, needs `APP_URL`). Do not hand-roll Playwright or seed localStorage yourself. It opens the app in headless Chromium as you (the key stays out of the page), waits until the app's API reads settle (30 s cap), uploads the PNGs to agent-fs and prints their links, the console errors, the failed requests and `render ok` or `render FAILED` (exit 0 or 1; exit 2 is a config error).
+  - Options: `--page <name>`, `--viewport 375x812`, `--click '<playwright selector>'` (repeatable, one shot after each), `--wait-for '<selector>'`, `--as-email <user>` for per-user data, `--json`, `--no-upload`.
+  - Read the PNGs before you report; link them in the task output. A shot marked "not settled" may show a loading state.
+  - Apps scroll inside an inner canvas, so a shot captures the viewport only. Raise the viewport height for long pages.
 - App definitions: `GET /api/apps` and `GET /api/apps/<id>` with the API key as Bearer.
-- Follow-up edit to a live app: list in the brief the control numbers the edit must not move, and assert them from the backing script before publishing. Take a signed-in screenshot of each changed selector at 1440px wide, save the shots to agent-fs, critique, and repeat at least 3 times. If the backing script caches results, bump its version or force a fresh run so the shots show new data.
+- Follow-up edit to a live app: list in the brief the control numbers the edit must not move, and assert them from the backing script before publishing. Shoot each changed selector with `agent-swarm app-shot` (1440px default), critique, and repeat at least 3 times. If the backing script caches results, bump its version or force a fresh run so the shots show new data.
 
 
 ### Rows from agents and scripts

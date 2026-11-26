@@ -6,6 +6,7 @@ import { Box, render, Text, useApp } from "ink";
 import type { ComponentType } from "react";
 import { createElement, useEffect, useState } from "react";
 import pkg from "../package.json";
+import { APP_SHOT_HELP } from "./commands/app-shot.ts";
 import { dbCopyHelp } from "./commands/db-copy-help.ts";
 import { getApiKey, setApiKey } from "./utils/api-key.ts";
 import { installConsoleScrub } from "./utils/console-scrub.ts";
@@ -162,6 +163,7 @@ const COMMAND_HELP: Record<
   string,
   { usage: string; description: string; options: string; examples: string }
 > = {
+  "app-shot": APP_SHOT_HELP,
   controller: {
     usage: `${binName} controller --api-url <url> --kind docker [options]`,
     description: "Run a remote controller next to the worker infrastructure.",
@@ -461,6 +463,7 @@ function printHelp(command?: string) {
     ["codex-hook", "Handle Codex CLI hook events (stdin, steering delivery)"],
     ["session-summary-stdin", "Generate a Claude session summary (internal, stdin)"],
     ["x", "Execute external command routes"],
+    ["app-shot", "Screenshot a swarm app in headless Chromium and report errors"],
     ["scripts", "Reusable scripts maintenance"],
     ["rbac", "RBAC role management (bootstrap)"],
     ["db-copy", "Copy a SQLite database into an empty Postgres database"],
@@ -745,7 +748,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
 } else if (
-  (args.command === "onboard" || args.command === "controller" || args.command === "db-copy") &&
+  (args.command === "onboard" ||
+    args.command === "controller" ||
+    args.command === "db-copy" ||
+    args.command === "app-shot") &&
   !process.versions.bun
 ) {
   // The published bin uses Node, but these commands require Bun APIs.
@@ -753,7 +759,7 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : "db-copy"} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
+      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : args.command} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
     );
   }
   process.exit(result.status ?? 1);
@@ -781,6 +787,9 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runSessionSummaryFromStdin } = await import("./hooks/hook.ts");
   await runSessionSummaryFromStdin();
   process.exit(process.exitCode ?? 0);
+} else if (args.command === "app-shot") {
+  const { runAppShotCommand } = await import("./commands/app-shot");
+  process.exit(await runAppShotCommand(process.argv.slice(process.argv.indexOf("app-shot") + 1)));
 } else if (args.command === "x") {
   const xArgs = process.argv.slice(process.argv.indexOf("x") + 1);
   const { runXCommand } = await import("./commands/x");

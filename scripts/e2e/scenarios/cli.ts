@@ -474,3 +474,37 @@ export const cliController: Scenario = {
     expectOutput(k8s, "Remote k8s controllers are not supported", "controller --kind k8s");
   },
 };
+
+/**
+ * app-shot without a browser: the config and identity errors exit 2 before Chromium starts.
+ * The real-browser render runs in packages/ui-e2e/specs/app-shot.spec.ts (CI has Chromium there).
+ */
+export const cliAppShot: Scenario = {
+  name: "cli-app-shot",
+  order: 694,
+  groups: ["cli"],
+  async run(ctx) {
+    const noAppUrl = await runCli(["app-shot", "some-app"], { env: { API_KEY: ctx.apiKey } });
+    expectExit(noAppUrl, 2, "app-shot without APP_URL");
+    expectOutput(noAppUrl, "APP_URL is not set", "app-shot without APP_URL");
+
+    const env = { APP_URL: "http://127.0.0.1:9", MCP_BASE_URL: ctx.baseUrl, API_KEY: ctx.apiKey };
+    const noId = await runCli(["app-shot"], { env });
+    expectExit(noId, 2, "app-shot without an app id");
+    expectOutput(noId, "missing <appId>", "app-shot without an app id");
+
+    const viewport = await runCli(["app-shot", "some-app", "--viewport", "wide"], { env });
+    expectExit(viewport, 2, "app-shot with a bad viewport");
+    expectOutput(viewport, "--viewport must look like 1440x900", "app-shot with a bad viewport");
+
+    const badKey = await runCli(["app-shot", "some-app"], { env: { ...env, API_KEY: "e2e-wrong-key" } });
+    expectExit(badKey, 2, "app-shot with a wrong key");
+    expectOutput(badKey, "rejected the swarm API key", "app-shot with a wrong key");
+    expect(!`${badKey.stdout}${badKey.stderr}`.includes(ctx.apiKey), "app-shot printed the API key");
+
+    const email = `nobody-${ctx.nonce}@e2e.invalid`;
+    const noUser = await runCli(["app-shot", "some-app", "--as-email", email], { env });
+    expectExit(noUser, 2, "app-shot with an unknown user");
+    expectOutput(noUser, `no swarm user with email ${email}`, "app-shot with an unknown user");
+  },
+};
