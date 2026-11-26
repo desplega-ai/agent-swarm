@@ -6,7 +6,7 @@ import {
 } from "../scripts-runtime/sdk-allowlist";
 import { stdlib } from "../scripts-runtime/stdlib";
 import { WORKFLOW_SWARM_CAPABILITY_ALLOWLIST } from "./swarm-capabilities";
-import type { WorkflowCtx } from "./workflow-ctx";
+import type { SwarmCallOptions, SwarmCapabilityOptions, WorkflowCtx } from "./workflow-ctx";
 
 export type InvokeTool = (path: string, argsJson: string) => Promise<string>;
 
@@ -35,10 +35,23 @@ export function buildGuestWorkflowCtx(input: {
   const invokeStep = (name: string, label?: string, config?: unknown) =>
     invokeJson(input.invokeTool, `step.${name}`, label === undefined ? [] : [label, config]);
 
+  // Each call gets its per-method ordinal in call order, synchronously, so a
+  // re-executed run numbers its calls the same way and the host derives the
+  // same idempotency key for each. An explicit `idempotencyKey` wins.
+  const ordinals = new Map<string, number>();
+  const invokeSwarm = (method: string, args: unknown, options: unknown) => {
+    const ordinal = (ordinals.get(method) ?? 0) + 1;
+    ordinals.set(method, ordinal);
+    const explicit = (options as SwarmCallOptions | undefined)?.idempotencyKey;
+    const callOptions: SwarmCapabilityOptions =
+      typeof explicit === "string" ? { idempotencyKey: explicit } : { ordinal };
+    return invokeJson(input.invokeTool, `swarm.${method}`, [args ?? {}, callOptions]);
+  };
+
   const swarm = Object.fromEntries(
     WORKFLOW_SWARM_CAPABILITY_ALLOWLIST.map((method) => [
       method,
-      (args?: unknown) => invokeJson(input.invokeTool, `swarm.${method}`, args ?? {}),
+      (args?: unknown, options?: SwarmCallOptions) => invokeSwarm(method, args, options),
     ]),
   ) as WorkflowCtx["swarm"];
 
@@ -53,11 +66,7 @@ export function buildGuestWorkflowCtx(input: {
             async (args?: unknown) =>
               unwrapToolPayload(
                 `ctx.${ns}.${method}`,
-                await invokeJson(
-                  input.invokeTool,
-                  `swarm.${sdkMethodForNamespace(ns, method)}`,
-                  args ?? {},
-                ),
+                await invokeSwarm(sdkMethodForNamespace(ns, method), args, undefined),
               ),
           ]),
         ),

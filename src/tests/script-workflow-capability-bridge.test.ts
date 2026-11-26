@@ -24,7 +24,22 @@ describe("script workflow capability bridge", () => {
     await expect(ctx.swarm.agent_info()).resolves.toEqual({ ok: true });
     expect(ctx.swarm.config).toBeUndefined();
     expect(ctx.swarm.future_sensitive_property).toBeUndefined();
-    expect(calls).toEqual([{ path: "swarm.agent_info", argsJson: "{}" }]);
+    expect(calls).toEqual([{ path: "swarm.agent_info", argsJson: '[{},{"ordinal":1}]' }]);
+
+    // Ordinals count per method in call order; an explicit key replaces the ordinal.
+    calls.length = 0;
+    await Promise.all([
+      ctx.swarm.agent_info({ a: 1 }),
+      ctx.swarm.task_get({ taskId: "t" }),
+      ctx.swarm.agent_info({ a: 2 }, { idempotencyKey: "mine" }),
+      ctx.swarm.agent_info({ a: 3 }),
+    ]);
+    expect(calls.map((call) => call.argsJson)).toEqual([
+      '[{"a":1},{"ordinal":2}]',
+      '[{"taskId":"t"},{"ordinal":1}]',
+      '[{"a":2},{"idempotencyKey":"mine"}]',
+      '[{"a":3},{"ordinal":4}]',
+    ]);
   });
 
   test("host rejects sensitive and unknown swarm properties before accessing their values", async () => {

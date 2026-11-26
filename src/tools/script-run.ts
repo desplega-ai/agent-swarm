@@ -87,7 +87,7 @@ export const registerScriptRunTool = (server: McpServer) => {
           .max(200)
           .optional()
           .describe(
-            "When set, output is auto-persisted to kv under script:executions/{key}. Re-running with the same key overwrites. Queryable via kv-get.",
+            "Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again.",
           ),
       }),
       outputSchema: scriptToolOutputSchema,
