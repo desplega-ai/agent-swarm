@@ -128,6 +128,10 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
     child.kill("SIGKILL");
   }, options.timeoutMs ?? 60_000);
   let stdoutSoFar = "";
+  // Under --coverage the child is `bun test`, which prints its own banner first. Strip it from
+  // the live view too, so `whileRunning` sees the CLI's own first line.
+  const cliStdout = (raw: string) =>
+    wrapped ? raw.replace(/^bun test v\S+ \([0-9a-f]+\)\n/, "") : raw;
   const readStdout = (async () => {
     const decoder = new TextDecoder();
     for await (const chunk of child.stdout) stdoutSoFar += decoder.decode(chunk, { stream: true });
@@ -138,15 +142,14 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
   let duringError: unknown;
   if (options.whileRunning) {
     try {
-      await options.whileRunning({ stdout: () => stdoutSoFar });
+      await options.whileRunning({ stdout: () => cliStdout(stdoutSoFar) });
     } catch (error) {
       duringError = error;
     }
     child.kill("SIGTERM");
   }
   const [rawStdout, stderr] = await output;
-  // Under --coverage the child is `bun test`, which prints its own banner first.
-  const stdout = wrapped ? rawStdout.replace(/^bun test v\S+ \([0-9a-f]+\)\n/, "") : rawStdout;
+  const stdout = cliStdout(rawStdout);
   let exitCode = await child.exited;
   clearTimeout(timer);
   if (wrapped) {
