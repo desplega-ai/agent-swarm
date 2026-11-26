@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   githubLabel,
   githubTitle,
+  linkedUrls,
+  normalizeLinkUrl,
   parseGithubShorthand,
   parseSwarmLink,
   parseSwarmLinkOrRef,
   type SwarmLink,
   type SwarmLinkOrigins,
+  withoutLinkedUrls,
 } from "./swarm-links";
 
 const ORIGINS: SwarmLinkOrigins = {
@@ -311,5 +314,107 @@ describe("GitHub Enterprise Server web base", () => {
     expect(parseSwarmLinkOrRef("o/r#7", ORIGINS)).toMatchObject({
       href: "https://github.com/o/r/issues/7",
     });
+  });
+});
+
+describe("parseSwarmLink: GitLab, Linear, Jira and Slack", () => {
+  const ext = (href: string) => {
+    const link = parse(href);
+    return link?.type === "external"
+      ? { provider: link.provider, kind: link.kind, label: link.label, title: link.title }
+      : link;
+  };
+  test("a GitLab MR, issue and commit on any host", () => {
+    expect(ext("https://gitlab.com/group/sub/app/-/merge_requests/42")).toEqual({
+      provider: "gitlab",
+      kind: "mr",
+      label: "app!42",
+      title: "MR group/sub/app!42",
+    });
+    expect(ext("https://git.corp.example/team/app/-/issues/7#note_1")).toMatchObject({
+      kind: "issue",
+      label: "app#7",
+    });
+    expect(ext("https://gitlab.com/g/app/-/commit/ABCDEF1234567")).toMatchObject({
+      kind: "commit",
+      label: "app@abcdef1",
+    });
+  });
+  test("Linear and Jira issue keys", () => {
+    expect(ext("https://linear.app/desplega/issue/des-375/expose-tool")).toMatchObject({
+      provider: "linear",
+      label: "DES-375",
+    });
+    expect(ext("https://acme.atlassian.net/browse/OPS-12")).toMatchObject({
+      provider: "jira",
+      label: "OPS-12",
+    });
+    expect(
+      ext("https://acme.atlassian.net/jira/software/projects/OPS/boards/1?selectedIssue=OPS-9"),
+    ).toMatchObject({ provider: "jira", label: "OPS-9" });
+  });
+  test("a Slack message and a thread reply", () => {
+    expect(ext("https://acme.slack.com/archives/C0123ABC/p1764150000123456")).toMatchObject({
+      provider: "slack",
+      kind: "message",
+      label: "Slack message",
+    });
+    expect(
+      ext("https://acme.slack.com/archives/C0123ABC/p1764150000123456?thread_ts=1764150000.000100"),
+    ).toMatchObject({ kind: "thread", label: "Slack thread" });
+  });
+  test("other pages of those hosts stay plain links (negative controls)", () => {
+    for (const href of [
+      "https://gitlab.com/group/app/-/merge_requests/new",
+      "https://gitlab.com/group/app",
+      "https://linear.app/desplega/projects",
+      "https://acme.atlassian.net/wiki/spaces/ENG",
+      "https://acme.slack.com/archives/C0123ABC",
+      "https://example.com/-/issues/12x",
+      "https://example.com/some/page",
+    ]) {
+      expect(parse(href)).toBeNull();
+    }
+  });
+});
+
+describe("link dedupe", () => {
+  test("normalizeLinkUrl drops www, trailing slash, query and fragment", () => {
+    const want = "github.com/desplega-ai/agent-swarm/pull/3705";
+    for (const href of [
+      "https://github.com/desplega-ai/agent-swarm/pull/3705",
+      "https://www.GitHub.com/desplega-ai/agent-swarm/pull/3705/",
+      "http://github.com/desplega-ai/agent-swarm/pull/3705?notification_referrer_id=x#issuecomment-1",
+    ]) {
+      expect(normalizeLinkUrl(href)).toBe(want);
+    }
+    expect(normalizeLinkUrl("not a url")).toBeNull();
+    expect(normalizeLinkUrl("mailto:a@b.c")).toBeNull();
+  });
+
+  test("linkedUrls finds bare, markdown and Slack links and trims trailing punctuation", () => {
+    const text = [
+      "See [#3705](https://github.com/o/r/pull/3705).",
+      "Also https://example.com/a/, and <https://acme.slack.com/archives/C1/p1764150000123456|thread>.",
+      "Bold **https://linear.app/x/issue/ENG-1**",
+    ].join("\n");
+    expect([...linkedUrls(text)].sort()).toEqual([
+      "acme.slack.com/archives/C1/p1764150000123456",
+      "example.com/a",
+      "github.com/o/r/pull/3705",
+      "linear.app/x/issue/ENG-1",
+    ]);
+    expect(linkedUrls(null).size).toBe(0);
+  });
+
+  test("withoutLinkedUrls drops a link attachment the text names, keeps files and other links", () => {
+    const rows = [
+      { id: "pr", kind: "url", url: "https://github.com/o/r/pull/3705/" },
+      { id: "other", kind: "url", url: "https://github.com/o/r/pull/9" },
+      { id: "file", kind: "agent-fs", url: null },
+    ];
+    const text = "Merged [#3705](https://github.com/o/r/pull/3705#discussion).";
+    expect(withoutLinkedUrls(rows, text).map((r) => r.id)).toEqual(["other", "file"]);
+    expect(withoutLinkedUrls(rows, undefined)).toBe(rows);
   });
 });

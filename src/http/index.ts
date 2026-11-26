@@ -117,6 +117,7 @@ import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
+import { handleLinkPreview } from "./link-preview";
 import {
   closeIdleMcpTransports,
   DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS,
@@ -460,6 +461,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePageProxy(req, res),
         () => handlePages(req, res, pathSegments, queryParams, myAgentId),
         () => handleDesignSystem(req, res, pathSegments, queryParams, myAgentId),
+        () => handleLinkPreview(req, res, pathSegments, queryParams),
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),

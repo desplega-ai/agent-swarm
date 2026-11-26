@@ -23,7 +23,19 @@ mock.module("@/contexts/agent-fs-context", () => ({ useOptionalAgentFs: () => ag
 mock.module("@/components/link-preview/link-preview-state", () => ({
   useLinkPreviewClick: () => undefined,
 }));
-mock.module("@/components/shared/markdown-link-chip", () => ({ useSwarmLinkOrigins: () => null }));
+mock.module("@/components/shared/markdown-link-chip", () => ({
+  useSwarmLinkOrigins: () => ({
+    dashboard: "https://swarm.test",
+    configuredDashboard: null,
+    agentFsLive: null,
+    agentFsApi: null,
+  }),
+  SwarmLinkView: ({ link }: { link: { href: string } }) => (
+    <a data-slot="swarm-link" href={link.href}>
+      chip
+    </a>
+  ),
+}));
 mock.module("@/components/kibo-ui/spinner", () => require("../kibo-ui/spinner"));
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 mock.module("@/components/shared/animated-reveal", () => require("./animated-reveal"));
@@ -297,5 +309,64 @@ describe("whose attachment a session shows where", () => {
       <TaskPromptAttachments taskId="task-1" attachments={[output]} from="person" />,
     );
     expect(html).toBe("");
+  });
+});
+
+describe("link attachments", () => {
+  const pr = {
+    ...ID_LESS,
+    id: "pr",
+    kind: "url",
+    providerId: "github",
+    name: "GitHub pull request #3705",
+    url: "https://github.com/desplega-ai/agent-swarm/pull/3705",
+    path: undefined,
+    mimeType: undefined,
+    agentId: "worker-1",
+  } as TaskAttachment;
+  const report = {
+    ...ID_LESS,
+    id: "report",
+    name: "report.md",
+    agentId: "worker-1",
+  } as TaskAttachment;
+
+  test("a reply that already links the PR leaves its attachment out", () => {
+    agentFs = COMB_OFF;
+    const html = render(
+      <TaskPromptAttachments
+        taskId="task-1"
+        attachments={[pr, report]}
+        from="agent"
+        linkedText="Merged [#3705](https://github.com/desplega-ai/agent-swarm/pull/3705/)."
+      />,
+    );
+    expect(html).toContain("report.md");
+    expect(html).not.toContain("pull/3705");
+  });
+
+  test("a link the text does not name is a chip, with no download", () => {
+    agentFs = COMB_OFF;
+    for (const html of [
+      render(<TaskPromptAttachments taskId="task-1" attachments={[pr]} from="agent" />),
+      render(<TaskAttachmentsSection taskId="task-1" attachments={[pr]} />),
+    ]) {
+      expect(html).toContain('data-slot="swarm-link"');
+      expect(html).toContain('href="https://github.com/desplega-ai/agent-swarm/pull/3705"');
+      expect(html).not.toContain("Download");
+    }
+  });
+
+  test("the task page's list hides a linked PR and keeps the file", () => {
+    agentFs = COMB_OFF;
+    const html = render(
+      <TaskAttachmentsSection
+        taskId="task-1"
+        attachments={[pr, report]}
+        linkedText="https://github.com/desplega-ai/agent-swarm/pull/3705"
+      />,
+    );
+    expect(html).toContain("report.md");
+    expect(html).not.toContain("swarm-link");
   });
 });

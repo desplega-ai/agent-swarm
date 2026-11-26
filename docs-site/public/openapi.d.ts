@@ -8365,6 +8365,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/link-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the Open Graph preview of an external link
+         * @description Fetches the page server-side (cached) and returns its title, description, image and site name. `ok: false` when the page could not be read. Loopback and private hosts are refused with 400.
+         */
+        get: {
+            parameters: {
+                query: {
+                    url: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The preview, or `ok: false` with empty fields */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            url: string;
+                            ok: boolean;
+                            title: string | null;
+                            description: string | null;
+                            image: string | null;
+                            siteName: string | null;
+                        };
+                    };
+                };
+                /** @description Missing, malformed or refused URL */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/events": {
         parameters: {
             query?: never;

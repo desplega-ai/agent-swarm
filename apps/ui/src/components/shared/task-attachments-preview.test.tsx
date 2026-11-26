@@ -25,7 +25,19 @@ mock.module("@/contexts/agent-fs-context", () => ({ useOptionalAgentFs: () => nu
 mock.module("@/components/link-preview/link-preview-state", () => ({
   useLinkPreviewClick: () => undefined,
 }));
-mock.module("@/components/shared/markdown-link-chip", () => ({ useSwarmLinkOrigins: () => null }));
+mock.module("@/components/shared/markdown-link-chip", () => ({
+  useSwarmLinkOrigins: () => ({
+    dashboard: "https://swarm.test",
+    configuredDashboard: null,
+    agentFsLive: null,
+    agentFsApi: null,
+  }),
+  SwarmLinkView: ({ link }: { link: { href: string } }) => (
+    <a data-slot="swarm-link" href={link.href}>
+      chip
+    </a>
+  ),
+}));
 mock.module("@/components/kibo-ui/spinner", () => require("../kibo-ui/spinner"));
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 mock.module("@/components/shared/animated-reveal", () => require("./animated-reveal"));

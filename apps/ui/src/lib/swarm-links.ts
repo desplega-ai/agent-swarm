@@ -1,6 +1,7 @@
 // Links in agent output that name something of this swarm: a dashboard page
-// (a task, a session, a page, ...), an agent-fs file, or a GitHub PR, issue,
-// commit or repo. Markdown renders them as chips
+// (a task, a session, a page, ...), an agent-fs file, a GitHub PR, issue,
+// commit or repo, a GitLab MR, issue or commit, a Linear or Jira issue, or a
+// Slack message. Markdown renders them as chips
 // (`components/shared/markdown-link-chip.tsx`), and so do app link cells.
 //
 // No host is built in: a self-hosted swarm has its own URLs. The caller passes
@@ -66,7 +67,21 @@ export type SwarmLink =
   | { type: "dashboard"; route: DashboardRoute; id: string; path: string; href: string }
   /** `path` is the decoded drive path. */
   | { type: "file"; name: string; path: string; folder: boolean; href: string }
-  | { type: "share"; name: string | null; href: string };
+  | { type: "share"; name: string | null; href: string }
+  /** A GitLab MR / issue / commit, a Linear or Jira issue, or a Slack message. */
+  | {
+      type: "external";
+      provider: ExternalProvider;
+      kind: ExternalKind;
+      /** The chip text: `repo!12`, `ENG-42`, "Slack thread". */
+      label: string;
+      /** The full name: `MR group/repo!12`. */
+      title: string;
+      href: string;
+    };
+
+export type ExternalProvider = "gitlab" | "linear" | "jira" | "slack";
+export type ExternalKind = "mr" | "issue" | "commit" | "thread" | "message";
 
 function parseUrl(value: string, base?: string): URL | null {
   try {
@@ -188,6 +203,104 @@ function parseGithubUrl(
   return null;
 }
 
+const ISSUE_KEY = /^[A-Z][A-Z0-9_]{0,9}-\d{1,7}$/;
+
+/** A GitLab MR, issue or commit (its `/-/` paths, on any host), a Linear or Jira issue, or a Slack message. */
+function parseExternalUrl(url: URL, href: string): SwarmLink | null {
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname;
+  const gitlab = /^\/(.+?)\/-\/(merge_requests|issues|commit)\/([^/]+)/.exec(path);
+  if (gitlab) {
+    const [, project = "", section, id = ""] = gitlab;
+    const repo = project.split("/").at(-1) ?? project;
+    if (section === "commit") {
+      if (!/^[0-9a-f]{7,40}$/i.test(id)) return null;
+      const sha = id.toLowerCase();
+      return external("gitlab", "commit", `${repo}@${sha.slice(0, 7)}`, `${project}@${sha}`, href);
+    }
+    if (!/^\d{1,9}$/.test(id)) return null;
+    return section === "issues"
+      ? external("gitlab", "issue", `${repo}#${id}`, `Issue ${project}#${id}`, href)
+      : external("gitlab", "mr", `${repo}!${id}`, `MR ${project}!${id}`, href);
+  }
+  if (host === "linear.app") {
+    const key = /^\/[^/]+\/issue\/([^/]+)/.exec(path)?.[1]?.toUpperCase();
+    return key && ISSUE_KEY.test(key)
+      ? external("linear", "issue", key, `Linear issue ${key}`, href)
+      : null;
+  }
+  if (host.endsWith(".atlassian.net")) {
+    const key = (
+      /^\/browse\/([^/]+)/.exec(path)?.[1] ??
+      url.searchParams.get("selectedIssue") ??
+      ""
+    ).toUpperCase();
+    return ISSUE_KEY.test(key) ? external("jira", "issue", key, `Jira issue ${key}`, href) : null;
+  }
+  if (host === "slack.com" || host.endsWith(".slack.com")) {
+    const message = /^\/archives\/([A-Z0-9]+)\/p\d{10,}/i.exec(path);
+    if (!message) return null;
+    const thread = url.searchParams.has("thread_ts");
+    const noun = thread ? "Slack thread" : "Slack message";
+    return external("slack", thread ? "thread" : "message", noun, `${noun} in ${message[1]}`, href);
+  }
+  return null;
+}
+
+function external(
+  provider: ExternalProvider,
+  kind: ExternalKind,
+  label: string,
+  title: string,
+  href: string,
+): SwarmLink {
+  return { type: "external", provider, kind, label, title, href };
+}
+
+/**
+ * The form two links to one page share: host without `www.` and path without
+ * a trailing slash, lowercased host, no query and no fragment. Null for a
+ * value that is not an http(s) URL.
+ */
+export function normalizeLinkUrl(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const host = url.host.toLowerCase().replace(/^www\./, "");
+  return `${host}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/** Every http(s) URL a text names (bare, in markdown or in Slack `<url|label>`), normalized. */
+export function linkedUrls(text: string | null | undefined): Set<string> {
+  const found = new Set<string>();
+  for (const match of (text ?? "").matchAll(/https?:\/\/[^\s<>()[\]"'`|]+/gi)) {
+    const normalized = normalizeLinkUrl(match[0].replace(/[.,;:!?*_~]+$/, ""));
+    if (normalized) found.add(normalized);
+  }
+  return found;
+}
+
+/**
+ * The rows without the link attachments the text already links: a reply that
+ * names a PR inline and attaches the same PR shows it once.
+ */
+export function withoutLinkedUrls<T extends { kind: string; url?: string | null }>(
+  rows: T[],
+  text: string | null | undefined,
+): T[] {
+  const linked = linkedUrls(text);
+  if (linked.size === 0) return rows;
+  return rows.filter((row) => {
+    if (row.kind !== "url" || !row.url) return true;
+    const normalized = normalizeLinkUrl(row.url);
+    return !normalized || !linked.has(normalized);
+  });
+}
+
 /**
  * `owner/repo#N` (a PR or an issue) and `owner/repo@<sha>` (a commit), the
  * shorthand an agent or a data column writes instead of a URL. Null for any
@@ -275,6 +388,8 @@ export function parseSwarmLink(raw: string, origins: SwarmLinkOrigins): SwarmLin
 
   const github = parseGithubUrl(url, href, origins.github);
   if (github) return github;
+  const provider = parseExternalUrl(url, href);
+  if (provider) return provider;
 
   const agentFs = [originOf(origins.agentFsLive), originOf(origins.agentFsApi)];
   if (!agentFs.includes(url.origin)) return null;
