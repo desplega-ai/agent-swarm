@@ -212,8 +212,12 @@ function decideSlackSessionStatus(
   return awaitingHuman ? "suspended" : "active";
 }
 
-async function desiredStatus(channelId: string, threadTs: string): Promise<SlackSessionStatus> {
-  const tasks = await getSlackTasksInThread(channelId, threadTs);
+async function desiredStatus(
+  channelId: string,
+  threadTs: string,
+  loadTasks: () => Promise<readonly Pick<AgentTask, "status">[]>,
+): Promise<SlackSessionStatus> {
+  const tasks = await loadTasks();
   const running = tasks.some((task) => !isTerminalTaskStatus(task.status));
   const awaitingHuman = running ? false : await isSlackThreadAwaitingHuman(channelId, threadTs);
   return decideSlackSessionStatus(tasks, awaitingHuman);
@@ -434,6 +438,8 @@ export async function reconcileSlackSessionStatus(input: {
   outcomeDelivered?: boolean;
   /** A person clicked Stop: Slack holds `processing` whatever this process last recorded. */
   stopped?: boolean;
+  /** The thread's tasks; a render pass hands over the listing it already holds. */
+  loadTasks?: () => Promise<readonly Pick<AgentTask, "status">[]>;
 }): Promise<void> {
   try {
     const client = input.client ?? getSlackApp()?.client;
@@ -452,7 +458,11 @@ export async function reconcileSlackSessionStatus(input: {
           uncertain: true,
         });
       }
-      const desired = await desiredStatus(channelId, threadTs);
+      const desired = await desiredStatus(
+        channelId,
+        threadTs,
+        input.loadTasks ?? (() => getSlackTasksInThread(channelId, threadTs)),
+      );
       const result = await applyStatus(client, channelId, threadTs, desired, input.budget);
       if (input.outcomeDelivered && result === "unavailable") {
         await clearLegacyDmStatus(client, channelId, threadTs);
@@ -500,16 +510,20 @@ export async function markSlackSessionProcessing(input: {
 export function beginSlackStatusTick(): {
   /** Shared by every native status write the tick starts; hand it to anything the tick calls that may write. */
   budget: StatusBudget;
-  reconcile: (channelId: string, threadTs: string) => Promise<void>;
+  reconcile: (
+    channelId: string,
+    threadTs: string,
+    loadTasks?: () => Promise<readonly Pick<AgentTask, "status">[]>,
+  ) => Promise<void>;
   finish: () => Promise<void>;
 } {
   const budget: StatusBudget = { remaining: CALLS_PER_TICK };
   const visited = new Set<string>();
   return {
     budget,
-    reconcile: async (channelId, threadTs) => {
+    reconcile: async (channelId, threadTs, loadTasks) => {
       visited.add(threadKey(channelId, threadTs));
-      await reconcileSlackSessionStatus({ channelId, threadTs, budget });
+      await reconcileSlackSessionStatus({ channelId, threadTs, budget, loadTasks });
     },
     finish: async () => {
       try {

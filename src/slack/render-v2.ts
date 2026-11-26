@@ -37,6 +37,7 @@ import {
   recordMergedSlackOutcome,
   type SlackOutcomeGroupHost,
 } from "../be/db/slack-card-groups";
+import { getSlackOutcomeMessages } from "../be/db/slack-messages";
 import {
   closeSlackTreeIfSettled,
   getSlackProcessingThreads,
@@ -46,6 +47,7 @@ import {
   slackThreadHasBotReplySince,
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
+import { requestMemoEpoch } from "../be/request-memo";
 import { getTaskCitations } from "../be/task-citations";
 import { getTaskUiSpec } from "../be/task-ui-spec";
 import { slackContextKey } from "../tasks/context-key";
@@ -881,10 +883,13 @@ async function createThreadTree(
 export async function ensureSlackThreadPresentation(
   taskIds: string[],
   statusBudget?: StatusBudget,
+  reads?: ThreadPassReads,
 ): Promise<SlackMessageRecord | null> {
-  const task = (await Promise.all(taskIds.map(getTaskById))).find(
-    (candidate): candidate is AgentTask => !!candidate,
-  );
+  const task =
+    reads?.tasks[0] ??
+    (await Promise.all(taskIds.map(getTaskById))).find(
+      (candidate): candidate is AgentTask => !!candidate,
+    );
   if (!task?.slackChannelId || !task.slackThreadTs) return null;
   // Every accepted ask passes through here: start Slack's own "working" state
   // with the tree. A no-op when the thread is already showing it. The native
@@ -893,11 +898,12 @@ export async function ensureSlackThreadPresentation(
   // the old guarantee that the status write has finished before a tree
   // failure propagates.
   const [tree] = await Promise.allSettled([
-    presentThreadTree(task, taskIds, statusBudget),
+    presentThreadTree(task, taskIds, statusBudget, reads),
     reconcileSlackSessionStatus({
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
       budget: statusBudget,
+      loadTasks: reads && (() => passThreadTasks(reads.channelId, reads.threadTs, reads)),
     }),
   ]);
   if (tree.status === "rejected") {
@@ -914,14 +920,15 @@ async function presentThreadTree(
   task: AgentTask,
   taskIds: string[],
   statusBudget?: StatusBudget,
+  reads?: ThreadPassReads,
 ): Promise<SlackMessageRecord | null> {
-  const visibility = syncSlackTreeVisibility();
+  const visibility = passTreeCutoff(reads);
   const generation = slackTreeGeneration();
   const cutoff = await visibility;
   if (!task.slackChannelId || !task.slackThreadTs) return null;
-  const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const tasks = await passThreadTasks(task.slackChannelId, task.slackThreadTs, reads);
   if (isSlackTaskTreeEnabled()) assertSlackTreeCurrent(generation);
-  const activatedAt = await getSlackRenderV2ActivatedAt();
+  const activatedAt = reads ? reads.activatedAt : await getSlackRenderV2ActivatedAt();
   // Old asks prevent a new tree, but never suppress newer outcomes in the thread.
   if (
     activatedAt &&
@@ -1046,11 +1053,12 @@ async function updateThreadTree(
   tree: SlackMessageRecord,
   bypassThrottle = false,
   statusBudget?: StatusBudget,
+  reads?: ThreadPassReads,
 ): Promise<boolean> {
   const generation = slackTreeGeneration();
   const result = await withTreeUpdateLock(tree.channelId, tree.threadTs, async () => {
     assertSlackTreeCurrent(generation);
-    const cutoff = await syncSlackTreeVisibility();
+    const cutoff = await passTreeCutoff(reads);
     const app = getSlackApp();
     if (!app) return "unchanged" as const;
     const current = await getSlackTreeMessageByThread(tree.channelId, tree.threadTs);
@@ -1058,7 +1066,7 @@ async function updateThreadTree(
     if (isPendingSlackMessage(current)) return "pending" as const;
 
     const renderedThrough = new Date().toISOString();
-    const tasks = await getSlackTasksInThread(current.channelId, current.threadTs);
+    const tasks = await passThreadTasks(current.channelId, current.threadTs, reads);
     if (tasks.length === 0 || !canPresentSlackTree(tasks, cutoff)) return "unchanged" as const;
     const text = await renderThreadTree(tasks);
     assertSlackTreeCurrent(generation);
@@ -2616,7 +2624,76 @@ type RenderPassContext = {
   delegationActivatedAt: string | null;
   outcomeWindow: SlackOutcomeWindow;
   statusTick: ReturnType<typeof beginSlackStatusTick>;
+  /** isSlackTaskTreeEnabled() and syncSlackTreeVisibility() at the start of the pass. */
+  treeEnabled: boolean;
+  treeCutoff: string | null;
+  /** slackTreeGeneration() when treeCutoff was taken: any later visibility transition moves it. */
+  treeGeneration: number;
 };
+
+/**
+ * Reads a render pass already made for one thread, so its tree path reuses them
+ * instead of reading them again. Only this process writes the database (the API
+ * server owns it), so a write epoch that has not moved means the rows are current.
+ */
+type ThreadPassReads = SlackThreadAddress &
+  Pick<RenderPassContext, "activatedAt" | "treeEnabled" | "treeCutoff" | "treeGeneration"> & {
+    tasks: AgentTask[];
+    /** requestMemoEpoch("task") taken before `tasks` was read. */
+    tasksEpoch: number;
+  };
+
+/**
+ * The pass's tree visibility, or a fresh read when the flag flipped since (that read also
+ * invalidates). The generation check catches an off/on that ends on the same boolean but
+ * persisted a new cutoff.
+ */
+function passTreeCutoff(reads: ThreadPassReads | undefined): Promise<string | null> {
+  if (
+    reads &&
+    reads.treeEnabled === isSlackTaskTreeEnabled() &&
+    reads.treeGeneration === slackTreeGeneration()
+  ) {
+    return Promise.resolve(reads.treeCutoff);
+  }
+  return syncSlackTreeVisibility();
+}
+
+/** The pass's thread listing while no task write landed since, else a fresh one. */
+function passThreadTasks(
+  channelId: string,
+  threadTs: string,
+  reads: ThreadPassReads | undefined,
+): Promise<AgentTask[]> {
+  if (
+    reads &&
+    reads.channelId === channelId &&
+    reads.threadTs === threadTs &&
+    reads.tasksEpoch === requestMemoEpoch("task")
+  ) {
+    return Promise.resolve(reads.tasks);
+  }
+  return getSlackTasksInThread(channelId, threadTs);
+}
+
+/**
+ * Outcome card lookup for one thread's tasks: one IN read, reused until this
+ * process writes slack_messages again, then read once more. Replaces one
+ * getSlackOutcomeMessage per member per loop.
+ */
+function threadOutcomeReader(
+  taskIds: readonly string[],
+): (taskId: string) => Promise<SlackMessageRecord | null> {
+  const ids = new Set(taskIds);
+  let loaded: { epoch: number; cards: Promise<Map<string, SlackMessageRecord>> } | undefined;
+  return async (taskId) => {
+    if (!ids.has(taskId)) return getSlackOutcomeMessage(taskId);
+    // The epoch is taken before the read starts, so a write during the read forces another.
+    const epoch = requestMemoEpoch("slack");
+    if (loaded?.epoch !== epoch) loaded = { epoch, cards: getSlackOutcomeMessages(taskIds) };
+    return (await loaded.cards).get(taskId) ?? null;
+  };
+}
 
 /**
  * See SlackOutcomeWindow. A card may post for one conclusion timeout after
@@ -2659,10 +2736,15 @@ async function processSlackThread(
     delegationActivatedAt,
     outcomeWindow,
     statusTick,
+    treeEnabled,
+    treeCutoff,
+    treeGeneration,
   }: RenderPassContext,
 ): Promise<"stop" | "open" | "closed"> {
   if (!isSlackRenderV2Enabled()) return "stop";
+  const tasksEpoch = requestMemoEpoch("task");
   const tasks = await getSlackTasksInThread(thread.channelId, thread.threadTs);
+  const outcomeOf = threadOutcomeReader(tasks.map((task) => task.id));
   const existingTree = await getSlackTreeMessageByThread(thread.channelId, thread.threadTs);
   if (
     !existingTree &&
@@ -2695,7 +2777,7 @@ async function processSlackThread(
     const closure = closuresByAskId.get(askId) ?? [];
     let count = 0;
     for (const member of closure) {
-      if (await getSlackOutcomeMessage(member.id)) count++;
+      if (await outcomeOf(member.id)) count++;
     }
     childCardCounts.set(askId, count);
     return count;
@@ -2713,7 +2795,7 @@ async function processSlackThread(
   for (const task of tasks) {
     if (!isSlackRenderV2Enabled()) return "stop";
     if (task.source === "slack") continue;
-    const card = await getSlackOutcomeMessage(task.id);
+    const card = await outcomeOf(task.id);
     if (card && isSettledSlackMessage(card)) continue;
     if (!card && endedBefore(task, outcomeWindow.finishedAfter)) continue;
     if (!delegationEnabled || delegationActivatedAt === null) continue;
@@ -2758,7 +2840,7 @@ async function processSlackThread(
       continue;
     }
     if (!(await taskNeedsDirectOutcome(task, activatedAt, leadFollowUp))) continue;
-    const card = await getSlackOutcomeMessage(task.id);
+    const card = await outcomeOf(task.id);
     if (card && isSettledSlackMessage(card)) continue;
     if (await isAnsweredByDeferralCard(task, tasks)) continue;
     // A pending card has no bound Slack message, so its retry would create
@@ -2839,7 +2921,7 @@ async function processSlackThread(
       // Once the per-ask cap is reached, remaining terminal children are
       // represented in the conclusion digest rather than blocking it.
       if (existingChildCards >= CHILD_CARDS_PER_ASK) break;
-      const memberCard = await getSlackOutcomeMessage(member.id);
+      const memberCard = await outcomeOf(member.id);
       // The child pass never starts a card past the cutoff, so do not wait
       // for one; an in-flight card is still awaited.
       if (!memberCard && endedBefore(member, outcomeWindow.finishedAfter)) continue;
@@ -2884,13 +2966,23 @@ async function processSlackThread(
       await noteOutcomeDeliveryFailure(task, error, statusTick.budget);
     }
   }
+  const reads: ThreadPassReads = {
+    ...thread,
+    activatedAt,
+    treeEnabled,
+    treeCutoff,
+    treeGeneration,
+    tasks,
+    tasksEpoch,
+  };
   try {
     const tree = await ensureSlackThreadPresentation(
       tasks.map((task) => task.id),
       statusTick.budget,
+      reads,
     );
     if (tree) {
-      await updateThreadTree(tree, outcomeCreated, statusTick.budget);
+      await updateThreadTree(tree, outcomeCreated, statusTick.budget, reads);
       await closeSlackTreeIfSettled(tree.id);
     }
   } catch (error) {
@@ -2898,7 +2990,9 @@ async function processSlackThread(
       console.error("[Slack] Failed to present v2 tree:", scrubSecrets(String(error)));
     }
   }
-  await statusTick.reconcile(thread.channelId, thread.threadTs);
+  await statusTick.reconcile(thread.channelId, thread.threadTs, () =>
+    passThreadTasks(thread.channelId, thread.threadTs, reads),
+  );
   return (await slackThreadHasOutcomeWork(thread, outcomeWindow)) ? "open" : "closed";
 }
 
@@ -3007,7 +3101,12 @@ function runExclusive(work: () => Promise<void>): Promise<void> {
 }
 
 async function beginRenderPass(): Promise<RenderPassContext> {
-  await syncSlackTreeVisibility();
+  const treeEnabled = isSlackTaskTreeEnabled();
+  const visibility = syncSlackTreeVisibility();
+  // Taken before the await: a transition queued behind this read moves it, so the
+  // cutoff is never reused past one.
+  const treeGeneration = slackTreeGeneration();
+  const treeCutoff = await visibility;
   const activatedAt = await ensureSlackRenderV2Activation();
   const delegationEnabled = isSlackDelegationEnabled();
   const delegationActivatedAt = delegationEnabled ? await ensureSlackDelegationActivation() : null;
@@ -3017,6 +3116,9 @@ async function beginRenderPass(): Promise<RenderPassContext> {
     delegationActivatedAt,
     outcomeWindow: slackOutcomeWindow(delegationEnabled),
     statusTick: beginSlackStatusTick(),
+    treeEnabled,
+    treeCutoff,
+    treeGeneration,
   };
 }
 
