@@ -42,5 +42,8 @@ SELECT s.id, s.doc, memory_fts_length(s.doc)
   FROM (SELECT id, memory_fts_document("name", "content") AS doc FROM "agent_memory") s;
 
 CREATE INDEX "idx_memory_fts_doc" ON "memory_fts" USING gin ("doc");
+-- bm25 reads the row count and the average length on each search. With this
+-- index that read is an index-only scan, not a scan of every stored document.
+CREATE INDEX "idx_memory_fts_doc_len" ON "memory_fts" ("doc_len");
 
 DROP INDEX IF EXISTS "idx_agent_memory_fts";
