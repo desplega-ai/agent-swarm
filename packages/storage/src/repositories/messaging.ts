@@ -172,10 +172,17 @@ export interface MessagingRepository {
    * in `listChannels` order.
    */
   listUnreadChannelMentions(agentId: string): Promise<UnreadChannelMentionsRow[]>;
+  /**
+   * Over every channel the agent is not processing, its messages after the
+   * agent's read mark: those that are not its own, and those that mention it.
+   */
+  countUnreadInbox(agentId: string): Promise<{ unreadCount: number; mentionsCount: number }>;
 
   // ---- channel_read_state ----
   setChannelLastRead(agentId: string, channelId: string, now: string): Promise<void>;
   findChannelReadState(agentId: string, channelId: string): Promise<ChannelReadStateRow | null>;
+  /** One agent's read state in every channel it has one, in no particular order. */
+  listChannelReadStates(agentId: string): Promise<(ChannelReadStateRow & { channelId: string })[]>;
   /** Sets `processing_since` unless the channel is already being processed; returns the changes. */
   claimChannelMentions(
     agentId: string,
@@ -460,6 +467,23 @@ export abstract class BaseMessagingRepository implements MessagingRepository {
     return rows.map((row) => ({ ...row, count: Number(row.count) }));
   }
 
+  async countUnreadInbox(agentId: string): Promise<{ unreadCount: number; mentionsCount: number }> {
+    // One statement for every channel, in place of a read state and two counts per channel.
+    const row = await this.db.get<{ unreadCount: number | null; mentionsCount: number | null }>(sql`
+      SELECT
+        SUM(CASE WHEN m."agentId" IS NULL OR m."agentId" != ${agentId} THEN 1 ELSE 0 END) AS "unreadCount",
+        SUM(CASE WHEN ${this.mentions(agentId)} THEN 1 ELSE 0 END) AS "mentionsCount"
+      FROM channels c
+      JOIN channel_messages m ON m."channelId" = c.id
+      LEFT JOIN channel_read_state s ON s."agentId" = ${agentId} AND s."channelId" = c.id
+      WHERE s.processing_since IS NULL
+        AND (s."lastReadAt" IS NULL OR m."createdAt" > s."lastReadAt")`);
+    return {
+      unreadCount: Number(row?.unreadCount ?? 0),
+      mentionsCount: Number(row?.mentionsCount ?? 0),
+    };
+  }
+
   // ---- channel_read_state ----
 
   async setChannelLastRead(agentId: string, channelId: string, now: string): Promise<void> {
@@ -473,6 +497,12 @@ export abstract class BaseMessagingRepository implements MessagingRepository {
     return this.db.get<ChannelReadStateRow>(sql`
       SELECT "lastReadAt", processing_since FROM channel_read_state
       WHERE "agentId" = ${agentId} AND "channelId" = ${channelId}`);
+  }
+
+  listChannelReadStates(agentId: string): Promise<(ChannelReadStateRow & { channelId: string })[]> {
+    return this.db.query<ChannelReadStateRow & { channelId: string }>(sql`
+      SELECT "channelId", "lastReadAt", processing_since FROM channel_read_state
+      WHERE "agentId" = ${agentId}`);
   }
 
   async claimChannelMentions(

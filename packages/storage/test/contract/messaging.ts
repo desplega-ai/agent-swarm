@@ -147,15 +147,39 @@ export function messagingContract(engine: ContractEngine): void {
         { channelId: "c1", lastReadAt: null, count: 2 },
       ]);
       expect(await repo.listUnreadChannelMentions("a2x")).toEqual([]);
+      // A second channel the agent never read: its message counts as unread too.
+      await repo.insertChannelMessage({
+        id: "m4",
+        channelId: "c2",
+        agentId: null,
+        content: "m4",
+        replyToId: null,
+        mentions: "[]",
+        createdAt: T0,
+      });
+      const inbox = (unreadCount: number, mentionsCount: number) => ({
+        unreadCount,
+        mentionsCount,
+      });
+      expect(await repo.countUnreadInbox("a1")).toEqual(inbox(3, 2));
+      expect(await repo.countUnreadInbox("a2x")).toEqual(inbox(3, 0));
+      expect(await repo.listChannelReadStates("a1")).toEqual([]);
       await repo.setChannelLastRead("a1", "c1", T0);
       expect(await repo.listUnreadChannelMentions("a1")).toEqual([
         { channelId: "c1", lastReadAt: T0, count: 2 },
       ]);
+      expect(await repo.countUnreadInbox("a1")).toEqual(inbox(3, 2));
       await repo.setChannelLastRead("a1", "c1", T1);
       expect(await repo.listUnreadChannelMentions("a1")).toEqual([]);
+      expect(await repo.countUnreadInbox("a1")).toEqual(inbox(1, 0));
       await repo.setChannelLastRead("a1", "c1", T0);
       expect(await repo.claimChannelMentions("a1", "c1", T0, T1)).toBe(1);
       expect(await repo.listUnreadChannelMentions("a1")).toEqual([]);
+      // A channel being processed drops out of both counts.
+      expect(await repo.countUnreadInbox("a1")).toEqual(inbox(1, 0));
+      expect(await repo.listChannelReadStates("a1")).toEqual([
+        { channelId: "c1", lastReadAt: T0, processing_since: T1 },
+      ]);
       await repo.setChannelMessageContent("m1", "edited");
       expect((await repo.findChannelMessage("m1"))?.content).toBe("edited");
       expect(await repo.deleteChannel("c2")).toBe(1);

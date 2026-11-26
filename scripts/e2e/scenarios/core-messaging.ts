@@ -1,5 +1,5 @@
 import { sql } from "../db";
-import { asRecord, asRecords, expect, pollUntil } from "../http";
+import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
 import type { McpConnection } from "../mcp";
 import type { Scenario, ScenarioContext } from "../run";
 import {
@@ -118,6 +118,39 @@ async function channels(
   );
   expect((await callTool(poster, "post-message", { channel: name, content: "" })).isError, "empty");
   return { name, channelId, firstMessageId };
+}
+
+/** GET /me?include=inbox: the reader's unread counts and its unread @mention preview. */
+async function inboxSummary(
+  ctx: ScenarioContext,
+  readerId: string,
+  posterId: string,
+  name: string,
+) {
+  const response = await ctx.api("GET", "/me?include=inbox", { agentId: readerId });
+  expectStatus(response, [200], "GET /me?include=inbox");
+  const inbox = asRecord(asRecord(response.json).inbox);
+  // Other scenarios may post to shared channels, but only this one mentions the reader.
+  expect(
+    Number(inbox.unreadCount) >= 2 && inbox.mentionsCount === 1,
+    `inbox counts are wrong: ${JSON.stringify(inbox)}`,
+  );
+  const recent = asRecords(inbox, "recentMentions");
+  expect(
+    recent.length === 1 &&
+      recent[0]?.channelName === name &&
+      recent[0]?.agentName === `core-poster-${ctx.nonce}` &&
+      recent[0]?.content === `first post ${ctx.nonce}`,
+    `inbox recentMentions are wrong: ${JSON.stringify(recent)}`,
+  );
+  // The poster's own posts are neither unread nor mentions for the poster.
+  const own = asRecord(
+    asRecord((await ctx.api("GET", "/me?include=inbox", { agentId: posterId })).json).inbox,
+  );
+  expect(
+    own.mentionsCount === 0 && asRecords(own, "recentMentions").length === 0,
+    `the poster's inbox counts its own posts: ${JSON.stringify(own)}`,
+  );
 }
 
 /** An @mention wakes the idle agent through the poll loop. */
@@ -271,6 +304,7 @@ export const coreMessaging: Scenario = {
         await withMcp(ctx, readerId, async (reader) => {
           await withMcp(ctx, leadId, async (lead) => {
             const { name, channelId } = await channels(ctx, poster, posterId, readerId);
+            await inboxSummary(ctx, readerId, posterId, name);
             await mentionTrigger(ctx, readerId, channelId);
             await reading(ctx, reader, poster, readerId, name, channelId);
             await deletion(ctx, reader, lead, name, channelId);
