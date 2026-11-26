@@ -30,7 +30,6 @@
  * measures main and a branch. `--out` writes the ids and counts of each
  * query; `--compare` reports whether two such files hold the same results.
  */
-import { Database } from "bun:sqlite";
 import {
   mkdtempSync,
   readdirSync,
@@ -42,13 +41,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DbClient, Storage, TaskListFilters } from "@desplega/storage";
-import { createBunSqliteClient, createSqliteStorage } from "../../storage-sqlite/src";
+import { openSqliteTaskCorpus } from "../../storage-sqlite/bench/task-search-corpus";
 import { createPostgresClient, createPostgresStorage, runPostgresMigrations } from "../src";
 import { type TaskCorpusRow, taskCorpusRows, taskCorpusWords } from "./task-search-corpus";
 
 const ROOT = join(import.meta.dir, "..", "..", "..");
 const PG_CHAIN = join(ROOT, "src", "be", "migrations", "postgres");
-const SQLITE_CHAIN = join(ROOT, "src", "be", "migrations");
 
 function option(name: string): string | undefined {
   const at = process.argv.indexOf(`--${name}`);
@@ -300,34 +298,9 @@ async function sqliteResults(
   queries: { label: string; search: string }[],
 ): Promise<RunResult["queries"]> {
   rmSync(file, { force: true });
-  const db = new Database(file);
-  db.run("PRAGMA journal_mode = WAL");
-  db.run("PRAGMA foreign_keys = ON");
-  const files = readdirSync(SQLITE_CHAIN)
-    .filter((name) => /^\d+_.*\.sql$/.test(name))
-    .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10));
-  for (const name of files) db.exec(readFileSync(join(SQLITE_CHAIN, name), "utf8"));
-  const insert =
-    db.prepare(`INSERT INTO agent_tasks (id, task, title, status, taskType, tags, priority, createdAt, lastUpdatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  let batch: TaskCorpusRow[] = [];
-  const flush = db.transaction((rows: TaskCorpusRow[]) => {
-    for (const row of rows) insert.run(...values(row));
-  });
-  for (const row of taskCorpusRows(ROWS)) {
-    batch.push(row);
-    if (batch.length >= 1000) {
-      flush(batch);
-      batch = [];
-    }
-  }
-  flush(batch);
-  const storage = createSqliteStorage(
-    createBunSqliteClient(() => db),
-    { vectorSearch: false },
-  );
-  const results = await runQueries(storage, queries, 1, 0);
-  db.close();
+  const lite = openSqliteTaskCorpus(file, taskCorpusRows(ROWS));
+  const results = await runQueries(lite.storage, queries, 1, 0);
+  lite.close();
   return results;
 }
 
