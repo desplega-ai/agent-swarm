@@ -42,6 +42,7 @@ import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retenti
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import { getStorage } from "../be/storage";
+import { readEngineStats } from "../be/storage-root";
 import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
@@ -60,7 +61,9 @@ import { initJira } from "../jira";
 import { initLinear } from "../linear";
 import {
   initOtel,
+  isPgMetricsEnabled,
   isPollTracingEnabled,
+  startPostgresStatsMetrics,
   startSpan,
   withRemoteContext,
   withSpanContext,
@@ -848,6 +851,8 @@ startScratchScriptGc();
 initialize();
 
 await initOtel("api");
+// Postgres server gauges (pg_stat_*), read once per metric export over the engine pool.
+if (isPostgresEngine() && isPgMetricsEnabled()) startPostgresStatsMetrics(readEngineStats);
 
 httpServer
   .listen(port, async () => {
