@@ -35,11 +35,16 @@ export function approvalDraftKey(
   return `${draftPrefix(apiUrl, requestId)}${hashText(JSON.stringify(questions))}`;
 }
 
-/** The answers worth keeping: known, non-config questions only. */
+/**
+ * The answers worth keeping: known, non-config questions only. An id that any
+ * config question uses is never kept, even when a text question shares it: the
+ * create API does not reject duplicate ids, so both read one response slot.
+ */
 function draftable(questions: ApprovalQuestion[], values: Values): Values {
+  const configIds = new Set(questions.filter((q) => q.type === "config").map((q) => q.id));
   const kept: Values = {};
   for (const question of questions) {
-    if (question.type !== "config" && values[question.id] !== undefined) {
+    if (!configIds.has(question.id) && values[question.id] !== undefined) {
       kept[question.id] = values[question.id];
     }
   }

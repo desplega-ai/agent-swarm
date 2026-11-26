@@ -55,6 +55,48 @@ describe("approval drafts", () => {
     });
   });
 
+  // The create API and MCP accept duplicate question ids, so a text and a config
+  // question can share one response slot. That slot holds the config answer.
+  const notes: ApprovalQuestion = { id: "same", type: "text", label: "Notes" };
+  const secret: ApprovalQuestion = {
+    id: "same",
+    type: "config",
+    label: "Token",
+    config: { key: "TOKEN", scope: "global" },
+  };
+  const go: ApprovalQuestion = { id: "go", type: "approval", label: "Ship it?" };
+  for (const [order, shared] of [
+    ["text first", [notes, secret, go]],
+    ["config first", [secret, notes, go]],
+  ] as const) {
+    test(`an id shared with a config question is never stored or restored (${order})`, () => {
+      const storage = memoryStorage();
+      const set = [...shared];
+      const key = approvalDraftKey(API, "req-1", set);
+      writeApprovalDraft(
+        storage,
+        key,
+        set,
+        { same: { action: "set", value: "SECRET" }, go: { approved: true } },
+        NOW,
+      );
+      expect(storage.items.get(key)).not.toContain("SECRET");
+      expect(readApprovalDraft(storage, key, set, NOW)).toEqual({ go: { approved: true } });
+      // A draft written before this guard still never restores the shared slot.
+      storage.setItem(
+        key,
+        JSON.stringify({
+          text: JSON.stringify({
+            same: { action: "set", value: "SECRET" },
+            go: { approved: true },
+          }),
+          savedAt: NOW,
+        }),
+      );
+      expect(readApprovalDraft(storage, key, set, NOW)).toEqual({ go: { approved: true } });
+    });
+  }
+
   test("a changed question set ignores the old draft", () => {
     const storage = memoryStorage();
     writeApprovalDraft(
