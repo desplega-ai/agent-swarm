@@ -808,7 +808,8 @@ export async function handleCore(
           status = "waiting_for_credentials";
         }
 
-        await updateAgentStatus(agent.id, status);
+        // An unchanged status only bumps `lastUpdatedAt`: no re-read, no agent_log row.
+        await updateAgentStatus(agent.id, status, { previous: agent });
 
         return true;
       });
