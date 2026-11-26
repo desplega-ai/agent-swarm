@@ -14,6 +14,21 @@ import {
 import { configureAgentFs, removeConfigs, startAgentFsStub, storedSheet } from "./sheets-helpers";
 
 const CSV = "e2e/data/sales.csv";
+// Every non-read statement shape; each must be refused before it reaches agent-fs.
+const WRITES = [
+  `DELETE FROM '/${CSV}'`,
+  "INSERT INTO t VALUES (1)",
+  "UPDATE t SET amount = 0",
+  "CREATE TABLE t AS SELECT 1",
+  "DROP TABLE t",
+  "ATTACH '/e2e/data/x.db' AS x",
+  `COPY (SELECT * FROM '/${CSV}') TO '/tmp/out.csv'`,
+  "PRAGMA threads = 1",
+  "SET threads = 1",
+  `SELECT * FROM '/${CSV}'; DELETE FROM t`,
+  "WITH x AS (SELECT 1) DELETE FROM t",
+  "SELECT E'\\''; DELETE FROM t; --'",
+];
 const RESULT = {
   columns: [
     { name: "region", type: "VARCHAR" },
@@ -31,8 +46,8 @@ const RESULT = {
 
 /**
  * Flow `data`: `data-query` and `ctx.data.query` proxy the agent-fs `sql` op as the agent's own
- * key. Rows, a card, a sheet, the sqlite and missing-path refusals, agent-fs's own errors, the
- * MCP and script row caps, and one `data.query` event per call without the SQL text.
+ * key. Rows, a card, a sheet, the read-only, sqlite and missing-path refusals, agent-fs's own
+ * errors, the MCP and script row caps, and one `data.query` event per call without the SQL text.
  */
 export const dataQuery: Scenario = {
   name: "data-query",
@@ -136,7 +151,24 @@ export const dataQuery: Scenario = {
           origin: "e2e",
         });
         expect(toolText(capped).includes("at most 1000"), `MCP row cap: ${toolText(capped)}`);
+        for (const write of WRITES) {
+          const refused = await callToolErr(mcp, "data-query", { sql: write, origin: "e2e" });
+          expect(
+            toolText(refused).includes("data-query is read-only") &&
+              structured(refused).errorCode === "READ_ONLY",
+            `read-only refusal for ${write}: ${toolText(refused)}`,
+          );
+        }
         expect(sqlCalls.length === before, "refusals never reach agent-fs sql");
+
+        // Negative control: reads that merely mention write words still run.
+        for (const read of [
+          `WITH t AS (SELECT * FROM '/${CSV}') SELECT 'delete; drop' AS note, "update" FROM t`,
+          `DESCRIBE SELECT * FROM '/${CSV}'`,
+        ]) {
+          await callToolOk(mcp, "data-query", { sql: read, origin: "e2e" });
+          expect(sqlCalls.at(-1)?.query === read, `read reaches agent-fs: ${read}`);
+        }
 
         const busy = await callToolErr(mcp, "data-query", { sql: "SELECT 'busy'", origin: "e2e" });
         expect(
@@ -156,7 +188,8 @@ export const dataQuery: Scenario = {
             source: `export default async (_args, ctx) => {
   const result = await ctx.data.query({ sql: ${JSON.stringify(query)}, origin: "e2e" });
   const refusal = await ctx.data.query({ sql: "SELECT * FROM '/x/app.duckdb'", origin: "e2e" }).catch((e) => String(e));
-  return { rowCount: result.rowCount, success: "success" in result, refusal };
+  const write = await ctx.data.query({ sql: "DELETE FROM '/${CSV}'", origin: "e2e" }).then(() => "ran", (e) => String(e));
+  return { rowCount: result.rowCount, success: "success" in result, refusal, write };
 };`,
           },
           `ctx.data ${executor}`,
@@ -167,6 +200,7 @@ export const dataQuery: Scenario = {
           result.rowCount === 2 &&
             result.success === false &&
             String(result.refusal).includes("duckdb") &&
+            String(result.write).includes("data-query is read-only") &&
             sqlCalls.at(-1)?.maxRows === 1_000,
           `${executor}: ${JSON.stringify(result)} / maxRows ${String(sqlCalls.at(-1)?.maxRows)}`,
         );
@@ -181,10 +215,11 @@ export const dataQuery: Scenario = {
       }));
       const ok = parsed.filter((e) => e.status === "ok");
       expect(
-        parsed.length === 12 &&
-          ok.length === 5 &&
+        parsed.length === 12 + WRITES.length + 2 + 2 &&
+          ok.length === 7 &&
           JSON.stringify(ok.map((e) => e.data.output).sort()) ===
-            `["card","rows","rows","rows","sheet"]` &&
+            `["card","rows","rows","rows","rows","rows","sheet"]` &&
+          parsed.filter((e) => e.data.errorCode === "READ_ONLY").length === WRITES.length + 2 &&
           ok.filter((e) => e.data.callOrigin === "script-sdk").length === 2 &&
           parsed.every((e) => e.data.origin === "e2e") &&
           parsed.some((e) => e.data.errorCode === "NOT_FOUND") &&
