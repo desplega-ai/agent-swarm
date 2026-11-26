@@ -71,7 +71,7 @@ export function anchorKeyOf(anchor: {
 }
 
 /** djb2, base 36. A key part, not a security boundary. */
-function hashText(text: string): string {
+export function hashText(text: string): string {
   let hash = 5381;
   for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
   return (hash >>> 0).toString(36);

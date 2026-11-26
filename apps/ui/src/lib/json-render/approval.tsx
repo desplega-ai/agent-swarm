@@ -31,6 +31,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useApprovalDraft } from "@/lib/approval-drafts";
 import { quorumLabel, respondErrorMessage } from "@/lib/approval-format";
 import { useCan } from "@/lib/use-can";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,7 @@ function ApprovalRequestCard({ requestId, props }: { requestId: string; props: A
   const queryClient = useQueryClient();
   const canRespond = useCan("approval.respond");
   const runResolved = useResolvedChainRunner(props.onResolved);
+  const draft = useApprovalDraft(request);
   /** The server refused this viewer's answer, or answered 409 with the request still pending. */
   const [refusal, setRefusal] = useState<string | null>(null);
   /** This viewer's answer was recorded but the approvers policy needs more. */
@@ -108,6 +110,7 @@ function ApprovalRequestCard({ requestId, props }: { requestId: string; props: A
       const result = await respond.mutateAsync({ id: request.id, responses: values });
       // Swap in the server's view right away: no wait for the next poll.
       queryClient.setQueryData(["approval-request", request.id], result);
+      draft.clear();
       if (result.approvalRequest.status === "pending") setRecorded(true);
     } catch (error) {
       const code = (error as { status?: unknown } | null)?.status;
@@ -142,6 +145,8 @@ function ApprovalRequestCard({ requestId, props }: { requestId: string; props: A
     body = (
       <QuestionFlow
         questions={request.questions}
+        initialValues={draft.initial}
+        onChange={draft.save}
         onSubmit={submit}
         done={() => <Note>Sending your answer…</Note>}
       />
