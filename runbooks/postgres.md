@@ -127,7 +127,7 @@ In the window:
 
 Rollback: stop the API, unset `DATABASE_URL`, start it again. It runs on the untouched SQLite file. Writes made on Postgres after the cutover are not copied back.
 
-What the copy does, step by step: opens the SQLite file read-only; skips the two tables that Litestream adds to a replicated database (`_litestream_seq`, `_litestream_lock`); refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings (full text needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table; after COMMIT, runs `VACUUM (ANALYZE)` so the API starts with planner statistics (a `WARNING` line says so when this step fails: run it by hand before you start the API).
+What the copy does, step by step: opens the SQLite file read-only; skips the two tables that Litestream adds to a replicated database (`_litestream_seq`, `_litestream_lock`); refuses a target that holds any table; runs the Postgres migrations inside the copy transaction, so a refused copy leaves the target empty and a re-run works; disables user triggers during the copy; converts each value to its column type (booleans, `bigint`, `jsonb`, `timestamptz` from both SQLite timestamp formats, `bytea`); keeps SQLite `rowid` as `_rowid`; rebuilds `memory_vec` from the copied embeddings and `agent_tasks_search` (the task search documents) from the copied tasks (the other full-text search needs no rebuild: it is an expression index); restarts identity sequences; compares row counts and checksums of normalized values per table; after COMMIT, runs `VACUUM (ANALYZE)` so the API starts with planner statistics (a `WARNING` line says so when this step fails: run it by hand before you start the API).
 
 Refused rows: one run lists every row the target cannot store. The copy first reads the orphan rows from SQLite (`PRAGMA foreign_key_check`: a row whose parent row is gone), then checks every value. After the first refused row it writes no more rows, so a refused run takes minutes, not the time of a full copy. Each line names the table, the column and the rowid.
 
@@ -147,6 +147,13 @@ Not repaired, so fix these in the SQLite file by hand: invalid JSON syntax, an i
 To repair by hand instead: SQLite `replace()` does not remove a NUL byte (it reads a pattern that starts with NUL as empty and changes nothing), so rewrite such a value from a program.
 
 Memory and batches: the copy process holds one batch of rows at a time (at most 500 rows or 16 MB of stored text, in both directions), and its checksums need no list of rows.
+
+## Task search documents
+
+Task search (`GET /api/tasks?search=`, `get-tasks`) reads stored `tsvector` documents in `agent_tasks_search` (migration 389), one row per task. The tasks repository writes the row in the statement that writes the task text or title. A search takes its candidates from the GIN indexes of these documents and checks a phrase in the stored document, so it parses no task text.
+
+- After the upgrade to migration 389, the API builds the documents of the existing tasks in batches after the start (the task search backfill, mark `agent_tasks_fts_state.indexedThrough`). The log line `[task-fts] backfill indexed=<rows> ms=<ms>` tells you that it is complete. Until then, a task past the mark matches through the expression indexes of migration 368, so the results are correct, but a phrase search can be slower.
+- An image older than migration 389 does not write the documents. If one ran on the database after the upgrade, set `UPDATE agent_tasks_fts_state SET "indexedThrough" = 0 WHERE id = 1` and restart the API: the backfill writes every document again.
 
 ## Known differences
 

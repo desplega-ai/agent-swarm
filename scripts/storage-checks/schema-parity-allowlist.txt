@@ -46,3 +46,5 @@ index:idx_agent_memory_fts -- Postgres form of the run-time FTS5 table memory_ft
 # missing one is rowid-surrogate-shape:<table>, which is not allowlisted.
 rowid-surrogate -- Postgres has no rowid: session_logs exposes rowid AS seq in the API, human_free_reclassify_queue stores rowids, and about 140 repository ORDER BYs tie-break on rowid; the data copy copies rowid into _rowid so API values stay equal across engines (lead decision, M3)
 rows:metrics -- the seeded starter dashboard holds engine-native SQL: Postgres migration 370 rewrites its widget and options queries in Postgres SQL, the SQLite chain keeps the SQLite queries of migration 092 (review of PR #141)
+# Task search documents (migration 389). SQLite stores them in the FTS5 table agent_tasks_fts (257).
+table:agent_tasks_search -- stored tsvector documents of agent_tasks.task and title, the Postgres counterpart of the FTS5 table agent_tasks_fts; the tasks repository writes them with each task text or title write (migration 389)

@@ -112,6 +112,9 @@ export const dataCopy: Scenario = {
         `/api/agents/${agentId}`,
         ...taskIds.map((id) => `/api/tasks/${id}`),
         `/api/tasks?agentId=${agentId}`,
+        // Task search on the copy reads the search documents that db-copy builds.
+        `/api/tasks?search=${encodeURIComponent("copy task")}`,
+        `/api/tasks?search=${encodeURIComponent("task asc")}`,
         `/api/schedules/${scheduleId}`,
         `/api/config?scope=global&key=${secretKey}&includeSecrets=true`,
         `/api/config?scope=global&key=${plainKey}`,
@@ -182,6 +185,15 @@ export const dataCopy: Scenario = {
         },
       });
       expectStatus(created, [201], "new task on the copy");
+      // The new task is searchable on the copy: the write stored its search document.
+      const createdId = asString(asRecord(created.json).id, "new task id");
+      const found = await target("GET", `/api/tasks?search=${encodeURIComponent("after copy")}`);
+      expectStatus(found, [200], "search the new task on the copy");
+      const foundIds = asRecords(found.json, "tasks").map((task) => task.id);
+      expect(
+        foundIds.length === 1 && foundIds[0] === createdId,
+        `search for the new task on the copy returned ${JSON.stringify(foundIds)}, expected [${createdId}]`,
+      );
 
       // A second copy into the same database is refused while its API runs on it.
       const again = await recopy();

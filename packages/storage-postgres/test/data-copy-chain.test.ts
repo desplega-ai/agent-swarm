@@ -22,7 +22,7 @@ import { createScratchDatabase, type ScratchDatabase } from "./scratch";
 const CHAIN_DIR = join(import.meta.dir, "../../../src/be/migrations/postgres");
 
 /** Tables the copy fills by other means: no cell of them is converted. */
-const NOT_COPIED = new Set(["_migrations", "memory_vec"]);
+const NOT_COPIED = new Set(["_migrations", "memory_vec", "agent_tasks_search"]);
 
 const enc = new TextEncoder();
 const text = (value: string): CopyCell => ({ kind: "text", bytes: enc.encode(value) });
