@@ -19,6 +19,7 @@ export type DurableCallInput = Pick<
   RunScriptInput,
   | "runtimeInstanceId"
   | "sourceTaskId"
+  | "toolCallKeyPrefix"
   | "egressSecrets"
   | "failedBindings"
   | "userConfig"

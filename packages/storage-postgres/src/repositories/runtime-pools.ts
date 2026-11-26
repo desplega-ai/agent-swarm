@@ -154,6 +154,13 @@ export class PostgresRuntimePoolsRepository extends BaseRuntimePoolsRepository {
     );
   }
 
+  async listRuntimesForPools(poolIds: readonly string[]): Promise<RuntimeInstanceRow[]> {
+    if (poolIds.length === 0) return [];
+    return this.db.query<RuntimeInstanceRow>(
+      sql`SELECT * FROM runtime_instances WHERE pool_id IN (${sqlList(poolIds)}) ORDER BY created_at, "_rowid"`,
+    );
+  }
+
   listEligibleRuntimeSlots(
     seenSince: string,
     agentId?: string,

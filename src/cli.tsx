@@ -362,6 +362,25 @@ const COMMAND_HELP: Record<
       `  ${binName} claude-managed-setup --api-url https://swarm.example.com`,
     ].join("\n"),
   },
+  "ui-dev": {
+    usage: `${binName} ui-dev (--app <id> | --page <id|slug> | --route <path>) [options]`,
+    description:
+      "Open a swarm app or page in the dashboard, already connected to the swarm API as a fixed user, with no repo checkout. Serves the dashboard of APP_URL (default https://app.agent-swarm.dev) on 127.0.0.1 and prints UI_DEV_READY {json} with the URL to open. Runs until SIGINT/SIGTERM. The UI acts with your swarm key: an action click or form submit writes to that API.",
+    options: [
+      "  --app <id>          Open /apps/<id>",
+      "  --page <id|slug>    Open /pages/<id> (a slug resolves to the newest matching page)",
+      "  --route <path>      Open any dashboard path",
+      "  --api-url <url>     Swarm API (default MCP_BASE_URL). Another URL must be loopback",
+      "  --as-email <email>  Dashboard user to view as (default: the first user with an email)",
+      "  --port <n>          Local port (default 5274)",
+      "  --json              Print only the ready JSON line",
+      "  -h, --help          Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} ui-dev --app <app-id>`,
+      `  ${binName} ui-dev --page my-report --json`,
+    ].join("\n"),
+  },
   "worker-token": {
     usage: `${binName} worker-token <create|rotate|revoke> (--agent-id <id> | --name <name>) [options]`,
     description:
@@ -468,6 +487,7 @@ function printHelp(command?: string) {
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
     ["worker-token", "Mint, rotate, or revoke an agent-bound worker token"],
+    ["ui-dev", "Open a swarm app or page in a pre-connected dashboard"],
     ["e2b", "Build templates and start E2B API/worker sandboxes"],
     ["version", "Show version number"],
     ["help", "Show this help message"],
@@ -745,7 +765,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
 } else if (
-  (args.command === "onboard" || args.command === "controller" || args.command === "db-copy") &&
+  (args.command === "onboard" ||
+    args.command === "controller" ||
+    args.command === "db-copy" ||
+    args.command === "ui-dev") &&
   !process.versions.bun
 ) {
   // The published bin uses Node, but these commands require Bun APIs.
@@ -753,7 +776,7 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : "db-copy"} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
+      `${args.command === "onboard" ? "Onboarding" : args.command === "controller" ? "Controller" : args.command} requires Bun. Install Bun from https://bun.sh, then retry this command.`,
     );
   }
   process.exit(result.status ?? 1);
@@ -825,6 +848,9 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runWorkerToken } = await import("./commands/worker-token");
   const tokenArgs = process.argv.slice(process.argv.indexOf("worker-token") + 1);
   process.exit(await runWorkerToken(tokenArgs));
+} else if (args.command === "ui-dev") {
+  const { runUiDev } = await import("./commands/ui-dev");
+  process.exit(await runUiDev(process.argv.slice(process.argv.indexOf("ui-dev") + 1)));
 } else if (args.command === "e2b") {
   const { runE2BCommand } = await import("./commands/e2b");
   const e2bArgs = process.argv.slice(process.argv.indexOf("e2b") + 1);

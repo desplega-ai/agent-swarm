@@ -2,8 +2,9 @@ import type { KvEntry, KvValueType } from "../../types";
 import { getStorage } from "../storage";
 
 /**
- * KV row codec plus the batch helpers (`upsertKvMany`, `getKvMany`,
- * `deleteKvMany`) that write or read many keys in a few statements.
+ * KV row codec, the batch helpers (`upsertKvMany`, `getKvMany`,
+ * `deleteKvMany`) that write or read many keys in a few statements, and the
+ * compare-and-set writes (`replaceKvIfValue`, `deleteKvIfValue`).
  */
 
 export interface KvRow {
@@ -121,4 +122,47 @@ export async function getKvMany(
 export async function deleteKvMany(namespace: string, keys: readonly string[]): Promise<number> {
   if (keys.length === 0) return 0;
   return getStorage().repos.kv.deleteEntries(namespace, [...new Set(keys)]);
+}
+
+/**
+ * Replace a KV entry only while it still holds `expected`, expired or not: a
+ * compare-and-set for a claim owner (renew, finalize). Returns true on a write.
+ */
+export async function replaceKvIfValue(input: {
+  namespace: string;
+  key: string;
+  expected: unknown;
+  value: unknown;
+  valueType: KvValueType;
+  expiresAt?: number | null;
+}): Promise<boolean> {
+  const changes = await getStorage().repos.kv.replaceEntryIfValue(
+    {
+      namespace: input.namespace,
+      key: input.key,
+      value: encodeKvValue(input.value, input.valueType),
+      value_type: input.valueType,
+      expires_at: input.expiresAt ?? null,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    },
+    encodeKvValue(input.expected, input.valueType),
+  );
+  return changes > 0;
+}
+
+/** Delete a KV entry only while it still holds `expected`. Returns true on a delete. */
+export async function deleteKvIfValue(
+  namespace: string,
+  key: string,
+  expected: unknown,
+  valueType: KvValueType,
+): Promise<boolean> {
+  return (
+    (await getStorage().repos.kv.deleteEntryIfValue(
+      namespace,
+      key,
+      encodeKvValue(expected, valueType),
+    )) > 0
+  );
 }

@@ -13,6 +13,8 @@ export class SwarmConfig {
   readonly auditSourceTaskId: RedactedValue<string> | undefined;
   /** Per-process extension bridge secret; present only for in-process extension SDKs. */
   readonly extensionToken: RedactedValue<string> | undefined;
+  /** Base of this run's derived per-call idempotency keys; absent for an unkeyed run. */
+  readonly toolCallKeyPrefix: string | undefined;
 
   private readonly userValues: Map<string, RedactedValue<string>>;
 
@@ -52,6 +54,7 @@ export class SwarmConfig {
           isSecret: payload.system.extensionToken.isSecret,
         })
       : undefined;
+    this.toolCallKeyPrefix = payload.system.toolCallKeyPrefix?.value;
     this.userValues = new Map(
       Object.entries(payload.user ?? {}).map(([key, value]) => [
         key,

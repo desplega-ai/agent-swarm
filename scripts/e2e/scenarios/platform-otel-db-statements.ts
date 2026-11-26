@@ -1,5 +1,13 @@
-import { expect, expectStatus, pollUntil } from "../http";
+import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario } from "../run";
+import {
+  cancelQuietly,
+  claimTask,
+  createAssignedTask,
+  listOf,
+  registerWorker,
+  retireAgent,
+} from "./core-helpers";
 
 /** A local OTLP/HTTP JSON collector: records each request path and body. */
 function startCollector() {
@@ -68,7 +76,8 @@ const points = (metrics: OtlpMetric[], name: string) =>
  * per statement under its request span when `OTEL_TRACE_DB_STATEMENTS` is on (statement
  * text only: the nonce bound as a parameter never reaches a span), and on PostgreSQL the
  * transaction outcome counter. On PostgreSQL the API also exports the server's `pg_stat_*`
- * gauges (`agentswarm.pg.*`); on SQLite it exports none.
+ * gauges (`agentswarm.pg.*`); on SQLite it exports none. The statement spans also pin
+ * GET /api/agents to one active-task count for the whole list, not one per agent.
  */
 export const platformOtelDbStatements: Scenario = {
   name: "platform-otel-db-statements",
@@ -94,7 +103,24 @@ export const platformOtelDbStatements: Scenario = {
         [201],
         "task create under OTel",
       );
-      expectStatus(await ctx.api("GET", "/api/agents"), [200], "agent list under OTel");
+      // Three workers, one of them running a task: the list must still count active tasks
+      // with one statement, and the grouped counts must match each agent's own.
+      const workers = [
+        await registerWorker(ctx, "otel-list-a"),
+        await registerWorker(ctx, "otel-list-b"),
+        await registerWorker(ctx, "otel-list-c"),
+      ];
+      const running = await createAssignedTask(ctx, workers[0]!, `otel list ${ctx.nonce}`);
+      await claimTask(ctx, workers[0]!, running);
+      const list = await ctx.api("GET", "/api/agents");
+      expectStatus(list, [200], "agent list under OTel");
+      const listed = new Map(listOf(list.json, "agents").map((a) => [a.id, a]));
+      for (const [i, id] of workers.entries()) {
+        const current = asRecord(listed.get(id)?.capacity).current;
+        expect(current === (i === 0 ? 1 : 0), `${id} lists capacity.current ${String(current)}`);
+      }
+      await cancelQuietly(ctx, running);
+      for (const id of workers) await retireAgent(ctx, id);
 
       const bodies = (path: string) =>
         collector.received.filter((r) => r.path === path).map((r) => r.body);
@@ -167,6 +193,32 @@ export const platformOtelDbStatements: Scenario = {
       expect(
         String(attr(child.attributes, "db.statement")).includes("agent_tasks"),
         "the statement span has no db.statement text",
+      );
+
+      // The agent list reads active-task counts once for every agent, not once per agent.
+      const listSpan = () =>
+        spansOf(bodies("/v1/traces")).find(
+          (s) => s.name === "GET /api/agents" && attr(s.attributes, "url.path") === "/api/agents",
+        );
+      expect(
+        await pollUntil(() => listSpan() !== undefined, 15_000, 100),
+        `no GET /api/agents request span; paths: ${paths()}`,
+      );
+      const listStatements = () =>
+        spansOf(bodies("/v1/traces")).filter(
+          (s) => s.parentSpanId === listSpan()?.spanId && attr(s.attributes, "db.system"),
+        );
+      // The statement spans end before their request span, so they are exported with or before it.
+      expect(
+        await pollUntil(() => listStatements().length > 0, 15_000, 100),
+        "no statement spans under GET /api/agents",
+      );
+      const taskCounts = listStatements().filter((s) =>
+        /FROM agent_tasks/.test(String(attr(s.attributes, "db.statement"))),
+      );
+      expect(
+        taskCounts.length === 1,
+        `GET /api/agents read agent_tasks ${taskCounts.length} times for ${listed.size} agents`,
       );
 
       // Postgres server gauges, read from pg_stat_* once per export.

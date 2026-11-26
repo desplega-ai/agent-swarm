@@ -263,6 +263,7 @@ value:getActivePricingRow
 value:getActiveSessionForTask
 value:getActiveSessions
 value:getActiveTaskCount
+value:getActiveTaskCounts
 value:getAgentById
 value:getAgentCurrentTask
 value:getAgentDailyTaskCounts

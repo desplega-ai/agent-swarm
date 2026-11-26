@@ -24,7 +24,12 @@ import {
 import { handleCapabilityRequest, MAX_PENDING_CAPABILITY_CALLS } from "./capability-bridge";
 import { scriptRunMaxWallMs } from "./limits";
 import { isWorkflowSwarmCapabilityAllowed } from "./swarm-capabilities";
-import { type BuiltWorkflowCtx, buildWorkflowCtx } from "./workflow-ctx";
+import {
+  type BuiltWorkflowCtx,
+  buildWorkflowCtx,
+  durableToolCallKey,
+  type SwarmCapabilityOptions,
+} from "./workflow-ctx";
 
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
 const MAX_STDERR_BYTES = 1_048_576;
@@ -92,7 +97,19 @@ export async function dispatchCapability(
     }
     const capability = built.ctx.swarm[method];
     if (!capability) throw new Error(`Unknown workflow capability: ${path}`);
-    return stringifyResult(await capability(args));
+    // The guest sends `[args, options]`; tool args are always an object, so a
+    // bare value is a caller without options.
+    if (!Array.isArray(args)) return stringifyResult(await capability(args));
+    const [toolArgs, options] = args as [unknown, SwarmCapabilityOptions | undefined];
+    const idempotencyKey =
+      options && "idempotencyKey" in options && typeof options.idempotencyKey === "string"
+        ? options.idempotencyKey
+        : options && "ordinal" in options && Number.isSafeInteger(options.ordinal)
+          ? durableToolCallKey(built.ctx.run.id, method, options.ordinal)
+          : undefined;
+    return stringifyResult(
+      await capability(toolArgs, idempotencyKey ? { idempotencyKey } : undefined),
+    );
   }
 
   if (path === "step.humanInTheLoop") {
