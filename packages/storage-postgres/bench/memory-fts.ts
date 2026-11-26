@@ -17,18 +17,16 @@
  * `searchFtsRows` with the store's search reader. The script runs on any
  * checkout of this repository, so the same file measures main and a branch.
  */
-import { Database } from "bun:sqlite";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MemorySearchFilter, Storage } from "@desplega/storage";
-import { createBunSqliteClient, createSqliteStorage } from "../../storage-sqlite/src";
+import { openSqliteFtsCorpus } from "../../storage-sqlite/bench/memory-fts-corpus";
 import { createPostgresClient, createPostgresStorage, runPostgresMigrations } from "../src";
 import { buildCorpus, type Corpus, type CorpusRow, documentFrequencies } from "./corpus";
 
 const ROOT = join(import.meta.dir, "..", "..", "..");
 const PG_CHAIN = join(ROOT, "src", "be", "migrations", "postgres");
-const SQLITE_CHAIN = join(ROOT, "src", "be", "migrations");
 
 function option(name: string, fallback: number): number {
   const at = process.argv.indexOf(`--${name}`);
@@ -142,37 +140,8 @@ async function timeQueries(storage: Storage, list: { label: string; terms: strin
   return results;
 }
 
-function sqliteStorage(corpus: Corpus): { storage: Storage; db: Database } {
-  const db = new Database(":memory:");
-  db.run("PRAGMA foreign_keys = ON");
-  const files = readdirSync(SQLITE_CHAIN)
-    .filter((name) => /^\d+_.*\.sql$/.test(name))
-    .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10));
-  for (const file of files) db.exec(readFileSync(join(SQLITE_CHAIN, file), "utf8"));
-  db.run(`CREATE VIRTUAL TABLE memory_fts USING fts5(
-    memory_id UNINDEXED, name, content, tokenize='porter unicode61')`);
-  const insert = db.prepare(
-    `INSERT INTO agent_memory (id, agentId, scope, name, content, source, createdAt, accessedAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, 'manual', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')`,
-  );
-  db.transaction(() => {
-    for (const row of corpus.rows)
-      insert.run(row.id, row.agentId, row.scope, row.name, row.content);
-  })();
-  db.run(
-    "INSERT INTO memory_fts (memory_id, name, content) SELECT id, name, content FROM agent_memory",
-  );
-  return {
-    storage: createSqliteStorage(
-      createBunSqliteClient(() => db),
-      { vectorSearch: false },
-    ),
-    db,
-  };
-}
-
 async function parity(pg: Storage, corpus: Corpus, list: { label: string; terms: string[] }[]) {
-  const { storage: lite, db } = sqliteStorage(corpus);
+  const { storage: lite, close } = openSqliteFtsCorpus(corpus.rows);
   const extra = [
     {
       label: "two rare terms",
@@ -214,7 +183,7 @@ async function parity(pg: Storage, corpus: Corpus, list: { label: string; terms:
       `| ${label} | ${liteIds.size} | ${pgIds.size} | ${sameSet ? "yes" : "NO"} | ${shared}/5 | ${shared50}/50 | ${ok ? "pass" : "FAIL"} |`,
     );
   }
-  db.close();
+  close();
   console.log("\nParity with SQLite FTS5 (D15: same id set, at least 4 of the first 5 ids):\n");
   console.log(
     "| Query | SQLite ids | Postgres ids | Same set | Top 5 shared | Top 50 shared | D15 |",
