@@ -7,7 +7,7 @@ description: Build and iterate on schema-backed Swarm Apps with live models, nam
 
 Swarm Apps are persistent, agent-authored internal applications: a schema-backed row store, named queries, custom script/task actions, and a validated json-render interface served at `/apps/<id>`. Use an app when people need to view and change live records; use `create_page` for a static snapshot.
 
-**When to use a sheet or board instead:** a tracker or grid people keep editing, with no queries or actions, is a sheet. A plan, diagram or map to think through is a board. Both are editable agent-fs files; see the `boards-and-sheets` skill. To show one inside an app, use the `ObjectEmbed` component (section "Embed a sheet or board").
+**When to use a sheet or board instead:** a tracker or grid people keep editing, with no queries or actions, is a sheet. A plan, diagram or map to think through is a board. Both are editable agent-fs files; see the `boards-and-sheets` skill. To show one inside an app, use the `ObjectEmbed` component (section "Embed a sheet or board"). To fill a sheet from CSV, Parquet or xlsx files on the drive, use `data-query` with `sheet` (the `data` skill).
 
 > **Capability gate**: app tools are available when the server's `CAPABILITIES` includes `pages` (for example `CAPABILITIES=core,task-pool,pages`). There is no separate `apps` capability. If these tools are absent from your MCP list, this is why.
 
@@ -17,9 +17,10 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 |---|---|
 | `app-list` | Discover apps by id, name, description, and timestamps. Definitions are omitted. |
 | `app-catalog` | Ask what a page may contain: no args lists every component (one line, child slots) and action type; `{ component }` returns its props schema (`prop` drills into one); `{ action }` an action step's params; `{ topic: "expressions" }` the binding reference (`$state` roots, route params, `$param`, `$template`, repeat, `watch`, `OnEnter.everyMs`, visibility). Read it instead of guessing props or reading dashboard source. |
-| `app-get` | Read one complete stored definition before changing it. It also returns `sourcesPath`, the app's agent-fs sources folder. |
+| `app-get` | Read a definition. `{ outline: true }` returns the tree without props (pages with params and `{ nodeId: [type, childIds] }`, model columns, queries, actions); `{ path }` returns one subtree (`pages.main.elements.title` or `/pages/main/elements/title`). Read the whole app only when you need all of it; the whole read also returns `sourcesPath`, the app's agent-fs sources folder. |
 | `app-upsert` | Create an app, or replace an existing app's entire definition when you intentionally have the full desired state. |
-| `app-patch` | Make a focused change while preserving everything not mentioned in the patch. Prefer this for iteration. |
+| `app-patch-node` | Edit one page or reusable-element node: `props` merges one level (`null` deletes a prop), `set` replaces node keys, `remove` deletes the node and its subtree, `create: { parentId, index?, node }` adds one. Prefer this for UI iteration. |
+| `app-patch` | Make a focused change to actions, queries, models, page params or settings while preserving everything not mentioned. `ops` takes JSON-pointer `add`/`replace`/`remove`/`test` ops instead of a merge patch. |
 | `app-query` | Run one declared named query and return its rows. Use this when an agent or saved script needs to consume app data rather than render the app UI. |
 | `app-rows-list` | List rows with typed equality filters, sorting, and a limit. Returns `{ rows, total }`. |
 | `app-row-get` | Read a row by `rowId`. Returns `{ row }`. |
@@ -34,7 +35,7 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | `app-diff` | Show a unified definition diff; defaults to newest snapshot → CURRENT. |
 | `app-rollback` | Restore a snapshot through the normal schema-migration engine. |
 
-For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch` -> if rejected, fix every returned `issues[]` entry (`path` + `message`) and retry. Validation happens before storage, so a rejected update leaves the saved app unchanged. Do not guess at the current definition or use `app-upsert` with a partial definition.
+For every edit: `app-get { outline: true }` -> `app-get { path }` for the node you change -> `app-patch-node` (UI) or `app-patch` (actions, queries, models) -> if rejected, fix every returned `issues[]` entry (`path` + `message`) and retry. A missing node returns the `closest` node ids. Validation happens before storage, so a rejected update leaves the saved app unchanged. `dryRun: true` validates and reports `changed` without storing. Writes return a compact summary (`changed` paths, `issues`, `warnings`, `versionCreated`); pass `includeApp: true` only when you need the stored app back. Use `app-upsert` only to create an app or to replace a definition you hold whole; never with a partial definition.
 
 Keep what you need to rebuild or extend an app in its agent-fs sources folder, `sourcesPath` from `app-get` (`shared/app:<id>/src/` by default): the generator that builds the definition, backing-script drafts, and a `NOTES.md` with the decisions, data sources and control numbers a follow-up must keep. On a follow-up edit, read `NOTES.md` first, then update it with what you changed. `app-get` lists the files there when agent-fs is set up. The server never writes this folder.
 
@@ -1228,7 +1229,7 @@ Each task is a bar at `x = 100 + (start - min) * scale`, `width = days * scale`,
 
 `pages.<page>: null` deletes a page, except the current `defaultPage` cannot be deleted. `root`, `title`, and top-level `defaultPage` use ordinary merge semantics. A top-level `page` patch is rejected with guidance to patch `pages.<name>` instead.
 
-Because elements, param declarations, actions, and columns are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` requires sending its full `{ "type": "Table", "props": ... }` element. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
+Because elements, param declarations, actions, and columns are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` with a merge patch requires sending its full `{ "type": "Table", "props": ... }` element; `app-patch-node { page, nodeId, props: { emptyMessage } }` or one `ops` entry (`{ "op": "replace", "path": "/pages/main/elements/table/props/emptyMessage", "value": "..." }`) changes just that prop. A `test` op makes the patch conditional: when it fails, nothing is stored and the issue names `ops[<i>]`. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
 
 ```json
 {

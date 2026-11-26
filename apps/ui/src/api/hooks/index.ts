@@ -51,7 +51,13 @@ export {
   useUsageSummary,
 } from "./use-costs";
 export { useCredentialMissingAgents } from "./use-credential-missing-agents";
-export { useDbQuery, useTableColumns, useTableList } from "./use-db-query";
+export {
+  defaultDebugSql,
+  useDbDialect,
+  useDbQuery,
+  useTableColumns,
+  useTableList,
+} from "./use-db-query";
 export type { FeatureGateResult } from "./use-feature-gate";
 export { useFeatureGate } from "./use-feature-gate";
 export type {

@@ -72,6 +72,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
     "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
   "src/tools/sheets.ts":
     "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
+  "src/tools/data.ts":
+    "own-scoped: reads only through the caller's own agent-scoped agent-fs key (its default drive or a drive that key can read), and agent-fs enforces drive permissions",
   "src/tools/boards.ts":
     "own-scoped: acts only on the caller's default agent-fs drive with the caller's own agent-scoped key, and agent-fs enforces drive permissions",
   "src/tools/chat-reply.ts":

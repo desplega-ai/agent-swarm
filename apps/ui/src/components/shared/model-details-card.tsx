@@ -27,6 +27,7 @@ export type ModelDetailsTask = Pick<
   AgentTask,
   | "id"
   | "model"
+  | "runModel"
   | "modelTier"
   | "resolvedModel"
   | "modelSource"

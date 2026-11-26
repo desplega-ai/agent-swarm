@@ -193,6 +193,10 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   totalCostUsd: true,
 });
 
+const TaskListItemSchema = AgentTaskSummarySchema.extend({
+  runModel: z.string().optional().describe("Latest named model reported by a harness session."),
+});
+
 /** `/api/tasks?fields=timeline` item — mirrors `AgentTaskTimelineItem` in ../types. */
 const AgentTaskTimelineItemSchema = AgentTaskSchema.pick({
   id: true,
@@ -345,7 +349,7 @@ const listTasks = route({
       schema: z.object({
         tasks: z.union([
           z.array(AgentTaskSchema),
-          z.array(AgentTaskSummarySchema),
+          z.array(TaskListItemSchema),
           z.array(AgentTaskTimelineItemSchema),
         ]),
         /** Present only when the request passed `includeTotal=true`. */

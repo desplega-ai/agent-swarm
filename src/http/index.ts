@@ -33,6 +33,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { withRequestMemo } from "../be/request-memo";
 import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
@@ -41,6 +42,7 @@ import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retenti
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import { getStorage } from "../be/storage";
+import { readEngineStats } from "../be/storage-root";
 import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
@@ -59,7 +61,9 @@ import { initJira } from "../jira";
 import { initLinear } from "../linear";
 import {
   initOtel,
+  isPgMetricsEnabled,
   isPollTracingEnabled,
+  startPostgresStatsMetrics,
   startSpan,
   withRemoteContext,
   withSpanContext,
@@ -116,6 +120,7 @@ import { handleImprovements } from "./improvements";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
 import { handleKv } from "./kv";
+import { handleLinkPreview } from "./link-preview";
 import {
   closeIdleMcpTransports,
   DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS,
@@ -459,6 +464,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handlePageProxy(req, res),
         () => handlePages(req, res, pathSegments, queryParams, myAgentId),
         () => handleDesignSystem(req, res, pathSegments, queryParams, myAgentId),
+        () => handleLinkPreview(req, res, pathSegments, queryParams),
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
@@ -512,7 +518,7 @@ const httpServer = createHttpServer(async (req, res) => {
     const loopPath = loopPathForRequest(req.method, pathSegments);
     await withLoopPath(loopPath, () =>
       withRequestWriteScope(loopPath, () =>
-        span ? withSpanContext(span, handleRequest) : handleRequest(),
+        withRequestMemo(() => (span ? withSpanContext(span, handleRequest) : handleRequest())),
       ),
     );
   });
@@ -847,6 +853,8 @@ startScratchScriptGc();
 initialize();
 
 await initOtel("api");
+// Postgres server gauges (pg_stat_*), read once per metric export over the engine pool.
+if (isPostgresEngine() && isPgMetricsEnabled()) startPostgresStatsMetrics(readEngineStats);
 
 httpServer
   .listen(port, async () => {
@@ -1028,8 +1036,10 @@ httpServer
     // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
     startHumanFreeDrain();
 
-    // Index the task rows migration 256 left out, in batches. Task search
-    // stays on LIKE until it finishes. See src/be/db/tasks/search-index.ts.
+    // Index the task rows migration 256 (SQLite) or 391 (Postgres) left out,
+    // in batches. Until it finishes, SQLite search stays on LIKE and Postgres
+    // search matches those rows through the expression indexes of 368. See
+    // src/be/db/tasks/search-index.ts.
     void startTaskSearchBackfill();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)

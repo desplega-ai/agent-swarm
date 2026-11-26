@@ -308,6 +308,15 @@ export type TaskListFields = "full" | "slim" | "timeline";
 
 /** Every list row carries the summed session cost of its task. */
 type TaskListCost = { totalCostUsd: number | null };
+
+/** Same ordering as the session-cost list. Used only after selecting the task page. */
+export function taskRunModelColumn(rowId: "rowid" | "_rowid"): SqlQuery {
+  return sql`, (SELECT model FROM session_costs
+    WHERE "taskId" = agent_tasks.id
+      AND COALESCE(kind, 'harness') <> 'system-one'
+      AND model NOT IN ('', 'default')
+    ORDER BY "createdAt" DESC, ${sqlIdent(rowId)} ASC LIMIT 1) AS "runModel"`;
+}
 /** The slim and timeline `task`: the UTF-8 byte prefix the list projection cuts. */
 type TaskListPreview = Omit<TaskRow, "task" | "totalCostUsd"> & { task: Uint8Array };
 
@@ -369,7 +378,7 @@ export type TaskTimelineListRow = Pick<
 
 /** The row `listTasks` returns for a projection: only the selected columns. */
 export type TaskListRow<F extends TaskListFields> = F extends "slim"
-  ? TaskSlimListRow
+  ? TaskSlimListRow & { runModel: string | null }
   : F extends "timeline"
     ? TaskTimelineListRow
     : Omit<TaskRow, "totalCostUsd"> & TaskListCost;
@@ -1623,11 +1632,24 @@ export abstract class BaseTasksRepository implements TasksRepository {
 
   // ---- agent_tasks: drafts and Slack folds ----
 
+  /**
+   * `write` inserts or updates the `task` or `title` of agent_tasks rows and
+   * returns at least their `id`, `task` and `title` (`RETURNING`). The result
+   * is the statement to run, with the same rows. SQLite keeps agent_tasks_fts
+   * by triggers (migration 257), so the statement stays as it is. Every
+   * statement that writes `task` or `title` goes through here.
+   */
+  protected writeTaskText(write: SqlQuery): SqlQuery {
+    return write;
+  }
+
   async appendDraftTaskText(taskId: string, suffix: string, now: string): Promise<number> {
-    const result = await this.db.run(sql`
+    const rows = await this.db.query<{ id: string }>(
+      this.writeTaskText(sql`
       UPDATE agent_tasks SET task = task || ${suffix}, "lastUpdatedAt" = ${now}
-      WHERE id = ${taskId} AND status = 'draft'`);
-    return result.changes;
+      WHERE id = ${taskId} AND status = 'draft' RETURNING id, task, title`),
+    );
+    return rows.length;
   }
 
   async foldPendingTaskText(args: {
@@ -1638,14 +1660,17 @@ export abstract class BaseTasksRepository implements TasksRepository {
     slackParticipants: string | null;
     now: string;
   }): Promise<number> {
-    const result = await this.db.run(sql`
+    const rows = await this.db.query<{ id: string }>(
+      this.writeTaskText(sql`
       UPDATE agent_tasks
          SET task = ${args.nextTask},
              status = CASE WHEN ${args.toDraft} THEN 'draft' ELSE status END,
              "slackParticipants" = COALESCE(${jsonText(args.slackParticipants)}, "slackParticipants"),
              "lastUpdatedAt" = ${args.now}
-         WHERE id = ${args.taskId} AND status = 'pending' AND task = ${args.expectedTask}`);
-    return result.changes;
+         WHERE id = ${args.taskId} AND status = 'pending' AND task = ${args.expectedTask}
+         RETURNING id, task, title`),
+    );
+    return rows.length;
   }
 
   /** Reads a JSON field of `agent_log.metadata` (SQLite `json_extract`). */
@@ -2210,12 +2235,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
   // ---- agent_tasks: lifecycle writes ----
 
   insertSimpleTask(t: NewSimpleTask): Promise<TaskRow | null> {
-    return this.db.get<TaskRow>(sql`
+    return this.db.get<TaskRow>(
+      this.writeTaskText(sql`
       INSERT INTO agent_tasks (id, "key", "agentId", task, status, source, "slackChannelId", "slackThreadTs",
         "slackUserId", "swarmVersion", "isHumanFree", "createdAt", "lastUpdatedAt")
       VALUES (${t.id}, ${t.key}, ${t.agentId}, ${t.task}, ${t.status}, ${t.source}, ${t.slackChannelId},
         ${t.slackThreadTs}, ${t.slackUserId}, ${t.swarmVersion}, ${t.isHumanFree}, ${nowIso}, ${nowIso})
-      RETURNING *`);
+      RETURNING *`),
+    );
   }
 
   listPendingTasksForAgent(agentId: string): Promise<TaskRow[]> {
@@ -2278,13 +2305,17 @@ export abstract class BaseTasksRepository implements TasksRepository {
 
   setTaskTitle(taskId: string, title: string | null): Promise<TaskRow | null> {
     return this.db.get<TaskRow>(
-      sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} RETURNING *`,
+      this.writeTaskText(
+        sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} RETURNING *`,
+      ),
     );
   }
 
   setTaskTitleIfUnset(taskId: string, title: string): Promise<TaskRow | null> {
     return this.db.get<TaskRow>(
-      sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} AND title IS NULL RETURNING *`,
+      this.writeTaskText(
+        sql`UPDATE agent_tasks SET title = ${title} WHERE id = ${taskId} AND title IS NULL RETURNING *`,
+      ),
     );
   }
 
@@ -3204,7 +3235,8 @@ export abstract class BaseTasksRepository implements TasksRepository {
   }
 
   insertTask(r: NewTaskRow): Promise<TaskRow | null> {
-    return this.db.get<TaskRow>(sql`
+    return this.db.get<TaskRow>(
+      this.writeTaskText(sql`
       INSERT INTO agent_tasks (
         id, "key", "agentId", "creatorAgentId", task, status, source, routing_reason, routing_source,
         routing_note, "taskType", tags, priority, "dependsOn", "offeredTo", "offeredAt",
@@ -3233,7 +3265,8 @@ export abstract class BaseTasksRepository implements TasksRepository {
         ${r.requestedByUserId}, ${r.requestedByUserIdInherited}, ${r.contextKey},
         ${r.routingAffinity}, ${r.swarmVersion}, ${r.createdAt}, ${r.lastUpdatedAt},
         ${r.created_by}, ${r.updated_by}, ${r.isHumanFree}, ${r.sourceStepId}, ${r.sourceScriptRunId}
-      ) RETURNING *`);
+      ) RETURNING *`),
+    );
   }
 
   async insertRoutingDecision(r: RoutingDecisionRow): Promise<void> {

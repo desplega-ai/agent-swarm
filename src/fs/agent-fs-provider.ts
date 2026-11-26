@@ -29,6 +29,15 @@ export function agentFsRequestTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AGENT_FS_REQUEST_TIMEOUT_MS;
 }
 
+const DEFAULT_AGENT_FS_SQL_REQUEST_TIMEOUT_MS = 35_000;
+
+// agent-fs stops a query after 30 s (downloads included), so the swarm waits a
+// little longer and never cuts off a query agent-fs would still finish.
+export function agentFsSqlTimeoutMs(): number {
+  const parsed = Number(process.env.AGENT_FS_SQL_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AGENT_FS_SQL_REQUEST_TIMEOUT_MS;
+}
+
 // Uploads get the base deadline plus a size allowance of 256 bytes per ms, a
 // 250 KB/s floor for the slowest link we are willing to wait on. A 300 KB
 // attachment buys 1.2 s, the 50 MiB cap buys about 205 s.
@@ -42,6 +51,30 @@ type AgentFsRawUploadResponse = {
   contentHash?: string;
   deduped?: boolean;
 };
+
+/** A table binding of the agent-fs `sql` op: a drive path, or a path with an explicit format. */
+export type AgentFsSqlTable = string | { path: string; format?: string };
+
+/** The agent-fs `sql` op result. */
+export type AgentFsSqlResult = {
+  columns: Array<{ name: string; type: string }>;
+  rows: Record<string, unknown>[];
+  rowCount: number;
+  truncated: boolean;
+  files: Array<{ table: string; path: string; format: string }>;
+  elapsedMs: number;
+};
+
+/** A refused `sql` op. `agentFsCode` is agent-fs's own error code, e.g. `VALIDATION_ERROR`. */
+export class AgentFsSqlError extends FilesError {
+  constructor(
+    error: FilesError,
+    message: string,
+    readonly agentFsCode: string | undefined,
+  ) {
+    super(error.code, message, { status: error.status, cause: error });
+  }
+}
 
 /** One agent-fs comment (`comment-get`, `comment-add`). Dates arrive as ISO strings. */
 export type AgentFsComment = {
@@ -247,6 +280,31 @@ export class AgentFsProvider implements FileStorageProvider {
     });
   }
 
+  /** Read-only DuckDB SQL over drive files (the agent-fs `sql` op). */
+  async sql(
+    params: { query: string; tables?: Record<string, AgentFsSqlTable>; maxRows?: number },
+    scope?: Pick<FileScope, "orgId" | "driveId">,
+  ): Promise<AgentFsSqlResult> {
+    try {
+      return (await this.ops(
+        { op: "sql", ...params },
+        scope,
+        agentFsSqlTimeoutMs(),
+      )) as AgentFsSqlResult;
+    } catch (error) {
+      if (!(error instanceof FilesError) || error.status === undefined) throw error;
+      // agent-fs answers `{error, message, suggestion?}`; keep its code and readable text.
+      let body: Record<string, unknown> | null = null;
+      try {
+        body = asRecord(JSON.parse(error.message));
+      } catch {}
+      const message = typeof body?.message === "string" ? body.message : error.message;
+      const suggestion = typeof body?.suggestion === "string" ? ` ${body.suggestion}` : "";
+      const code = typeof body?.error === "string" ? body.error : undefined;
+      throw new AgentFsSqlError(error, `${message}${suggestion}`, code);
+    }
+  }
+
   async url(scope: FileScope, options: SignedUrlOptions = {}): Promise<string> {
     const expiresIn = Math.min(options.expiresIn ?? 3600, this.capabilities.signedUrl.maxExpiresIn);
     const result = await this.ops(
@@ -398,6 +456,7 @@ export class AgentFsProvider implements FileStorageProvider {
   private async ops(
     body: Record<string, unknown>,
     scope?: Pick<FileScope, "orgId" | "driveId">,
+    timeoutMs: number = agentFsRequestTimeoutMs(),
   ): Promise<unknown> {
     const { orgId, driveId } = this.scopeFor(scope);
     const response = await this.fetchWithDeadline(
@@ -410,7 +469,7 @@ export class AgentFsProvider implements FileStorageProvider {
         },
         body: JSON.stringify({ driveId, ...body }),
       },
-      agentFsRequestTimeoutMs(),
+      timeoutMs,
     );
     if (!response.ok) {
       throw await responseToFilesError(response);

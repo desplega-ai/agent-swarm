@@ -100,7 +100,6 @@ test("prompt attachment links open viewers and keep downloads separate", async (
       "Quarterly report",
       "https://live.agent-fs.dev/file/~/e2e-org/e2e-drive/reports/quarterly.pdf",
     ],
-    ["Reference", "https://example.com/reference"],
     ["Published report", "/pages/e2e-page"],
   ]) {
     const link = prompt.getByRole("link", { name: `Open ${name} in a new tab` });
@@ -110,6 +109,12 @@ test("prompt attachment links open viewers and keep downloads separate", async (
     await expect(link.locator(".lucide-external-link")).toBeVisible();
     await expect(link.locator("button")).toHaveCount(0);
   }
+  // A link attachment is a chip: no file card, no download.
+  const reference = prompt.getByRole("link", { name: "Reference", exact: true });
+  await expect(reference).toHaveAttribute("href", "https://example.com/reference");
+  await expect(reference).toHaveAttribute("target", "_blank");
+  await expect(prompt.getByRole("button", { name: "Download Reference" })).toHaveCount(0);
+  await expect(prompt.getByRole("button", { name: "Download Published report" })).toHaveCount(0);
   const scorecard = prompt.getByRole("link", {
     name: "Open HOL check-level scorecard in a new tab",
   });

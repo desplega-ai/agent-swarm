@@ -184,6 +184,7 @@ Fetch the page as markdown: `curl -fsSL https://docs.agent-swarm.dev/llms.mdx/do
 - [Sessions](https://docs.agent-swarm.dev/docs/ui/sessions)
 - [Configuration](https://docs.agent-swarm.dev/docs/ui/configuration)
 - [Comb](https://docs.agent-swarm.dev/docs/ui/comb)
+- [Migrate a SQLite swarm to PostgreSQL](https://docs.agent-swarm.dev/docs/migrations/sqlite-to-postgres)
 - [Integrations](https://docs.agent-swarm.dev/docs/integrations)
 - [Slack Integration](https://docs.agent-swarm.dev/docs/integrations/slack)
 - [GitHub App Integration](https://docs.agent-swarm.dev/docs/integrations/github)

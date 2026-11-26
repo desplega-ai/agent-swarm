@@ -196,6 +196,8 @@ export function sessionsContract(engine: ContractEngine): void {
       expect(await repo.dailySpendGlobal("2026-11-21")).toBe(3);
       expect(await repo.dailySpendForUser("u1", "2026-11-21")).toBe(1);
       expect(await repo.dailySpendForUser("u1", "2026-11-19")).toBe(0);
+      expect(await repo.dailySpendGlobal("2026-11-20")).toBe(4);
+      expect(await repo.dailySpendGlobal("2026-02-30")).toBe(0);
     });
 
     test("request compositions: seq, count, order with ties", async () => {

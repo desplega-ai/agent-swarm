@@ -2303,6 +2303,8 @@ export const EventNameSchema = z.enum([
   "script.global_upsert",
   // Schedule events
   "schedule.deleted",
+  // Data events (data-query; the adoption metric reads these)
+  "data.query",
 ]);
 
 export const SwarmEventSchema = z

@@ -34,6 +34,11 @@ import {
   type ProviderName,
 } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
+import {
+  TELEMETRY_OMITTED,
+  telemetryOmitsToolResult,
+  telemetryToolArgs,
+} from "../utils/tool-telemetry-redaction";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -144,15 +149,17 @@ function toolRequestAttributes(name: string, requestInfo: RequestInfo, meta: Met
     "agent.id": requestInfo.agentId,
     "agentswarm.task.id": requestInfo.sourceTaskId,
     "agentswarm.tool.call_id": typeof toolUseId === "string" ? toolUseId : undefined,
-    "agentswarm.tool.args_preview": previewValue(args),
+    "agentswarm.tool.args_preview": previewValue(telemetryToolArgs(name, args)),
   };
 }
 
-function toolResultAttributes(result: CallToolResult) {
+function toolResultAttributes(name: string, result: CallToolResult) {
   return {
     "mcp.tool.result_content_count": Array.isArray(result.content) ? result.content.length : 0,
     "mcp.tool.is_error": result.isError ?? false,
-    "agentswarm.tool.result_preview": previewValue(result.content),
+    "agentswarm.tool.result_preview": telemetryOmitsToolResult(name)
+      ? TELEMETRY_OMITTED
+      : previewValue(result.content),
   };
 }
 
@@ -467,6 +474,15 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "update-schedule": modelTierDeprecatedNudge,
   "patch-schedule": modelTierDeprecatedNudge,
   "slack-read": slackReadNudge,
+  "data-query": (r) => {
+    if (!r.ok) return undefined;
+    const d = r.data as { truncated?: boolean; rowCount?: number; output?: string } | undefined;
+    if (d?.truncated)
+      return "Truncated: aggregate in SQL (GROUP BY, LIMIT) instead of raising maxRows.";
+    return d?.output === "rows" && (d.rowCount ?? 0) > 20
+      ? "Handing these rows to a person? Re-run with `card: true` or `sheet: {path}` instead of pasting them."
+      : undefined;
+  },
   create_page: createPageNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
@@ -1243,7 +1259,7 @@ export const createToolRegistrar = (server: McpServer) => {
             }
             const result = await finalizeSwarmToolResult(name, outcome, requestInfo);
             dispatchPostToolCall(pre.dispatcher, name, {}, outcome, requestInfo, durationMs);
-            span.setAttributes(toolResultAttributes(result));
+            span.setAttributes(toolResultAttributes(name, result));
             return result;
           },
           toolRequestAttributes(name, requestInfo, meta),
@@ -1293,7 +1309,7 @@ export const createToolRegistrar = (server: McpServer) => {
             requestInfo,
             durationMs,
           );
-          span.setAttributes(toolResultAttributes(result));
+          span.setAttributes(toolResultAttributes(name, result));
           return result;
         },
         toolRequestAttributes(name, requestInfo, meta, args),

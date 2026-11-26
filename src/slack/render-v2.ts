@@ -1561,7 +1561,7 @@ type OutcomeUiSpec = { blocks: unknown[]; fallbackText: string };
  * `blocks` is empty when the stored spec no longer converts.
  */
 async function outcomeUiSpec(task: AgentTask): Promise<OutcomeUiSpec | null> {
-  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", false)) return null;
+  if (!isEnvFlagEnabled("UI_SPEC_ENABLED", true)) return null;
   const stored = await getTaskUiSpec(task.id);
   if (!stored) return null;
   return { blocks: taskUiSpecSlackBlocks(stored, task.id), fallbackText: stored.fallbackText };

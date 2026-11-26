@@ -22,9 +22,9 @@ export type MemoryVectorsState = {
  * The memory search indexes of an engine: full text (`memory_fts`) and vectors
  * (`memory_vec`). SQLite creates both at run time, outside the migration
  * chain (FTS5 and sqlite-vec virtual tables), and fills them from
- * `agent_memory`; Postgres has both from migration 369 (an expression GIN
- * index and a pgvector table). The memory store asks this object, never the
- * engine name.
+ * `agent_memory`; Postgres has both in the chain (the table `memory_fts` of
+ * migration 386 and the pgvector table of 369). The memory store asks this
+ * object, never the engine name.
  */
 export interface MemorySearchIndexes {
   /**
@@ -43,10 +43,11 @@ export interface MemorySearchIndexes {
   /** Fresh health counts, on the caller's connection (the health endpoint). */
   healthCounts(vectorBytes: number): Promise<MemoryHealthCountsRow>;
   /**
-   * A reader that runs memory search statements off the API event loop, when
-   * the engine's own reads block it (SQLite: a pool of worker threads, each
-   * with its own read-only connection). Absent when the engine's reads are
-   * already asynchronous (Postgres: the pool).
+   * The reader of memory search statements. SQLite: a pool of worker threads,
+   * each with its own read-only connection, so the reads do not block the API
+   * event loop. Postgres: a READ ONLY transaction for each statement outside a
+   * caller's transaction, so a long search does not hold back the predicate
+   * locks of SERIALIZABLE writers. Absent: the engine's executor.
    */
   readonly searchReader?: MemoryReadExecutor;
 }

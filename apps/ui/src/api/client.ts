@@ -84,6 +84,7 @@ import type {
   InboxStateUpsertResponse,
   IntegrationsCatalogResponse,
   IntegrationsSurfaceResponse,
+  LinkPreview,
   LogsResponse,
   McpOAuthMetadataResponse,
   McpOAuthStatusResponse,
@@ -2633,7 +2634,16 @@ class ApiClient {
       headers: this.getHeaders(),
       body: JSON.stringify({ sql, params }),
     });
-    if (!res.ok) throw new Error(`Failed to execute query: ${res.status}`);
+    if (!res.ok) {
+      // 400 answers { error: <text> }; 408 and 429 answer { error: <code>, message: <text> }.
+      const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      const detail = body.message || body.error;
+      throw new Error(
+        detail
+          ? `Query failed (${res.status}): ${detail}`
+          : `Failed to execute query: ${res.status}`,
+      );
+    }
     return res.json();
   }
 
@@ -4367,6 +4377,16 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/pages/${encodeURIComponent(id)}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`getPage ${id}: ${res.status}`);
+    return res.json();
+  }
+
+  /** The Open Graph preview of an external link, fetched and cached by the API. */
+  async getLinkPreview(url: string): Promise<LinkPreview> {
+    const res = await fetch(
+      `${this.getBaseUrl()}/api/link-preview?url=${encodeURIComponent(url)}`,
+      { headers: this.getHeaders() },
+    );
+    if (!res.ok) throw new Error(`getLinkPreview: ${res.status}`);
     return res.json();
   }
 

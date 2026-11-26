@@ -1,6 +1,6 @@
 import * as z from "zod";
 import { deleteKv, getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
-import { listScriptConnections } from "../be/script-connections";
+import { isScriptConnectionReachable } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { getStorage } from "../be/storage";
@@ -276,8 +276,7 @@ async function pullFromScript(args: {
   // Re-run the definition-time connection check at runtime: a connection
   // disabled after the write must fail the pass before the script is invoked.
   if (source.connection !== undefined) {
-    const reachable = await listScriptConnections({ agentId });
-    if (!reachable.some((connection) => connection.slug === source.connection)) {
+    if (!(await isScriptConnectionReachable(source.connection, { agentId }))) {
       throw new SyncPassError(
         `connection "${source.connection}" not found or disabled for the sync run-as identity`,
       );

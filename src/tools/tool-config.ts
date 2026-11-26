@@ -37,6 +37,7 @@ export const CORE_TOOLS = new Set([
   // Recurring operations (14-day fleet task prevalence)
   "script-run", // run inline or reusable scripts
   "db-query", // inspect swarm state
+  "data-query", // SQL over drive files (kept in context so agents reach for it)
   "kv-get", // retrieve durable task data
   "script-query-types", // inspect the live script SDK
   "get-repos", // locate repositories
@@ -194,6 +195,7 @@ export const DEFERRED_TOOLS = new Set([
   "app-get",
   "app-list",
   "app-patch",
+  "app-patch-node",
   "app-query",
   "app-rows-list",
   "app-row-get",

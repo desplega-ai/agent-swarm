@@ -9,16 +9,19 @@ import type { Subprocess } from "bun";
 import { closeDb, getSwarmConfigs, initDb, upsertSwarmConfig } from "../be/db";
 import { wasDbCreatedThisBoot } from "../be/db/runtime";
 import { DB_RETENTION_TABLES } from "../be/db-retention";
-import { seedDbRetentionDefaults } from "../be/db-retention-defaults";
+import { NEW_INSTALL_CONFIG_DEFAULTS, seedDbRetentionDefaults } from "../be/db-retention-defaults";
 import { PortInUseError, startOnFreePort, waitForServer } from "./test-net";
 
-const KEYS = DB_RETENTION_TABLES.map((table) => table.envKey);
+const RETENTION_KEYS: string[] = DB_RETENTION_TABLES.map((table) => table.envKey);
+const KEYS = [...RETENTION_KEYS, ...NEW_INSTALL_CONFIG_DEFAULTS.map((entry) => entry.key)];
 const DEFAULTS: Record<string, string> = {
   SESSION_LOG_RETENTION_DAYS: "30",
   AGENT_LOG_RETENTION_DAYS: "90",
   EVENTS_RETENTION_DAYS: "90",
   CONTEXT_VERSIONS_KEEP_LATEST: "100",
   SCRIPT_RUNS_RETENTION_DAYS: "30",
+  WORKFLOW_RUNS_RETENTION_DAYS: "30",
+  WORKTREE_REAPER_MODE: "on",
 };
 const ALL_UNSET = Object.fromEntries(KEYS.map((key) => [key, undefined]));
 
@@ -42,8 +45,11 @@ describe("seedDbRetentionDefaults", () => {
     );
   }
 
-  test("the preload keeps retention off for servers the suite spawns", () => {
-    expect(inheritedEnv).toEqual(Object.fromEntries(KEYS.map((key) => [key, "0"])));
+  test("the preload keeps retention off and the reaper in dry-run for servers the suite spawns", () => {
+    expect(inheritedEnv).toEqual({
+      ...Object.fromEntries(RETENTION_KEYS.map((key) => [key, "0"])),
+      WORKTREE_REAPER_MODE: "dry-run",
+    });
   });
 
   test("a test database is not a new install, so the default call seeds nothing", async () => {
@@ -65,7 +71,9 @@ describe("seedDbRetentionDefaults", () => {
   test("an env value or a stored row present at first boot wins over the default", async () => {
     process.env.SESSION_LOG_RETENTION_DAYS = "7";
     process.env.EVENTS_RETENTION_DAYS = "0";
+    process.env.WORKTREE_REAPER_MODE = "dry-run";
     await upsertSwarmConfig({ scope: "global", key: "SCRIPT_RUNS_RETENTION_DAYS", value: "365" });
+    await upsertSwarmConfig({ scope: "global", key: "WORKFLOW_RUNS_RETENTION_DAYS", value: "7" });
 
     await seedDbRetentionDefaults(true);
 
@@ -73,12 +81,14 @@ describe("seedDbRetentionDefaults", () => {
       AGENT_LOG_RETENTION_DAYS: "90",
       CONTEXT_VERSIONS_KEEP_LATEST: "100",
       SCRIPT_RUNS_RETENTION_DAYS: "365",
+      WORKFLOW_RUNS_RETENTION_DAYS: "7",
     });
   });
 
   test("an empty or blank env value at first boot is the operator's off, not a gap to fill", async () => {
     process.env.SESSION_LOG_RETENTION_DAYS = "";
     process.env.AGENT_LOG_RETENTION_DAYS = "   ";
+    process.env.WORKTREE_REAPER_MODE = "";
 
     await seedDbRetentionDefaults(true);
 
@@ -86,6 +96,7 @@ describe("seedDbRetentionDefaults", () => {
       EVENTS_RETENTION_DAYS: "90",
       CONTEXT_VERSIONS_KEEP_LATEST: "100",
       SCRIPT_RUNS_RETENTION_DAYS: "30",
+      WORKFLOW_RUNS_RETENTION_DAYS: "30",
     });
   });
 });
@@ -221,7 +232,7 @@ describe("retention defaults across real boots", () => {
       expect(removed.status).toBe(200);
       const firstSweep = await stopAndReadSweepConfig(first);
       expect(firstSweep).toContain(
-        "session_logs=7, agent_log=90, events=90, context_versions=100, script_runs=30",
+        "session_logs=7, agent_log=90, events=90, context_versions=100, script_runs=30, workflow_runs=30",
       );
       expect(firstSweep).toContain("dryRun=false");
 
@@ -229,7 +240,7 @@ describe("retention defaults across real boots", () => {
       const { EVENTS_RETENTION_DAYS: _deleted, ...kept } = seededDefaults;
       expect(values(await storedRetention(second))).toEqual(kept);
       expect(await stopAndReadSweepConfig(second)).toContain(
-        "session_logs=disabled, agent_log=90, events=disabled, context_versions=100, script_runs=30",
+        "session_logs=disabled, agent_log=90, events=disabled, context_versions=100, script_runs=30, workflow_runs=30",
       );
     },
     BOOT_TEST_TIMEOUT_MS,
@@ -242,7 +253,7 @@ describe("retention defaults across real boots", () => {
       const api = await bootApi(newDbPath(), blank);
       expect(await storedRetention(api)).toEqual({});
       expect(await stopAndReadSweepConfig(api)).toContain(
-        "session_logs=disabled, agent_log=disabled, events=disabled, context_versions=disabled, script_runs=disabled",
+        "session_logs=disabled, agent_log=disabled, events=disabled, context_versions=disabled, script_runs=disabled, workflow_runs=disabled",
       );
     },
     BOOT_TEST_TIMEOUT_MS,
@@ -261,7 +272,7 @@ describe("retention defaults across real boots", () => {
       const upgraded = await bootApi(dbPath, ALL_UNSET);
       expect(await storedRetention(upgraded)).toEqual({});
       expect(await stopAndReadSweepConfig(upgraded)).toContain(
-        "session_logs=disabled, agent_log=disabled, events=disabled, context_versions=disabled, script_runs=disabled",
+        "session_logs=disabled, agent_log=disabled, events=disabled, context_versions=disabled, script_runs=disabled, workflow_runs=disabled",
       );
     },
     BOOT_TEST_TIMEOUT_MS,

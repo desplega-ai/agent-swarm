@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.15.0",
+    "version": "2.15.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2139,7 +2139,8 @@
               "system.profile_sync_reconciled",
               "system.profile_sync_conflict",
               "script.global_upsert",
-              "schedule.deleted"
+              "schedule.deleted",
+              "data.query"
             ]
           },
           "status": {
@@ -10716,7 +10717,7 @@
       },
       "patch": {
         "summary": "Patch an app",
-        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.",
+        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries. `ops` applies JSON-pointer add/replace/remove/test ops instead; the first failing op stores nothing.",
         "tags": [
           "Apps"
         ],
@@ -10755,6 +10756,34 @@
                   "definition": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "ops": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "enum": [
+                            "add",
+                            "replace",
+                            "remove",
+                            "test"
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "op",
+                        "path"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
                   },
                   "migration": {
                     "type": "object",
@@ -24706,6 +24735,94 @@
         }
       }
     },
+    "/api/link-preview": {
+      "get": {
+        "summary": "Get the Open Graph preview of an external link",
+        "description": "Fetches the page server-side (cached) and returns its title, description, image and site name. `ok: false` when the page could not be read. Loopback and private hosts are refused with 400.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "required": true,
+            "name": "url",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The preview, or `ok: false` with empty fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "image": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "siteName": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "url",
+                    "ok",
+                    "title",
+                    "description",
+                    "image",
+                    "siteName"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing, malformed or refused URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/events": {
       "post": {
         "summary": "Store a single event",
@@ -24762,7 +24879,8 @@
                       "system.profile_sync_reconciled",
                       "system.profile_sync_conflict",
                       "script.global_upsert",
-                      "schedule.deleted"
+                      "schedule.deleted",
+                      "data.query"
                     ]
                   },
                   "status": {
@@ -24910,7 +25028,8 @@
                 "system.profile_sync_reconciled",
                 "system.profile_sync_conflict",
                 "script.global_upsert",
-                "schedule.deleted"
+                "schedule.deleted",
+                "data.query"
               ]
             },
             "required": false,
@@ -25142,7 +25261,8 @@
                             "system.profile_sync_reconciled",
                             "system.profile_sync_conflict",
                             "script.global_upsert",
-                            "schedule.deleted"
+                            "schedule.deleted",
+                            "data.query"
                           ]
                         },
                         "status": {
@@ -40769,6 +40889,10 @@
                               "totalCostUsd": {
                                 "type": "number",
                                 "minimum": 0
+                              },
+                              "runModel": {
+                                "type": "string",
+                                "description": "Latest named model reported by a harness session."
                               }
                             },
                             "required": [

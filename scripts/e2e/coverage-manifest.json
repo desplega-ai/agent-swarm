@@ -317,9 +317,11 @@
         "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
         "knowledge-apps-catalog",
+        "knowledge-apps-closest-bounds",
         "knowledge-apps-large-model",
         "knowledge-apps-limits",
         "knowledge-apps-log-stream",
+        "knowledge-apps-patch-node",
         "knowledge-apps-primitives",
         "knowledge-apps-session-thread-files",
         "knowledge-apps-template-refs"
@@ -442,7 +444,7 @@
     },
     "kv": {
       "description": "KV store over HTTP and MCP: namespaces, types, TTL, views, authorization, and the 24 hour MCP overflow spill.",
-      "scenarios": ["script-kv"]
+      "scenarios": ["script-kv", "kv-app-namespace-read"]
     },
     "linear-provider-emulated": {
       "description": "Against @emulators/linear: OAuth consent, actor=app install, code exchange, refresh and revoke; delegating a Todo issue creates a task and acknowledges the AgentSession, a Backlog issue is gated, completion ends the session with the output, and Canceled cancels the task; LINEAR_URL and LINEAR_API_URL cannot be stored in swarm_config",
@@ -637,6 +639,10 @@
     "session-followup-context": {
       "description": "The task and session reads a Lead's Sessions follow-up preamble and the composer's parent pick depend on: parentTaskId, isLeadTask, task text and attachments along a Lead / worker / review chain",
       "scenarios": ["core-session-followup-turns"]
+    },
+    "data": {
+      "description": "data-query and ctx.data.query as the agent's own key over an agent-fs stub: rows, a card table, a sheet with literal '=' text, sqlite/duckdb and missing-path refusals, agent-fs error text and code, the MCP and script row caps, one data.query event per call without the SQL text, and with OTLP on no SQL literal or result row in the exported tool span",
+      "scenarios": ["data-query", "data-query-otel"]
     },
     "sheets": {
       "description": "sheet-create/get/list/get-range/set-range/append-rows/clear-range/add-tab/import-xlsx/export-xlsx as the agent's own key over an agent-fs stub: formula round trip, every size limit, a 409 merge and the retry cap, an xlsx round trip with its refusals, ctx.sheets in both executors",
@@ -890,8 +896,8 @@
       "scenarios": ["platform-checklist"]
     },
     "outbound-url-guards": {
-      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, and discovered OAuth endpoints are validated",
-      "scenarios": ["platform-outbound-url-guards"]
+      "description": "Caller-supplied outbound URLs: every redirect hop of an OpenAPI import is resolved and checked, the onboarding embeddings probe resolves its endpoint name before it connects, memory embeddings refuse a private base URL stored through config but not the deployment env one, discovered OAuth endpoints are validated, and the link-preview route refuses private hosts",
+      "scenarios": ["platform-outbound-url-guards", "link-preview"]
     },
     "cli": {
       "description": "Operator CLI commands as a black box: exit code, output and written files",

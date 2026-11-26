@@ -27,7 +27,7 @@ apps/ui/.dev-notes/
 
 # local-fs file-storage provider root (task attachments; AGENT_FS_LOCAL_DIR
 # defaults to ./data/fs when the server runs from the repo root)
-data/
+/data/
 
 # dependencies (bun install)
 node_modules

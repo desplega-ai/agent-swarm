@@ -11,7 +11,13 @@ import {
   Table2,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useDbQuery, useTableColumns, useTableList } from "@/api/hooks";
+import {
+  defaultDebugSql,
+  useDbDialect,
+  useDbQuery,
+  useTableColumns,
+  useTableList,
+} from "@/api/hooks";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
@@ -29,8 +35,6 @@ import { cn } from "@/lib/utils";
 import { filterTables } from "./filter-tables";
 import { formatDebugCell } from "./format-cell";
 
-const DEFAULT_SQL = "SELECT name, type FROM sqlite_master WHERE type='table' ORDER BY name";
-
 // ── Table Browser Sidebar ──────────────────────────────────────────────────
 
 function TableBrowser({
@@ -44,7 +48,11 @@ function TableBrowser({
   onToggleTable: (tableName: string) => void;
   className?: string;
 }) {
-  const { data: tablesResult, isLoading } = useTableList();
+  const dialectQuery = useDbDialect();
+  const tablesQuery = useTableList(dialectQuery.data);
+  const { data: tablesResult } = tablesQuery;
+  const isLoading = dialectQuery.isLoading || tablesQuery.isLoading;
+  const loadError = dialectQuery.error ?? tablesQuery.error;
 
   const tables = useMemo(() => {
     if (!tablesResult?.rows) return [];
@@ -84,6 +92,11 @@ function TableBrowser({
               <Spinner className="size-3" /> Loading...
             </div>
           )}
+          {!isLoading && loadError && (
+            <div className="px-3 py-2 text-status-error-strong text-xs break-words">
+              {loadError.message}
+            </div>
+          )}
           {!isLoading && tables.length > 0 && visibleTables.length === 0 && (
             <div className="px-3 py-2 text-muted-foreground text-xs">No matching tables</div>
           )}
@@ -113,11 +126,12 @@ function TableItem({
   onToggle: () => void;
   onSelect: () => void;
 }) {
-  const { data: columnsResult } = useTableColumns(expanded ? name : null);
+  const { data: dialect } = useDbDialect();
+  const { data: columnsResult } = useTableColumns(expanded ? name : null, dialect);
 
   const columns = useMemo(() => {
     if (!columnsResult?.rows) return [];
-    // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+    // Both engines return: cid, name, type, notnull, dflt_value, pk
     return columnsResult.rows.map((row) => ({
       name: String(row[1]),
       type: String(row[2] || ""),
@@ -170,7 +184,10 @@ export default function DebugPage() {
   const { theme } = useTheme();
   const { searchParams, setParam, setParams } = useUrlSearchState();
   const dbQuery = useDbQuery();
-  const sql = readStringParam(searchParams, "sql", DEFAULT_SQL);
+  const { data: dialect } = useDbDialect();
+  // Empty until the probe names the engine: each engine has its own catalog SQL.
+  const defaultSql = dialect ? defaultDebugSql(dialect) : "";
+  const sql = readStringParam(searchParams, "sql", defaultSql);
   const expandedTable = readStringParam(searchParams, "table");
   const [tablesCollapsed, setTablesCollapsed] = useLocalToggle("debug:tables-collapsed", false);
   // Below md the tables list is a closed drawer, not a 220px column
@@ -190,7 +207,7 @@ export default function DebugPage() {
 
   function handleSelectTable(tableName: string) {
     const newSql = `SELECT * FROM ${tableName} LIMIT 50`;
-    setParams({ table: tableName, sql: newSql }, { defaultValues: { sql: DEFAULT_SQL } });
+    setParams({ table: tableName, sql: newSql }, { defaultValues: { sql: defaultSql } });
     dbQuery.mutate({ sql: newSql });
     // Picking a table on a phone closes the drawer to show results
     setTablesSheetOpen(false);
@@ -286,7 +303,7 @@ export default function DebugPage() {
               language="sql"
               theme={theme === "dark" ? "vs-dark" : "vs"}
               value={sql}
-              onChange={(value) => setParam("sql", value ?? "", { defaultValue: DEFAULT_SQL })}
+              onChange={(value) => setParam("sql", value ?? "", { defaultValue: defaultSql })}
               onMount={handleEditorMount}
               options={{
                 minimap: { enabled: false },
@@ -380,7 +397,7 @@ export default function DebugPage() {
             )}
 
             {dbQuery.error && (
-              <span className="text-sm text-status-error-strong ml-auto truncate">
+              <span className="ml-auto min-w-0 break-words text-sm text-status-error-strong">
                 {dbQuery.error instanceof Error ? dbQuery.error.message : "Query failed"}
               </span>
             )}

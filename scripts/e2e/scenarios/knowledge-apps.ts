@@ -800,6 +800,7 @@ export const knowledgeApps: Scenario = {
         await callTool(session, "app-patch", {
           appId: toolAppId,
           description: "patched by tool",
+          includeApp: true,
           definition: {
             queries: { newest: { model: "note", sort: { column: "n", dir: "desc" } } },
           },

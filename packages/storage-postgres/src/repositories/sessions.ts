@@ -71,6 +71,20 @@ const COST_FROM = sql`FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc
 /** SQLite's `DATE(createdAt)` of the stored ISO text: the UTC day. */
 const UTC_DAY = (column: SqlQuery) => sql`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
 
+/**
+ * The UTC day `YYYY-MM-DD` as the range [start, next start). A range on
+ * "createdAt" can use idx_session_costs_createdAt; the UTC_DAY text of every
+ * row cannot. Null for a text that is not a calendar day: no row matches it.
+ */
+function utcDayRange(dateUtc: string): { start: string; end: string } | null {
+  const start = new Date(`${dateUtc}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || start.toISOString().slice(0, 10) !== dateUtc) return null;
+  return {
+    start: start.toISOString(),
+    end: new Date(start.getTime() + 86_400_000).toISOString(),
+  };
+}
+
 /** The session columns of a credential window usage row. */
 const KEY_WINDOW_USAGE_COLUMNS = sql`sc."taskId", sc."credentialKeyType", sc."credentialKeySuffix", sc.harness,
   sc."inputTokens", sc."outputTokens", sc."cacheReadTokens", sc."cacheWriteTokens",
@@ -300,25 +314,32 @@ export class PostgresSessionsRepository extends BaseSessionsRepository {
 
   // SQLite compares the first 10 characters of the stored ISO text: the UTC day.
   async dailySpendForAgent(agentId: string, dateUtc: string): Promise<number> {
+    const day = utcDayRange(dateUtc);
+    if (!day) return 0;
     const row = await this.db.get<SumRow>(sql`
       SELECT COALESCE(SUM("totalCostUsd"), 0) AS total FROM session_costs
-      WHERE "agentId" = ${agentId} AND ${UTC_DAY(sql`"createdAt"`)} = ${dateUtc}`);
+      WHERE "agentId" = ${agentId} AND "createdAt" >= ${day.start} AND "createdAt" < ${day.end}`);
     return row?.total ?? 0;
   }
 
   async dailySpendGlobal(dateUtc: string): Promise<number> {
+    const day = utcDayRange(dateUtc);
+    if (!day) return 0;
     const row = await this.db.get<SumRow>(sql`
       SELECT COALESCE(SUM("totalCostUsd"), 0) AS total FROM session_costs
-      WHERE ${UTC_DAY(sql`"createdAt"`)} = ${dateUtc}`);
+      WHERE "createdAt" >= ${day.start} AND "createdAt" < ${day.end}`);
     return row?.total ?? 0;
   }
 
   async dailySpendForUser(userId: string, dateUtc: string): Promise<number> {
+    const day = utcDayRange(dateUtc);
+    if (!day) return 0;
     const row = await this.db.get<SumRow>(sql`
       SELECT COALESCE(SUM(sc."totalCostUsd"), 0) AS total
       FROM session_costs sc
       JOIN agent_tasks t ON sc."taskId" = t.id
-      WHERE t."requestedByUserId" = ${userId} AND ${UTC_DAY(sql`sc."createdAt"`)} = ${dateUtc}`);
+      WHERE t."requestedByUserId" = ${userId}
+        AND sc."createdAt" >= ${day.start} AND sc."createdAt" < ${day.end}`);
     return row?.total ?? 0;
   }
 

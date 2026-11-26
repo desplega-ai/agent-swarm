@@ -3612,27 +3612,9 @@ export interface InboxSummary {
 
 export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
   const messaging = getStorage().repos.messaging;
-  const channels = await getAllChannels();
-  let unreadCount = 0;
-  let mentionsCount = 0;
-
-  for (const channel of channels) {
-    // Check if this channel is already being processed
-    const readState = await messaging.findChannelReadState(agentId, channel.id);
-
-    const lastReadAt = readState?.lastReadAt ?? null;
-    const isProcessing =
-      readState?.processing_since !== null && readState?.processing_since !== undefined;
-
-    // Skip channels that are already being processed
-    if (isProcessing) continue;
-
-    // Count unread (excluding own messages)
-    unreadCount += await messaging.countUnreadChannelMessages(channel.id, agentId, lastReadAt);
-
-    // Count mentions in unread
-    mentionsCount += await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
-  }
+  // One grouped count over every channel the agent is not processing, in place
+  // of a read state and two counts per channel.
+  const { unreadCount, mentionsCount } = await messaging.countUnreadInbox(agentId);
 
   const tasks = getStorage().repos.tasks;
   // Count offered tasks for this agent
@@ -3647,22 +3629,28 @@ export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
   // Get recent unread @mentions (up to 3)
   const recentMentions: MentionPreview[] = [];
   const mentionMessages = await getMentionsForAgent(agentId, { unreadOnly: false });
+  // Every read mark and channel name in one statement each, loaded on first
+  // use, not one statement per mention.
+  let lastReadAtByChannel: Map<string, string | null> | null = null;
+  let channelNames: Map<string, string> | null = null;
 
   // Filter to only unread mentions and limit to 3
   for (const msg of mentionMessages) {
     if (recentMentions.length >= 3) break;
 
     // Check if message is unread (by checking against read state per channel)
-    const lastReadAt = await getLastReadAt(agentId, msg.channelId);
+    lastReadAtByChannel ??= new Map(
+      (await messaging.listChannelReadStates(agentId)).map((s) => [s.channelId, s.lastReadAt]),
+    );
+    const lastReadAt = lastReadAtByChannel.get(msg.channelId) ?? null;
     if (lastReadAt && new Date(msg.createdAt) <= new Date(lastReadAt)) {
       continue; // Already read
     }
 
-    // Get channel name
-    const channel = await getChannelById(msg.channelId);
+    channelNames ??= new Map((await getAllChannels()).map((c) => [c.id, c.name]));
 
     recentMentions.push({
-      channelName: channel?.name ?? "unknown",
+      channelName: channelNames.get(msg.channelId) ?? "unknown",
       agentName: msg.agentName ?? "Unknown",
       content: msg.content.length > 100 ? `${msg.content.slice(0, 100)}...` : msg.content,
       createdAt: msg.createdAt,
@@ -3690,50 +3678,28 @@ export async function claimMentions(
 ): Promise<{ channelId: string; lastReadAt: string | null; mentionsCount: number }[]> {
   const now = new Date().toISOString();
   const messaging = getStorage().repos.messaging;
-  const channels = await getAllChannels();
   const claimedChannels: { channelId: string; lastReadAt: string | null; mentionsCount: number }[] =
     [];
 
-  for (const channel of channels) {
-    // Check if this channel is already being processed
-    const readState = await messaging.findChannelReadState(agentId, channel.id);
+  // Channels already being processed are left out by the read.
+  for (const unread of await messaging.listUnreadChannelMentions(agentId)) {
+    const { channelId, lastReadAt, count: mentionCount } = unread;
+    // dryRun: report what a claim would take, without the write (idle-poll probe).
+    if (opts?.dryRun) {
+      claimedChannels.push({ channelId, lastReadAt, mentionsCount: mentionCount });
+      continue;
+    }
+    // Atomically claim mentions for this channel
+    const changes = await messaging.claimChannelMentions(
+      agentId,
+      channelId,
+      lastReadAt || new Date(0).toISOString(),
+      now,
+    );
 
-    const lastReadAt = readState?.lastReadAt ?? null;
-    const isProcessing =
-      readState?.processing_since !== null && readState?.processing_since !== undefined;
-
-    // Skip channels that are already being processed
-    if (isProcessing) continue;
-
-    // Check if there are unread mentions
-    const mentionCount = await messaging.countChannelMentions(channel.id, agentId, lastReadAt);
-
-    if (mentionCount > 0) {
-      // dryRun: report what a claim would take, without the write (idle-poll probe).
-      if (opts?.dryRun) {
-        claimedChannels.push({
-          channelId: channel.id,
-          lastReadAt,
-          mentionsCount: mentionCount,
-        });
-        continue;
-      }
-      // Atomically claim mentions for this channel
-      const changes = await messaging.claimChannelMentions(
-        agentId,
-        channel.id,
-        lastReadAt || new Date(0).toISOString(),
-        now,
-      );
-
-      // Only add to claimed list if we actually claimed it (not already processing)
-      if (changes > 0) {
-        claimedChannels.push({
-          channelId: channel.id,
-          lastReadAt,
-          mentionsCount: mentionCount,
-        });
-      }
+    // Only add to claimed list if we actually claimed it (not already processing)
+    if (changes > 0) {
+      claimedChannels.push({ channelId, lastReadAt, mentionsCount: mentionCount });
     }
   }
 

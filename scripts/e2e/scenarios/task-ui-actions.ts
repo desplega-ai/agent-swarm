@@ -44,24 +44,17 @@ async function waitForFlags(ctx: ScenarioContext, present: boolean): Promise<voi
 
 /**
  * A worker completes a task with a card whose Button declares a `follow_up`
- * action. The first POST to the ui-action route starts one follow-up task for
- * the requester; the second returns `already_done` and starts none.
+ * action, with both card flags unset: they are on by default. The first POST
+ * to the ui-action route starts one follow-up task for the requester; the
+ * second returns `already_done` and starts none.
  */
 export const taskUiActions: Scenario = {
   name: "task-ui-actions",
   order: 141,
   async run(ctx) {
-    const configIds: string[] = [];
     let taskId: string | undefined;
     try {
-      for (const key of FLAGS) {
-        const upsert = await ctx.api("PUT", "/api/config", {
-          body: { scope: "global", scopeId: null, key, value: "true", isSecret: false },
-        });
-        expectStatus(upsert, [200], `enable ${key}`);
-        configIds.push(String(asRecord(upsert.json).id));
-      }
-      await waitForFlags(ctx, true);
+      await waitForFlags(ctx, false);
 
       const worker = await registerWorker(ctx, "ui-actions");
       const requester = await createUser(ctx, "ui-actions-requester");
@@ -127,10 +120,6 @@ export const taskUiActions: Scenario = {
         );
         for (const child of children) await cancelQuietly(ctx, child.id);
       }
-      for (const id of configIds) {
-        expectStatus(await ctx.api("DELETE", `/api/config/${id}`), [200], "delete a card flag");
-      }
-      await waitForFlags(ctx, false);
     }
   },
 };

@@ -135,7 +135,7 @@ If the assigned worker is offline or unavailable, the follow-up routes to the le
 
 By default, thread follow-ups route automatically without requiring an @mention. That includes human replies to swarm-started root messages, even when no task row existed yet for the thread. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
 
-A thread reply that @mentions another user but not the bot (for example `@Alice wdyt?`) is addressed to that user, so the swarm ignores it. This applies to follow-up routing, the additive buffer, and assistant threads. Set `SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true` to make the swarm wake on these replies too. Each such reply then becomes a follow-up, so pair the flag with `ADDITIVE_SLACK=true` to batch side conversations into one task. `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` takes precedence over this flag.
+A thread reply that @mentions another user but not the bot (for example `@Alice wdyt?`) is addressed to that user, so the swarm ignores it. This applies to follow-up routing, the additive buffer, and assistant threads. Set `SLACK_THREAD_WAKE_ON_ANY_MESSAGE=true` to make the swarm wake on these replies too. Each such reply then becomes a follow-up, and the additive buffer (`ADDITIVE_SLACK`, on by default) batches side conversations into one task. `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` takes precedence over this flag.
 
 #### Live steering instead of follow-up tasks
 
@@ -166,7 +166,7 @@ Treat Slack channel/thread metadata as one routing unit. When a parent task or S
 
 ### Additive Slack Buffer
 
-When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows multi-message feedback without requiring an @mention each time.
+By default, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows multi-message feedback without requiring an @mention each time. Set `ADDITIVE_SLACK=false` to turn it off.
 
 - Messages are buffered for a configurable debounce window (`ADDITIVE_SLACK_BUFFER_MS`, default 10s)
 - Buffered messages are flushed into a single task with dependency chaining to the active task
@@ -211,9 +211,9 @@ The indicator never blocks a task. If Slack refuses the call, the swarm logs it 
 
 ### Stop button
 
-Slack can show a native **Stop** button in a thread's "Working…" line while the swarm is on an ask. It is off by default. To turn it on:
+Slack can show a native **Stop** button in a thread's "Working…" line while the swarm is on an ask. The setting is on by default, but the button shows only after step 2. To use it:
 
-1. Set `SLACK_STOP_BUTTON_ENABLED=true` on the API, or turn on **Slack Stop button** in **Settings → Configuration**. It applies without a restart.
+1. Leave `SLACK_STOP_BUTTON_ENABLED` unset on the API, or keep **Slack Stop button** on in **Settings → Configuration**. Set it to `false` to turn it off. It applies without a restart.
 2. In the Slack app settings, under **Event Subscriptions → Subscribe to bot events**, add `agent_session_stopped` and save. It needs only the `chat:write` scope the app already has. Reinstall the app if Slack asks you to.
 
 The checked-in `slack-manifest.json` does not subscribe to the event, because a subscribed app with the setting off would show a Stop button that does nothing.
@@ -247,7 +247,7 @@ Set `SLACK_REPLY_FOOTER_ENABLED=false` to hide the task details footer from outc
 
 ### Answer feedback
 
-Set `SLACK_FEEDBACK_BUTTONS=true`, or turn on **Slack answer feedback** in **Settings → Configuration**, to put Slack's native 👍/👎 buttons under each final outcome card. It is off by default and applies without a restart. Deferral (⏳) cards and timed-out conclusions get no buttons. If Slack refuses the buttons, the card posts without them.
+`SLACK_FEEDBACK_BUTTONS` puts Slack's native 👍/👎 buttons under each final outcome card. It is on by default. Set it to `false`, or turn off **Slack answer feedback** in **Settings → Configuration**, to remove them. It applies without a restart. Deferral (⏳) cards and timed-out conclusions get no buttons. If Slack refuses the buttons, the card posts without them.
 
 A click from an allowed person in the task's channel stores one row in the reserved KV namespace `slack-feedback`, at key `<taskId>/<slackUserId>`, so a person's later click on the same answer replaces their vote. The row holds `vote` (`up` or `down`), `votedAt`, and the task's `agentId`, `profile`, `model` and `modelTier`. A row also names the voter's Slack user ID and the task's channel and thread, so only a Lead agent can read the namespace: `GET /api/kv/_/slack-feedback` with the Lead's `X-Agent-ID` (add `?prefix=<taskId>/` for one task), or `kv_list` on that namespace as the Lead. Other agents and calls with no agent get 403, and no agent can write the namespace.
 
@@ -433,7 +433,7 @@ Files a user shares with the bot (images, voice memos, documents) become task at
 Each file also appears in the task description as a metadata line (filename, MIME type, size, Slack file ID). When a file can't be attached, the bot replies in the thread naming the file and the reason. A file that is larger than the 50 MB attachment limit or fails to download is also marked `(not attached: <reason>)` on its metadata line. A storage error happens after the description is written, so that file is reported only in the thread reply, and the task has no attachment for it.
 
 Limitations:
-- With `ADDITIVE_SLACK=true`, follow-ups that are buffered (rather than turned into a task right away) carry only the metadata line, marked as not attached, and the bot says so in the thread.
+- With `ADDITIVE_SLACK` on (the default), follow-ups that are buffered (rather than turned into a task right away) carry only the metadata line, marked as not attached, and the bot says so in the thread.
 - With thread steering enabled, a lead follow-up that includes files creates a follow-up task instead of steering the running session, because steering only carries text.
 - When the bot reads earlier messages of a thread for context, messages that contain only a file are skipped.
 

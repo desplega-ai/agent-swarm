@@ -1,5 +1,6 @@
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { format } from "node:util";
+import type { PostgresStats } from "@desplega/storage";
 import {
   type BatchObservableResult,
   type Counter,
@@ -250,6 +251,7 @@ export async function shutdown(): Promise<void> {
   await sdk?.shutdown();
   sdk = undefined;
   stopEventLoopDelayMetrics();
+  stopPostgresStats?.();
   uninstallConsoleLogBridge();
 }
 
@@ -317,6 +319,180 @@ export function startEventLoopDelayMetrics(meter: Meter): void {
 
 export function stopEventLoopDelayMetrics(): void {
   stopEventLoopDelay?.();
+}
+
+/** A pool wait plus a few 2 s statements; past it this export skips the Postgres gauges. */
+const PG_STATS_READ_TIMEOUT_MS = 10_000;
+let stopPostgresStats: (() => void) | undefined;
+
+/**
+ * Postgres server gauges, read from `pg_stat_*` once per metric export (60 s):
+ * the batch callback awaits `read`, so no timer of its own runs. A read still
+ * in flight (it holds one pool connection) makes the next export skip rather
+ * than queue a second one. A failed read logs once per distinct error and
+ * reports nothing for that export. Cumulative server counters are observable
+ * counters; the SDK turns them into deltas under delta temporality.
+ */
+export function startPostgresStatsMetrics(read: () => Promise<PostgresStats | null>): void {
+  if (stopPostgresStats) return;
+  const meter = metrics.getMeter(METER_NAME);
+  const gauge = (name: string, description: string, unit: string) =>
+    meter.createObservableGauge(name, { description, unit });
+  const counter = (name: string, description: string, unit: string) =>
+    meter.createObservableCounter(name, { description, unit });
+  const i = {
+    connections: gauge(
+      "agentswarm.pg.connections",
+      "Client connections on the Postgres server, by state",
+      "{connection}",
+    ),
+    maxConnections: gauge(
+      "agentswarm.pg.connections.max",
+      "The Postgres server's max_connections setting",
+      "{connection}",
+    ),
+    queryMaxAge: gauge(
+      "agentswarm.pg.query.max_age",
+      "Age of the oldest running statement on the Postgres server",
+      "s",
+    ),
+    transactionMaxAge: gauge(
+      "agentswarm.pg.transaction.max_age",
+      "Age of the oldest open transaction on the Postgres server",
+      "s",
+    ),
+    dbSize: gauge("agentswarm.pg.db.size", "Size of the swarm database", "By"),
+    cacheHitRatio: gauge(
+      "agentswarm.pg.cache.hit_ratio",
+      "Share of block reads served from shared buffers since the last stats reset",
+      "1",
+    ),
+    commits: counter("agentswarm.pg.commits", "Committed transactions", "{transaction}"),
+    rollbacks: counter("agentswarm.pg.rollbacks", "Rolled back transactions", "{transaction}"),
+    blocksHit: counter(
+      "agentswarm.pg.blocks.hit",
+      "Block reads served from shared buffers",
+      "{block}",
+    ),
+    blocksRead: counter(
+      "agentswarm.pg.blocks.read",
+      "Block reads that went to disk or the OS cache",
+      "{block}",
+    ),
+    deadlocks: counter("agentswarm.pg.deadlocks", "Deadlocks detected", "{deadlock}"),
+    tempBytes: counter(
+      "agentswarm.pg.temp.bytes",
+      "Bytes written to temporary files by queries",
+      "By",
+    ),
+    tableSeqScans: counter(
+      "agentswarm.pg.table.seq_scans",
+      "Sequential scans per table (top tables only)",
+      "{scan}",
+    ),
+    tableLiveTuples: gauge(
+      "agentswarm.pg.table.live_tuples",
+      "Estimated live rows per table (top tables only)",
+      "{row}",
+    ),
+    tableDeadTuples: gauge(
+      "agentswarm.pg.table.dead_tuples",
+      "Estimated dead rows per table (top tables only)",
+      "{row}",
+    ),
+    statementsAvailable: gauge(
+      "agentswarm.pg.stat_statements.available",
+      "1 when pg_stat_statements is installed and loaded, else 0",
+      "1",
+    ),
+    statementCalls: counter(
+      "agentswarm.pg.statements.calls",
+      "Statement executions in the swarm database (pg_stat_statements)",
+      "{call}",
+    ),
+    statementTime: counter(
+      "agentswarm.pg.statements.exec_time",
+      "Statement execution time in the swarm database (pg_stat_statements)",
+      "s",
+    ),
+    statementRows: counter(
+      "agentswarm.pg.statements.rows",
+      "Rows returned or changed by statements in the swarm database (pg_stat_statements)",
+      "{row}",
+    ),
+  };
+  let inFlight = false;
+  let lastError: string | undefined;
+  const readOnce = async (): Promise<PostgresStats | null> => {
+    const pending = read();
+    inFlight = true;
+    void pending.then(
+      () => {
+        inFlight = false;
+      },
+      () => {
+        inFlight = false;
+      },
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`timed out after ${PG_STATS_READ_TIMEOUT_MS} ms`)),
+        PG_STATS_READ_TIMEOUT_MS,
+      );
+    });
+    try {
+      return await Promise.race([pending, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const collect = async (observer: BatchObservableResult) => {
+    if (inFlight) return;
+    let stats: PostgresStats | null;
+    try {
+      stats = await readOnce();
+    } catch (error) {
+      const message = scrubSecrets(error instanceof Error ? error.message : String(error));
+      if (message !== lastError) console.warn(`[OTel] Postgres stats read failed: ${message}`);
+      lastError = message;
+      return;
+    }
+    lastError = undefined;
+    if (!stats) return;
+    for (const { state, count } of stats.connectionsByState) {
+      observer.observe(i.connections, count, { state });
+    }
+    observer.observe(i.maxConnections, stats.maxConnections);
+    observer.observe(i.queryMaxAge, stats.longestQuerySeconds);
+    observer.observe(i.transactionMaxAge, stats.longestTransactionSeconds);
+    observer.observe(i.dbSize, stats.databaseSizeBytes);
+    const blocks = stats.blocksHit + stats.blocksRead;
+    if (blocks > 0) observer.observe(i.cacheHitRatio, stats.blocksHit / blocks);
+    observer.observe(i.commits, stats.commits);
+    observer.observe(i.rollbacks, stats.rollbacks);
+    observer.observe(i.blocksHit, stats.blocksHit);
+    observer.observe(i.blocksRead, stats.blocksRead);
+    observer.observe(i.deadlocks, stats.deadlocks);
+    observer.observe(i.tempBytes, stats.tempBytes);
+    for (const t of stats.tables) {
+      observer.observe(i.tableSeqScans, t.seqScans, { table: t.table });
+      observer.observe(i.tableLiveTuples, t.liveTuples, { table: t.table });
+      observer.observe(i.tableDeadTuples, t.deadTuples, { table: t.table });
+    }
+    observer.observe(i.statementsAvailable, stats.statements ? 1 : 0);
+    if (stats.statements) {
+      observer.observe(i.statementCalls, stats.statements.calls);
+      observer.observe(i.statementTime, stats.statements.totalExecMs / 1000);
+      observer.observe(i.statementRows, stats.statements.rows);
+    }
+  };
+  const observables = Object.values(i);
+  meter.addBatchObservableCallback(collect, observables);
+  stopPostgresStats = () => {
+    meter.removeBatchObservableCallback(collect, observables);
+    stopPostgresStats = undefined;
+  };
 }
 
 const CONSOLE_LOG_BODY_MAX_CHARS = 16_384;
@@ -691,6 +867,8 @@ const DB_OPERATIONS = new Set([
 // SQL parser only if a dashboard shows such a label.
 const MAIN_TABLE =
   /\b(?:from|into|update|join)\s+(?:only\s+)?((?:"?[A-Za-z_]\w*"?\.)?"?[A-Za-z_]\w*"?)/i;
+const LEADING_WRITE_CTE =
+  /^\s*with\s+(?:recursive\s+)?"?[A-Za-z_]\w*"?\s+as\s+(?:(?:not\s+)?materialized\s+)?\(\s*(insert|update|delete)\b/i;
 const PARSED_CACHE_MAX = 2000;
 const parsedStatements = new Map<string, ParsedStatement>();
 
@@ -702,7 +880,11 @@ const parsedStatements = new Map<string, ParsedStatement>();
 export function parseDbStatement(sql: string): ParsedStatement {
   const cached = parsedStatements.get(sql);
   if (cached) return cached;
-  const keyword = /^\s*([A-Za-z]+)/.exec(sql)?.[1]?.toUpperCase() ?? "";
+  const first = /^\s*([A-Za-z]+)/.exec(sql)?.[1]?.toUpperCase() ?? "";
+  // A statement whose first CTE writes (`WITH w AS (INSERT INTO t ...) ...`)
+  // is that write: the CTE only passes its rows on to the rest.
+  const keyword =
+    first === "WITH" ? (LEADING_WRITE_CTE.exec(sql)?.[1]?.toUpperCase() ?? first) : first;
   const operation = DB_OPERATIONS.has(keyword) ? keyword : "OTHER";
   const target = MAIN_TABLE.exec(sql)?.[1];
   const table = target
