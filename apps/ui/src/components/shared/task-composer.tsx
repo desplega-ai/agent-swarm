@@ -549,8 +549,7 @@ export function TaskComposer({
   const filesAllowSteer = steerTakesFiles
     ? !attachments.some((file) => file.type.startsWith("audio/"))
     : attachments.length === 0;
-  const steerTarget =
-    filesAllowSteer && !holdingFiles && canSteer && maySteer ? targetTask : null;
+  const steerTarget = filesAllowSteer && !holdingFiles && canSteer && maySteer ? targetTask : null;
 
   const addAttachment = useCallback((file: File) => {
     setAttachments((current) => [...current, file]);

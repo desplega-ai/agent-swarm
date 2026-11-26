@@ -218,9 +218,7 @@ export function SteerComposer({
         // All or nothing: a steer that silently drops a screenshot misleads
         // the agent. Withdraw what did upload; a leftover is only an unused
         // attachment on the task.
-        await Promise.allSettled(
-          result.attachments.map((a) => deleteTaskAttachment(taskId, a.id)),
-        );
+        await Promise.allSettled(result.attachments.map((a) => deleteTaskAttachment(taskId, a.id)));
         const label =
           result.failed.length === 1 ? result.failed[0].file.name : `${result.failed.length} files`;
         setUploadError(`${label} failed to upload, so nothing was sent. Send again to retry.`);

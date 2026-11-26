@@ -169,7 +169,9 @@ mock.module("@/components/steering/steer-composer", () => ({
       data-placeholder={placeholder}
       data-route-detail={routeDetail}
       data-source={source}
-      data-files={onAttachmentsChange ? (attachments ?? []).map((f) => f.name).join(",") : undefined}
+      data-files={
+        onAttachmentsChange ? (attachments ?? []).map((f) => f.name).join(",") : undefined
+      }
     >
       {extraActions}
     </div>

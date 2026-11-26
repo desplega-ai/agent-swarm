@@ -120,7 +120,11 @@ test("files upload to the steered task and go out as attachment ids", async () =
   );
   expect(uploaded.sort()).toEqual(["t1/a.png", "t1/b.png"]);
   expect(steers).toEqual([
-    expect.objectContaining({ id: "t1", message: "see these", attachmentIds: ["att-a.png", "att-b.png"] }),
+    expect.objectContaining({
+      id: "t1",
+      message: "see these",
+      attachmentIds: ["att-a.png", "att-b.png"],
+    }),
   ]);
 });
 
