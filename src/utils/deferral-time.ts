@@ -25,8 +25,11 @@ function partsInTz(date: Date, tz: string) {
     hourCycle: "h23",
   });
   const parts = Object.fromEntries(fmt.formatToParts(date).map((p) => [p.type, p.value]));
+  // Map each local date to UTC midnight so consecutive dates stay one day apart across DST.
+  const calendarDate = new Date(0);
+  calendarDate.setUTCFullYear(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
   return {
-    year: parts.year!,
+    dayNumber: calendarDate.getTime() / 86_400_000,
     month: parts.month!,
     day: parts.day!,
     hour: parts.hour!,
@@ -51,11 +54,8 @@ export function formatDeferralDateTime(
   // Minute precision: this string is read by a human deciding whether to wait,
   // and the wake-up is scheduler-polled anyway, so seconds were false precision.
   const time = `${t.hour}:${t.minute}${labelZone ? ` ${t.abbreviation}` : ""}`;
-  const n = partsInTz(now, zone);
-  if (t.year === n.year && t.month === n.month && t.day === n.day) return { date: "today", time };
-  const tm = partsInTz(new Date(now.getTime() + 86_400_000), zone);
-  if (t.year === tm.year && t.month === tm.month && t.day === tm.day) {
-    return { date: "tomorrow", time };
-  }
+  const daysAhead = t.dayNumber - partsInTz(now, zone).dayNumber;
+  if (daysAhead === 0) return { date: "today", time };
+  if (daysAhead === 1) return { date: "tomorrow", time };
   return { date: `${t.month}-${t.day}`, time };
 }
