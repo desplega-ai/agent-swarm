@@ -1974,6 +1974,16 @@ export function tasksContract(engine: ContractEngine): void {
       });
     });
 
+    test("countFailedSince skips cascade failures and older finishes", async () => {
+      expect(await repo.countFailedSince(T1)).toBe(0);
+      await seedTask(storage, { id: "f1", status: "failed", finishedAt: T1 });
+      await seedTask(storage, { id: "f2", status: "failed", statusKind: "agent", finishedAt: T1 });
+      await seedTask(storage, { id: "c", status: "failed", statusKind: "cascade", finishedAt: T1 });
+      await seedTask(storage, { id: "old", status: "failed", finishedAt: T0 });
+      await seedTask(storage, { id: "ok", status: "completed", finishedAt: T1 });
+      expect(await repo.countFailedSince(T1)).toBe(2);
+    });
+
     test("install and tree aggregates", async () => {
       expect(await repo.hasUserOrNonSystemTask()).toBe(false);
       await seedUsers("u1", "u2");

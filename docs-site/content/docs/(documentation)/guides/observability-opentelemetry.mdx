@@ -508,6 +508,19 @@ On the Postgres engine the API reads the server's `pg_stat_*` views once per met
 
 The counters are cumulative server counts read as observable counters, so a backend that prefers delta temporality receives the per-export increase.
 
+### Swarm State
+
+On any engine the API reads swarm state from its database once per metric export (60 s) and exports it as unlabeled gauges, so `max` over the series is the swarm total. A read still running at the next export makes that export skip it, and a read is cut at 10 s. A failed read logs one `[OTel] swarm state read failed` line and the export carries no swarm state points. On by default; set `OTEL_SWARM_METRICS=false` to turn it off.
+
+| Metric | Instrument | Unit | Attributes | Meaning |
+| --- | --- | --- | --- | --- |
+| `agentswarm.tasks.failed.1h` | Gauge | `{task}` | | Tasks that failed in the last hour. Cascade failures (a dependency failed) are left out, so one root failure counts once. |
+| `agentswarm.approvals.pending` | Gauge | `{request}` | | Pending approval requests. |
+| `agentswarm.approvals.pending.max_age` | Gauge | `s` | | Age of the oldest pending approval request, 0 when none. |
+| `agentswarm.approvals.overdue` | Gauge | `{request}` | | Pending requests past their deadline. The heartbeat timeout sweep keeps this at 0; a non-zero value means the sweep is not running. |
+| `agentswarm.queue.claimable` | Gauge | `{task}` | | Pending or unassigned tasks whose dependencies all completed. |
+| `agentswarm.queue.oldest_age` | Gauge | `s` | | How long the oldest claimable task has waited since it became claimable, 0 when the queue is empty. |
+
 ### Metric Temporality
 
 Temporality is NOT hardcoded. Set the following for Datadog or any delta-preferred backend:
