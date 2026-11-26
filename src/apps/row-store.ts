@@ -586,12 +586,18 @@ async function patchPreparedRowUnlocked(
   rowId: string,
   prepared: Record<string, unknown>,
   options: AppRowWriteOptions,
-  appPresent?: boolean,
 ): Promise<AppRow | null> {
-  if (!(appPresent ?? (await appExists(appId)))) return null;
-  const existing = await getAppRow(appId, model, rowId);
-  if (!existing) return null;
-  const oldKeys = new Set(indexKeys(model, definition, existing));
+  const [updated] = await patchPreparedRowsUnlocked(appId, model, definition, [
+    { rowId, prepared, options },
+  ]);
+  return updated ?? null;
+}
+
+function patchedRow(
+  existing: AppRow,
+  prepared: Record<string, unknown>,
+  options: AppRowWriteOptions,
+): AppRow {
   const previousMs = Date.parse(existing.updatedAt);
   const updatedAt =
     options.skipUpdatedAt === true
@@ -609,34 +615,101 @@ async function patchPreparedRowUnlocked(
     }
   }
   Object.assign(updated, sourceEnvelope(options));
-  const newKeys = new Set(indexKeys(model, definition, updated));
-  const namespace = appsNamespace(appId);
-  await deleteKvMany(
-    namespace,
-    [...oldKeys].filter((key) => !newKeys.has(key)),
-  );
-  await upsertKvMany([
-    { namespace, key: rowKey(model, rowId), value: updated, valueType: "json" },
-    ...[...newKeys].filter((key) => !oldKeys.has(key)).map((key) => indexEntry(namespace, key)),
-  ]);
   return updated;
 }
 
+type PreparedRowPatch = {
+  rowId: string;
+  prepared: Record<string, unknown>;
+  options: AppRowWriteOptions;
+  prior?: AppRow;
+};
+
 /**
- * Caller must already hold the app/model mutation lock. `appPresent`: as in
- * `createAppRowUnlocked`.
+ * Patch rows with one read for the rows that came without a `prior`, at most
+ * one index delete and one multi-row upsert (chunked by the KV helpers).
+ * Results follow `patches`; null marks a missing row or app. A row patched
+ * twice starts its second patch from the first one's result.
  */
-export async function patchAppRowUnlocked(
+async function patchPreparedRowsUnlocked(
   appId: string,
   model: string,
   definition: ModelDef,
-  rowId: string,
-  values: Record<string, unknown>,
-  options: AppRowWriteOptions = {},
+  patches: readonly PreparedRowPatch[],
   appPresent?: boolean,
-): Promise<AppRow | null> {
-  const prepared = prepareValues(definition, values, "patch", options);
-  return patchPreparedRowUnlocked(appId, model, definition, rowId, prepared, options, appPresent);
+): Promise<Array<AppRow | null>> {
+  if (patches.length === 0) return [];
+  if (!(appPresent ?? (await appExists(appId)))) return patches.map(() => null);
+  const namespace = appsNamespace(appId);
+  const stored = await getKvMany(
+    namespace,
+    patches.filter((patch) => patch.prior === undefined).map((patch) => rowKey(model, patch.rowId)),
+  );
+  const current = new Map<string, AppRow | null>();
+  const storedIndexKeys = new Map<string, Set<string>>();
+  const results = patches.map((patch) => {
+    let existing: AppRow | null | undefined = current.get(patch.rowId);
+    if (!current.has(patch.rowId)) {
+      existing = patch.prior ?? asAppRow(stored.get(rowKey(model, patch.rowId))?.value);
+      if (existing)
+        storedIndexKeys.set(patch.rowId, new Set(indexKeys(model, definition, existing)));
+    }
+    const updated = existing ? patchedRow(existing, patch.prepared, patch.options) : null;
+    current.set(patch.rowId, updated);
+    return updated;
+  });
+  const staleIndexKeys: string[] = [];
+  const writes: KvWrite[] = [];
+  for (const [rowId, row] of current) {
+    const oldKeys = storedIndexKeys.get(rowId);
+    if (!row || !oldKeys) continue;
+    const newKeys = new Set(indexKeys(model, definition, row));
+    staleIndexKeys.push(...[...oldKeys].filter((key) => !newKeys.has(key)));
+    writes.push(
+      { namespace, key: rowKey(model, rowId), value: row, valueType: "json" },
+      ...[...newKeys].filter((key) => !oldKeys.has(key)).map((key) => indexEntry(namespace, key)),
+    );
+  }
+  await deleteKvMany(namespace, staleIndexKeys);
+  await upsertKvMany(writes);
+  return results;
+}
+
+/** One row of a `patchAppRowsUnlocked` batch. */
+export interface AppRowPatch {
+  rowId: string;
+  values: Record<string, unknown>;
+  options?: AppRowWriteOptions;
+  /**
+   * The stored row, when the caller read it under the same mutation lock. Every
+   * write to an app namespace holds that lock (generic KV writes to `apps:*` are
+   * refused), so the row cannot have moved; without it the batch reads it.
+   */
+  prior?: AppRow;
+}
+
+/**
+ * Caller must already hold the app/model mutation lock, and run the batch in
+ * one transaction when it must be all or nothing. Every value is validated
+ * before the first write. `appPresent`: as in `createAppRowUnlocked`.
+ */
+export async function patchAppRowsUnlocked(
+  appId: string,
+  model: string,
+  definition: ModelDef,
+  patches: readonly AppRowPatch[],
+  appPresent?: boolean,
+): Promise<Array<AppRow | null>> {
+  const prepared = patches.map((patch) => {
+    const options = patch.options ?? {};
+    return {
+      rowId: patch.rowId,
+      prepared: prepareValues(definition, patch.values, "patch", options),
+      options,
+      ...(patch.prior === undefined ? {} : { prior: patch.prior }),
+    };
+  });
+  return patchPreparedRowsUnlocked(appId, model, definition, prepared, appPresent);
 }
 
 /**
