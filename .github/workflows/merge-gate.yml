@@ -754,10 +754,10 @@ jobs:
     # so the scenario list is the same on both engines (storage brief, check 3).
     env:
       E2E_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
-    # Postgres 16 with pgvector (storage engine, decision D17): a real server, no PGlite.
+    # Postgres 18 with pgvector (storage engine, decision D17): a real server, no PGlite.
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -906,17 +906,17 @@ jobs:
     name: E2E Contract on Postgres (shard ${{ matrix.shard }}/6)
     needs: detect-changes
     if: github.event_name != 'pull_request' || needs.detect-changes.outputs.e2e == 'true'
-    # The recovery scenario needs pg_dump and pg_restore 16 for the pg16 service.
+    # The recovery scenario needs pg_dump and pg_restore 18 for the pg18 service (a step below).
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     timeout-minutes: 40
     env:
       E2E_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
-    # Postgres 16 with pgvector (storage engine, decision D17): a real server, no PGlite.
+    # Postgres 18 with pgvector (storage engine, decision D17): a real server, no PGlite.
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -942,6 +942,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install the PostgreSQL 18 client
+        run: bash scripts/install-postgres-client.sh 18 >> "$GITHUB_PATH"
 
       - name: Run E2E contract shard on Postgres
         run: bun run e2e --engine postgres --shard ${{ matrix.shard }}/6 --json e2e-pg-shard-${{ matrix.shard }}.json --summary-md e2e-summary.md
@@ -1004,10 +1007,10 @@ jobs:
     timeout-minutes: 20
     env:
       STORAGE_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
-    # Postgres 16 with pgvector (storage engine, decision D17): a real server, no PGlite.
+    # Postgres 18 with pgvector (storage engine, decision D17): a real server, no PGlite.
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -1191,7 +1194,7 @@ jobs:
     # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: postgres
         ports:

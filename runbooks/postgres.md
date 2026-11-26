@@ -20,7 +20,7 @@ An installation that sets none of them behaves as before.
 
 ## Requirements
 
-- Postgres 16 with the pgvector extension (memory vector search). CI uses `pgvector/pgvector:pg16`.
+- Postgres 16 or later with the pgvector extension (memory vector search). Use Postgres 18 for a new install. CI, the Compose overlay and the worker image use Postgres 18 (`pgvector/pgvector:pg18`).
 - A database created with the `C` collation and character classes: `CREATE DATABASE swarm TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`. SQLite compares text by bytes and folds case for ASCII only; the `C` locale gives the same order and the same `ILIKE`/`lower()` behavior.
 - The extension: the first migration runs `CREATE EXTENSION IF NOT EXISTS vector`. If the swarm role may not create it, run that statement once as a superuser before the first start.
 - The swarm role owns the schema objects (it runs the migrations).
@@ -36,6 +36,19 @@ Compose: `docker compose -f docker-compose.example.yml -f docker-compose.postgre
 Helm: set `database.url` (stored in a chart Secret) or `database.existingSecret` (keys `DATABASE_URL`, optional `DATABASE_QUERY_URL`). The chart turns the Litestream sidecar off on Postgres. Keep `api.replicas: 1`.
 
 Keep the API volume on both engines: it holds the encryption key file and the page-session secret.
+
+## Upgrade a Compose database from Postgres 16
+
+The Compose overlay moved from `pgvector/pgvector:pg16` with the volume at `/var/lib/postgresql/data` to `pg18` with the volume at `/var/lib/postgresql`. The Postgres 18 images keep the data in `/var/lib/postgresql/18/docker`. An old volume does not start under the new overlay. The user procedure (dump with the old overlay, restore into the new one) is in the docs guide: [Upgrade a Compose database from Postgres 16](../docs-site/content/docs/(documentation)/guides/postgres.mdx). Keep the two in step.
+
+Facts behind it, tested on 2026-11-26:
+
+- pg18 on a pg16 volume, at either mount path: the container stops with `Error: in 18+, these Docker images are configured to store database data in a format which is compatible with "pg_ctlcluster"`. The data stays as it was. The failed start leaves an empty `18/docker` directory in the volume, and the old overlay still starts on it.
+- A `pg16` image with the new mount path starts a new, empty database in an anonymous volume at `/var/lib/postgresql/data`. The API then starts on that empty database. Never pair the two.
+- `pg_dump -Fc` of a pg16 swarm database (144 tables), then `pg_restore --exit-on-error` into a fresh pg18 database with the same `POSTGRES_INITDB_ARGS`: exit 0, the API started (`[db] Postgres engine ready`) and read its tasks.
+- At the first start, the image runs a short init server on the Unix socket only. A socket `pg_isready` passes during that phase, so wait with `pg_isready -h 127.0.0.1` before a restore.
+
+A database outside Compose (managed Postgres, Dokploy) moves with the tools of its provider: a major-version upgrade, `pg_upgrade`, or the same dump and restore. A new Postgres 18 cluster has data checksums on by default. `pg_upgrade` needs the same checksum setting on both clusters.
 
 ## db-query reader role
 

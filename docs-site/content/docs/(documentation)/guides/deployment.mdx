@@ -581,7 +581,7 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
-The worker image also includes PostgreSQL 16 server binaries for local test setups. Nothing auto-starts unless you set `SWARM_DEP_POSTGRES_ENABLED=true`; in that case the root-stage entrypoint runs [`scripts/init-local-postgres.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-postgres.sh) before the worker privilege drop, then starts the cluster as the `worker` user on `localhost:5433` by default. Override with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB` as needed.
+The worker image also includes PostgreSQL 18 server binaries for local test setups. Nothing auto-starts unless you set `SWARM_DEP_POSTGRES_ENABLED=true`; in that case the root-stage entrypoint runs [`scripts/init-local-postgres.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-postgres.sh) before the worker privilege drop, then starts the cluster as the `worker` user on `localhost:5433` by default. Override with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB` as needed.
 
 Set a non-empty `LOCAL_POSTGRES_PASSWORD` in the worker environment before enabling PostgreSQL. The helper has no password default and reapplies the supplied value to existing clusters on every invocation. Configure password-using clients with that value; loopback binding and local trust authentication are unchanged.
 

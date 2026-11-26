@@ -1016,11 +1016,11 @@ chown -R worker:worker /home/worker/.local 2>/dev/null || true
 # documentation of the skill-fs-writer intent.
 chown -R worker:worker /home/worker/.claude 2>/dev/null || true
 
-# Optional: initialize a local PostgreSQL 16 cluster before dropping privileges.
+# Optional: initialize a local PostgreSQL 18 cluster before dropping privileges.
 # command -v guard: postgres/redis servers only ship in the full image — on the
 # slim image these flags log a warning instead of killing the boot (set -e).
 if [ "${SWARM_DEP_POSTGRES_ENABLED:-false}" = "true" ]; then
-  if [ -x /usr/lib/postgresql/16/bin/initdb ]; then
+  if [ -x /usr/lib/postgresql/18/bin/initdb ]; then
     /usr/local/bin/init-local-postgres.sh
   else
     echo "WARNING: SWARM_DEP_POSTGRES_ENABLED=true but PostgreSQL is not installed (slim image?) - skipping"

@@ -10,7 +10,7 @@
  *       [--compare a.json b.json]
  *
  * The URL names a maintenance database (for example of
- * `docker run -e POSTGRES_PASSWORD=bench -p 5432:5432 pgvector/pgvector:pg16`).
+ * `docker run -e POSTGRES_PASSWORD=bench -p 5432:5432 pgvector/pgvector:pg18`).
  *
  * Steps:
  * 1. A template database with the chain up to `--existing-head` and the

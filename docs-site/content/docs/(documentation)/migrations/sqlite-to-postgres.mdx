@@ -142,7 +142,7 @@ The built-in scripts, schedules and extensions carry SQL for both engines, and t
 
 ## Step 3: prepare PostgreSQL
 
-Follow [Requirements](/docs/guides/postgres#requirements): PostgreSQL 16, pgvector, and a database with the `C` collation. Create the database and stop there. `db-copy` refuses a database that already holds tables, so do not start an API on it.
+Follow [Requirements](/docs/guides/postgres#requirements): PostgreSQL 16 or later (18 for a new server), pgvector, and a database with the `C` collation. Create the database and stop there. `db-copy` refuses a database that already holds tables, so do not start an API on it.
 
 Set these before the window. Each one needs a server restart, which is free now and costs an API restart later.
 
@@ -249,7 +249,7 @@ Every write made on PostgreSQL after the switch is lost in a rollback: nothing c
 
 1. Inventory of scripts, widgets, prompts, extensions and pages with SQL
 2. Every item ported to portable or dual-dialect SQL, live on SQLite
-3. PostgreSQL 16 + pgvector, `C` collation, the settings of Step 3
+3. PostgreSQL 16 or later (18 for a new server) + pgvector, `C` collation, the settings of Step 3
 4. Supervisor restarts the API
 5. Rehearsal passed with `every count and checksum equal`, duration known
 6. Ported statements ran on the rehearsal database
