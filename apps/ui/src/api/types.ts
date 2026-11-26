@@ -3433,11 +3433,16 @@ export interface DbQueryRequest {
   params?: unknown[];
 }
 
+/** SQL dialect of the API's storage engine. */
+export type DbQueryDialect = "sqlite" | "postgres";
+
 export interface DbQueryResponse {
   columns: string[];
   rows: unknown[][];
   elapsed: number;
   total: number;
+  /** Absent on an API from before the Postgres engine (SQLite only). */
+  dialect?: DbQueryDialect;
 }
 
 // Budgets & Pricing — see src/types.ts in the API repo for the source of truth.
