@@ -1,6 +1,6 @@
 import type { SlackMessage } from "@desplega.ai/slack-mock";
 import { sql } from "../db";
-import { expect, pollUntil } from "../http";
+import { expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
   claim,
@@ -13,10 +13,14 @@ import {
   registerWorker,
 } from "./slack-helpers";
 
-// A Lead follow-up that finishes after the Lead's previous card in the
-// same thread, with nothing posted in between, merges into that card (one chat.update, no new message), so the
-// thread reads as one answer and sends one notification. A later message in
-// the thread, or a failed follow-up, keeps the follow-up a separate card.
+// A Lead follow-up that finishes soon after the Lead's previous card in the
+// same thread, with nothing posted in between, merges into that card (one
+// chat.update, no new message), so the thread reads as one answer. A later
+// message in the thread keeps the follow-up a separate card. A follow-up that
+// finishes after SLACK_CARD_MERGE_WINDOW_SEC posts a new reply, because an
+// edit sends no notification, and the previous card becomes a pointer.
+// A failed follow-up always posts its own card; a slow one also turns the
+// previous card into a pointer.
 //
 // Runs with render v2 on and delegation off, the production state.
 
@@ -97,10 +101,69 @@ async function settledFollowUpRow(ctx: ScenarioContext, ask: DelegatedAsk): Prom
   return row;
 }
 
+/** Sets SLACK_CARD_MERGE_WINDOW_SEC and loads it into the running server. */
+async function setMergeWindow(ctx: ScenarioContext, seconds: string): Promise<void> {
+  expectStatus(
+    await ctx.api("PUT", "/api/config", {
+      body: {
+        scope: "global",
+        scopeId: null,
+        key: "SLACK_CARD_MERGE_WINDOW_SEC",
+        value: seconds,
+        isSecret: false,
+      },
+    }),
+    [200],
+    "set SLACK_CARD_MERGE_WINDOW_SEC",
+  );
+  expectStatus(
+    await ctx.api("POST", "/api/config/reload", { body: {} }),
+    [200],
+    "reload config",
+  );
+}
+
+/** A follow-up that ends after the 1s merge window: own card, and the ask's card points at it. */
+async function expectSlowFollowUpReply(
+  ctx: ScenarioContext,
+  workerId: string,
+  label: string,
+  status: "completed" | "failed",
+  pointer: string,
+): Promise<void> {
+  const ask = await delegatedAsk(ctx, workerId, label);
+  const host = outcomeRow(ctx, ask.askTaskId);
+  if (!host) throw new Error(`The ${label} ask ${ask.askTaskId} has no outcome row`);
+  await Bun.sleep(1_500);
+  const answer = `follow-up review ${label} ${ctx.nonce}`;
+  await finish(
+    ctx,
+    ask.leadId,
+    ask.followUpId,
+    status === "failed" ? { status, failureReason: answer } : { status, output: answer },
+  );
+  const row = await settledFollowUpRow(ctx, ask);
+  expect(
+    row.merged_into_id === null && row.ts !== host.ts,
+    `The slow ${label} follow-up merged into the ask's card: ${JSON.stringify(row)}`,
+  );
+  const ownCard = threadMessages(ctx, ask.threadTs, answer);
+  expect(
+    ownCard.length === 1 && ownCard[0]?.ts === row.ts,
+    `The slow ${label} follow-up did not post a new reply: ${JSON.stringify(ownCard.map((m) => m.ts))}`,
+  );
+  const pointed = await pollUntil(() => {
+    const card = ctx.slack.messages(GENERAL).find((message) => message.ts === host.ts);
+    return card?.text === pointer && !JSON.stringify(card).includes(ask.askOutput);
+  }, 30_000);
+  expect(pointed, `The ${label} ask's card was not edited down to "${pointer}"`);
+}
+
 export const slackFollowUpCardMerge: Scenario = {
   name: "slack-follow-up-card-merge",
   // Band 2 (130-140): render v2 on, delegation off.
   order: 130.6,
+  groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
     await registerLead(ctx, "e2e-lead-card-merge");
@@ -173,7 +236,7 @@ export const slackFollowUpCardMerge: Scenario = {
       `The interrupted follow-up did not post its own card: ${JSON.stringify(ownCard.map((m) => m.ts))}`,
     );
 
-    // 3. A failed follow-up stays a separate card.
+    // 3. A quick failed follow-up stays a separate card, so it notifies.
     const failed = await delegatedAsk(ctx, workerId, "failed");
     const failureReason = `follow-up review failed ${ctx.nonce}`;
     await finish(ctx, failed.leadId, failed.followUpId, {
@@ -190,5 +253,15 @@ export const slackFollowUpCardMerge: Scenario = {
       failedCard.length === 1 && failedCard[0]?.ts === failedRow.ts,
       "The failed follow-up did not post its own card",
     );
+
+    // 4. A follow-up past the merge window posts a new reply, so the requester
+    // is notified, and the ask's card becomes a pointer to it.
+    await setMergeWindow(ctx, "1");
+    try {
+      await expectSlowFollowUpReply(ctx, workerId, "slow-done", "completed", "✅ Done ↓");
+      await expectSlowFollowUpReply(ctx, workerId, "slow-failed", "failed", "❌ Failed ↓");
+    } finally {
+      await setMergeWindow(ctx, "120");
+    }
   },
 };

@@ -234,12 +234,13 @@ A continuation normally resolves its parent's waiting card in place, without pos
 
 Terminal task output is automatically delivered through the thread's outcome card. No additional relay message is created: extra messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. When `slack-reply` is used, the outcome card is compacted instead of duplicating that explicit reply. These tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains the originating agent and task without a Slack-message permalink.
 
-A Lead follow-up or resume result can merge into the previous outcome card instead of posting a new message. The previous card gets the new result under its own, separated by a blank line, and one footer links both tasks. An edit sends no notification, so the merge happens only when all of these are true:
+A Lead follow-up or resume result can merge into the previous outcome card of the same ask instead of posting a new message. The card shows the ask's own answer and the newest follow-up's answer, and one footer links both tasks. The previous card is a candidate only when all of these are true:
 
-- The follow-up completed. A failed or deferred follow-up posts its own card.
-- The previous card is from the same agent, changed at most 2 minutes ago, and is a plain completed result. A deferral, conclusion, delegated-child or Block Kit card is never a merge target.
+- The follow-up completed or failed. A deferred or cancelled follow-up posts its own card.
+- The previous card is from the same agent, answers the same Slack ask, and is a plain completed result. A deferral, conclusion, delegated-child or Block Kit card is never a merge target.
 - No message, from a person or a bot, came after the previous card.
-- One card holds at most 5 results, and the merged text fits one card.
+
+An edit sends no notification, so only a quick completed follow-up merges: one that finished within `SLACK_CARD_MERGE_WINDOW_SEC` seconds (default `120`) of the previous card's first post, with merged text that fits one card. A quick failed follow-up posts its own card and leaves the previous card as it is. A slower follow-up posts its answer as a new reply, which notifies the requester, and the previous card is edited down to `✅ Done ↓` (or `❌ Failed ↓`).
 
 Set `SLACK_RENDER_V2_QUIET_LEAD_THREADS=true` to keep Lead threads to the Lead's replies: a Lead deferral posts no ⏳ waiting card, and a successful Lead follow-up that ends without `slack-reply` posts no card; failed or cancelled follow-ups and resumed asks still post their cards. See [Quiet Lead threads](/docs/ui/configuration#quiet-lead-threads-in-slack).
 
