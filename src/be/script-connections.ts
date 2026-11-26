@@ -2121,14 +2121,14 @@ export async function getScriptMcpConnectionDescriptors(
 
 /**
  * True when an enabled connection with this slug applies to the context: the
- * `listScriptConnections(context)` check, read from the run-time catalog
- * instead of every column of every row.
+ * `listScriptConnections(context)` check on the catalog columns only, not the
+ * stored spec and generated types. Uncached: every call sees the current rows.
  */
 export async function isScriptConnectionReachable(
   slug: string,
   context: { agentId?: string; repoId?: string },
 ): Promise<boolean> {
-  return (await loadScriptConnectionCatalog()).some(
+  return catalogFromRows(await scriptsRepo().listConnectionCatalog()).some(
     (connection) =>
       connection.slug === slug &&
       connection.enabled &&
