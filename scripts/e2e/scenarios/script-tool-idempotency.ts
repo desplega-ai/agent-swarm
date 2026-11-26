@@ -193,7 +193,7 @@ export const scriptToolIdempotency: Scenario = {
     const scan = await ctx.api("POST", "/api/db-query", {
       agentId,
       body: {
-        sql: "SELECT namespace, value FROM kv_entries WHERE value LIKE ?",
+        sql: "SELECT namespace, value FROM kv_entries WHERE value LIKE $1",
         params: [`%${marker}%`],
       },
     });
