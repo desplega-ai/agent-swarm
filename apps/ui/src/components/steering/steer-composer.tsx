@@ -21,6 +21,10 @@
  * all or nothing: if one upload fails, nothing is sent, the files already
  * uploaded are deleted (best effort), and the text and files stay in the box.
  *
+ * The send itself is `useSteerSend`. A caller that can swap this box out
+ * mid-send (`TaskComposer`) owns it and passes it as `send`, so the upload,
+ * the lock and the clear on success outlive this component.
+ *
  * The draft can be **controlled** (`value` + `onValueChange`). Callers that
  * swap this component in and out (`TaskComposer` flips between the follow-up
  * dock and this one as the target task's status changes) must use the
@@ -31,11 +35,12 @@
  * toast has an Open action that goes to that task.
  */
 
+import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { deleteTaskAttachment } from "@/api/fs";
-import { useSteerTask } from "@/api/hooks/use-tasks";
+import { type SteerTaskInput, useSteerTask } from "@/api/hooks/use-tasks";
 import type { AgentTaskStatus, SteeringSource, SteerMode, SteerResult } from "@/api/types";
 import { uploadComposeAttachments } from "@/components/sessions/compose-attachment-upload";
 import { ComposerDock } from "@/components/sessions/composer-dock";
@@ -91,8 +96,77 @@ export interface SteerComposerProps {
    */
   attachments?: File[];
   onAttachmentsChange?: (files: File[]) => void;
+  /** The send, owned by the caller (`useSteerSend`). Omitted: this box owns it. */
+  send?: SteerSend;
   className?: string;
 }
+
+/** A steer with the files it carries: they upload to the task first. */
+export interface SteerSendInput extends Omit<SteerTaskInput, "attachmentIds"> {
+  attachments: File[];
+}
+
+/** A file did not upload, so nothing was sent. */
+export class SteerUploadError extends Error {}
+
+/**
+ * Uploads the files to the steered task, then steers with their ids. All or
+ * nothing: a steer that silently drops a screenshot misleads the agent, so a
+ * failed upload withdraws the files that did upload and sends nothing. Its
+ * `onSuccess` and `onError` run even after the box that sent it unmounts.
+ */
+export function useSteerSend({
+  mutationKey,
+  onSuccess,
+  onError,
+}: {
+  mutationKey?: readonly unknown[];
+  onSuccess?: (input: SteerSendInput) => void;
+  onError?: (error: Error) => void;
+} = {}) {
+  const steerTask = useSteerTask();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationKey,
+    mutationFn: async ({ attachments, ...input }: SteerSendInput) => {
+      if (attachments.length === 0) return steerTask.mutateAsync(input);
+      const result = await uploadComposeAttachments({ taskId: input.id, files: attachments });
+      if (result.failed.length > 0) {
+        // A leftover is only an unused attachment on the task.
+        await Promise.allSettled(
+          result.attachments.map((a) => deleteTaskAttachment(input.id, a.id)),
+        );
+        const label =
+          result.failed.length === 1 ? result.failed[0].file.name : `${result.failed.length} files`;
+        throw new SteerUploadError(
+          `${label} failed to upload, so nothing was sent. Send again to retry.`,
+        );
+      }
+      return steerTask.mutateAsync({
+        ...input,
+        attachmentIds: result.attachments.map((a) => a.id),
+      });
+    },
+    onSuccess: (result, input) => {
+      const promotedTaskId = result.promotedTaskId;
+      toast.success(
+        describeOutcome(result),
+        promotedTaskId
+          ? {
+              action: {
+                label: "Open",
+                onClick: () => void navigate(`/tasks/${promotedTaskId}`),
+              },
+            }
+          : undefined,
+      );
+      onSuccess?.(input);
+    },
+    onError,
+  });
+}
+
+export type SteerSend = ReturnType<typeof useSteerSend>;
 
 /** Statuses where the task has no live session yet: steering can only queue. */
 const PRE_START_STATUSES = new Set<AgentTaskStatus>([
@@ -134,20 +208,15 @@ export function SteerComposer({
   source,
   attachments,
   onAttachmentsChange,
+  send,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
   // A Viewer's role cannot steer: no box that would only return 403.
   const maySteer = useCan("task.steer.own");
-  const navigate = useNavigate();
-  const steerTask = useSteerTask();
   const [internalDraft, setInternalDraft] = useState("");
   const [mode, setMode] = useState<SteerMode>("queue");
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const files = attachments ?? [];
-  const isPending = steerTask.isPending || uploading;
-
   // Controlled when the caller supplies `value`; the internal state is then
   // never read, so there's no second source of truth to drift.
   const isControlled = value !== undefined;
@@ -159,6 +228,18 @@ export function SteerComposer({
     },
     [isControlled, onValueChange],
   );
+  const ownSend = useSteerSend({
+    onSuccess: (input) => {
+      setDraft("");
+      citations?.clear();
+      if (input.attachments.length > 0) {
+        onAttachmentsChange?.(files.filter((file) => !input.attachments.includes(file)));
+      }
+    },
+  });
+  const sending = send ?? ownSend;
+  const isPending = sending.isPending;
+  const uploadError = sending.error instanceof SteerUploadError ? sending.error.message : null;
 
   const modes = supportedSteerModes ?? ["queue"];
   const notStarted = taskStatus !== undefined && PRE_START_STATUSES.has(taskStatus);
@@ -172,66 +253,17 @@ export function SteerComposer({
   // us (task moves to a different agent): never submit an unsupported mode.
   const effectiveMode: SteerMode = canInterrupt ? mode : "queue";
 
-  const send = (message: string, sentFiles: File[], attachmentIds: string[]) => {
-    steerTask.mutate(
-      {
-        id: taskId,
-        message,
-        mode: effectiveMode,
-        requestedByUserId: userId ?? undefined,
-        source,
-        attachmentIds,
-      },
-      {
-        onSuccess: (result) => {
-          const promotedTaskId = result.promotedTaskId;
-          toast.success(
-            describeOutcome(result),
-            promotedTaskId
-              ? {
-                  action: {
-                    label: "Open",
-                    onClick: () => void navigate(`/tasks/${promotedTaskId}`),
-                  },
-                }
-              : undefined,
-          );
-          setDraft("");
-          citations?.clear();
-          // The box takes no file while a send is pending, so every file went.
-          if (sentFiles.length > 0) onAttachmentsChange?.([]);
-        },
-      },
-    );
-  };
-
-  const submit = async () => {
+  const submit = () => {
     const message = messageWithCitations(draft, citations);
     if (message.length === 0 || isPending) return;
-    setUploadError(null);
-    if (files.length === 0) return send(message, [], []);
-    const sentFiles = files;
-    setUploading(true);
-    try {
-      const result = await uploadComposeAttachments({ taskId, files: sentFiles });
-      if (result.failed.length > 0) {
-        // All or nothing: a steer that silently drops a screenshot misleads
-        // the agent. Withdraw what did upload; a leftover is only an unused
-        // attachment on the task.
-        await Promise.allSettled(result.attachments.map((a) => deleteTaskAttachment(taskId, a.id)));
-        const label =
-          result.failed.length === 1 ? result.failed[0].file.name : `${result.failed.length} files`;
-        setUploadError(`${label} failed to upload, so nothing was sent. Send again to retry.`);
-        return;
-      }
-      send(
-        message,
-        sentFiles,
-        result.attachments.map((a) => a.id),
-      );
-    } finally {
-      setUploading(false);
-    }
+    sending.mutate({
+      id: taskId,
+      message,
+      mode: effectiveMode,
+      requestedByUserId: userId ?? undefined,
+      source,
+      attachments: files,
+    });
   };
 
   const routeLabel = !hasLiveDelivery
@@ -252,19 +284,23 @@ export function SteerComposer({
       value={draft}
       onChange={setDraft}
       citations={citations}
-      onSubmit={() => void submit()}
+      onSubmit={submit}
       isPending={isPending}
-      isError={steerTask.isError}
-      errorMessage={steerTask.error instanceof Error ? steerTask.error.message : "Failed to send"}
+      isError={sending.isError && !uploadError}
+      errorMessage={sending.error instanceof Error ? sending.error.message : "Failed to send"}
       pendingLabel={
-        uploading ? "Uploading files…" : hasLiveDelivery ? "Sending…" : "Creating follow-up task…"
+        sending.variables?.attachments.length
+          ? "Uploading files…"
+          : hasLiveDelivery
+            ? "Sending…"
+            : "Creating follow-up task…"
       }
       attachments={onAttachmentsChange ? files : undefined}
       onAttachmentsChange={
         onAttachmentsChange
           ? (next) => {
               onAttachmentsChange(next);
-              setUploadError(null);
+              if (uploadError) sending.reset();
             }
           : undefined
       }

@@ -146,6 +146,9 @@ mock.module("@/contexts/current-user-context", () => ({
 // Steering is its own surface; the stub shows which composer is up, the send
 // label, placeholder and route detail it was handed, and renders its extra actions.
 mock.module("@/components/steering/steer-composer", () => ({
+  // task-composer-steer.test.tsx covers the real send.
+  useSteerSend: () => ({ isPending: false }),
+  SteerUploadError: class extends Error {},
   SteerComposer: ({
     extraActions,
     sendLabel,

@@ -3558,6 +3558,9 @@
     },
     "handled_note": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "attachments": {
+      "pending": "unassigned: no batch yet scrubs this writer"
     }
   },
   "task_templates": {

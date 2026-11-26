@@ -15,7 +15,10 @@ mock.module("@/api/hooks/use-tasks", () => ({
     isPending: false,
     isError: false,
     error: null,
-    mutate: (input: Record<string, unknown>) => steers.push(input),
+    mutateAsync: async (input: Record<string, unknown>) => {
+      steers.push(input);
+      return { outcome: "queued" };
+    },
   }),
 }));
 mock.module("sonner", () => ({ toast: { success: () => {} } }));
@@ -61,6 +64,7 @@ mock.module("@/components/sessions/composer-dock", () => ({
 
 const { createRoot } = await import("react-dom/client");
 const { MemoryRouter } = await import("react-router-dom");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { SteerComposer } = await import("./steer-composer");
 
 beforeEach(() => {
@@ -74,7 +78,13 @@ async function sendFrom(node: React.ReactNode): Promise<string> {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<MemoryRouter>{node}</MemoryRouter>));
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>{node}</MemoryRouter>
+      </QueryClientProvider>,
+    ),
+  );
   await act(async () => (host.querySelector("button") as HTMLButtonElement).click());
   // The upload resolves after the click.
   await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
