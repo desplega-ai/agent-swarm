@@ -130,6 +130,7 @@ describe("API drain with a real worker", () => {
           env: {
             ...minimalEnv(),
             HOME: home,
+            SWARM_WORKSPACE_DIR: home,
             AGENT_SWARM_API_KEY: sut.apiKey,
             MCP_BASE_URL: sut.baseUrl,
             AGENT_ID: agentId,
@@ -202,6 +203,7 @@ describe("API drain with a real worker", () => {
         ...minimalEnv(),
         PATH: process.env.PATH ?? "/usr/bin:/bin",
         HOME: home,
+        SWARM_WORKSPACE_DIR: home,
         AGENT_SWARM_API_KEY: sut.apiKey,
         API_KEY: sut.apiKey,
         MCP_BASE_URL: sut.baseUrl,

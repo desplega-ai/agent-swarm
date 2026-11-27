@@ -100,6 +100,7 @@ try {
       ...minimalEnv(),
       ...routeEnv,
       HOME: home,
+      SWARM_WORKSPACE_DIR: workspace,
       CLAUDE_CONFIG_DIR: join(home, ".claude"),
       CLAUDE_TRUST_PRESEED: "false",
       LOG_DIR: join(directory, "logs"),

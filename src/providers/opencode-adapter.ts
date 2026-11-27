@@ -40,6 +40,12 @@ import {
   getOpenRouterAttributionHeaders,
   getOpenRouterBaseUrl,
 } from "../utils/openrouter-base-url";
+import {
+  IDENTITY_MD_PATH,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
+} from "../utils/profile-paths";
 import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
@@ -825,10 +831,10 @@ export class OpencodeSession implements ProviderSession {
   private onFileChanged(file: string): void {
     const path = file.startsWith("/") ? file : join(this.cwd, file);
     if (
-      path === "/workspace/SOUL.md" ||
-      path === "/workspace/IDENTITY.md" ||
-      path === "/workspace/TOOLS.md" ||
-      path === "/workspace/CLAUDE.md"
+      path === SOUL_MD_PATH ||
+      path === IDENTITY_MD_PATH ||
+      path === TOOLS_MD_PATH ||
+      path === WORKSPACE_CLAUDE_MD_PATH
     ) {
       void syncIdentityFilesToServer(this.swarm, "self_edit");
     }

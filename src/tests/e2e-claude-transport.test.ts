@@ -134,6 +134,7 @@ describe("Claude E2E transport harness", () => {
           ? (spawnCalls[0][1] as { env?: Record<string, string> }).env
           : undefined;
       expect(workerEnv?.CLAUDE_BINARY).toBe("/opt/claude-pinned");
+      expect(workerEnv?.SWARM_WORKSPACE_DIR).toBe(`${workerEnv?.HOME}/workspace`);
       expect(spawnCalls[0]?.[0]).toContain("/opt/agent-swarm");
     } finally {
       spawnSpy.mockRestore();

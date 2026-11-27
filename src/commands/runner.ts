@@ -166,9 +166,14 @@ import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   bootIdentityBaselines,
   fetchProfileSyncRejectionBanner,
+  HEARTBEAT_MD_PATH,
+  IDENTITY_MD_PATH,
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
+  SETUP_SCRIPT_PATH,
+  SOUL_MD_PATH,
   syncProfileFilesToServer,
+  TOOLS_MD_PATH,
   WORKSPACE_CLAUDE_MD_PATH,
   writeIdentityBaselines,
   writeProfileFileFromDb,
@@ -7256,9 +7261,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   }
 
   // Write SOUL.md and IDENTITY.md to workspace before spawning Claude
-  const SOUL_MD_PATH = "/workspace/SOUL.md";
-  const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
-
   if (agentSoulMd) {
     try {
       const backupPath = await writeProfileFileFromDb(SOUL_MD_PATH, agentSoulMd);
@@ -7282,8 +7284,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Only create if it doesn't exist — the entrypoint already composed/prepended it at container start
   if (agentSetupScript) {
     try {
-      if (!(await Bun.file("/workspace/start-up.sh").exists())) {
-        await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${agentSetupScript}\n`);
+      if (!(await Bun.file(SETUP_SCRIPT_PATH).exists())) {
+        await Bun.write(SETUP_SCRIPT_PATH, `#!/bin/bash\n${agentSetupScript}\n`);
         console.log(`[${role}] Wrote start-up.sh to workspace`);
       }
     } catch (err) {
@@ -7294,7 +7296,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Write TOOLS.md to workspace (agent can edit during session)
   if (agentToolsMd) {
     try {
-      const backupPath = await writeProfileFileFromDb("/workspace/TOOLS.md", agentToolsMd);
+      const backupPath = await writeProfileFileFromDb(TOOLS_MD_PATH, agentToolsMd);
       if (backupPath) console.warn(`[${role}] Archived differing TOOLS.md at ${backupPath}`);
       console.log(`[${role}] Wrote TOOLS.md to workspace`);
     } catch (err) {
@@ -7305,7 +7307,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Write HEARTBEAT.md to workspace (lead's periodic checklist)
   if (agentHeartbeatMd) {
     try {
-      const backupPath = await writeProfileFileFromDb("/workspace/HEARTBEAT.md", agentHeartbeatMd);
+      const backupPath = await writeProfileFileFromDb(HEARTBEAT_MD_PATH, agentHeartbeatMd);
       if (backupPath) console.warn(`[${role}] Archived differing HEARTBEAT.md at ${backupPath}`);
       console.log(`[${role}] Wrote HEARTBEAT.md to workspace`);
     } catch (err) {
@@ -7334,7 +7336,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   try {
     // start-up.sh is not rewritten here when it exists: the entrypoint composed
     // it from the DB at container start, so its agent-managed section is the base.
-    const setupFile = Bun.file("/workspace/start-up.sh");
+    const setupFile = Bun.file(SETUP_SCRIPT_PATH);
     const baselines = bootIdentityBaselines(
       {
         soulMd: agentSoulMd,

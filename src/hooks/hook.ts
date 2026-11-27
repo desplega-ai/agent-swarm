@@ -31,6 +31,15 @@ import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import {
+  HEARTBEAT_MD_PATH,
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SETUP_SCRIPT_PREFIX,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+  WORKSPACE_DIR,
+} from "../utils/profile-paths";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { contextBoundNoteThreshold, injectClaimedContextBoundNote } from "./context-bound-note";
 import {
@@ -48,13 +57,6 @@ import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 
-// Identity and workspace file paths
-const SOUL_MD_PATH = "/workspace/SOUL.md";
-const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
-const TOOLS_MD_PATH = "/workspace/TOOLS.md";
-const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
-const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
-
 type McpServerConfig = {
   url: string;
   headers: {
@@ -70,7 +72,7 @@ type McpServerConfig = {
  */
 export async function loadHookMcpConfig(
   projectDir: string,
-  workspaceDir = "/workspace",
+  workspaceDir = WORKSPACE_DIR,
 ): Promise<McpServerConfig | undefined> {
   for (const configDir of new Set([workspaceDir, projectDir])) {
     try {
@@ -1395,7 +1397,7 @@ export async function handleHook(): Promise<void> {
             }
 
             // Setup script: start-up.sh (or start-up.*)
-            if (editedPath.startsWith("/workspace/start-up")) {
+            if (editedPath.startsWith(SETUP_SCRIPT_PREFIX)) {
               await syncSetupScriptToServer(agentInfo.id, "self_edit");
             }
           } catch {

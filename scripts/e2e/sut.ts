@@ -291,6 +291,7 @@ export async function startSut(
   const env = {
     ...minimalEnv(),
     HOME: homeDir,
+    SWARM_WORKSPACE_DIR: `${homeDir}/workspace`,
     PORT: String(port),
     API_KEY: apiKey,
     AGENT_SWARM_API_KEY: apiKey,

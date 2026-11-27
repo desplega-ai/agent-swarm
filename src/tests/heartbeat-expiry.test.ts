@@ -259,6 +259,7 @@ describe("profile persistence heartbeat gate", () => {
               OTEL_SDK_DISABLED: "true",
               DESPLEGA_TELEMETRY_ENV: "test",
               HOME: dir,
+              SWARM_WORKSPACE_DIR: dir,
               PATH: dir,
             },
           }),

@@ -36,15 +36,28 @@ import {
   type BudgetedIdentityField,
   IDENTITY_FIELD_BUDGETS,
 } from "../utils/identity-field-budget.ts";
+import {
+  HEARTBEAT_MD_PATH,
+  IDENTITY_BASELINES_PATH,
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
+} from "../utils/profile-paths.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { prependContextPreamble } from "./context-preamble.ts";
 import "./templates.ts";
 
-export const SOUL_MD_PATH = "/workspace/SOUL.md";
-export const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
-export const TOOLS_MD_PATH = "/workspace/TOOLS.md";
-export const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
-export const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
+export {
+  HEARTBEAT_MD_PATH,
+  IDENTITY_BASELINES_PATH,
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
+};
 
 // ──────────────────────────────────────────────────────────────────────────
 // Identity-file baseline hashes — prevents session-end sync from clobbering
@@ -61,8 +74,6 @@ export const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 //   4. After the API accepts a file, its baseline advances to the synced hash,
 //      so a file edited once is not re-sent over a later DB-side edit.
 // ──────────────────────────────────────────────────────────────────────────
-export const IDENTITY_BASELINES_PATH = "/tmp/identity-baselines.json";
-
 export type IdentityBaselines = Record<string, string>;
 
 export function contentSha256(content: string): string {
@@ -149,10 +160,8 @@ const PROFILE_FIELD_DETAILS: Record<
     recoveryGuidance: `Inspect and shrink the live ${IDENTITY_MD_PATH} first, moving durable tail content into memory. After a worker restart, use ${IDENTITY_MD_PATH}.pre-boot-<timestamp>.bak as the fallback copy of the rejected content.`,
   },
   claudeMd: {
-    label:
-      "claudeMd (~/.claude/CLAUDE.md for Claude; /workspace/CLAUDE.md for non-Claude harnesses, which Claude excludes from its memory load)",
-    recoveryGuidance:
-      "Inspect and shrink the live CLAUDE.md source first, moving durable tail content into memory. Claude edits ~/.claude/CLAUDE.md; editing /workspace/CLAUDE.md does not reach a Claude session. After a worker restart, non-Claude harnesses can use /workspace/CLAUDE.md.pre-boot-<timestamp>.bak as the fallback copy; Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step.",
+    label: `claudeMd (~/.claude/CLAUDE.md for Claude; ${WORKSPACE_CLAUDE_MD_PATH} for non-Claude harnesses, which Claude excludes from its memory load)`,
+    recoveryGuidance: `Inspect and shrink the live CLAUDE.md source first, moving durable tail content into memory. Claude edits ~/.claude/CLAUDE.md; editing ${WORKSPACE_CLAUDE_MD_PATH} does not reach a Claude session. After a worker restart, non-Claude harnesses can use ${WORKSPACE_CLAUDE_MD_PATH}.pre-boot-<timestamp>.bak as the fallback copy; Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step.`,
   },
   toolsMd: {
     label: `toolsMd (${TOOLS_MD_PATH})`,
@@ -608,17 +617,6 @@ export function planClaudeMdSync(state: {
   if (base === null) return { claudeMd: content, changeSource: "session_sync" };
   return { claudeMd: content, changeSource: "session_sync", expectedHashes: { claudeMd: base } };
 }
-/**
- * Workspace CLAUDE.md — the agent-level instructions file the runner
- * materializes from the `claudeMd` DB field at boot (`runner.ts`) and that the
- * base-prompt truncation notice tells NON-Claude harnesses (codex/pi/opencode)
- * to edit. Distinct from CLAUDE_MD_PATH; this is the FS→DB source for the
- * non-Claude providers that previously had no sync path at all. Written for
- * every harness (a container can live-swap providers), but Claude sessions
- * skip it via `claudeMdExcludes` (`src/providers/claude-flag-settings.ts`).
- */
-export const WORKSPACE_CLAUDE_MD_PATH = "/workspace/CLAUDE.md";
-
 // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption.
 // Mirrors `hook.ts` (raised from 100 to 500 after profile-corruption recurrences
 // where a short test sentinel synced into the real agent's DB row).

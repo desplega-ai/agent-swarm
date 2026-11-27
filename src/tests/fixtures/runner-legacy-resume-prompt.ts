@@ -20,21 +20,6 @@ mock.module("../../prompts/resolver", () => ({
 const profileSync = await import("../../commands/profile-sync");
 mock.module("../../commands/profile-sync", () => ({
   ...profileSync,
-  SOUL_MD_PATH: join(directory, "SOUL.md"),
-  IDENTITY_MD_PATH: join(directory, "IDENTITY.md"),
-  TOOLS_MD_PATH: join(directory, "TOOLS.md"),
-  HEARTBEAT_MD_PATH: join(directory, "HEARTBEAT.md"),
-  CLAUDE_MD_PATH: join(directory, "CLAUDE.md"),
-  WORKSPACE_CLAUDE_MD_PATH: join(directory, "CLAUDE.md"),
-  SETUP_SCRIPT_PATH: join(directory, "start-up.sh"),
-  IDENTITY_BASELINES_PATH: join(directory, "baselines.json"),
-  async readIdentityBaselines() {
-    return {};
-  },
-  async writeProfileFileFromDb() {
-    return null;
-  },
-  async writeIdentityBaselines() {},
   async syncProfileFilesToServer() {},
   async prependProfileSyncRejectionBanner(prompt: string) {
     return { prompt, injected: false };

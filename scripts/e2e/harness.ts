@@ -130,6 +130,7 @@ function workerEnv(
   const env: Record<string, string> = {
     ...minimalEnv(),
     HOME: homeDir,
+    SWARM_WORKSPACE_DIR: `${homeDir}/workspace`,
     LOG_DIR: `${homeDir}/logs`,
     AGENT_ID: agentId,
     MCP_BASE_URL: baseUrl,
@@ -426,7 +427,7 @@ async function runHarnessAttempt(
   claudeTransport: ClaudeTransport,
 ): Promise<HarnessAttempt> {
   const started = Date.now();
-  const stamp = `${Date.now()}-${provider}`;
+  const stamp = `${Date.now()}-${provider}-${nonce}`;
   const logPath = `/tmp/e2e-harness-${provider}-${stamp}.log`;
   const homeDir = `/tmp/e2e-harness-home-${stamp}`;
   let child: HarnessChild | undefined;

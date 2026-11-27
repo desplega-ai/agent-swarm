@@ -14,6 +14,13 @@ import {
   ProviderNameSchema,
 } from "@/types";
 import { MAX_PROFILE_FILE_LENGTH } from "@/utils/constants";
+import {
+  HEARTBEAT_MD_PATH,
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+} from "@/utils/profile-paths";
 
 // Loose mirror of AgentSchema for tool output: every field optional, no
 // datetime/uuid format pins, nested blobs collapsed to permissive objects.
@@ -329,35 +336,35 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (isUpdatingSelf && requestInfo.agentId === process.env.AGENT_ID) {
           if (soulMd !== undefined) {
             try {
-              await Bun.write("/workspace/SOUL.md", soulMd);
+              await Bun.write(SOUL_MD_PATH, soulMd);
             } catch {
               /* ignore */
             }
           }
           if (identityMd !== undefined) {
             try {
-              await Bun.write("/workspace/IDENTITY.md", identityMd);
+              await Bun.write(IDENTITY_MD_PATH, identityMd);
             } catch {
               /* ignore */
             }
           }
           if (setupScript !== undefined) {
             try {
-              await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${setupScript}\n`);
+              await Bun.write(SETUP_SCRIPT_PATH, `#!/bin/bash\n${setupScript}\n`);
             } catch {
               /* ignore */
             }
           }
           if (toolsMd !== undefined) {
             try {
-              await Bun.write("/workspace/TOOLS.md", toolsMd);
+              await Bun.write(TOOLS_MD_PATH, toolsMd);
             } catch {
               /* ignore */
             }
           }
           if (heartbeatMd !== undefined) {
             try {
-              await Bun.write("/workspace/HEARTBEAT.md", heartbeatMd);
+              await Bun.write(HEARTBEAT_MD_PATH, heartbeatMd);
             } catch {
               /* ignore */
             }

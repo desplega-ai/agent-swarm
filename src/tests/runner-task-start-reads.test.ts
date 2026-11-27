@@ -25,6 +25,7 @@ describe("runner task-start reads", () => {
               env: {
                 PATH: process.env.PATH,
                 HOME: directory,
+                SWARM_WORKSPACE_DIR: directory,
                 AGENT_ID: "11111111-1111-4111-8111-111111111111",
                 API_KEY: "example-fixture-key",
                 MCP_BASE_URL: "http://runner.invalid",

@@ -29,6 +29,7 @@ import {
 } from "../types";
 import { agentFsFileLinkQuery, getAppUrl, resolveAgentFsLinkBase } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { WORKSPACE_CLAUDE_MD_PATH } from "../utils/profile-paths";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
@@ -75,7 +76,7 @@ const CLAUDE_MD_INJECT_PROVIDERS: ReadonlySet<string> = new Set([
 
 /** Where each provider's editable CLAUDE.md lives, for the truncation notice. */
 function claudeMdSourcePath(provider: string): string {
-  return provider === "claude" ? "~/.claude/CLAUDE.md" : "/workspace/CLAUDE.md";
+  return provider === "claude" ? "~/.claude/CLAUDE.md" : WORKSPACE_CLAUDE_MD_PATH;
 }
 
 /** Public guide for the per-repo merge policy and the swarm auto-merger. */
