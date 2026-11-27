@@ -105,7 +105,13 @@ export async function runCli(args: string[], options: CliOptions = {}): Promise<
   const home = options.home ?? (await tempDir("home"));
   const command = commandOf(args);
   if (command) calledCommands.add(command);
-  const base = { ...minimalEnv(), HOME: home, NO_COLOR: "1", ...options.env };
+  const base = {
+    ...minimalEnv(),
+    HOME: home,
+    SWARM_WORKSPACE_DIR: `${home}/workspace`,
+    NO_COLOR: "1",
+    ...options.env,
+  };
   const wrapped = coverageDir ? await coverageCommand(args, cwd) : undefined;
   const started = Date.now();
   const child = Bun.spawn(

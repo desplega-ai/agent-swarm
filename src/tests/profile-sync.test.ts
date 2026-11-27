@@ -524,7 +524,10 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
           apiUrl: "https://api.example.test",
           apiKey: "example-secret-key",
           changeSource: "session_sync",
-          // No files on a CI box → typically no payloads; still must never throw.
+          io: {
+            readFile: async (path) => (path === TOOLS_MD_PATH ? "edited tools" : undefined),
+            writeFile: async () => {},
+          },
           claudeMdLock: { path: join(tmpdir(), `claude-md-${crypto.randomUUID()}.lock`) },
           fetchImpl,
         }),

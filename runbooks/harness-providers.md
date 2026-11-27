@@ -51,6 +51,14 @@ The step injects its HTTP probe, clock, sleep and logger for unit tests.
 module against local HTTP servers. This is a per-step migration from Bash
 tracked in #2047. Other boot stages still run in the shell.
 
+## Testing worker profile sync
+
+When spawning a worker in a test, give it a temporary `HOME` and set
+`SWARM_WORKSPACE_DIR` to its own workspace. The runner and hooks use that
+directory for the profile mirrors, pre-boot backups, `identity-baselines.json`
+and its lock. With the variable unset, workers use the container's `/workspace`
+and keep the baseline file in `/tmp`.
+
 ## Worker MCP config
 
 Boot writes `/workspace/.mcp.json` with only the swarm HTTP server (plus the

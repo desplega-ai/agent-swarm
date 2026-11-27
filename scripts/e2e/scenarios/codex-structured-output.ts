@@ -97,6 +97,8 @@ export const codexStructuredOutput: Scenario = {
     const homeDir = `/tmp/e2e-codex-structured-${ctx.nonce}`;
     const workspaceDir = `${homeDir}/workspace`;
     await Bun.$`mkdir -p ${homeDir}/logs ${workspaceDir}`.quiet();
+    const previousTools = `local tools before boot ${ctx.nonce}`;
+    await Bun.write(`${workspaceDir}/TOOLS.md`, previousTools);
     if (process.getuid?.() === 0 && Bun.which("gosu")) {
       await Bun.$`chown -R worker:worker ${homeDir}`.quiet();
     }
@@ -107,6 +109,7 @@ export const codexStructuredOutput: Scenario = {
       env: {
         ...minimalEnv(),
         HOME: homeDir,
+        SWARM_WORKSPACE_DIR: workspaceDir,
         LOG_DIR: `${homeDir}/logs`,
         AGENT_ID: agentId,
         MCP_BASE_URL: ctx.baseUrl,
@@ -163,6 +166,28 @@ export const codexStructuredOutput: Scenario = {
       // 1 + 2: the strict rewrite reaches the request, a prose turn gets one reprompt and
       // the JSON answer to it completes the task.
       const fixedTask = await runTask(fixed, TASK_SCHEMA);
+      // A test worker booted inside another worker must own its mirrors, backups and hashes.
+      const baselines = asRecord(await Bun.file(`${workspaceDir}/identity-baselines.json`).json());
+      for (const [field, name] of Object.entries({
+        soulMd: "SOUL.md",
+        identityMd: "IDENTITY.md",
+        toolsMd: "TOOLS.md",
+        claudeMd: "CLAUDE.md",
+      })) {
+        const content = await Bun.file(`${workspaceDir}/${name}`).text();
+        expect(
+          baselines[field] === new Bun.CryptoHasher("sha256").update(content).digest("hex"),
+          `${name} must match this worker's boot baseline`,
+        );
+      }
+      const backups = await Array.fromAsync(
+        new Bun.Glob("TOOLS.md.pre-boot-*.bak").scan(workspaceDir),
+      );
+      expect(backups.length === 1, "expected one TOOLS.md backup in the worker's workspace");
+      expect(
+        (await Bun.file(`${workspaceDir}/${backups[0]}`).text()) === previousTools,
+        "backup must preserve the previous TOOLS.md",
+      );
       const fixedTurns = turns(fixed);
       expect(
         fixedTurns.length === 2,

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { WORKSPACE_CLAUDE_MD_PATH } from "../utils/profile-paths";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 /**
@@ -20,7 +21,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
  * uncached message instead. The SessionStart hook still writes that file: it
  * is the copy the agent edits and the Stop hook syncs back to the profile.
  */
-export const WORKSPACE_CLAUDE_MD_EXCLUDE = "/workspace/CLAUDE.md";
+export const WORKSPACE_CLAUDE_MD_EXCLUDE = WORKSPACE_CLAUDE_MD_PATH;
 
 /** `~/.claude/CLAUDE.md` for the HOME the Claude session runs under. */
 export function userClaudeMdExclude(home: string = process.env.HOME ?? homedir()): string {
