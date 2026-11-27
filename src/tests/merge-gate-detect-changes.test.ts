@@ -367,6 +367,8 @@ describe("merge-gate unit-test scope", () => {
     "src/tests/preload.ts",
     "src/tests/hang-watchdog.ts",
     "src/tests/hang-watchdog-worker.ts",
+    "src/tests/fixtures/child-write-guard-preload.ts",
+    "src/tests/fixtures/profile-write-guard.ts",
     "bunfig.toml",
     "tsconfig.json",
     "bun.lock",

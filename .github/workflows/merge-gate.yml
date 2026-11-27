@@ -220,7 +220,7 @@ jobs:
           base=$(git rev-parse HEAD^1)
           CHANGED=$(git diff --no-renames --name-only "$base" HEAD)
           scope=changed
-          if echo "$CHANGED" | grep -Eq '^(src/be/migrations/|templates/|src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock|\.github/workflows/merge-gate\.yml$)'; then
+          if echo "$CHANGED" | grep -Eq '^(src/be/migrations/|templates/|src/tests/(preload|hang-watchdog|hang-watchdog-worker|fixtures/child-write-guard|fixtures/child-write-guard-preload|fixtures/profile-write-guard)\.ts$|bunfig\.toml$|tsconfig\.json$|bun\.lock|\.github/workflows/merge-gate\.yml$)'; then
             scope=full
           elif echo "$CHANGED" | grep -qx 'package.json' &&
             git diff -U0 "$base" HEAD -- package.json | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' |
