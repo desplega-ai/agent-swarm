@@ -10678,6 +10678,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "This caller already has an import in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }

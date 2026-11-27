@@ -109,6 +109,11 @@ const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;
 export const MAX_APP_ROW_BODY_BYTES = 1 * 1024 * 1024;
 export const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_APP_BUNDLE_BODY_BYTES = 64 * 1024 * 1024;
+/**
+ * Callers with an import in flight: one import per caller at a time.
+ * shortcut: in-process only; move to a shared lock if the API runs replicas.
+ */
+const importsInFlight = new Set<string>();
 const MAX_USER_CONFIG_BODY_BYTES = 64 * 1024;
 const MAX_USER_CONFIG_VALUES_BYTES = 16 * 1024;
 const DECIMAL_NUMBER_PATTERN = /^[+-]?\d+(?:\.\d+)?$/;
@@ -499,6 +504,7 @@ const importAppRoute = route({
     403: { description: "Permission denied" },
     409: { description: "App id or script name conflict" },
     413: { description: "Bundle too large" },
+    429: { description: "This caller already has an import in flight" },
   },
   rbac: { permission: "app.manage" },
 });
@@ -1327,7 +1333,18 @@ export async function handleApps(
           ? { kind: "operator" }
           : { kind: "other" };
     const keepId = parsed.query.keepId === "1" || parsed.query.keepId === "true";
-    const result = await importAppBundle(parsed.body, { keepId, writer });
+    const flightKey = `${caller.kind}:${caller.id ?? ""}`;
+    if (importsInFlight.has(flightKey)) {
+      json(res, { error: "an import from this caller is already running" }, 429);
+      return true;
+    }
+    importsInFlight.add(flightKey);
+    let result: Awaited<ReturnType<typeof importAppBundle>>;
+    try {
+      result = await importAppBundle(parsed.body, { keepId, writer });
+    } finally {
+      importsInFlight.delete(flightKey);
+    }
     if (!result.ok) {
       json(
         res,

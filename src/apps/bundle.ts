@@ -37,6 +37,12 @@ export const APP_BUNDLE_FORMAT = "swarm-app-bundle/v1";
  */
 export const MAX_EXPORT_ROWS = 200_000;
 
+/**
+ * Scripts one import may carry. Each one costs DB lookups and, when new, a
+ * script plus version insert, so the cap bounds the work of one request.
+ */
+export const MAX_IMPORT_SCRIPTS = 100;
+
 export const AppBundleScriptSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -164,10 +170,50 @@ export type AppImportResult =
     }
   | {
       ok: false;
-      status: 400 | 403 | 409;
+      status: 400 | 403 | 409 | 413;
       error: string;
       issues?: AppValidationIssue[];
     };
+
+/**
+ * Bound the work of one import before any hashing or DB lookup: cap the
+ * script and row counts, and refuse a script the definition does not wire
+ * (export only ever writes referenced scripts) or a repeated script id.
+ */
+function checkImportBudget(bundle: AppBundle): AppImportResult | null {
+  if (bundle.scripts.length > MAX_IMPORT_SCRIPTS) {
+    return {
+      ok: false,
+      status: 413,
+      error: `bundle has more than ${MAX_IMPORT_SCRIPTS} scripts; import is capped`,
+    };
+  }
+  let totalRows = 0;
+  for (const rows of Object.values(bundle.rows)) totalRows += rows.length;
+  if (totalRows > MAX_EXPORT_ROWS) {
+    return {
+      ok: false,
+      status: 413,
+      error: `bundle has more than ${MAX_EXPORT_ROWS} rows; import is capped`,
+    };
+  }
+  const referenced = collectScriptReferences(bundle.app.definition);
+  const seen = new Set<string>();
+  const issues: AppValidationIssue[] = [];
+  for (const [index, script] of bundle.scripts.entries()) {
+    if (seen.has(script.id)) {
+      issues.push({ path: `scripts.${index}.id`, message: `script id "${script.id}" repeats` });
+    } else if (!referenced.has(script.id)) {
+      issues.push({
+        path: `scripts.${index}.id`,
+        message: `script "${script.id}" is not referenced by the app definition`,
+      });
+    }
+    seen.add(script.id);
+  }
+  if (issues.length > 0) return { ok: false, status: 400, error: "invalid bundle scripts", issues };
+  return null;
+}
 
 type ScriptPlan =
   | { kind: "reuse"; bundleId: string; script: ScriptRecord }
@@ -192,6 +238,8 @@ export async function importAppBundle(
   options: { keepId: boolean; writer: AppImportWriter },
 ): Promise<AppImportResult> {
   const { writer } = options;
+  const overBudget = checkImportBudget(bundle);
+  if (overBudget) return overBudget;
   if (options.keepId && (await getApp(bundle.app.id))) {
     return { ok: false, status: 409, error: `app "${bundle.app.id}" already exists` };
   }

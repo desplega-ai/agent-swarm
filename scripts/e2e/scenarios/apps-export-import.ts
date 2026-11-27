@@ -154,6 +154,21 @@ export const appsExportImport: Scenario = {
         body: { ...bundle, rows: { item: [{ ...sampleRow, n: "not a number" }] } },
       });
       expectStatus(badRows, [400], "a row with a wrong value kind");
+
+      // The import refuses work the definition does not need, before any lookup.
+      const unreferenced = await ctx.api("POST", "/api/apps/import", {
+        agentId: owner,
+        body: { ...bundle, scripts: [...scripts, { ...scripts[0]!, id: "not-wired" }] },
+      });
+      expectStatus(unreferenced, [400], "a script the definition does not reference");
+      const tooMany = await ctx.api("POST", "/api/apps/import", {
+        agentId: owner,
+        body: {
+          ...bundle,
+          scripts: Array.from({ length: 101 }, (_, i) => ({ ...scripts[0]!, id: `s${i}` })),
+        },
+      });
+      expectStatus(tooMany, [413], "more scripts than the import cap");
     } finally {
       for (const id of appIds) await ctx.api("DELETE", `/api/apps/${id}`);
       await ctx.api("DELETE", `/api/scripts/${encodeURIComponent(scriptName)}?scope=agent`, {
