@@ -7296,8 +7296,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Only create if it doesn't exist — the entrypoint already composed/prepended it at container start
   if (agentSetupScript) {
     try {
-      if (!(await Bun.file("/workspace/start-up.sh").exists())) {
-        await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${agentSetupScript}\n`);
+      if (!(await Bun.file(SETUP_SCRIPT_PATH).exists())) {
+        await Bun.write(SETUP_SCRIPT_PATH, `#!/bin/bash\n${agentSetupScript}\n`);
         console.log(`[${role}] Wrote start-up.sh to workspace`);
       }
     } catch (err) {
