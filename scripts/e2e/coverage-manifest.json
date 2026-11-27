@@ -496,7 +496,7 @@
       "scenarios": ["platform-oauth-apps"]
     },
     "oauth-refresh-locks": {
-      "description": "Refresh lock acquire, contention, wrong-owner release, expiry takeover",
+      "description": "Refresh lock acquire, codex_oauth_<slot>-only keys, contention, wrong-owner release, expiry takeover",
       "scenarios": ["platform-oauth-locks"]
     },
     "codex-oauth-slot-store": {

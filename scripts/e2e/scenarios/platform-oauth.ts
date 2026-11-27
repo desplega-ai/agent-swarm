@@ -847,7 +847,8 @@ export const platformOauthLocks: Scenario = {
   name: "platform-oauth-locks",
   order: 635,
   async run(ctx) {
-    const key = `e2e-lock-${ctx.nonce}`;
+    // Slot 98 stays clear of the slot (97) that platform-codex-oauth-slot-store locks.
+    const key = "codex_oauth_98";
     expectStatus(
       await ctx.api("POST", `/api/oauth/refresh-locks/${key}`, {
         apiKey: null,
@@ -889,6 +890,28 @@ export const platformOauthLocks: Scenario = {
       [400],
       "a key outside the allowed alphabet",
     );
+    // Only codex_oauth_<slot> keys are worker-lockable; the server's authz:<id> keys are not.
+    for (const [badKey, label] of [
+      [`authz:e2e-${ctx.nonce}`, "a server authorization lock key"],
+      [`e2e-lock-${ctx.nonce}`, "a key that is not a Codex pool slot"],
+      ["codex_oauth_01", "a slot with a leading zero"],
+      ["codex_oauth_101", "a slot above the pool maximum"],
+    ] as const) {
+      expectStatus(
+        await ctx.api("POST", `/api/oauth/refresh-locks/${badKey}`, { body: { ttlMs: 1000 } }),
+        [400],
+        `acquire ${label}`,
+      );
+      expectStatus(
+        await ctx.api("DELETE", `/api/oauth/refresh-locks/${badKey}`, { body: { owner: "x" } }),
+        [400],
+        `release ${label}`,
+      );
+      expect(
+        !ctx.db.get(sql`SELECT 1 FROM oauth_refresh_locks WHERE "lockKey" = ${badKey}`),
+        `no lock row is written for ${label}`,
+      );
+    }
 
     const first = await ctx.api("POST", `/api/oauth/refresh-locks/${key}`, {
       body: { ttlMs: 60_000 },
