@@ -81,7 +81,7 @@ bun run ui:dev --api local --route /apps                  # empty local dashboar
 
 What the copy holds:
 
-- **App**: `GET /api/apps/<id>/export` on the source, then `POST /api/apps/import?keepId=1` locally. Every row (no 1,000-row list cap) and the scripts its actions use; the app keeps its id. Import warnings (a script needing a connection or secret absent locally) land in the ready line's `warnings`. Script actions run locally, as a local `ui-dev` agent.
+- **App**: `GET /api/apps/<id>/export` on the source, then `POST /api/apps/import?keepId=1` locally. Every row (no 1,000-row list cap) and the scripts its actions use; the app keeps its id. Import warnings (a script needing a connection or secret absent locally) land in the ready line's `warnings`. Script actions run locally, as a local `ui-dev` agent, in the quickjs sandbox (`SCRIPT_EXECUTOR=quickjs`): a copied script cannot read your files, env or processes, a native executor pin is dropped with a warning, and scripts carry no extracted `argsJsonSchema`. A script that needs Bun or `node:` APIs fails locally.
 - **Page**: the record from `GET /api/pages/<id>` and its KV namespace, under a new local page id (the ready line's `target.id`). A password page becomes `authed`, with a warning: the password is not readable through the API. A page that calls swarm APIs beyond its own KV gets a "local data is empty" warning.
 - **User**: the source user you view as (`--as-email`, else the first user with an email), recreated by email. With a fixture or `--route`: `--as-email`, else `ui-dev@example.com`.
 - Not copied: sync schedules, connections, secrets, tasks and any other swarm data a page reads.
