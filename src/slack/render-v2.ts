@@ -225,6 +225,8 @@ const outcomeDeliveryNextAttemptAt = new Map<string, number>();
 const outcomeReservedWithoutAttempt = new Set<string>();
 // Answered Lead wake-ups whose trigger reaction this process already settled.
 // They keep no outcome row, so nothing else stops a render pass repeating it.
+// Oldest first out: an evicted wake-up in a still-open thread settles once more.
+const ANSWERED_WAKES_SETTLED_MAX = 1_000;
 const answeredWakeReactionsSettled = new Set<string>();
 
 function outcomeDeliveryGate(taskId: string, card: SlackMessageRecord | null): boolean {
@@ -2868,6 +2870,10 @@ async function processSlackThread(
       if (!card && (await isSlackContinuation(task)) && (await isWakeAnsweredByReply(task))) {
         // The reply is the answer; settle the reaction the card would have settled.
         if (!answeredWakeReactionsSettled.has(task.id)) {
+          if (answeredWakeReactionsSettled.size >= ANSWERED_WAKES_SETTLED_MAX) {
+            const [oldest] = answeredWakeReactionsSettled;
+            if (oldest !== undefined) answeredWakeReactionsSettled.delete(oldest);
+          }
           answeredWakeReactionsSettled.add(task.id);
           await finalizeTerminalSlackReactions([task]);
         }

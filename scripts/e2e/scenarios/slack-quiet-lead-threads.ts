@@ -146,6 +146,7 @@ async function fanOutAndReplyOnce(
     ctx.slack.apiCalls("reactions.remove").filter((call) => call.args.timestamp === message.ts)
       .length;
   const settled = removals();
+  // A repeat would land within a few render ticks; the poll times out when none does.
   await pollUntil(() => removals() > settled, slackAbsenceWindowMs(ctx));
   expect(
     removals() === settled,
