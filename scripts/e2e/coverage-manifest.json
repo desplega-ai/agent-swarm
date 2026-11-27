@@ -702,6 +702,7 @@
         "slack-failed-task",
         "slack-assistant-file-share",
         "slack-reaction-override",
+        "slack-reaction-rate-limit",
         "slack-relay-restart",
         "slack-task-output-citations",
         "slack-task-tree-toggle",

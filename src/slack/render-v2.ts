@@ -223,6 +223,9 @@ const outcomeDeliveryNextAttemptAt = new Map<string, number>();
 // outcomeDeliveryNextAttemptAt; worst case that just reverts to today's
 // reconciliation behavior for the one row in flight.
 const outcomeReservedWithoutAttempt = new Set<string>();
+// Answered Lead wake-ups whose trigger reaction this process already settled.
+// They keep no outcome row, so nothing else stops a render pass repeating it.
+const answeredWakeReactionsSettled = new Set<string>();
 
 function outcomeDeliveryGate(taskId: string, card: SlackMessageRecord | null): boolean {
   if (card?.deliveryAbandonedAt) return false;
@@ -2864,7 +2867,10 @@ async function processSlackThread(
       // its trigger reaction still settles.
       if (!card && (await isSlackContinuation(task)) && (await isWakeAnsweredByReply(task))) {
         // The reply is the answer; settle the reaction the card would have settled.
-        await finalizeTerminalSlackReactions([task]);
+        if (!answeredWakeReactionsSettled.has(task.id)) {
+          answeredWakeReactionsSettled.add(task.id);
+          await finalizeTerminalSlackReactions([task]);
+        }
         continue;
       }
       // An in-flight card keeps its bounded retries; only a new card is refused.
@@ -3204,6 +3210,7 @@ export function _resetSlackRenderV2ForTests(): void {
   cachedTeamId = undefined;
   outcomeDeliveryNextAttemptAt.clear();
   outcomeReservedWithoutAttempt.clear();
+  answeredWakeReactionsSettled.clear();
   dirtyTaskIds.clear();
   dirtyThreads.clear();
   renderInFlight = null;

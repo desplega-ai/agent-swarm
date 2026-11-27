@@ -131,6 +131,28 @@ async function fanOutAndReplyOnce(
     replies.length === 1 && replies[0]!.includes(`reviewed and shipped ${ctx.nonce}`),
     `A quiet Lead thread should hold only the Lead's reply: ${JSON.stringify(replies)}`,
   );
+
+  // New work keeps the thread open, so every render pass revisits the answered wake-up.
+  const next = await ctx.slack.postMessage({
+    channel: "general",
+    user: "bob",
+    thread_ts: message.ts,
+    text: `<@${ctx.slack.bot.userId}> also announce it in the newsletter`,
+  });
+  await waitForEyes(ctx, next.ts);
+  const nextId = String((await findSlackTask(ctx, next.ts)).id);
+  await claim(ctx, leadId, nextId);
+  const removals = () =>
+    ctx.slack.apiCalls("reactions.remove").filter((call) => call.args.timestamp === message.ts)
+      .length;
+  const settled = removals();
+  await pollUntil(() => removals() > settled, slackAbsenceWindowMs(ctx));
+  expect(
+    removals() === settled,
+    `The answered ask's reactions were removed again while the thread stayed open: ${settled} -> ${removals()} reactions.remove calls`,
+  );
+  await finish(ctx, leadId, nextId, { status: "completed", output: "Announced." });
+  await waitForOutcome(ctx, message.ts, "Announced.");
 }
 
 export const slackQuietLeadThreads: Scenario = {
