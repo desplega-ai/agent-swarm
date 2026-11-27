@@ -1020,6 +1020,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      # Postgres 16, the oldest version the API supports: the contract suite runs here too,
+      # so SQL that needs 17 or 18 fails in CI (runbooks/postgres.md, "Requirements").
+      postgres16:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     steps:
       # Full history: check:no-new-triggers diffs against the storage base commit.
@@ -1064,6 +1077,11 @@ jobs:
 
       - name: Repository contract suite (SQLite and Postgres)
         run: bun run test:storage
+
+      - name: Repository contract suite on Postgres 16 (oldest supported)
+        env:
+          STORAGE_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
+        run: bun run test:storage:postgres
 
   # Reports the run to the results tracker (same secrets as ui-e2e.yml). Its own job so the
   # secrets never share a runner with code from the PR under test: a merge group can hold a

@@ -20,7 +20,7 @@ An installation that sets none of them behaves as before.
 
 ## Requirements
 
-- Postgres 16 or later with the pgvector extension (memory vector search). Use Postgres 18 for a new install. CI, the Compose overlay and the worker image use Postgres 18 (`pgvector/pgvector:pg18`).
+- Postgres 16 or later with the pgvector extension (memory vector search). Use Postgres 18 for a new install. CI, the Compose overlay and the worker image use Postgres 18 (`pgvector/pgvector:pg18`). CI also runs the repository contract suite on Postgres 16 (Storage Engine Checks), so SQL that needs 17 or 18 fails there.
 - A database created with the `C` collation and character classes: `CREATE DATABASE swarm TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`. SQLite compares text by bytes and folds case for ASCII only; the `C` locale gives the same order and the same `ILIKE`/`lower()` behavior.
 - The extension: the first migration runs `CREATE EXTENSION IF NOT EXISTS vector`. If the swarm role may not create it, run that statement once as a superuser before the first start.
 - The swarm role owns the schema objects (it runs the migrations).

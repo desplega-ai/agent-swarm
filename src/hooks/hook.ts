@@ -18,11 +18,13 @@ import {
 } from "../be/memory/raters/llm";
 import { materializeClaudeMd, stopClaudeMd } from "../commands/claude-md-session";
 import {
+  adoptDroppedIdentityFields,
   advanceIdentityBaselines,
   buildIndependentIdentityPayloads,
   contentSha256,
   fetchWithSyncTimeout,
   type ProfilePayload,
+  profileOf,
   readIdentityBaselines,
   warnProfileFileTooLarge,
 } from "../commands/profile-sync";
@@ -31,6 +33,15 @@ import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import {
+  HEARTBEAT_MD_PATH,
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SETUP_SCRIPT_PREFIX,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+  WORKSPACE_DIR,
+} from "../utils/profile-paths";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { contextBoundNoteThreshold, injectClaimedContextBoundNote } from "./context-bound-note";
 import {
@@ -48,13 +59,6 @@ import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 
-// Identity and workspace file paths
-const SOUL_MD_PATH = "/workspace/SOUL.md";
-const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
-const TOOLS_MD_PATH = "/workspace/TOOLS.md";
-const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
-const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
-
 type McpServerConfig = {
   url: string;
   headers: {
@@ -70,7 +74,7 @@ type McpServerConfig = {
  */
 export async function loadHookMcpConfig(
   projectDir: string,
-  workspaceDir = "/workspace",
+  workspaceDir = WORKSPACE_DIR,
 ): Promise<McpServerConfig | undefined> {
   for (const configDir of new Set([workspaceDir, projectDir])) {
     try {
@@ -170,7 +174,7 @@ export async function postHookProfileUpdate({
   body: ProfilePayload["body"];
   label: string;
   fetchImpl?: typeof fetch;
-}): Promise<boolean> {
+}): Promise<false | Record<string, unknown>> {
   try {
     const response = await fetchImpl(url, {
       method: "PUT",
@@ -187,8 +191,9 @@ export async function postHookProfileUpdate({
           `[hook] ${label} profile sync failed: HTTP ${response.status}${responseBody ? ` — ${responseBody}` : ""}`,
         ),
       );
+      return false;
     }
-    return response.ok;
+    return await profileOf(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(scrubSecrets(`[hook] ${label} profile sync errored: ${message}`));
@@ -774,15 +779,19 @@ export async function handleHook(): Promise<void> {
 
     const synced: Record<string, string> = {};
     for (const [field, value] of Object.entries(updates)) {
-      const [payload] = buildIndependentIdentityPayloads({ [field]: value }, changeSource);
+      const [payload] = buildIndependentIdentityPayloads(
+        { [field]: value },
+        changeSource,
+        baselines,
+      );
       if (!payload) continue;
-      const ok = await postHookProfileUpdate({
+      const profile = await postHookProfileUpdate({
         url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
         headers: mcpConfig.headers,
         body: payload.body,
         label: payload.label,
       });
-      if (ok) synced[field] = value;
+      if (profile) Object.assign(synced, await adoptDroppedIdentityFields(payload, profile));
     }
     await advanceIdentityBaselines(synced);
   };
@@ -1395,7 +1404,7 @@ export async function handleHook(): Promise<void> {
             }
 
             // Setup script: start-up.sh (or start-up.*)
-            if (editedPath.startsWith("/workspace/start-up")) {
+            if (editedPath.startsWith(SETUP_SCRIPT_PREFIX)) {
               await syncSetupScriptToServer(agentInfo.id, "self_edit");
             }
           } catch {

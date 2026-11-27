@@ -9,10 +9,13 @@
 import type { ExtensionFactory, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import {
+  adoptDroppedIdentityFields,
   advanceIdentityBaselines,
+  buildIndependentIdentityPayloads,
   contentSha256,
   PROFILE_FILE_IO,
   type ProfileFileIO,
+  profileOf,
   readIdentityBaselines,
 } from "../commands/profile-sync";
 import {
@@ -30,6 +33,13 @@ import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
+import {
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SETUP_SCRIPT_PREFIX,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+} from "../utils/profile-paths";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   BUILTIN_TOOL_GROUP,
@@ -171,9 +181,9 @@ export async function syncIdentityFilesToServer(
 ): Promise<void> {
   const updates: Record<string, string> = {};
   const paths: Record<string, string> = {
-    soulMd: "/workspace/SOUL.md",
-    identityMd: "/workspace/IDENTITY.md",
-    toolsMd: "/workspace/TOOLS.md",
+    soulMd: SOUL_MD_PATH,
+    identityMd: IDENTITY_MD_PATH,
+    toolsMd: TOOLS_MD_PATH,
   };
   const baselines = await readIdentityBaselines(io.readFile);
 
@@ -191,17 +201,23 @@ export async function syncIdentityFilesToServer(
 
   if (Object.keys(updates).length === 0) return;
 
-  try {
-    const resp = await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
-      method: "PUT",
-      headers: apiHeaders(config),
-      body: JSON.stringify({ ...updates, changeSource }),
-      signal,
-    });
-    if (resp.ok) await advanceIdentityBaselines(updates, io);
-  } catch {
-    /* silently fail */
+  const synced: Record<string, string> = {};
+  for (const payload of buildIndependentIdentityPayloads(updates, changeSource, baselines)) {
+    try {
+      const resp = await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
+        method: "PUT",
+        headers: apiHeaders(config),
+        body: JSON.stringify(payload.body),
+        signal,
+      });
+      if (resp.ok) {
+        Object.assign(synced, await adoptDroppedIdentityFields(payload, await profileOf(resp), io));
+      }
+    } catch {
+      /* silently fail */
+    }
   }
+  await advanceIdentityBaselines(synced, io);
 }
 
 /** Sync setup script to server */
@@ -211,7 +227,7 @@ export async function syncSetupScriptToServer(
   io: ProfileFileIO = PROFILE_FILE_IO,
 ): Promise<void> {
   try {
-    const raw = await io.readFile("/workspace/start-up.sh");
+    const raw = await io.readFile(SETUP_SCRIPT_PATH);
     if (!raw?.trim()) return;
 
     const markerStart = "# === Agent-managed setup (from DB) ===";
@@ -774,15 +790,15 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
       if ((toolName === "write" || toolName === "edit") && editedPath) {
         // Identity files
         if (
-          editedPath === "/workspace/SOUL.md" ||
-          editedPath === "/workspace/IDENTITY.md" ||
-          editedPath === "/workspace/TOOLS.md"
+          editedPath === SOUL_MD_PATH ||
+          editedPath === IDENTITY_MD_PATH ||
+          editedPath === TOOLS_MD_PATH
         ) {
           void syncIdentityFilesToServer(config, "self_edit");
         }
 
         // Setup script
-        if (editedPath.startsWith("/workspace/start-up")) {
+        if (editedPath.startsWith(SETUP_SCRIPT_PREFIX)) {
           void syncSetupScriptToServer(config, "self_edit");
         }
 

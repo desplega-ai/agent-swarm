@@ -1,14 +1,14 @@
 /** Runs the real runner loop in a child process so module mocks cannot leak. */
 import { mock } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { ProviderSessionConfig } from "../../providers/types";
 
 const scenario = process.argv[2];
 const directory = process.argv[3]!;
 const concurrent = scenario === "concurrent";
 const toolsPath = join(directory, "TOOLS.md");
-const baselinesPath = join(directory, "baselines.json");
+const baselinesPath = join(directory, "identity-baselines.json");
 const taskIds = ["22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"];
 const captures: string[] = [];
 let profileReads = 0;
@@ -37,24 +37,6 @@ mock.module("../../prompts/resolver", () => ({
 const profileSync = await import("../../commands/profile-sync");
 mock.module("../../commands/profile-sync", () => ({
   ...profileSync,
-  SOUL_MD_PATH: join(directory, "SOUL.md"),
-  IDENTITY_MD_PATH: join(directory, "IDENTITY.md"),
-  TOOLS_MD_PATH: toolsPath,
-  HEARTBEAT_MD_PATH: join(directory, "HEARTBEAT.md"),
-  CLAUDE_MD_PATH: join(directory, "CLAUDE.md"),
-  WORKSPACE_CLAUDE_MD_PATH: join(directory, "CLAUDE.md"),
-  SETUP_SCRIPT_PATH: join(directory, "start-up.sh"),
-  IDENTITY_BASELINES_PATH: baselinesPath,
-  async readIdentityBaselines() {
-    return JSON.parse(readFileSync(baselinesPath, "utf8"));
-  },
-  async writeProfileFileFromDb(path: string, content: string) {
-    writeFileSync(join(directory, basename(path)), content);
-    return null;
-  },
-  async writeIdentityBaselines(baselines: Record<string, string>) {
-    writeFileSync(baselinesPath, JSON.stringify(baselines));
-  },
   async syncProfileFilesToServer() {},
   async prependProfileSyncRejectionBanner(prompt: string) {
     return { prompt, injected: false };

@@ -9,7 +9,7 @@ import {
   jsonText,
   likeAsciiCi,
   nowIso,
-  readableSessionSql,
+  readableSessionRowSql,
   SqlQuery,
   sql,
   sqlJoin,
@@ -248,16 +248,18 @@ export class PostgresTasksRepository extends BaseTasksRepository {
   ): Promise<TaskListRow<F>[]> {
     const conditions = await this.taskFilterConditions(filters, "page");
     if (!filters.includeHeartbeat) conditions.push(this.notHeartbeat());
-    if (filters.readableBy) {
-      conditions.push(readableSessionSql(filters.readableBy.userId, sql`agent_tasks.id`));
-    }
+    // The page stops at LIMIT, so test only the rows it reads. The set form
+    // builds every hidden task of the user on each call.
+    if (filters.readableBy) conditions.push(readableSessionRowSql(filters.readableBy.userId));
     // The insertion-order tiebreak is in the page query too, so the page holds
-    // the same rows the outer sort orders.
+    // the same rows the outer sort orders. MATERIALIZED keeps the page as the
+    // driving side: the readable-session fallback set prices the page in the
+    // millions, and inlined, the planner then sorts every task to join it.
     const order =
       page.orderBy === "createdAt"
         ? `agent_tasks."createdAt" DESC, agent_tasks."_rowid" DESC`
         : `agent_tasks."lastUpdatedAt" DESC, agent_tasks.priority DESC, agent_tasks."_rowid" DESC`;
-    return this.db.query<TaskListRow<F>>(sql`WITH page AS (
+    return this.db.query<TaskListRow<F>>(sql`WITH page AS MATERIALIZED (
       SELECT agent_tasks."_rowid" AS rid FROM agent_tasks${sqlWhere(conditions)}
       ORDER BY ${raw(order)} LIMIT ${raw(String(page.limit))} OFFSET ${raw(String(page.offset))}
     )

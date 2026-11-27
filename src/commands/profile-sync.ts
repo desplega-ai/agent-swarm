@@ -36,15 +36,28 @@ import {
   type BudgetedIdentityField,
   IDENTITY_FIELD_BUDGETS,
 } from "../utils/identity-field-budget.ts";
+import {
+  HEARTBEAT_MD_PATH,
+  IDENTITY_BASELINES_PATH,
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
+} from "../utils/profile-paths.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { prependContextPreamble } from "./context-preamble.ts";
 import "./templates.ts";
 
-export const SOUL_MD_PATH = "/workspace/SOUL.md";
-export const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
-export const TOOLS_MD_PATH = "/workspace/TOOLS.md";
-export const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
-export const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
+export {
+  HEARTBEAT_MD_PATH,
+  IDENTITY_BASELINES_PATH,
+  IDENTITY_MD_PATH,
+  SETUP_SCRIPT_PATH,
+  SOUL_MD_PATH,
+  TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
+};
 
 // ──────────────────────────────────────────────────────────────────────────
 // Identity-file baseline hashes — prevents session-end sync from clobbering
@@ -61,8 +74,6 @@ export const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 //   4. After the API accepts a file, its baseline advances to the synced hash,
 //      so a file edited once is not re-sent over a later DB-side edit.
 // ──────────────────────────────────────────────────────────────────────────
-export const IDENTITY_BASELINES_PATH = "/tmp/identity-baselines.json";
-
 export type IdentityBaselines = Record<string, string>;
 
 export function contentSha256(content: string): string {
@@ -149,10 +160,8 @@ const PROFILE_FIELD_DETAILS: Record<
     recoveryGuidance: `Inspect and shrink the live ${IDENTITY_MD_PATH} first, moving durable tail content into memory. After a worker restart, use ${IDENTITY_MD_PATH}.pre-boot-<timestamp>.bak as the fallback copy of the rejected content.`,
   },
   claudeMd: {
-    label:
-      "claudeMd (~/.claude/CLAUDE.md for Claude; /workspace/CLAUDE.md for non-Claude harnesses, which Claude excludes from its memory load)",
-    recoveryGuidance:
-      "Inspect and shrink the live CLAUDE.md source first, moving durable tail content into memory. Claude edits ~/.claude/CLAUDE.md; editing /workspace/CLAUDE.md does not reach a Claude session. After a worker restart, non-Claude harnesses can use /workspace/CLAUDE.md.pre-boot-<timestamp>.bak as the fallback copy; Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step.",
+    label: `claudeMd (~/.claude/CLAUDE.md for Claude; ${WORKSPACE_CLAUDE_MD_PATH} for non-Claude harnesses, which Claude excludes from its memory load)`,
+    recoveryGuidance: `Inspect and shrink the live CLAUDE.md source first, moving durable tail content into memory. Claude edits ~/.claude/CLAUDE.md; editing ${WORKSPACE_CLAUDE_MD_PATH} does not reach a Claude session. After a worker restart, non-Claude harnesses can use ${WORKSPACE_CLAUDE_MD_PATH}.pre-boot-<timestamp>.bak as the fallback copy; Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step.`,
   },
   toolsMd: {
     label: `toolsMd (${TOOLS_MD_PATH})`,
@@ -608,17 +617,6 @@ export function planClaudeMdSync(state: {
   if (base === null) return { claudeMd: content, changeSource: "session_sync" };
   return { claudeMd: content, changeSource: "session_sync", expectedHashes: { claudeMd: base } };
 }
-/**
- * Workspace CLAUDE.md — the agent-level instructions file the runner
- * materializes from the `claudeMd` DB field at boot (`runner.ts`) and that the
- * base-prompt truncation notice tells NON-Claude harnesses (codex/pi/opencode)
- * to edit. Distinct from CLAUDE_MD_PATH; this is the FS→DB source for the
- * non-Claude providers that previously had no sync path at all. Written for
- * every harness (a container can live-swap providers), but Claude sessions
- * skip it via `claudeMdExcludes` (`src/providers/claude-flag-settings.ts`).
- */
-export const WORKSPACE_CLAUDE_MD_PATH = "/workspace/CLAUDE.md";
-
 // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption.
 // Mirrors `hook.ts` (raised from 100 to 500 after profile-corruption recurrences
 // where a short test sentinel synced into the real agent's DB row).
@@ -718,11 +716,20 @@ export interface ProfilePayload {
 export function buildIndependentIdentityPayloads(
   updates: Record<string, string>,
   changeSource: ProfileChangeSource,
+  baselines?: IdentityBaselines | null,
 ): ProfilePayload[] {
-  return Object.entries(updates).map(([field, value]) => ({
-    label: `identity.${field}`,
-    body: { [field]: value, changeSource },
-  }));
+  return Object.entries(updates).map(([field, value]) => {
+    // The baseline is the DB value this file derives from: a newer DB value (a Lead or dreaming edit) wins.
+    const base = baselines?.[field];
+    return {
+      label: `identity.${field}`,
+      body: {
+        [field]: value,
+        changeSource,
+        ...(base ? { expectedHashes: { [field]: base } } : {}),
+      },
+    };
+  });
 }
 
 /**
@@ -931,7 +938,7 @@ export async function collectProfilePayloads(
       baselines,
       agentId,
     );
-    payloads.push(...buildIndependentIdentityPayloads(updates, changeSource));
+    payloads.push(...buildIndependentIdentityPayloads(updates, changeSource, baselines));
   }
 
   if (fields.includes("claude")) {
@@ -976,7 +983,7 @@ export async function collectProfilePayloads(
 export async function postProfileUpdate(
   opts: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "fetchImpl">,
   payload: ProfilePayload,
-): Promise<boolean> {
+): Promise<false | Record<string, unknown>> {
   const doFetch = opts.fetchImpl ?? fetch;
   try {
     const resp = await doFetch(`${opts.apiUrl}/api/agents/${opts.agentId}/profile`, {
@@ -1000,13 +1007,65 @@ export async function postProfileUpdate(
           `[profile-sync] ${payload.label} sync failed: HTTP ${resp.status}${detail ? ` — ${detail}` : ""}`,
         ),
       );
+      return false;
     }
-    return resp.ok;
+    return await profileOf(resp);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(scrubSecrets(`[profile-sync] ${payload.label} sync errored: ${msg}`));
     return false;
   }
+}
+
+/** The agent profile an accepted update answers with; `{}` when the body isn't JSON. */
+export async function profileOf(resp: Response): Promise<Record<string, unknown>> {
+  try {
+    const body = (await resp.json()) as unknown;
+    return body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+const IDENTITY_FILE_PATHS: Record<string, string> = {
+  soulMd: SOUL_MD_PATH,
+  identityMd: IDENTITY_MD_PATH,
+  toolsMd: TOOLS_MD_PATH,
+  heartbeatMd: HEARTBEAT_MD_PATH,
+};
+
+/**
+ * After an accepted identity update: a field the API dropped because the DB moved
+ * on since the file's baseline (a Lead or dreaming edit) is written back to its
+ * workspace file, so the agent continues from the DB value instead of a stale copy.
+ * Returns the content each sent field now has in the DB, for the baselines.
+ */
+export async function adoptDroppedIdentityFields(
+  payload: ProfilePayload,
+  profile: Record<string, unknown>,
+  io: Pick<ProfileFileIO, "writeFile"> = PROFILE_FILE_IO,
+): Promise<Record<string, string>> {
+  const synced = baselineFieldsOf(payload);
+  const guarded = (payload.body.expectedHashes ?? {}) as Record<string, string>;
+  for (const [field, sent] of Object.entries(synced)) {
+    const dbValue = profile[field];
+    const path = IDENTITY_FILE_PATHS[field];
+    if (!guarded[field] || !path || typeof dbValue !== "string" || dbValue === sent) continue;
+    try {
+      await io.writeFile(path, dbValue);
+      synced[field] = dbValue;
+      console.warn(
+        `[profile-sync] ${field}: the DB changed since this file was loaded; kept the DB value and refreshed ${path}`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        scrubSecrets(`[profile-sync] ${field}: could not refresh ${path} from the DB: ${msg}`),
+      );
+      delete synced[field];
+    }
+  }
+  return synced;
 }
 
 /**
@@ -1054,7 +1113,8 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
   );
   const synced: Record<string, string> = {};
   for (const payload of payloads) {
-    if (await postProfileUpdate(opts, payload)) Object.assign(synced, baselineFieldsOf(payload));
+    const profile = await postProfileUpdate(opts, payload);
+    if (profile) Object.assign(synced, await adoptDroppedIdentityFields(payload, profile, io));
   }
   await advanceIdentityBaselines(synced, io);
 
