@@ -293,6 +293,29 @@ export const scriptKv: Scenario = {
       [403],
       "reserved namespace",
     );
+    // The Lead's workflow-suggestion ledger: a worker write could fake a person's decline.
+    const ledgerKey = encodeURIComponent(`u/e2e-${ctx.nonce}/p/task-1`);
+    expectStatus(
+      await ctx.api("PUT", `/api/kv/_/workflow-suggest/${ledgerKey}`, {
+        agentId,
+        body: { value: { state: "declined" }, valueType: "json" },
+      }),
+      [403],
+      "a worker may not write the workflow-suggest ledger",
+    );
+    expectStatus(
+      await ctx.api("PUT", `/api/kv/_/workflow-suggest/${ledgerKey}`, {
+        agentId: leadId,
+        body: { value: { state: "declined" }, valueType: "json" },
+      }),
+      [200],
+      "the lead writes the workflow-suggest ledger",
+    );
+    expectStatus(
+      await ctx.api("DELETE", `/api/kv/_/workflow-suggest/${ledgerKey}`, { agentId: leadId }),
+      [204],
+      "the lead deletes its ledger record",
+    );
     // Slack profile emails decide the email-domain allowlist and the user auto-link:
     // only the API's users.info writer stores them, not an agent and not the lead.
     const enrichNs = "integration:user-enrichment:slack";

@@ -65,6 +65,7 @@ import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
 import { registerInjectLearningTool } from "./tools/inject-learning";
+import { registerIntegrationStatusTool } from "./tools/integration-status";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
 // KV capability
 import {
@@ -548,6 +549,9 @@ export async function createServer(
 
     // SQL over the agent's own agent-fs drive files; refuses at call time without an agent-fs key.
     registerDataQueryTool(server);
+
+    // Read-only integration states (the GET /status truth) plus script connection slugs.
+    registerIntegrationStatusTool(server);
 
     // Steering acknowledgement must ship with core: steering delivery works on
     // directly-assigned tasks (no task-pool capability required), and without

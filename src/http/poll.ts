@@ -146,6 +146,9 @@ const PollTaskAssignedTriggerSchema = z.object({
     })
     .optional(),
   threadParticipants: TaskThreadParticipantsSchema.optional(),
+  // Set on a Lead task that is a person's ask: the runner adds the
+  // `task.workflow_suggest` pointer to the task prompt.
+  workflowSuggest: z.literal(true).optional(),
 });
 
 // `budget_refused` reuses the canonical `BudgetRefusedTriggerSchema` entity
@@ -237,9 +240,18 @@ async function attachmentsForTrigger(
   }));
 }
 
+/** A Lead task that is a person's ask: it has a requester and came from a person-facing surface. */
+function isLeadPersonAsk(task: AgentTask, agent: Agent): boolean {
+  return (
+    !!agent.isLead &&
+    !!task.requestedByUserId &&
+    ["ui", "slack", "chat", "comb"].includes(task.source ?? "")
+  );
+}
+
 async function buildChecklistNudge(task: AgentTask, agent: Agent) {
   const userId = task.requestedByUserId;
-  if (!agent.isLead || !userId || !["ui", "slack", "chat", "comb"].includes(task.source ?? "")) {
+  if (!userId || !isLeadPersonAsk(task, agent)) {
     return undefined;
   }
   try {
@@ -605,6 +617,7 @@ export async function handlePoll(
                 ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
                 ...(nudge && { checklistNudge: nudge }),
                 ...(assignedThread && { threadParticipants: assignedThread }),
+                ...(isLeadPersonAsk(pendingTask, agent) && { workflowSuggest: true as const }),
               },
             };
           }

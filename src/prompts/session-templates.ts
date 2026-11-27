@@ -753,6 +753,19 @@ If it fits the conversation, offer it once, at the end of your reply{{link_claus
   category: "task_lifecycle",
 });
 
+// Lead only: the task is a person's ask (same gate as the checklist nudge). The
+// API sets `workflowSuggest` on the poll trigger; an empty override turns it off.
+registerTemplate({
+  eventType: "task.workflow_suggest",
+  header: "",
+  defaultBody: `
+## Workflow suggestion
+This is a person's ask. Before you reply, load the \`workflow-suggestion\` skill and follow it. An offer goes inside this reply or nowhere.
+`,
+  variables: [],
+  category: "task_lifecycle",
+});
+
 // Lead only: the task's key is a use-case group (the same rule create-schedule
 // and create-page use to inherit it). The system prompt never carries a key.
 registerTemplate({

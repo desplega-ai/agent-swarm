@@ -177,6 +177,9 @@ export const SDK_TOOL_NAME_MAP = {
   prompt_delete: "delete-prompt-template", // destructive
   prompt_preview: "preview-prompt-template",
 
+  // ── integrations ──
+  integration_status: "integration-status",
+
   // ── tracker ──
   tracker_status: "tracker-status",
   tracker_syncStatus: "tracker-sync-status",

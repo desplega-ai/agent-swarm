@@ -490,6 +490,19 @@ export const workflowDefinitions: Scenario = {
     const refused = await ctx.api("POST", `/api/workflows/${id}/trigger`, { body: {} });
     expectStatus(refused, [400], "trigger a disabled workflow");
     expect(String(asRecord(refused.json).error).includes("disabled"), "disabled error message");
+    const draftResponse = await ctx.api("POST", "/api/workflows", {
+      agentId: workerId,
+      body: { name: `wf-defs-draft-${ctx.nonce}`, definition: original, enabled: false },
+    });
+    expectStatus(draftResponse, [201], "create a disabled draft workflow");
+    const draftId = asString(asRecord(draftResponse.json).id, "draft workflow id");
+    created.push(draftId);
+    expect(
+      asRecord(draftResponse.json).enabled === false,
+      "POST enabled:false saves a disabled draft",
+    );
+    const draftRefused = await ctx.api("POST", `/api/workflows/${draftId}/trigger`, { body: {} });
+    expectStatus(draftRefused, [400], "trigger a workflow created disabled");
     await ctx.api("PUT", `/api/workflows/${id}`, {
       body: { enabled: true, cooldown: null, input: null },
     });
@@ -568,6 +581,19 @@ export const workflowDefinitions: Scenario = {
         ctx.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM workflows WHERE id = ${mcpId}`)
           ?.n === 1,
         "create-workflow persisted the row",
+      );
+      const mcpDraft = await callToolOk(connection, "create-workflow", {
+        name: `${mcpName}-draft`,
+        definition: { nodes: [bash("d1", "draft-one")] },
+        enabled: false,
+        requires: ["slack"],
+      });
+      const mcpDraftWorkflow = asRecord(mcpDraft.structured.workflow);
+      created.push(asString(mcpDraftWorkflow.id, "mcp draft workflow id"));
+      expect(
+        mcpDraftWorkflow.enabled === false &&
+          JSON.stringify(mcpDraftWorkflow.requires) === JSON.stringify(["slack"]),
+        "create-workflow saves enabled:false and requires",
       );
 
       const mcpGot = await callToolOk(connection, "get-workflow", { id: mcpId });

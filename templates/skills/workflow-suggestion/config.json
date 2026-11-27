@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "workflow-suggestion",
+  "displayName": "Workflow Suggestion",
+  "slug": "workflow-suggestion",
+  "title": "Workflow Suggestion",
+  "description": "Lead only. A person's ask that repeats their earlier asks: offer an existing workflow, or a disabled draft, inside your reply. Load before you reply to a person's ask; never in a heartbeat, schedule, workflow step or worker follow-up.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["lead", "workflows"]
+}

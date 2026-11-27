@@ -84,9 +84,10 @@ const LEAD_READABLE_FAMILIES = new Map([
 /**
  * Families only the Lead may write. `usecase:<key>` holds the Slack or chat
  * thread a use case reports to; the Lead posts run summaries there, so a
- * worker must not be able to point it at another thread.
+ * worker must not be able to point it at another thread. `workflow-suggest`
+ * is the Lead's suggestion ledger; a worker write could fake a decline.
  */
-const LEAD_ONLY_FAMILIES = new Set(["usecase"]);
+const LEAD_ONLY_FAMILIES = new Set(["usecase", "workflow-suggest"]);
 
 /** True when writes to `namespace` need a Lead agent (`kv.write.any`). */
 export function requiresLeadToWrite(namespace: string): boolean {

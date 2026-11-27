@@ -109,6 +109,7 @@ seeded skills are named by the prompt, five of them with a MUST pointer:
 | `scheduling` | plain pointer | `create-schedule` target types, timing, verify and repair |
 | `pages`, `apps`, `agent-fs` | plain pointers (outputs block) | publishing, apps, the shared drive |
 | `workflow-iterate` | plain pointer (lead) | building workflows |
+| `workflow-suggestion` | lead, per task: `task.workflow_suggest` on a person's ask (same gate as the checklist nudge) | when to offer a workflow inside the reply, the `workflow-suggest-scan` call, the `workflow-suggest` KV ledger |
 
 Renaming or unseeding one of these breaks a prompt pointer. Change the template
 and the skill in the same PR. Skill descriptions are written as pointers: the

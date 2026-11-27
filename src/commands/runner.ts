@@ -3521,6 +3521,8 @@ interface Trigger {
   };
   /** One-shot setup nudge for the lead (server-picked open checklist item). */
   checklistNudge?: ChecklistNudge;
+  /** The lead task is a person's ask: point at the `workflow-suggestion` skill. */
+  workflowSuggest?: boolean;
   /** People in a multi-person Slack thread (server: `buildTaskThreadParticipants`). */
   threadParticipants?: {
     total: number;
@@ -3594,6 +3596,15 @@ export async function buildChecklistNudgePrompt(
     href: nudge.href ?? "",
     link_clause: nudge.href ? `, with the link ${nudge.href}` : "",
   });
+  return result.skipped ? "" : result.text.trim();
+}
+
+/** The lead's pointer to the `workflow-suggestion` skill on a person's ask. Task prompt only. */
+export async function buildWorkflowSuggestPrompt(
+  workflowSuggest: boolean | undefined,
+): Promise<string> {
+  if (!workflowSuggest) return "";
+  const result = await resolveTemplateAsync("task.workflow_suggest", {});
   return result.skipped ? "" : result.text.trim();
 }
 
@@ -3748,6 +3759,7 @@ export function missingTaskDirWarning(
 export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
   requestedBy?: RequesterProfile;
   checklistNudge?: ChecklistNudge;
+  workflowSuggest?: boolean;
   /** The task's asset key; the lead gets a use-case note when it is a group key. */
   taskKey?: string;
   threadParticipants?: ThreadParticipants;
@@ -3785,6 +3797,7 @@ export async function buildTaskSessionPrompts(input: {
     await buildUseCasePrompt(basePromptArgs.role, context.taskKey),
     ...(await buildRequesterPrompts(context.requestedBy, context.threadParticipants)),
     await buildChecklistNudgePrompt(context.checklistNudge),
+    await buildWorkflowSuggestPrompt(context.workflowSuggest),
     context.cwdWarning?.trim(),
   ]
     .filter((part): part is string => Boolean(part))
@@ -8181,6 +8194,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             slackContext: taskSlackContext,
             requestedBy: trigger.requestedBy,
             checklistNudge: trigger.checklistNudge,
+            workflowSuggest: trigger.workflowSuggest,
             taskKey: (trigger.task as { key?: string } | undefined)?.key,
             threadParticipants: trigger.threadParticipants,
             cwdWarning,
