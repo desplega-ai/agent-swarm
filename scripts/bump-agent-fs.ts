@@ -56,6 +56,10 @@ export const PINS: Pin[] = [
     pattern: /^([ \t]*npm i -g @desplega\.ai\/agent-fs@)(\S+)$/m,
   },
   {
+    path: ".github/workflows/slack-visuals-publish.yml",
+    pattern: /^([ \t]*npm i -g @desplega\.ai\/agent-fs@)(\S+)$/m,
+  },
+  {
     path: "charts/agent-swarm/examples/values-all-workers-agent-fs.yaml",
     pattern: AGENT_FS_HELM_TAG_PATTERN,
   },

@@ -1,13 +1,15 @@
 #!/bin/bash
 # Publish an already-staged, allowlist-filtered Slack visuals tree (flat by profile, e.g.
-# <staged-root>/legacy, <staged-root>/v2) for one PR to the `ci-visuals` branch. Staging
-# (filtering fork-controlled artifact contents down to an explicit allowlist) happens earlier,
-# in the unprivileged validation job — see visuals-stage.sh and slack-visuals-publish.yml for
-# why that split exists. This script only does git mechanics on input it treats as already-safe.
+# <staged-root>/legacy, <staged-root>/v2) for one PR to agent-fs, then share that folder as a
+# public, non-expiring site so the sticky PR comment can embed the images. Staging (filtering
+# fork-controlled artifact contents down to an explicit allowlist) happens earlier, in the
+# unprivileged validation job — see visuals-stage.sh and slack-visuals-publish.yml for why that
+# split exists. This script only uploads input it treats as already-safe.
 #
-# The branch is rebuilt as a single commit on every run, so history never grows, and
-# --force-with-lease guards against a concurrent run from another PR (retry on rejection).
-# Prints `base_url=<raw.githubusercontent.com prefix>` on the last line.
+# The images used to live on a `ci-visuals` git branch, which grew the repository's history on
+# every run. agent-fs keeps them outside the repo: ci-visuals/pr-<N>/<sha7>/<profile>/...
+# Needs AGENT_FS_API_URL, AGENT_FS_API_KEY, AGENT_FS_DEFAULT_ORG_ID and AGENT_FS_DEFAULT_DRIVE_ID.
+# Prints `base_url=<share site URL>` on the last line.
 
 set -euo pipefail
 
@@ -22,7 +24,7 @@ head_sha=$3
 
 # Defense in depth: the caller already validated these against trusted GitHub API metadata
 # before invoking this script, but this script is directly runnable and pr_number/head_sha end
-# up in a git ref path below, so re-validate here too.
+# up in an agent-fs path below, so re-validate here too.
 if ! [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
   echo "pr-number must be a positive decimal integer: $pr_number" >&2
   exit 1
@@ -43,110 +45,44 @@ if [ -z "$(find "$staged_root" -mindepth 1 -maxdepth 1 -type d -print -quit)" ];
   exit 1
 fi
 
-repository=${GITHUB_REPOSITORY:-}
-if [ -z "$repository" ]; then
-  remote_url=$(git remote get-url origin)
-  case "$remote_url" in
-    git@github.com:*) repository=${remote_url#git@github.com:} ;;
-    https://github.com/*) repository=${remote_url#https://github.com/} ;;
-    ssh://git@github.com/*) repository=${remote_url#ssh://git@github.com/} ;;
-    *)
-      echo "Cannot derive GitHub repository from origin: $remote_url" >&2
-      exit 1
-      ;;
-  esac
-  repository=${repository%.git}
-fi
+for var in AGENT_FS_API_URL AGENT_FS_API_KEY AGENT_FS_DEFAULT_ORG_ID AGENT_FS_DEFAULT_DRIVE_ID; do
+  if [ -z "${!var:-}" ]; then
+    echo "$var is not set. Add the E2E_AGENT_FS_* repository secrets." >&2
+    exit 1
+  fi
+done
 
-if [[ "$repository" != */* ]]; then
-  echo "GITHUB_REPOSITORY must be owner/repo: $repository" >&2
+# shortcut: published folders are never pruned or revoked, add a cleanup job if drive storage matters.
+dest="ci-visuals/pr-$pr_number/$sha7"
+export dest pr_number sha7
+
+# Only images: the comment embeds PNG/GIF files, and index.json stays out of the public share.
+# One retry per file covers a transient API error; 8 uploads at a time keep a big run in budget.
+# shellcheck disable=SC2016 # expanded by the inner bash, not here
+uploaded=$(cd "$staged_root" && find . -mindepth 2 -type f \( -name '*.png' -o -name '*.gif' \) -print0 \
+  | xargs -0 -r -n 1 -P 8 bash -c '
+      rel=${1#./}
+      for attempt in 1 2; do
+        if agent-fs write "$dest/$rel" --file "$1" -m "visuals: pr-$pr_number $sha7" >/dev/null; then
+          echo "$rel"
+          exit 0
+        fi
+        echo "Upload attempt $attempt failed: $rel" >&2
+      done
+      exit 1
+    ' _ | wc -l)
+
+if [ "$uploaded" -eq 0 ]; then
+  echo "No images uploaded from $staged_root" >&2
+  exit 1
+fi
+echo "Uploaded $uploaded images to $dest" >&2
+
+share_json=$(agent-fs share-create "$dest" --expires-in never --json)
+base_url=$(jq -r '.url // empty' <<<"$share_json")
+if ! [[ "$base_url" =~ ^https://[^[:space:]\"\<\>]+/$ ]]; then
+  echo "share-create returned no usable https site URL: kind=$(jq -r '.kind // "?"' <<<"$share_json")" >&2
   exit 1
 fi
 
-worktree_dir=""
-
-cleanup() {
-  if [ -n "$worktree_dir" ]; then
-    git worktree remove --force "$worktree_dir" >/dev/null 2>&1 || rm -rf "$worktree_dir"
-    worktree_dir=""
-  fi
-  git branch -D ci-visuals-build >/dev/null 2>&1 || true
-}
-
-trap cleanup EXIT
-
-for attempt in 1 2 3; do
-  fetched_sha=""
-  if git fetch origin ci-visuals; then
-    fetched_sha=$(git rev-parse FETCH_HEAD)
-  fi
-
-  worktree_dir=$(mktemp -d)
-  rmdir "$worktree_dir"
-  git worktree add --detach "$worktree_dir"
-  (
-    cd "$worktree_dir"
-    git checkout --orphan ci-visuals-build
-    git rm -rf . >/dev/null 2>&1 || true
-    git clean -fdx >/dev/null
-    if [ -n "$fetched_sha" ]; then
-      git checkout "$fetched_sha" -- .
-    fi
-
-    target="pr-$pr_number/$sha7"
-    rm -rf "pr-$pr_number"
-    mkdir -p "$target"
-    for profile_dir in "$staged_root"/*; do
-      [ -d "$profile_dir" ] || continue
-      cp -R "$profile_dir" "$target/"
-    done
-    date -u +%FT%TZ > "pr-$pr_number/updated-at"
-
-    now=$(date -u +%s)
-    for pr_dir in pr-*; do
-      [ -d "$pr_dir" ] || continue
-      [ -f "$pr_dir/updated-at" ] || continue
-      updated_at=$(<"$pr_dir/updated-at")
-      if updated_seconds=$(date --date "$updated_at" +%s 2>/dev/null); then
-        :
-      elif updated_seconds=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$updated_at" +%s 2>/dev/null); then
-        :
-      else
-        continue
-      fi
-      if [ $((now - updated_seconds)) -gt $((30 * 24 * 60 * 60)) ]; then
-        rm -rf "$pr_dir"
-      fi
-    done
-
-    # Vercel deploys every ci-visuals push, which fails ROOTDIR_NOT_EXIST.
-    # Root-directory resolution precedes the Ignored Build Step, so disable
-    # deployments at both the repo root and each Vercel project root instead.
-    for vercel_root in . apps/ui apps/templates-ui docs-site; do
-      mkdir -p "$vercel_root"
-      cat > "$vercel_root/vercel.json" <<'JSON'
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "git": { "deploymentEnabled": { "ci-visuals": false } }
-}
-JSON
-    done
-
-    git add -A
-    git -c user.name='github-actions[bot]' \
-      -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-      commit --allow-empty -m "visuals: pr-$pr_number $sha7"
-  )
-
-  if git -C "$worktree_dir" push --force-with-lease="refs/heads/ci-visuals:$fetched_sha" origin HEAD:refs/heads/ci-visuals; then
-    cleanup
-    echo "base_url=https://raw.githubusercontent.com/$repository/ci-visuals/pr-$pr_number/$sha7"
-    exit 0
-  fi
-
-  echo "Push rejected on attempt $attempt of 3. Retrying." >&2
-  cleanup
-done
-
-echo "Could not publish ci-visuals after 3 attempts." >&2
-exit 1
+echo "base_url=$base_url"
