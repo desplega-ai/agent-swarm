@@ -18,11 +18,12 @@ import {
 } from "./definition";
 import {
   type AppRow,
+  type AppRowPatch,
   appExists,
   appsNamespace,
   createAppRowUnlocked,
   listAllAppRowsForMigrationUnlocked,
-  patchAppRowUnlocked,
+  patchAppRowsUnlocked,
   withMutationLock,
   yieldToEventLoop,
 } from "./row-store";
@@ -598,7 +599,7 @@ type ReconcileTally = Omit<ReconcileCounts, "staleSweepSkipped">;
 export const RECONCILE_CHUNK_SIZE = 200;
 
 /**
- * Apply `write` to `items` in transactions of RECONCILE_CHUNK_SIZE, yielding
+ * Run `write` on each RECONCILE_CHUNK_SIZE slice of `items` in its own transaction, yielding
  * to the event loop between chunks. A chunk's tally lands in `counts` only
  * after it commits, so a failing chunk rolls back its writes and its counts
  * together while earlier chunks stay committed and counted.
@@ -619,7 +620,7 @@ async function writeInChunks<T>(
   appId: string,
   items: readonly T[],
   counts: ReconcileCounts,
-  write: (item: T, tally: ReconcileTally, appPresent: boolean) => Promise<void>,
+  write: (chunk: readonly T[], tally: ReconcileTally, appPresent: boolean) => Promise<void>,
   state?: ChunkState,
 ): Promise<void> {
   for (let start = 0; start < items.length; start += RECONCILE_CHUNK_SIZE) {
@@ -635,7 +636,7 @@ async function writeInChunks<T>(
       };
       // One app check per chunk transaction, not one per row write.
       const appPresent = await appExists(appId);
-      for (const item of chunk) await write(item, chunkTally, appPresent);
+      await write(chunk, chunkTally, appPresent);
       return chunkTally;
     });
     state?.committed();
@@ -732,54 +733,84 @@ function reconcile(args: {
       appId,
       pull.records,
       counts,
-      async (record, tally, appPresent) => {
-        if (seen.has(record.key)) {
-          warn(warnings, `source returned duplicate key "${record.key}"; the last record wins`);
-        }
-        markSeen(record.key);
-        const values = projectRecord({ record, bindings, joinKey, warnings });
-        const envelope = { source: sourceName, syncedAt: now, stale: false };
-        const existing = mine.get(record.key);
-        if (!existing) {
-          // No adoption: a row with no source of its own is not ours to take.
-          const created = await createAppRowUnlocked(
+      async (records, tally, appPresent) => {
+        // Patches are collected and written in one batch per chunk; a create
+        // still writes at once. Reconcile holds the mutation lock, so each
+        // `mine` row is the stored row and the batch needs no re-read.
+        let pending: Array<{ key: string; differs: boolean; patch: AppRowPatch }> = [];
+        const flush = async () => {
+          if (pending.length === 0) return;
+          const batch = pending;
+          pending = [];
+          const results = await patchAppRowsUnlocked(
             appId,
             model,
             modelDef,
-            values,
-            { allowSourceManaged: true, envelope, actor },
+            batch.map((entry) => entry.patch),
             appPresent,
           );
-          setMine(record.key, created);
-          tally.created += 1;
-          return;
+          batch.forEach((entry, index) => {
+            const updated = results[index];
+            if (!updated) {
+              warn(warnings, `row "${entry.patch.rowId}" vanished before it could be updated`);
+              return;
+            }
+            setMine(entry.key, updated);
+            if (entry.differs) tally.updated += 1;
+            else tally.refreshed += 1;
+          });
+        };
+        for (const record of records) {
+          if (seen.has(record.key)) {
+            warn(warnings, `source returned duplicate key "${record.key}"; the last record wins`);
+            // The repeat must start from the earlier record's write.
+            if (pending.some((entry) => entry.key === record.key)) await flush();
+          }
+          markSeen(record.key);
+          const values = projectRecord({ record, bindings, joinKey, warnings });
+          const envelope = { source: sourceName, syncedAt: now, stale: false };
+          const existing = mine.get(record.key);
+          if (!existing) {
+            // No adoption: a row with no source of its own is not ours to take.
+            const created = await createAppRowUnlocked(
+              appId,
+              model,
+              modelDef,
+              values,
+              { allowSourceManaged: true, envelope, actor },
+              appPresent,
+            );
+            setMine(record.key, created);
+            tally.created += 1;
+            continue;
+          }
+          if (!appPresent) {
+            // Warn in record order, as a per-row write did.
+            warn(warnings, `row "${existing.id}" vanished before it could be updated`);
+            continue;
+          }
+          const differs = Object.entries(values).some(
+            ([name, value]) => !sameValue(modelDef.columns[name], existing[name], value),
+          );
+          pending.push({
+            key: record.key,
+            differs,
+            patch: {
+              rowId: existing.id,
+              prior: existing,
+              values,
+              options: {
+                allowSourceManaged: true,
+                envelope,
+                actor,
+                // Freshness must be meaningful: syncedAt advances on every confirmed
+                // row, updatedAt only when projected data actually moved.
+                ...(differs ? {} : { skipUpdatedAt: true }),
+              },
+            },
+          });
         }
-        const differs = Object.entries(values).some(
-          ([name, value]) => !sameValue(modelDef.columns[name], existing[name], value),
-        );
-        const updated = await patchAppRowUnlocked(
-          appId,
-          model,
-          modelDef,
-          existing.id,
-          values,
-          {
-            allowSourceManaged: true,
-            envelope,
-            actor,
-            // Freshness must be meaningful: syncedAt advances on every confirmed
-            // row, updatedAt only when projected data actually moved.
-            ...(differs ? {} : { skipUpdatedAt: true }),
-          },
-          appPresent,
-        );
-        if (!updated) {
-          warn(warnings, `row "${existing.id}" vanished before it could be updated`);
-          return;
-        }
-        setMine(record.key, updated);
-        if (differs) tally.updated += 1;
-        else tally.refreshed += 1;
+        await flush();
       },
       chunkState,
     );
@@ -794,30 +825,31 @@ function reconcile(args: {
       warn(warnings, "pull reported an incomplete window; stale sweep skipped");
       return;
     }
-    await writeInChunks(appId, unseen, counts, async (row, tally, appPresent) => {
-      if (row.stale === true) {
-        tally.unchanged += 1;
-        return;
-      }
-      await patchAppRowUnlocked(
-        appId,
-        model,
-        modelDef,
-        row.id,
-        {},
-        {
-          allowSourceManaged: true,
-          skipUpdatedAt: true,
-          // syncedAt records last confirmed presence, so it stays frozen here.
-          envelope: {
-            source: sourceName,
-            syncedAt: typeof row.syncedAt === "string" ? row.syncedAt : now,
-            stale: true,
+    await writeInChunks(appId, unseen, counts, async (rows, tally, appPresent) => {
+      const patches: AppRowPatch[] = [];
+      for (const row of rows) {
+        if (row.stale === true) {
+          tally.unchanged += 1;
+          continue;
+        }
+        patches.push({
+          rowId: row.id,
+          prior: row,
+          values: {},
+          options: {
+            allowSourceManaged: true,
+            skipUpdatedAt: true,
+            // syncedAt records last confirmed presence, so it stays frozen here.
+            envelope: {
+              source: sourceName,
+              syncedAt: typeof row.syncedAt === "string" ? row.syncedAt : now,
+              stale: true,
+            },
           },
-        },
-        appPresent,
-      );
-      tally.markedStale += 1;
+        });
+        tally.markedStale += 1;
+      }
+      await patchAppRowsUnlocked(appId, model, modelDef, patches, appPresent);
     });
   });
 }

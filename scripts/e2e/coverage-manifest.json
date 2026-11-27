@@ -325,6 +325,7 @@
         "knowledge-apps-patch-node",
         "knowledge-apps-primitives",
         "knowledge-apps-session-thread-files",
+        "knowledge-apps-sync-batched-writes",
         "knowledge-apps-template-refs"
       ]
     },
