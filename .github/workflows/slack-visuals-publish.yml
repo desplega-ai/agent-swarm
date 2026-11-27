@@ -190,6 +190,12 @@ jobs:
           name: slack-visuals-staged
           path: staged
 
+      # Own step with no secrets in env: a global install has no lockfile, so a transitive
+      # dependency's install script must not see the agent-fs key.
+      - name: Install agent-fs CLI
+        run: |
+          npm i -g @desplega.ai/agent-fs@0.18.40
+
       # The images go to agent-fs as a public, non-expiring share site, not to a git branch, so
       # they never grow the repository. Same agent-fs secrets as the UI E2E report.
       - name: Publish Slack visuals
@@ -203,7 +209,6 @@ jobs:
           AGENT_FS_DEFAULT_DRIVE_ID: ${{ secrets.E2E_AGENT_FS_DRIVE_ID }}
         run: |
           set -euo pipefail
-          npm i -g @desplega.ai/agent-fs@0.18.40
           publish_output=$(bash scripts/e2e/visuals-publish.sh staged "$PR" "$HEAD_SHA")
           printf '%s\n' "$publish_output"
           base_url=$(printf '%s\n' "$publish_output" | tail -n 1)
