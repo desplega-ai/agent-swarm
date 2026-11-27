@@ -283,11 +283,13 @@ export default async function workflowSuggestScan(args: any, ctx: any) {
     .slice(0, 5);
   const workflows = [];
   for (const { w, fit } of ranked) {
+    // SQLite binds an array to `$N` placeholders in order of first appearance, not by N,
+    // so `$1` must be the first placeholder in the text for both engines to agree.
     const [runs] = await q(
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN "startedAt" >= $2 THEN 1 ELSE 0 END) AS week,
-              (SELECT r2.status FROM workflow_runs r2 WHERE r2."workflowId" = $1 ORDER BY r2."startedAt" DESC LIMIT 1) AS "lastStatus",
-              (SELECT COUNT(*) FROM scheduled_tasks st WHERE st."targetType" = 'workflow' AND st."workflowId" = $1) AS schedules
+      `SELECT (SELECT r2.status FROM workflow_runs r2 WHERE r2."workflowId" = $1 ORDER BY r2."startedAt" DESC LIMIT 1) AS "lastStatus",
+              (SELECT COUNT(*) FROM scheduled_tasks st WHERE st."targetType" = 'workflow' AND st."workflowId" = $1) AS schedules,
+              COUNT(*) AS total,
+              SUM(CASE WHEN "startedAt" >= $2 THEN 1 ELSE 0 END) AS week
          FROM workflow_runs WHERE "workflowId" = $1`,
       [w.id, weekAgo],
     );

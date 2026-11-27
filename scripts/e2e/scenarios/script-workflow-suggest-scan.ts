@@ -2,6 +2,12 @@ import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { createAssignedTask, createUser } from "./core-helpers";
 import { expectRunOk, getLead, registerAgent, runScript } from "./script-helpers";
+import {
+  createWorkflow,
+  deleteWorkflowQuietly,
+  triggerWorkflow,
+  waitForRun,
+} from "./workflow-helpers";
 
 /**
  * Flow `workflow-suggestion`: the seeded `workflow-suggest-scan` script reads a person's
@@ -101,6 +107,56 @@ export const scriptWorkflowSuggestScan: Scenario = {
       "the unanswered offer in this thread is pending",
     );
     expect(second.optedOut === true, "the opt-out record is read");
+
+    // A matching workflow with one run and one workflow schedule reads as healthy. On
+    // SQLite this pins the `$N` bind order of the per-workflow runs query.
+    const workflowId = await createWorkflow(
+      ctx,
+      "weekly-competitor-radar-report",
+      {
+        nodes: [{ id: "radar", type: "script", config: { runtime: "bash", script: "echo radar" } }],
+      },
+      { description: `compile the weekly competitor radar report ${ctx.nonce}` },
+      workerId,
+    );
+    let scheduleId = "";
+    try {
+      const { runId } = await triggerWorkflow(ctx, workflowId);
+      await waitForRun(ctx, runId, "completed", 30_000, "matching workflow run");
+      const schedule = await ctx.api("POST", "/api/schedules", {
+        body: {
+          name: `e2e-wf-suggest-${ctx.nonce}`,
+          // 03:00 on 1 January: never due while the suite runs.
+          cronExpression: "0 3 1 1 *",
+          targetType: "workflow",
+          workflowId,
+        },
+      });
+      expectStatus(schedule, [201], "create a workflow schedule");
+      scheduleId = String(asRecord(schedule.json).id);
+
+      const third = await scan(askId, "scan with a matching workflow");
+      const match = asRecord(
+        (third.workflows as unknown[]).find((w) => asRecord(w).id === workflowId),
+      );
+      expect(
+        Number(match.runsTotal) > 0 &&
+          Number(match.runs7d) > 0 &&
+          match.schedules === 1 &&
+          match.lastRunStatus === "completed",
+        `the matching workflow carries its run and schedule, got ${JSON.stringify(match)}`,
+      );
+      const diagnosis = asRecord(third.diagnosis);
+      expect(
+        diagnosis.kind === "healthy" &&
+          Array.isArray(diagnosis.workflowIds) &&
+          diagnosis.workflowIds[0] === workflowId,
+        `a workflow with a completed run diagnoses as healthy, got ${JSON.stringify(diagnosis)}`,
+      );
+    } finally {
+      if (scheduleId) await ctx.api("DELETE", `/api/schedules/${scheduleId}`);
+      await deleteWorkflowQuietly(ctx, workflowId);
+    }
 
     for (const key of [`u/${userId}/p/${earlierId}`, `u/${userId}/optout`]) {
       await ctx.api("DELETE", `/api/kv/_/workflow-suggest/${encodeURIComponent(key)}`, {
