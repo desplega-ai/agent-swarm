@@ -40,6 +40,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [db-query](#db-query)
   - [get-oauth-access-token](#get-oauth-access-token)
   - [data-query](#data-query)
+  - [integration-status](#integration-status)
   - [accept-steer](#accept-steer)
   - [steer-task](#steer-task)
 - [Task Pool Tools](#task-pool-tools)
@@ -514,6 +515,14 @@ Read-only DuckDB SQL over tabular files on your agent-fs drive (csv, tsv, parque
 | `card` | `boolean` | No | - | Also return `card`, a uiSpec spec with the result as a Table. |
 | `sheet` | `object` | No | - | New `.sheet.json` path; create-only. |
 | `origin` | `string` | No | - | Label for the usage event, e.g. `workflow`, `e2e` or `qa`. Default: the call path. |
+
+### integration-status
+
+**Integration Status**
+
+Read which integrations this swarm has connected: slack, github, linear, jira, gsc, agentmail and agentfs as unverified, configured or verified (the same states the dashboard status page shows), plus the slugs of the enabled script connections this agent can call. Read-only.
+
+*No parameters*
 
 ### accept-steer
 
@@ -1489,6 +1498,8 @@ Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (s
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace) |
 | `vcsRepo` | `string` | No | - | Default VCS repo for all agent-task nodes (e.g. org/repo) |
 | `triggerSchema` | `object` | No | - | Optional JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored. |
+| `requires` | `array` | No | - | Integrations the workflow needs (slack, github, linear, jira, gsc, agentmail, agentfs). Preflight marks it needs_setup when one is not connected. |
+| `enabled` | `boolean` | No | - | Default true. false saves a draft that refuses every trigger until someone enables it. |
 
 ### list-workflows
 

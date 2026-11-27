@@ -778,6 +778,8 @@ declare module "swarm-sdk" {
       isDefault?: boolean;
     }): Promise<unknown>;
     prompt_get(args: { id: string }): Promise<unknown>;
+    // --- integrations ---
+    integration_status(args?: Record<string, never>): Promise<unknown>;
     // --- tracker ---
     tracker_status(args?: Record<string, unknown>): Promise<unknown>;
     tracker_syncStatus(args?: Record<string, unknown>): Promise<unknown>;
