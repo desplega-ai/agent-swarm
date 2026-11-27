@@ -9,10 +9,13 @@
 import type { ExtensionFactory, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import {
+  adoptDroppedIdentityFields,
   advanceIdentityBaselines,
+  buildIndependentIdentityPayloads,
   contentSha256,
   PROFILE_FILE_IO,
   type ProfileFileIO,
+  profileOf,
   readIdentityBaselines,
 } from "../commands/profile-sync";
 import {
@@ -191,17 +194,23 @@ export async function syncIdentityFilesToServer(
 
   if (Object.keys(updates).length === 0) return;
 
-  try {
-    const resp = await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
-      method: "PUT",
-      headers: apiHeaders(config),
-      body: JSON.stringify({ ...updates, changeSource }),
-      signal,
-    });
-    if (resp.ok) await advanceIdentityBaselines(updates, io);
-  } catch {
-    /* silently fail */
+  const synced: Record<string, string> = {};
+  for (const payload of buildIndependentIdentityPayloads(updates, changeSource, baselines)) {
+    try {
+      const resp = await fetch(`${config.apiUrl}/api/agents/${config.agentId}/profile`, {
+        method: "PUT",
+        headers: apiHeaders(config),
+        body: JSON.stringify(payload.body),
+        signal,
+      });
+      if (resp.ok) {
+        Object.assign(synced, await adoptDroppedIdentityFields(payload, await profileOf(resp), io));
+      }
+    } catch {
+      /* silently fail */
+    }
   }
+  await advanceIdentityBaselines(synced, io);
 }
 
 /** Sync setup script to server */

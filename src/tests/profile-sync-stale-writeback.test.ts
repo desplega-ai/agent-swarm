@@ -167,6 +167,44 @@ describe("profile sync never writes an untouched file over a DB edit", () => {
     expect(db.identityMd).toBe(EDITED_IDENTITY);
   });
 
+  test("opencode/pi: an edited file is not sent over a DB edit made during the session", async () => {
+    db = { identityMd: BOOT_IDENTITY };
+    const io = bootedWorkspace({ identityMd: BOOT_IDENTITY });
+    io.files[IDENTITY_MD_PATH] = EDITED_IDENTITY;
+    db.identityMd = "dreaming edit";
+
+    await syncIdentityFilesToServer(config, "self_edit", undefined, io);
+
+    expect(sentHashes).toEqual({ identityMd: contentSha256(BOOT_IDENTITY) });
+    expect(db.identityMd).toBe("dreaming edit");
+    // The agent continues from the DB value, and a later edit of it syncs.
+    expect(io.files[IDENTITY_MD_PATH]).toBe("dreaming edit");
+    const next = `${EDITED_IDENTITY}\nA line the agent adds after the refresh.`;
+    io.files[IDENTITY_MD_PATH] = next;
+    await syncIdentityFilesToServer(config, "self_edit", undefined, io);
+    expect(db.identityMd).toBe(next);
+  });
+
+  test("opencode/pi: a dropped file does not hold back the other edited files", async () => {
+    db = { soulMd: "boot soul", identityMd: BOOT_IDENTITY };
+    const io = bootedWorkspace({ identityMd: BOOT_IDENTITY });
+    io.files[IDENTITY_BASELINES_PATH] = JSON.stringify({
+      soulMd: contentSha256("boot soul"),
+      identityMd: contentSha256(BOOT_IDENTITY),
+    });
+    io.files[SOUL_MD_PATH] = "agent soul";
+    io.files[IDENTITY_MD_PATH] = EDITED_IDENTITY;
+    db.identityMd = "dreaming edit";
+
+    await syncIdentityFilesToServer(config, "session_sync", undefined, io);
+
+    expect(db).toEqual({ soulMd: "agent soul", identityMd: "dreaming edit" });
+    expect(baselinesOf(io)).toEqual({
+      soulMd: contentSha256("agent soul"),
+      identityMd: contentSha256("dreaming edit"),
+    });
+  });
+
   test("an untouched start-up.sh does not overwrite a DB setupScript edit", async () => {
     db = { setupScript: "echo boot" };
     const io = memoryIO({
