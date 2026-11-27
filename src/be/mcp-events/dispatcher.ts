@@ -18,6 +18,7 @@ import { isLiveUserToken } from "@/be/users";
 import { getAppUrl } from "@/utils/constants";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { workflowEventBus } from "@/workflows/event-bus";
+import { runDetached } from "../../otel";
 import { isMcpUserEventsEnabled, parseTaskEventArguments, type TaskEventName } from "./catalog";
 import {
   getSubscription,
@@ -101,10 +102,13 @@ async function attemptDelivery(
   await recordDeliveryOutcome(row.id, { ok: false, category: result.category, atIso });
   const delay = retryDelaysMs[attempt];
   if (delay === undefined) return;
-  const timer = setTimeout(() => {
-    pendingTimers.delete(timer);
-    void attemptDelivery(subscriptionId, eventId, body, attempt + 1).catch(logError);
-  }, delay);
+  // Detached: the first attempt runs inside the request that emitted the event.
+  const timer = runDetached(() =>
+    setTimeout(() => {
+      pendingTimers.delete(timer);
+      void attemptDelivery(subscriptionId, eventId, body, attempt + 1).catch(logError);
+    }, delay),
+  );
   timer.unref?.();
   pendingTimers.add(timer);
 }

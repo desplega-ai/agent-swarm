@@ -7,7 +7,7 @@ timing races in the storage layer under crashes and partitions.
 
 | Workload | Containers | Faults |
 |---|---|---|
-| `postgres/` | API, PostgreSQL 16 with pgvector, client | API down, database down, API cut from database, API slow (to database, to all), client cut from API |
+| `postgres/` | API, PostgreSQL 18 with pgvector, client | API down, database down, API cut from database, API slow (to database, to all), client cut from API |
 | `sqlite/` | API on a SQLite file in a volume, client | API down, client cut from API |
 
 There is no LLM and no worker in the guest. The model's two actions play the clients
@@ -24,7 +24,7 @@ two claimed ones, so every line of the search starts with work in every state.
   - `k/act`: one client step (`work`, `create`, `replay`, `cancel`, `sweep`, and `init` and `seed` for setup). It writes every answer of the API to a journal.
   - `k/audit`: compares the journal with `GET /api/tasks` and prints the numbers the checks read.
   - `k/serve`: starts the API again when it exits (on Postgres it exits when it loses the one-process lock).
-- `images/postgres/`: PostgreSQL 16 with pgvector on alpine, without LLVM (97 MB; `pgvector/pgvector:pg16` is 480 MB).
+- `images/postgres/`: PostgreSQL 18 with pgvector on alpine, without LLVM (105 MB; `pgvector/pgvector:pg18` is about 480 MB).
 - `model/common.lua`: setup, resources, actions and checks. `model/postgres.lua` and `model/sqlite.lua`: the faults of each variant.
 - `postgres/`, `sqlite/`: the workload directories that `kinoko push` takes. Their `model.lua` is generated: edit `model/*.lua`, then run `./build.sh --models-only`.
 

@@ -29,7 +29,9 @@
  *   `$form = { message, attachments: [{ path, name, mimeType, size }] }`. A
  *   failed upload sends nothing and keeps the text and files. Files never
  *   steer: a box with files sends a follow-up. The person bubble shows the
- *   `input.attachments` of each app action prompt as chips.
+ *   `input.attachments` of each app action prompt as chips. While the
+ *   viewer's browser has no working agent-fs key, a box above the composer
+ *   gives the steps to connect, with Comb's connect dialog one click away.
  * - A session: the shared `SessionConversation` (turn timeline, "Latest"
  *   jump, `TaskComposer`), with the app keeping control of sends:
  *   - steer: the newest unfinished task of ANY agent (`steerTarget="any"`),
@@ -58,15 +60,19 @@
 import { getByPath, type InferComponentProps } from "@json-render/core";
 import { useActions, useStateStore } from "@json-render/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { SquarePen } from "lucide-react";
+import { Paperclip, SquarePen } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { SESSION_LIST_KEY, useSession, useSessions } from "@/api/hooks/use-sessions";
 import type { AgentTask } from "@/api/types";
+import { ConnectDialog, useEmbeddedFrame } from "@/components/comb/connect-dialog";
 import { ComposerDock, DEFAULT_ATTACHMENT_LIMITS } from "@/components/sessions/composer-dock";
 import { SessionConversation } from "@/components/sessions/session-conversation";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
+import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { CHAT_COLUMN } from "@/lib/chat-width";
 import { cn } from "@/lib/utils";
 import { useAppScopeId } from "./app-scope";
 import type { ActionChain, swarmCatalog } from "./catalog";
@@ -140,6 +146,42 @@ function useWaitForTask(rootTaskId: string, chain: readonly AgentTask[]) {
       resolveRef.current = resolve;
       setPendingTaskId(taskId);
     });
+}
+
+/**
+ * Steps to connect agent-fs, above the composer of a thread that takes files,
+ * while this browser has no working key. Connecting unmounts it. Not in an
+ * embedded frame, where a key does not persist: the send error stays there.
+ */
+function ConnectFilesHint() {
+  const agentFs = useOptionalAgentFs();
+  const embedded = useEmbeddedFrame();
+  const [open, setOpen] = useState(false);
+  const needsKey = agentFs?.state === "needs-connect" || agentFs?.state === "invalid-key";
+  if (!needsKey || embedded) return null;
+  return (
+    // Shrinks and scrolls so a composer grown by files keeps Send in the fixed-height thread;
+    // `relative` and the fill cover a session timeline squeezed to its padded scroller.
+    <div className="relative min-h-0 overflow-y-auto [scrollbar-gutter:auto] bg-background px-4 pt-2">
+      <AlertCallout
+        tone="info"
+        icon={Paperclip}
+        role="note"
+        title="Connect your files to send attachments"
+        className={CHAT_COLUMN}
+      >
+        <ol className="list-decimal space-y-0.5 pl-4">
+          <li>Press Connect Files.</li>
+          <li>Wait a few seconds.</li>
+          <li>Press Send again.</li>
+        </ol>
+        <Button type="button" size="sm" className="mt-2" onClick={() => setOpen(true)}>
+          Connect Files
+        </Button>
+      </AlertCallout>
+      <ConnectDialog open={open} onOpenChange={setOpen} />
+    </div>
+  );
 }
 
 /** A notice in place of the conversation, over a disabled composer. */
@@ -382,6 +424,7 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
           onValueChange={setDraft}
           placeholder={placeholder}
           routeLabel={ROUTE_LABEL}
+          composerNotice={attachments ? <ConnectFilesHint /> : undefined}
         />
       ) : (
         <>
@@ -392,6 +435,7 @@ export function SessionThreadComponent({ props }: { props: SessionThreadProps })
                 : "This thread has no onDispatch action chain, so it cannot start a session."}
             </p>
           </div>
+          {attachments ? <ConnectFilesHint /> : null}
           <ComposerDock
             value={draft}
             onChange={setDraft}

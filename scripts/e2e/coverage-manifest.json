@@ -311,8 +311,9 @@
       "scenarios": ["health", "auth"]
     },
     "app-engine": {
-      "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
+      "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete, bundle export and import",
       "scenarios": [
+        "apps-export-import",
         "knowledge-apps",
         "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
@@ -518,6 +519,10 @@
     "otel-db-statements": {
       "description": "The storage StatementObserver exports agentswarm.db.statement.duration with engine, operation and table labels, a statement span under its request span with no parameter values (OTEL_TRACE_DB_STATEMENTS), and the Postgres transaction outcome counter",
       "scenarios": ["platform-otel-db-statements"]
+    },
+    "otel-detached-timers": {
+      "description": "Timers and background work armed while serving a request run outside that request's trace, so the request span ends on time and background spans start their own root trace",
+      "scenarios": ["platform-otel-detached-timers"]
     },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",

@@ -48,6 +48,31 @@ async function sessionLogs(ctx: ScenarioContext, taskId: string, owner: string, 
     "Logs without taskId must persist in order with a null taskId",
   );
 
+  // A batch above the 100-row multi-row INSERT chunk: lines keep their order
+  // and numbering across chunks, and the next POST continues the numbering.
+  const bulkSessionId = `core-sl-bulk-${ctx.nonce}`;
+  const bulkLines = Array.from({ length: 250 }, (_, i) => `bulk line ${i}`);
+  for (const lines of [bulkLines, ["bulk tail"]]) {
+    expectStatus(
+      await ctx.api("POST", "/api/session-logs", {
+        body: { sessionId: bulkSessionId, iteration: 1, cli: "claude", lines },
+      }),
+      [201],
+      "store a bulk log batch",
+    );
+  }
+  const bulkRows = ctx.db.query<{ content: string; lineNumber: number }>(
+    sql`SELECT content, "lineNumber" FROM session_logs WHERE "sessionId" = ${bulkSessionId} ORDER BY ${insertionOrder}`,
+  );
+  expect(
+    bulkRows.length === 251 &&
+      bulkRows.every(
+        (row, i) =>
+          row.lineNumber === i && row.content === (i < 250 ? `bulk line ${i}` : "bulk tail"),
+      ),
+    "A bulk log batch must keep its order and line numbers across insert chunks",
+  );
+
   const secret = `sk-ant-api03-${"A".repeat(90)}`;
   let response = await ctx.api("POST", "/api/session-logs", {
     body: {

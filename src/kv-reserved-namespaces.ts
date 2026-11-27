@@ -51,6 +51,11 @@ const RESERVED_FAMILIES = new Map([
     "integrations:kapso",
     "namespace is reserved for Kapso routing; use register-kapso-number or unregister-kapso-number",
   ],
+  // Chat SDK channel routing (src/integrations/chat-sdk/router.ts). `channel-settings` stays writable.
+  [
+    "integrations:chat:channels",
+    "namespace is reserved for chat channel routing; use register-chat-channel or unregister-chat-channel",
+  ],
 ]);
 
 /**

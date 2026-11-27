@@ -19,6 +19,7 @@ import {
   type SlackInboundTransport,
   touchSlackInboundDuplicate,
 } from "../be/db-queries/slack-inbound";
+import { runDetached } from "../otel";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getSlackConfiguration, type SlackMode } from "./config";
 import { checkInboundWorkspace, getCachedSlackWorkspaceIdentity } from "./workspace-guard";
@@ -523,7 +524,8 @@ export async function processNextSlackInboundReceipt(
 export type SlackInboundTimer = (fn: () => void, delayMs: number) => () => void;
 
 const defaultTimer: SlackInboundTimer = (fn, delayMs) => {
-  const handle = setTimeout(fn, delayMs);
+  // Detached: with the HTTP receiver, the arming call runs inside the request.
+  const handle = runDetached(() => setTimeout(fn, delayMs));
   handle.unref?.();
   return () => clearTimeout(handle);
 };

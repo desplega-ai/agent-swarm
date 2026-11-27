@@ -204,7 +204,7 @@ docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
 
 ### Postgres storage engine (optional)
 
-The API runs on SQLite by default. Set `DATABASE_URL` to a `postgres://` URL to run it on Postgres 16 with pgvector instead. Nothing changes for an install that does not set it.
+The API runs on SQLite by default. Set `DATABASE_URL` to a `postgres://` URL to run it on Postgres (16 or later, 18 recommended) with pgvector instead. Nothing changes for an install that does not set it.
 
 ```bash
 # .env
@@ -292,7 +292,7 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
-The worker image now also ships PostgreSQL 16 server binaries (`initdb`, `pg_ctl`, `psql`, `pg_stat_statements`) for local backend or integration-style test setups. They stay dormant unless you opt in with `SWARM_DEP_POSTGRES_ENABLED=true`, which runs [`scripts/init-local-postgres.sh`](./scripts/init-local-postgres.sh) from the entrypoint. The helper defaults to `localhost:5433` and can be tuned with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB`.
+The worker image now also ships PostgreSQL 18 server binaries (`initdb`, `pg_ctl`, `psql`, `pg_stat_statements`) for local backend or integration-style test setups. They stay dormant unless you opt in with `SWARM_DEP_POSTGRES_ENABLED=true`, which runs [`scripts/init-local-postgres.sh`](./scripts/init-local-postgres.sh) from the entrypoint. The helper defaults to `localhost:5433` and can be tuned with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB`.
 
 Set a non-empty `LOCAL_POSTGRES_PASSWORD` in the worker environment before enabling PostgreSQL. The helper has no password default and reapplies the supplied value to existing clusters on every invocation. Configure password-using clients with that value; loopback binding and local trust authentication are unchanged.
 
@@ -548,7 +548,7 @@ Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the AP
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=0.5` demoting only memories the agents rated wrong (`1.0` disables demotion). On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.18.39. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.18.40. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 

@@ -31,7 +31,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `STEERING_ENABLED` | `true` | [Task steering](/docs/guides/task-steering) is enabled by default. Set `false` or `0` (API server and worker containers) to opt out: steering routes reject writes, `steer-task`/`accept-steer` are not registered, and workers skip steering delivery polls. |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
-| `DATABASE_URL` | — | A `postgres://` URL runs the API on Postgres 16 with pgvector instead of SQLite. Deployment env only. See [Postgres](/docs/guides/postgres). |
+| `DATABASE_URL` | — | A `postgres://` URL runs the API on Postgres (16 or later, 18 recommended) with pgvector instead of SQLite. Deployment env only. See [Postgres](/docs/guides/postgres). |
 | `DATABASE_PASSWORD` | — | Postgres only: raw password that the API URL-encodes into `DATABASE_URL`. Deployment env only. |
 | `DATABASE_QUERY_URL` | — | Postgres only: URL of the restricted read-only role the `db-query` tool uses. Unset turns `db-query` off on Postgres. |
 | `SWARM_DATA_DIR` | directory of `DATABASE_PATH` | Directory of the encryption key file and the page-session secret, on either engine. |
@@ -325,7 +325,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
 | `MODEL_TIER_MAP` | No | — | JSON object overriding portable tier-to-model resolution for the current worker, for example `{\"smol\":\"gpt-5.4-mini\",\"smart\":\"gpt-5.5\"}`. Applies when a task, schedule, or workflow uses `modelTier`. |
 | `MODEL_TIER_<TIER>` | No | — | Per-tier override for `smol`, `regular`, `smart`, or `ultra` (for example `MODEL_TIER_SMART=gpt-5.5`). Wins over `MODEL_TIER_MAP`. |
-| `SWARM_DEP_POSTGRES_ENABLED` | No | `false` | Set to `true` to start the optional bundled PostgreSQL 16 cluster on worker boot. The root-stage entrypoint runs `scripts/init-local-postgres.sh` before privilege drop; binaries ship dormant in the worker image since `v1.93.0` |
+| `SWARM_DEP_POSTGRES_ENABLED` | No | `false` | Set to `true` to start the optional bundled PostgreSQL 18 cluster on worker boot. The root-stage entrypoint runs `scripts/init-local-postgres.sh` before privilege drop; binaries ship dormant in the worker image since `v1.93.0` |
 | `LOCAL_POSTGRES_DATA_DIR` | No | `/tmp/postgres-data` | Data directory for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_PORT` | No | `5433` | Port for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_USER` | No | `postgres` | Superuser name for the optional local Postgres cluster |

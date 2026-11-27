@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds what both workloads need, for linux/amd64 (the Kinoko guest):
 #   1. kinoko-swarm:<tag>            the API image under test plus the client scripts
-#   2. kinoko-swarm-postgres:pg16    PostgreSQL 16 with pgvector, small
+#   2. kinoko-swarm-postgres:pg18    PostgreSQL 18 with pgvector, small
 #   3. postgres/model.lua and sqlite/model.lua, from model/common.lua and the
 #      variant's faults file
 #
@@ -31,5 +31,5 @@ done
 
 docker build --platform linux/amd64 --build-arg "SWARM_IMAGE=$SWARM_IMAGE" \
   -t "kinoko-swarm:$SWARM_TAG" images/swarm
-docker build --platform linux/amd64 -t kinoko-swarm-postgres:pg16 images/postgres
+docker build --platform linux/amd64 -t kinoko-swarm-postgres:pg18 images/postgres
 docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}' | grep '^kinoko-swarm'

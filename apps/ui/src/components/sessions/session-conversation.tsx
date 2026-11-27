@@ -81,6 +81,8 @@ export interface SessionConversationProps {
   placeholder?: string;
   /** Follow-up route hint. Omitted: the dock's "Routes to Lead". */
   routeLabel?: string;
+  /** Shown right above the composer, while the viewer can type. */
+  composerNotice?: ReactNode;
 }
 
 const SCROLLED_UP_FADE = {
@@ -104,6 +106,7 @@ export function SessionConversation({
   onValueChange,
   placeholder,
   routeLabel,
+  composerNotice,
 }: SessionConversationProps) {
   // Steering (≥1.122.1). Older servers 404 `/api/tasks/:id/steer`, so the
   // composer falls back to its pre-steering chained-task behaviour.
@@ -319,6 +322,7 @@ export function SessionConversation({
         </p>
       ) : null}
 
+      {canType ? composerNotice : null}
       {/* Composer dock pinned to bottom. A read-only share gets a notice
           instead; a missing `access` (older servers) keeps the composer. */}
       {noAccess ? null : isReadOnlyAccess(detail?.access) ? (

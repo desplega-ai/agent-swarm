@@ -15,6 +15,7 @@ import {
   AppDefinitionSchema,
   type AppValidationIssue,
   type ColumnDef,
+  isIso8601Date,
   isValidColumnValue,
   jsonColumnSizeLabel,
   jsonColumnValueIssue,
@@ -515,6 +516,114 @@ export async function listAppRows(
     if (!isInTransaction()) await yieldToEventLoop();
   }
   return rows;
+}
+
+/** System fields a stored row carries besides its model columns, with their value check. */
+const IMPORT_SYSTEM_FIELDS: Record<string, (value: unknown) => boolean> = {
+  createdBy: (value) => typeof value === "string",
+  updatedBy: (value) => typeof value === "string",
+  source: (value) => typeof value === "string",
+  syncedAt: (value) => typeof value === "string" && isIso8601Date(value),
+  stale: (value) => typeof value === "boolean",
+};
+const IMPORT_ROW_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * Check rows copied from another swarm (an app bundle) against a model, keeping
+ * their ids, timestamps and provenance. Unlike `createAppRows` it does not
+ * apply defaults, required checks or the source-managed column guard: the rows
+ * are a snapshot of stored state, not a new write. Keys the model does not
+ * declare are dropped and counted. Throws `AppRowValidationError` on a bad row.
+ */
+export function prepareImportedRows(
+  model: string,
+  definition: ModelDef,
+  rows: readonly unknown[],
+): { rows: AppRow[]; droppedKeys: number } {
+  const issues: AppValidationIssue[] = [];
+  const prepared: AppRow[] = [];
+  const seen = new Set<string>();
+  let droppedKeys = 0;
+  const now = new Date().toISOString();
+  rows.forEach((raw, index) => {
+    const path = `rows.${model}.${index}`;
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      issues.push({ path, message: "row must be an object" });
+      return;
+    }
+    const input = raw as Record<string, unknown>;
+    const id = input.id;
+    if (typeof id !== "string" || !IMPORT_ROW_ID.test(id)) {
+      issues.push({ path: `${path}.id`, message: "row id must be 1-128 of [A-Za-z0-9_-]" });
+      return;
+    }
+    if (seen.has(id)) {
+      issues.push({ path: `${path}.id`, message: `duplicate row id "${id}"` });
+      return;
+    }
+    seen.add(id);
+    const row: AppRow = { id, createdAt: now, updatedAt: now };
+    for (const field of ["createdAt", "updatedAt"] as const) {
+      const value = input[field];
+      if (value === undefined) continue;
+      if (typeof value !== "string" || !isIso8601Date(value)) {
+        issues.push({ path: `${path}.${field}`, message: "must be an ISO-8601 date" });
+      } else {
+        row[field] = value;
+      }
+    }
+    for (const [name, value] of Object.entries(input)) {
+      if (name === "id" || name === "createdAt" || name === "updatedAt") continue;
+      if (value === null || value === undefined) continue;
+      const systemCheck = Object.hasOwn(IMPORT_SYSTEM_FIELDS, name)
+        ? IMPORT_SYSTEM_FIELDS[name]
+        : undefined;
+      if (systemCheck) {
+        if (systemCheck(value)) row[name] = value;
+        else issues.push({ path: `${path}.${name}`, message: `invalid ${name}` });
+        continue;
+      }
+      const column = Object.hasOwn(definition.columns, name) ? definition.columns[name] : undefined;
+      if (!column) {
+        droppedKeys++;
+        continue;
+      }
+      const ok =
+        column.kind === "json" ? jsonColumnValueIssue(value) === null : validValue(column, value);
+      if (ok) row[name] = value;
+      else
+        issues.push({ path: `${path}.${name}`, message: `must be a valid ${column.kind} value` });
+    }
+    prepared.push(row);
+  });
+  if (issues.length > 0) throw new AppRowValidationError(issues.slice(0, 50));
+  return { rows: prepared, droppedKeys };
+}
+
+const IMPORT_WRITE_BATCH = 500;
+
+/**
+ * Write rows from `prepareImportedRows` as they are, ids included, with their
+ * index keys. One transaction per batch with a yield between batches, so a
+ * large import does not hold the event loop or one giant transaction. Not all
+ * or nothing across batches: the importer deletes the app when a batch fails.
+ */
+export function writeImportedAppRows(
+  appId: string,
+  model: string,
+  definition: ModelDef,
+  rows: readonly AppRow[],
+): Promise<void> {
+  return withMutationLock(appId, model, async () => {
+    const namespace = appsNamespace(appId);
+    for (let start = 0; start < rows.length; start += IMPORT_WRITE_BATCH) {
+      const batch = rows.slice(start, start + IMPORT_WRITE_BATCH);
+      await inRowTransaction(() =>
+        upsertKvMany(batch.flatMap((row) => rowEntries(namespace, model, definition, row))),
+      );
+      await yieldToEventLoop();
+    }
+  });
 }
 
 const MIGRATION_KV_BATCH_SIZE = 1000;

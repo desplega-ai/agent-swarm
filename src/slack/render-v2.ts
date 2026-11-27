@@ -50,6 +50,7 @@ import {
 import { requestMemoEpoch } from "../be/request-memo";
 import { getTaskCitations } from "../be/task-citations";
 import { getTaskUiSpec } from "../be/task-ui-spec";
+import { runDetached, withSpan } from "../otel";
 import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask } from "../types";
 import { taskUiSpecSlackBlocks } from "../ui-spec/slack";
@@ -108,7 +109,6 @@ import {
 } from "./session-status";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { isAwaitingWake, isDeferredTask, slackTaskOutput } from "./task-output";
-
 import {
   assertSlackTreeCurrent,
   canPresentSlackTree,
@@ -1001,19 +1001,21 @@ function scheduleSlackTreeUpdate(
   if (existing) clearTimeout(existing);
   pendingTreeUpdates.set(
     tree.id,
-    setTimeout(
-      () => {
-        pendingTreeUpdates.delete(tree.id);
-        if (generation !== slackTreeGeneration() || !isSlackTaskTreeEnabled()) return;
-        void updateThreadTree(tree).catch((error) => {
-          if (error instanceof SlackTreeSuppressed) return;
-          console.error(
-            `[Slack] Failed to run debounced v2 tree update ${tree.id}:`,
-            scrubSecrets(String(error)),
-          );
-        });
-      },
-      Math.max(0, delayMs),
+    runDetached(() =>
+      setTimeout(
+        () => {
+          pendingTreeUpdates.delete(tree.id);
+          if (generation !== slackTreeGeneration() || !isSlackTaskTreeEnabled()) return;
+          void updateThreadTree(tree).catch((error) => {
+            if (error instanceof SlackTreeSuppressed) return;
+            console.error(
+              `[Slack] Failed to run debounced v2 tree update ${tree.id}:`,
+              scrubSecrets(String(error)),
+            );
+          });
+        },
+        Math.max(0, delayMs),
+      ),
     ),
   );
 }
@@ -3036,12 +3038,15 @@ function scheduleDirtyFlush(delayMs: number): void {
   if (dirtyFlushTimer && dirtyFlushAt <= at) return;
   if (dirtyFlushTimer) clearTimeout(dirtyFlushTimer);
   dirtyFlushAt = at;
-  dirtyFlushTimer = setTimeout(() => {
-    dirtyFlushTimer = null;
-    void flushSlackRenderV2DirtyThreads().catch((error) => {
-      console.error("[Slack] Event-driven v2 render failed:", error);
-    });
-  }, delayMs);
+  // Detached: task events fire inside request handlers.
+  dirtyFlushTimer = runDetached(() =>
+    setTimeout(() => {
+      dirtyFlushTimer = null;
+      void flushSlackRenderV2DirtyThreads().catch((error) => {
+        console.error("[Slack] Event-driven v2 render failed:", error);
+      });
+    }, delayMs),
+  );
 }
 
 /** Queue one thread for the event-driven render. */
@@ -3087,15 +3092,14 @@ export function stopSlackRenderV2Events(): void {
  * waits for the running pass and does not start its own, so two passes never
  * interleave their Slack writes.
  */
-function runExclusive(work: () => Promise<void>): Promise<void> {
+function runExclusive(kind: "dirty" | "reconcile", work: () => Promise<void>): Promise<void> {
   if (renderInFlight) return renderInFlight;
-  const run = (async () => {
-    try {
-      await work();
-    } finally {
-      renderInFlight = null;
-    }
-  })();
+  // Each pass is its own root trace, whoever triggered it.
+  const run = runDetached(() =>
+    withSpan("slack.render.pass", () => work(), { "slack.render.kind": kind }),
+  ).finally(() => {
+    renderInFlight = null;
+  });
   renderInFlight = run;
   return run;
 }
@@ -3133,7 +3137,7 @@ export async function flushSlackRenderV2DirtyThreads(): Promise<void> {
     await renderInFlight;
     if (dirtyTaskIds.size === 0 && dirtyThreads.size === 0) return;
   }
-  await runExclusive(renderDirtyThreads);
+  await runExclusive("dirty", renderDirtyThreads);
 }
 
 /**
@@ -3143,7 +3147,7 @@ export async function flushSlackRenderV2DirtyThreads(): Promise<void> {
  */
 export function processSlackRenderV2(): Promise<void> {
   if (!isSlackRenderV2Enabled()) return Promise.resolve();
-  return runExclusive(reconcileAllThreads);
+  return runExclusive("reconcile", reconcileAllThreads);
 }
 
 async function reconcileAllThreads(): Promise<void> {

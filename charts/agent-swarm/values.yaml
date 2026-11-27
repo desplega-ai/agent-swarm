@@ -326,7 +326,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.18.39
+    tag: 0.18.40
   port: 7433
   # -- Blob storage backend for agent-fs. `s3` (default) stores objects in
   # the bucket configured below. `local` stores objects on the agent-fs PVC
@@ -405,7 +405,7 @@ sharedVolume:
   existingClaim: ""
 
 # Storage engine. Empty `url` and `existingSecret` keep SQLite on the API volume
-# (the default). A postgres:// URL selects Postgres 16 with pgvector; see
+# (the default). A postgres:// URL selects Postgres (16 or later, 18 recommended) with pgvector; see
 # runbooks/postgres.md for the database, the db-query role and the cutover.
 # Litestream is off on Postgres. api.replicas stays 1 on both engines.
 database:

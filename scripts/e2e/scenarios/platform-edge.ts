@@ -1,4 +1,5 @@
 import { asRecord, asRecords, expect, expectStatus, pollUntil } from "../http";
+import { sql } from "../db";
 import type { Scenario, ScenarioContext } from "../run";
 import { cleanupStack, createUser, hmacSignature, registerAgent, userOf } from "./platform-helpers";
 
@@ -61,6 +62,41 @@ export const platformEdge: Scenario = {
       expect((await statusOf()) === "offline", "closing a static agent marks it offline");
       expectStatus(await ctx.api("POST", "/ping", { agentId }), [204], "ping after close");
       expect((await statusOf()) === "idle", "a ping brings the agent back");
+
+      // A ping that keeps the status logs nothing but still moves `lastUpdatedAt`,
+      // which the API drain reads to tell live workers from dead ones.
+      const statusLog = () =>
+        ctx.db.query<{ oldValue: string | null; newValue: string | null }>(
+          sql`SELECT "oldValue", "newValue" FROM agent_log
+              WHERE "agentId" = ${agentId} AND "eventType" = 'agent_status_change'`,
+        );
+      const lastUpdatedAt = () =>
+        String(
+          ctx.db.get<{ lastUpdatedAt: string }>(
+            sql`SELECT "lastUpdatedAt" FROM agents WHERE id = ${agentId}`,
+          )?.lastUpdatedAt,
+        );
+      const logBefore = statusLog();
+      expect(
+        logBefore.some((row) => row.oldValue === "offline" && row.newValue === "idle"),
+        "the revive ping logs offline -> idle",
+      );
+      let touchedAt = lastUpdatedAt();
+      for (let i = 0; i < 3; i++) {
+        await Bun.sleep(10);
+        expectStatus(await ctx.api("POST", "/ping", { agentId }), [204], `same-status ping ${i}`);
+        const next = lastUpdatedAt();
+        expect(
+          new Date(next).getTime() > new Date(touchedAt).getTime(),
+          `same-status ping ${i} moves lastUpdatedAt (${touchedAt} -> ${next})`,
+        );
+        touchedAt = next;
+      }
+      expect((await statusOf()) === "idle", "same-status pings keep the agent idle");
+      expect(
+        statusLog().length === logBefore.length,
+        `same-status pings add no agent_status_change rows (${logBefore.length} -> ${statusLog().length})`,
+      );
 
       // ── realtime browser SDK ───────────────────────────────────────────────
       const sdk = await ctx.api("GET", "/@swarm/realtime.js", { apiKey: null });

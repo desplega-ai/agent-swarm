@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # init-local-postgres.sh
 #
-# Initialize and start a local PostgreSQL 16 cluster.
+# Initialize and start a local PostgreSQL 18 cluster.
 #
 # Called automatically from docker-entrypoint.sh when
 # SWARM_DEP_POSTGRES_ENABLED=true.  Can also be run manually.
@@ -24,7 +24,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-PG_VERSION=16
+PG_VERSION=18
 PG_BINDIR="/usr/lib/postgresql/${PG_VERSION}/bin"
 PG_CLUSTER_DIR="${LOCAL_POSTGRES_DATA_DIR:-/tmp/postgres-data}"
 PG_DATA_DIR="${PG_CLUSTER_DIR}/data"
@@ -39,6 +39,17 @@ log() { printf '[init-local-postgres] %s\n' "$1"; }
 # Ensure cluster dir is owned by worker (this script runs as root)
 mkdir -p "$PG_CLUSTER_DIR"
 chown -R worker:worker "$PG_CLUSTER_DIR"
+
+# A cluster from an older image (PostgreSQL 16) does not start with these binaries.
+# Skip it with a warning and keep its files: the worker still boots.
+if [ -s "${PG_DATA_DIR}/PG_VERSION" ]; then
+  CLUSTER_VERSION="$(cat "${PG_DATA_DIR}/PG_VERSION")"
+  if [ "$CLUSTER_VERSION" != "$PG_VERSION" ]; then
+    log "WARNING: ${PG_DATA_DIR} holds a PostgreSQL ${CLUSTER_VERSION} cluster. This image runs PostgreSQL ${PG_VERSION}. Local PostgreSQL is not started."
+    log "Dump the old cluster with its own version, or set LOCAL_POSTGRES_DATA_DIR to a new directory."
+    exit 0
+  fi
+fi
 
 # --- 1. Init cluster if not already initialized ---
 if [ ! -s "${PG_DATA_DIR}/PG_VERSION" ]; then

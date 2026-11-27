@@ -30,7 +30,7 @@ import {
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "../slack/thread-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { registerSlackLeaveThreadTool } from "../tools/slack-leave-thread";
-import type { Agent, AgentTask } from "../types";
+import type { Agent } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { workflowEventBus } from "../workflows/event-bus";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
@@ -302,8 +302,18 @@ describe("slack-leave-thread", () => {
         contextKey: slackContextKey({ channelId: channel, threadTs }),
       }),
     });
-    expect(res.status).toBe(201);
-    const forged = (await res.json()) as AgentTask;
+    // A slack contextKey binds the thread, which an agent may not do over REST.
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain("task.slack.thread.bind");
+
+    // The leave tool still refuses the same forged row if one exists, as the route stored it
+    // before that check.
+    const forged = await createTaskExtended("forged slack task", {
+      agentId: worker.id,
+      creatorAgentId: worker.id,
+      source: "slack",
+      contextKey: slackContextKey({ channelId: channel, threadTs }),
+    });
     expect(forged.source).toBe("slack");
     expect(forged.slackChannelId).toBe(channel);
     expect(forged.slackThreadTs).toBe(threadTs);

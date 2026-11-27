@@ -75,6 +75,8 @@ Messages are text only until you set `attachments`. Then the composer takes file
 
 On send, the files upload with the viewer's own agent-fs key, so the viewer needs agent-fs connected with write access to `dir`. Then `onDispatch` runs with `$form.attachments`, a list of `{ path, name, mimeType, size }`. With `"input": { "$form": "" }` the task input carries `message` and `attachments`, and the chat shows the files on the message. If an upload fails, nothing is sent and the text and files stay in the composer. While a turn runs, the composer steers it and takes no files, as in Sessions.
 
+While the viewer's browser has no agent-fs key, a box above the composer lists the steps to connect, and its Connect Files button opens the connect flow. Once connected, the box goes away. In a `?mode=chromeless` iframe the box stays hidden, because a key saved there does not persist.
+
 ## Per-user configuration and theme
 
 `userConfig` declares typed settings, but each user's values are stored separately from the shared definition and rows. This is useful for preferences such as a default region, reporting window, or whether archived records are shown.

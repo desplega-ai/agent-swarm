@@ -709,6 +709,11 @@ export async function withRemoteContext<T>(
   return context.with(remoteContext, fn);
 }
 
+/** Run `fn` under the root context: spans it starts open new traces. */
+export function runDetached<T>(fn: () => T): T {
+  return context.with(ROOT_CONTEXT, fn);
+}
+
 export function injectTraceContext(headers: Record<string, string>): Record<string, string> {
   propagation.inject(context.active(), headers);
   return headers;
