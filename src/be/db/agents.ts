@@ -328,8 +328,22 @@ export async function getLeadAgent(): Promise<Agent | null> {
   return leads.find((a) => a.status !== "offline") ?? leads[0] ?? null;
 }
 
-export async function updateAgentStatus(id: string, status: AgentStatus): Promise<Agent | null> {
-  const oldAgent = await getAgentById(id);
+/**
+ * `previous` is the agent row the caller read in the same transaction. Passing it
+ * skips the re-read, and an unchanged status then only bumps `lastUpdatedAt`
+ * (liveness readers such as `listLiveInFlightTaskIds` rely on it) and logs nothing.
+ */
+export async function updateAgentStatus(
+  id: string,
+  status: AgentStatus,
+  opts?: { previous?: Agent },
+): Promise<Agent | null> {
+  const previous = opts?.previous;
+  if (previous && previous.status === status) {
+    const lastUpdatedAt = await agentsRepo().touchAgentUpdatedAt(id);
+    return lastUpdatedAt ? { ...previous, lastUpdatedAt } : null;
+  }
+  const oldAgent = previous ?? (await getAgentById(id));
   const row = await agentsRepo().setAgentColumns(id, { status });
   if (row && oldAgent) {
     try {

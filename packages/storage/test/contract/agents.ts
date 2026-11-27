@@ -173,9 +173,14 @@ export function agentsContract(engine: ContractEngine): void {
       expect(await repo.incrementEmptyPollCount("missing")).toBeNull();
       await repo.resetEmptyPollCount("a1");
       await repo.touchAgentActivity("a1");
+      const touchedAt = await repo.touchAgentUpdatedAt("a1");
+      expect(touchedAt).toMatch(ISO_MS);
+      expect(await repo.touchAgentUpdatedAt("missing")).toBeNull();
       const row = await repo.findAgentById("a1");
       expect(row?.emptyPollCount).toBe(0);
       expect(row?.lastActivityAt).toMatch(ISO_MS);
+      expect(row?.lastUpdatedAt).toBe(touchedAt);
+      expect(row?.status).toBe("idle");
       expect(await repo.deleteAgent("a1")).toBe(1);
       expect(await repo.deleteAgent("a1")).toBe(0);
     });

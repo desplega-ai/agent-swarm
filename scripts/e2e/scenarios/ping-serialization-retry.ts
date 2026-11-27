@@ -26,6 +26,9 @@ export const pingSerializationRetry: Scenario = {
         const response = await api("PUT", `/api/agents/${agentId}/name`, { body: { name } });
         expectStatus(response, [200], `rename worker to ${name}`);
       };
+      // A ping that keeps the status writes neither trigger's row, so each ping here
+      // revives a closed (offline) worker. A rejected ping rolls back and stays offline.
+      expectStatus(await api("POST", "/close", { agentId }), [204], "close worker");
       for (const table of ["agents", "agent_log"]) {
         await rename(`ping-conflict-${table}`);
         const response = await api("POST", "/ping", { agentId });

@@ -232,6 +232,8 @@ export interface AgentsRepository {
   /** COALESCE profile update; see {@link AgentProfileUpdate}. */
   updateAgentProfile(id: string, update: AgentProfileUpdate): Promise<AgentRow | null>;
   touchAgentActivity(id: string): Promise<void>;
+  /** Sets only `lastUpdatedAt` to now; returns it, or null for an unknown agent. */
+  touchAgentUpdatedAt(id: string): Promise<string | null>;
   /** Returns the new count, or null for an unknown agent. */
   incrementEmptyPollCount(id: string): Promise<number | null>;
   resetEmptyPollCount(id: string): Promise<void>;
@@ -573,6 +575,13 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
 
   async touchAgentActivity(id: string): Promise<void> {
     await this.db.run(sql`UPDATE agents SET "lastActivityAt" = ${nowIso} WHERE id = ${id}`);
+  }
+
+  async touchAgentUpdatedAt(id: string): Promise<string | null> {
+    const row = await this.db.get<{ lastUpdatedAt: string }>(
+      sql`UPDATE agents SET "lastUpdatedAt" = ${nowIso} WHERE id = ${id} RETURNING "lastUpdatedAt"`,
+    );
+    return row?.lastUpdatedAt ?? null;
   }
 
   async incrementEmptyPollCount(id: string): Promise<number | null> {
