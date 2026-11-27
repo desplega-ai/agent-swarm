@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-11-27
+
+### Added
+- CLI: `agent-swarm ui-dev` opens a swarm app or page in a pre-connected dashboard with no repo checkout (#3724); `bun run ui:dev` does the same from a checkout with Vite (#3710).
+- Scripts: per-call idempotency keys for `ctx.swarm` tool calls, so a re-run under the same `idempotencyKey` replays its writes instead of repeating them (#3718); failed tool calls throw a typed `SwarmToolError`, and unknown `ctx.swarm` names suggest the closest tool (#3713).
+- Steering: a steering message can carry files (#3715).
+- Tasks: `POST /api/tasks` can bind a task to a Slack thread (#3733).
+- OTel: swarm state gauges for failed tasks, approvals and the queue (#3732), and Postgres `pg_stat_*` gauges from the API (#3712).
+- UI: approval question descriptions play linked videos and show linked images inline (#3738); approval answers stay as a browser draft until submit (#3717); magic link chips with hover previews replace repeated link cards (#3711).
+- Docs: SQLite to PostgreSQL migration guide (#3687) and Postgres server settings and cutover checks (#3689).
+
+### Changed
+- agent-fs pins bumped 0.18.39 -> 0.18.40 (worker image, chart, compose files, `@desplega.ai/agent-fs-just-bash`).
+- Config: eight soaked opt-in settings are on by default: Pace credential selection, rich result cards and their action buttons, the Slack Stop button, Slack answer feedback and additive Slack thread buffering; the worktree reaper and 30-day workflow run retention are new-install defaults only (#3708).
+- Performance: batched reads for `GET /api/agents` (#3729), users (#3726), `GET /me` inbox counts (#3705) and Slack thread renders (#3727); multi-row session-log inserts (#3725); stored full-text search for tasks (#3697) and memory (#3692) on Postgres; cheaper Postgres retention, budget, mention and connection reads (#3690); Postgres JIT off on the API pool (#3735).
+- Worker image: harness bumps (#3695), amp (#3734), agent-browser 0.45.0 (#3699); `@desplega.ai/slack-mock` 0.8.0 (#3722).
+- Specs: TLA+ heartbeat and workflow specs synced with main (#3696).
+
+### Fixed
+- Data: `data-query` refuses non-read statements (#3704) and its write guard matches DuckDB's lexer (#3707).
+- Slack: one message per ask, with feedback buttons only on the result (#3721); a slow Lead follow-up posts as a new reply so it notifies (#3714).
+- Tasks: a Slack `contextKey` on `POST /api/tasks` needs `task.slack.thread.bind` (#3736).
+- Scripts: credential-broker responses and failed brokered fetches report the caller's URL (#3700, #3701).
+- Defer: "tomorrow" uses local calendar dates (#3728).
+- Entrypoint: root boot writes stay inside the worker's own files (#3720).
+- UI: the Debug page works on Postgres (#3706); the attachment PDF preview is framed as `application/pdf` (#3693); a drive media file whose stat fails shows its link (#3741); searchable select options show their full label (#3716); the Apps favorite column keeps a fixed width (#3719); the app last-action response panel is removed (#3709).
+
 ## [2.15.1] - 2026-11-26
 
 ### Added

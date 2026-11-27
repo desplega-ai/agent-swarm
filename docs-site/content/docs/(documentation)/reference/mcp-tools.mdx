@@ -852,6 +852,8 @@ Partially update a single node in a workflow definition. Merges the provided fie
 
 Create an approval request and return at once with the request ID and URL. The answer arrives later as a `hitl-follow-up` task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, boolean, and config.
 
+The dashboard renders each label and description as markdown. A linked image or video shows inline when its URL path ends in `.png`, `.jpg`, `.gif`, `.webp`, `.mp4`, `.webm` or `.mov`. For a URL without an extension, such as an agent-fs share `/raw` link, make the label the file name: `![demo.mp4](url)`. A media file that fails to load falls back to the link.
+
 A `config` question asks a person to set one swarm config key on the dashboard, such as an integration token: `{ "id": "bb", "type": "config", "config": { "key": "BITBUCKET_TOKEN", "scope": "global" } }`. Secrets are stored encrypted, and the follow-up task carries only `{ key, scope, isSecret, status, updatedAt }`, never the value. `isSecret` defaults to `true`; `options` and `defaultValue` are for non-secret keys. See [Config questions](/docs/concepts/workflows#config-questions) for every field and rule.
 
 | Parameter | Type | Required | Description |
@@ -1280,6 +1282,7 @@ with `script-upsert`.
 | `fsMode` | string | No | Filesystem mode (`none` only in v1) |
 | `executor` | `native` \| `quickjs` | No | Executor override for this run. When omitted, named scripts use their saved executor, else `SCRIPT_EXECUTOR` |
 | `object` | object | No | `{ id, method }`: call this object ID and method on the named global `DurableObject` script. See [Durable objects](/docs/guides/scripts-runtime#durable-objects) |
+| `idempotencyKey` | string | No | Run key. A successful run saves its output to KV `script:executions/{key}` (a re-run overwrites it). Every `ctx.swarm` call in the run derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (`task_send`, `slack_post`, ...) and `workflow_trigger` calls instead of repeating them. A nested `script_run` inherits a derived key. Reads and REST-routed writes (`kv_*`, `schedule_*`) run again. |
 
 ### script-upsert
 

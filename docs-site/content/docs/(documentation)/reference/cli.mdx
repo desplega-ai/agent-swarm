@@ -295,6 +295,34 @@ agent-swarm x composio POST /tool_router/session --body '{"user_id":"swarm-user-
 See [The `x` command](/docs/reference/x-command) for the Composio workflow,
 `swarm_x` MCP equivalent, and safety rules.
 
+### ui-dev
+
+Open a swarm app or page in the dashboard, already connected to the swarm API as a
+fixed user, with no repo checkout. It serves the dashboard bundle of `APP_URL`
+(default `https://app.agent-swarm.dev`) on `127.0.0.1`, proxies the API paths to the
+swarm, and prints `UI_DEV_READY {json}` with the URL to open. It runs until
+SIGINT/SIGTERM. The UI acts with your swarm key, so an action click or form submit
+writes to that API.
+
+```bash
+agent-swarm ui-dev --app <app-id>
+agent-swarm ui-dev --page my-report --json
+```
+
+| Option | Description |
+|--------|-------------|
+| `--app <id>` | Open `/apps/<id>` |
+| `--page <id\|slug>` | Open `/pages/<id>` (a slug resolves to the newest matching page) |
+| `--route <path>` | Open any dashboard path |
+| `--api-url <url>` | Swarm API (default `MCP_BASE_URL`). Another URL must be loopback |
+| `--as-email <email>` | Dashboard user to view as (default: the first user with an email) |
+| `--port <n>` | Local port (default `5274`) |
+| `--json` | Print only the ready JSON line |
+
+Pass exactly one of `--app`, `--page` or `--route`. Only `127.0.0.1:<port>` and
+`localhost:<port>` Host headers are served. In an agent-swarm checkout,
+`bun run ui:dev` takes the same arguments and serves `apps/ui` source with Vite instead.
+
 ### docs
 
 Show the documentation URL. All pages are also available in markdown format by appending `.md` to the URL.
