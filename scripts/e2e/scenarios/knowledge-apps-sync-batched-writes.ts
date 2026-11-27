@@ -78,7 +78,7 @@ function definition(scriptId: string, n: number, dup = false): Record<string, un
  */
 export const knowledgeAppsSyncBatchedWrites: Scenario = {
   name: "knowledge-apps-sync-batched-writes",
-  order: 558.8,
+  order: 558.9,
   async run(ctx) {
     const collector = startCollector();
     let restarted = false;
