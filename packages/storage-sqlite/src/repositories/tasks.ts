@@ -6,7 +6,7 @@ import {
   buildTaskFtsMatch,
   HUMAN_FREE_TAGS,
   type HumanFreeClassifyInput,
-  readableSessionSql,
+  readableSessionRowSql,
   SqlQuery,
   sql,
   sqlList,
@@ -68,9 +68,6 @@ const LIST_COLUMNS: Record<TaskListFields, string> = {
 
 const LINEAGE_COLUMNS = `${LIST_COLUMNS.slim}, agent_tasks."workflowRunId",
   (SELECT SUM("totalCostUsd") FROM session_costs WHERE session_costs."taskId" = agent_tasks.id) AS "totalCostUsd"`;
-
-/** Parent hops the row-at-a-time readability walk takes before it falls back to the set form. */
-const READABLE_WALK_MAX_DEPTH = 64;
 
 // At or below this many candidate rows, a page reads them by rowid and sorts
 // them. Above it, the page walks the lastUpdatedAt index and tests each row
@@ -202,42 +199,6 @@ export class SqliteTasksRepository extends BaseTasksRepository {
     return Number(row?.c ?? 0);
   }
 
-  /**
-   * The row-at-a-time form of `readableSessionSql`, for a query that stops at
-   * a LIMIT. It walks up from each row it tests to the root, so a page costs a
-   * few key lookups per row instead of the set of every hidden task. A row
-   * whose walk finds no root within READABLE_WALK_MAX_DEPTH hops (a very deep
-   * chain, or a parent cycle written before migration 253) falls back to the
-   * set form, which SQLite then builds once for the statement.
-   */
-  private readableSessionRowSql(userId: string | null): SqlQuery {
-    const otherOwner = userId
-      ? sql`up."requestedByUserId" IS NOT NULL AND up."requestedByUserId" != ${userId}`
-      : sql`up."requestedByUserId" IS NOT NULL`;
-    const shareMatch = userId
-      ? sql`(s."userId" IS NULL OR s."userId" = ${userId})`
-      : sql`s."userId" IS NULL`;
-    const set = readableSessionSql(userId, sql`agent_tasks.id`);
-    return sql`(CASE (
-      WITH RECURSIVE up(id, "parentTaskId", "requestedByUserId", "scheduleId", depth) AS (
-        SELECT u.id, u."parentTaskId", u."requestedByUserId", u."scheduleId", 0
-        FROM agent_tasks u WHERE u.id = agent_tasks.id
-        UNION ALL
-        SELECT p.id, p."parentTaskId", p."requestedByUserId", p."scheduleId", up.depth + 1
-        FROM up JOIN agent_tasks p ON p.id = up."parentTaskId"
-        WHERE up.depth < ${raw(String(READABLE_WALK_MAX_DEPTH))}
-      )
-      SELECT CASE WHEN ${otherOwner} AND up."scheduleId" IS NULL
-          AND NOT EXISTS (SELECT 1 FROM session_shares s
-            WHERE s."rootTaskId" = up.id AND s."revokedAt" IS NULL AND ${shareMatch})
-        THEN 1 ELSE 0 END
-      FROM up
-      WHERE up."parentTaskId" IS NULL
-        OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = up."parentTaskId")
-      LIMIT 1
-    ) WHEN 0 THEN 1 WHEN 1 THEN 0 ELSE ${set} END)`;
-  }
-
   async listTasks<F extends TaskListFields>(
     filters: TaskListFilters,
     page: TaskListPage,
@@ -253,7 +214,7 @@ export class SqliteTasksRepository extends BaseTasksRepository {
         : raw("");
     if (!filters.includeHeartbeat) conditions.push(this.notHeartbeat());
     // The page stops at LIMIT, so test only the rows it reads.
-    if (filters.readableBy) conditions.push(this.readableSessionRowSql(filters.readableBy.userId));
+    if (filters.readableBy) conditions.push(readableSessionRowSql(filters.readableBy.userId));
     // SQLite-only text, kept unquoted as written before the move: the page
     // query's ORDER BY is pinned by src/tests/db-tasks-read.test.ts.
     const orderColumns =

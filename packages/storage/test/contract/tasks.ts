@@ -554,6 +554,47 @@ export function tasksContract(engine: ContractEngine): void {
       expect(ids(await repo.listTasksByAgent("nobody", { userId: "u1" }))).toEqual([]);
     });
 
+    test("readable sessions: orphans, deep children and shares agree across page and count", async () => {
+      await seedUsers("u1", "u2");
+      await seedTask(storage, { id: "theirs", requestedByUserId: "u2" });
+      await seedTask(storage, { id: "theirs-kid", parentTaskId: "theirs" });
+      await seedTask(storage, { id: "theirs-grandkid", parentTaskId: "theirs-kid" });
+      // A parent that no longer exists makes the task its own session root.
+      await seedTask(storage, { id: "orphan", parentTaskId: "gone", requestedByUserId: "u2" });
+      await seedTask(storage, { id: "orphan-kid", parentTaskId: "orphan" });
+      await seedTask(storage, { id: "shared", requestedByUserId: "u2" });
+      await seedTask(storage, { id: "shared-kid", parentTaskId: "shared" });
+      await seedTask(storage, { id: "mine-kid", parentTaskId: "theirs", requestedByUserId: "u1" });
+      await storage.executor.run(
+        sql`INSERT INTO session_shares (id, "rootTaskId", "userId", access, "createdAt")
+            VALUES ('s1', 'shared', 'u1', 'read', ${T0})`,
+      );
+      const visible = async (userId: string | null) =>
+        ids(
+          (await repo.listTasks(
+            { readableBy: { userId } },
+            { limit: 25, offset: 0 },
+            "slim",
+          )) as TaskRow[],
+        ).sort();
+      // The root decides: a child that names u1 stays hidden under u2's root.
+      expect(await visible("u1")).toEqual(["shared", "shared-kid"]);
+      expect(await visible("u2")).toEqual([
+        "mine-kid",
+        "orphan",
+        "orphan-kid",
+        "shared",
+        "shared-kid",
+        "theirs",
+        "theirs-grandkid",
+        "theirs-kid",
+      ]);
+      expect(await visible(null)).toEqual([]);
+      expect(await repo.countTasks({ readableBy: { userId: "u1" } })).toBe(2);
+      expect(await repo.countTasks({ readableBy: { userId: "u2" } })).toBe(8);
+      expect(await repo.countTasks({ readableBy: { userId: null } })).toBe(0);
+    });
+
     test("lineage walks up and down with caps", async () => {
       await seedTask(storage, { id: "r" });
       await seedTask(storage, { id: "m", parentTaskId: "r" });

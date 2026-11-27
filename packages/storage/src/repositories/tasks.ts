@@ -7,7 +7,7 @@ import {
   nowIso,
 } from "../dialect";
 import type { SqlExecutor } from "../executor";
-import { EMPTY, SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
+import { dialectFragment, EMPTY, SqlQuery, sql, sqlIdent, sqlJoin, sqlList, sqlWhere } from "../sql";
 
 /**
  * Domain: tasks (`agent_tasks`, `agent_tasks_fts*`, `task_attachments`,
@@ -227,21 +227,86 @@ export function readableSessionSql(
   const shareMatch = userId
     ? sql`(s."userId" IS NULL OR s."userId" = ${userId})`
     : sql`s."userId" IS NULL`;
-  const notHidden = sql`${taskIdColumn} NOT IN (
-      WITH RECURSIVE hidden(id) AS (
+  const hiddenRoots = sql`${otherOwner}
+          AND r."scheduleId" IS NULL
+          AND NOT EXISTS (SELECT 1 FROM session_shares s
+            WHERE s."rootTaskId" = r.id AND s."revokedAt" IS NULL AND ${shareMatch})`;
+  const hidden = dialectFragment((dialect) =>
+    dialect.name === "postgres"
+      ? // The same set, in a shape the Postgres planner reads by index. The
+        // planner guesses ten times the anchor's rows for each recursion step,
+        // so a plain join hashes all of agent_tasks; the LATERAL with OFFSET 0
+        // keeps it a parentTaskId lookup per hidden task. The two anchor arms
+        // keep the parent check off the hashed scan of every task id that an
+        // OR forces. DISTINCT keeps the NOT IN hashed: that same guess sizes
+        // the set past work_mem, and an unhashed NOT IN rescans the whole set
+        // for every outer row (a guest's COUNT ran past 60 s on 78k tasks).
+        sql`WITH RECURSIVE hidden(id) AS (
+        SELECT r.id FROM agent_tasks r
+        WHERE r."parentTaskId" IS NULL AND ${hiddenRoots}
+        UNION ALL
+        SELECT r.id FROM agent_tasks r
+        WHERE r."parentTaskId" IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = r."parentTaskId")
+          AND ${hiddenRoots}
+        UNION ALL
+        SELECT c.id FROM hidden CROSS JOIN LATERAL (
+          SELECT c.id FROM agent_tasks c WHERE c."parentTaskId" = hidden.id OFFSET 0) c
+      )
+      SELECT DISTINCT id FROM hidden`
+      : sql`WITH RECURSIVE hidden(id) AS (
         SELECT r.id FROM agent_tasks r
         WHERE (r."parentTaskId" IS NULL
             OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = r."parentTaskId"))
-          AND ${otherOwner}
-          AND r."scheduleId" IS NULL
-          AND NOT EXISTS (SELECT 1 FROM session_shares s
-            WHERE s."rootTaskId" = r.id AND s."revokedAt" IS NULL AND ${shareMatch})
+          AND ${hiddenRoots}
         UNION ALL
         SELECT c.id FROM agent_tasks c JOIN hidden ON c."parentTaskId" = hidden.id
       )
-      SELECT id FROM hidden
+      SELECT id FROM hidden`,
+  );
+  const notHidden = sql`${taskIdColumn} NOT IN (
+      ${hidden}
     )`;
   return opts.nullable ? sql`(${taskIdColumn} IS NULL OR ${notHidden})` : notHidden;
+}
+
+/** Parent hops the row-at-a-time readability walk takes before it falls back to the set form. */
+const READABLE_WALK_MAX_DEPTH = 64;
+
+/**
+ * The row-at-a-time form of `readableSessionSql` over `agent_tasks`, for a
+ * query that stops at a LIMIT. It walks up from each row it tests to the root,
+ * so a page costs a few key lookups per row instead of the set of every hidden
+ * task. A row whose walk finds no root within READABLE_WALK_MAX_DEPTH hops (a
+ * very deep chain, or a parent cycle written before migration 253) falls back
+ * to the set form, which the engine then builds once for the statement.
+ */
+export function readableSessionRowSql(userId: string | null): SqlQuery {
+  const otherOwner = userId
+    ? sql`up."requestedByUserId" IS NOT NULL AND up."requestedByUserId" != ${userId}`
+    : sql`up."requestedByUserId" IS NOT NULL`;
+  const shareMatch = userId
+    ? sql`(s."userId" IS NULL OR s."userId" = ${userId})`
+    : sql`s."userId" IS NULL`;
+  const set = readableSessionSql(userId, sql`agent_tasks.id`);
+  return sql`(CASE (
+      WITH RECURSIVE up(id, "parentTaskId", "requestedByUserId", "scheduleId", depth) AS (
+        SELECT u.id, u."parentTaskId", u."requestedByUserId", u."scheduleId", 0
+        FROM agent_tasks u WHERE u.id = agent_tasks.id
+        UNION ALL
+        SELECT p.id, p."parentTaskId", p."requestedByUserId", p."scheduleId", up.depth + 1
+        FROM up JOIN agent_tasks p ON p.id = up."parentTaskId"
+        WHERE up.depth < ${new SqlQuery([String(READABLE_WALK_MAX_DEPTH)], [])}
+      )
+      SELECT CASE WHEN ${otherOwner} AND up."scheduleId" IS NULL
+          AND NOT EXISTS (SELECT 1 FROM session_shares s
+            WHERE s."rootTaskId" = up.id AND s."revokedAt" IS NULL AND ${shareMatch})
+        THEN 1 ELSE 0 END
+      FROM up
+      WHERE up."parentTaskId" IS NULL
+        OR NOT EXISTS (SELECT 1 FROM agent_tasks p WHERE p.id = up."parentTaskId")
+      LIMIT 1
+    ) WHEN 0 THEN TRUE WHEN 1 THEN FALSE ELSE ${set} END)`;
 }
 
 /** A column reference chosen by code (`agent_tasks.id`, `events."taskId"`). Never input. */
