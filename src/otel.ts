@@ -24,6 +24,7 @@ export interface SpanOptions {
   kind?: SwarmSpanKind;
 }
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { PostgresStats } from "@desplega/storage";
 import type { SwarmStateStats } from "./be/swarm-state-stats";
 // eslint-disable-next-line import/no-duplicates -- type-only import, no side-effects
@@ -96,6 +97,7 @@ let realWithRemoteContext:
   | (<T>(carrier: Record<string, unknown>, fn: () => Promise<T> | T) => Promise<T>)
   | undefined;
 let realWithSpanContext: (<T>(span: SwarmSpan, fn: () => T) => T) | undefined;
+let realRunDetached: (<T>(fn: () => T) => T) | undefined;
 let realInjectTraceContext:
   | ((headers: Record<string, string>) => Record<string, string>)
   | undefined;
@@ -167,6 +169,7 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realStartSpan = impl.startSpan;
     realWithRemoteContext = impl.withRemoteContext;
     realWithSpanContext = impl.withSpanContext;
+    realRunDetached = impl.runDetached;
     realInjectTraceContext = impl.injectTraceContext;
     realShutdown = impl.shutdown;
     realRecordSessionCost = impl.recordSessionCost;
@@ -216,6 +219,20 @@ export async function withRemoteContext<T>(
     return fn();
   }
   return realWithRemoteContext(carrier, fn);
+}
+
+// Taken at module load, where no request, span or DB transaction is active.
+const runContextFree = AsyncLocalStorage.snapshot();
+
+/**
+ * Run `fn` outside the caller's async context. A timer or interval armed inside
+ * `fn` fires with no request span (its work starts a new root trace) and no open
+ * DbClient transaction. Without it, a background loop armed from a request
+ * handler keeps parenting its spans to that request's trace for as long as the
+ * process lives. Wrap the arming call: `runDetached(() => setTimeout(...))`.
+ */
+export function runDetached<T>(fn: () => T): T {
+  return runContextFree(() => (realRunDetached ? realRunDetached(fn) : fn()));
 }
 
 export function injectTraceContext(headers: Record<string, string>): Record<string, string> {
@@ -286,6 +303,7 @@ export function _resetOtelForTests() {
   realStartSpan = undefined;
   realWithRemoteContext = undefined;
   realWithSpanContext = undefined;
+  realRunDetached = undefined;
   realInjectTraceContext = undefined;
   realShutdown = undefined;
   realRecordSessionCost = undefined;

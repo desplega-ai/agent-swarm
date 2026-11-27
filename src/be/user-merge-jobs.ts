@@ -52,6 +52,7 @@
  */
 
 import type { UserMergeJobRow } from "@desplega/storage";
+import { runDetached } from "../otel";
 import { invalidateTelemetryUserRole, scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { UserMergeJob, UserMergeJobStatus } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -397,10 +398,13 @@ async function runJob(job: UserMergeJob, options: UserMergeRunnerOptions): Promi
 const retryTimers = new Set<ReturnType<typeof setTimeout>>();
 
 function armRetry(delayMs: number, options: UserMergeRunnerOptions): void {
-  const timer = setTimeout(() => {
-    retryTimers.delete(timer);
-    void runUserMergeJobs(options);
-  }, delayMs);
+  // Detached: the drain is kicked from the merge request.
+  const timer = runDetached(() =>
+    setTimeout(() => {
+      retryTimers.delete(timer);
+      void runUserMergeJobs(options);
+    }, delayMs),
+  );
   timer.unref?.();
   retryTimers.add(timer);
 }

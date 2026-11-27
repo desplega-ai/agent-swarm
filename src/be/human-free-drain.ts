@@ -1,3 +1,4 @@
+import { runDetached } from "../otel";
 import { drainHumanFreeReclassifyQueue, setHumanFreeQueueListener } from "./db/tasks/human-free";
 
 /**
@@ -20,16 +21,20 @@ let passTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleIdle(): void {
   if (!running) return;
   if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => schedulePass(0), IDLE_INTERVAL_MS);
+  idleTimer = runDetached(() => setTimeout(() => schedulePass(0), IDLE_INTERVAL_MS));
   idleTimer.unref?.();
 }
 
 function schedulePass(delayMs: number): void {
   if (!running || passTimer) return;
-  passTimer = setTimeout(() => {
-    passTimer = null;
-    void runPass();
-  }, delayMs);
+  // Detached: a request's mutation wakes the drain, and the pass chain it starts
+  // would otherwise stay on that request's trace forever.
+  passTimer = runDetached(() =>
+    setTimeout(() => {
+      passTimer = null;
+      void runPass();
+    }, delayMs),
+  );
   passTimer.unref?.();
 }
 
