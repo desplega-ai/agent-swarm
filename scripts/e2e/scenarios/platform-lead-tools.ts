@@ -426,6 +426,28 @@ export const platformLeadTools: Scenario = {
         "worker kv-get on the Kapso routing namespace",
       );
       expect(kapsoRead.text.includes(workerId), "generic KV still reads the Kapso mapping");
+      // The chat channel routing namespace is written only by register-chat-channel.
+      const chatNs = "integrations:chat:channels";
+      const chatKey = `telegram:-${ctx.nonce}`;
+      expectToolError(
+        await callTool(worker, "kv-set", {
+          namespace: chatNs,
+          key: chatKey,
+          value: { agentId: workerId },
+        }),
+        "worker kv-set on the chat channel routing namespace",
+        "reserved for chat channel routing",
+      );
+      expectToolError(
+        await callTool(worker, "kv-delete", { namespace: chatNs, key: chatKey }),
+        "worker kv-delete on the chat channel routing namespace",
+        "reserved for chat channel routing",
+      );
+      const chatPut = await ctx.api("PUT", `/api/kv/_/${chatNs}/${encodeURIComponent(chatKey)}`, {
+        agentId: workerId,
+        body: { value: { agentId: workerId } },
+      });
+      expectStatus(chatPut, [403], "HTTP PUT on the chat channel routing namespace");
       const settingsKey = `telegram:-${ctx.nonce}`;
       expectToolOk(
         await callTool(worker, "kv-set", {
