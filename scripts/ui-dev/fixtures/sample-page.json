@@ -1,0 +1,26 @@
+{
+  "format": "swarm-page-bundle/v1",
+  "page": {
+    "id": "ui-dev-sample-page",
+    "slug": "ui-dev-sample-page",
+    "title": "ui-dev sample page",
+    "description": "Synthetic fixture for bun run ui:dev --api local",
+    "contentType": "text/html",
+    "authMode": "authed",
+    "body": "<!doctype html><html><body><h1>ui-dev sample page</h1><p id=\"visits\">visits pending</p><script>\n  swarmSdk.kv.incr(\"visits\")\n    .then((r) => { document.getElementById(\"visits\").textContent = \"visits \" + JSON.stringify(r.value ?? r); })\n    .catch((e) => { document.getElementById(\"visits\").textContent = \"kv error \" + e; });\n</script></body></html>"
+  },
+  "kv": [
+    {
+      "key": "visits",
+      "value": 41,
+      "valueType": "integer"
+    },
+    {
+      "key": "greeting",
+      "value": {
+        "text": "hello from the fixture"
+      },
+      "valueType": "json"
+    }
+  ]
+}

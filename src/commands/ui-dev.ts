@@ -190,9 +190,9 @@ async function portFree(port: number): Promise<boolean> {
  * Parse the arguments, then check the key, the user, the target and the port. Throws
  * UsageError (exit 2) on any of them.
  */
-export async function prepareUiDev(argv: string[]): Promise<UiDevSession> {
-  const options = parseUiDevArgs(argv);
-  const apiKey = getApiKey();
+export async function prepareUiDev(argv: string[], env = process.env): Promise<UiDevSession> {
+  const options = parseUiDevArgs(argv, env);
+  const apiKey = getApiKey(env);
   if (!apiKey) throw new UsageError("no swarm API key: set AGENT_SWARM_API_KEY or API_KEY");
   const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
   try {
@@ -210,16 +210,27 @@ export async function prepareUiDev(argv: string[]): Promise<UiDevSession> {
   }
 }
 
-/** The ready line both commands print once the URL answers. */
-export function printReady(session: UiDevSession, origin: string): void {
+/**
+ * The ready line both commands print once the URL answers. `local` is `bun run ui:dev --api
+ * local`: a throwaway API holds a copy of the target, so it replaces the prod-writes warning.
+ */
+export function printReady(
+  session: UiDevSession,
+  origin: string,
+  local?: { source: string; stateDir: string; apiKeyFile: string; warnings: string[] },
+): void {
   const { options } = session;
   const ready = {
     url: `${origin}${session.path}`,
+    mode: local ? "local" : "prod",
     target: session.target,
     apiUrl: options.apiUrl,
     userId: session.user.id,
     userEmail: session.user.email ?? null,
-    warnings: [
+    ...(local
+      ? { source: local.source, stateDir: local.stateDir, apiKeyFile: local.apiKeyFile }
+      : {}),
+    warnings: local?.warnings ?? [
       `the UI acts with your swarm key on ${options.apiUrl}: action clicks and form submits write there`,
     ],
     pid: process.pid,

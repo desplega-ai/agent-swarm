@@ -137,3 +137,62 @@ test("ui:dev opens an app and an authed HTML page pre-connected, with empty stor
     await fetch(`${swarm.apiUrl}/api/pages/${page.id}`, { method: "DELETE", headers });
   }
 });
+
+test("ui:dev --api local serves a copied app and authed page from the fixtures", async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  // Local mode reads nothing from a source API: the fixtures name the targets.
+  const appDev = await startUiDev(
+    [
+      "--api",
+      "local",
+      "--fixture",
+      "scripts/ui-dev/fixtures/sample-app.json",
+      "--port",
+      String(await freePort()),
+    ],
+    {},
+  );
+  const pageDev = await startUiDev(
+    [
+      "--api",
+      "local",
+      "--fixture",
+      "scripts/ui-dev/fixtures/sample-page.json",
+      "--port",
+      String(await freePort()),
+    ],
+    {},
+  );
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  try {
+    const tab = await context.newPage();
+    const errors: string[] = [];
+    tab.on("pageerror", (error) => errors.push(error.message));
+
+    await tab.goto(appDev.url);
+    await expect(tab.getByRole("heading", { name: "ui-dev sample app" })).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(tab.getByText("Sample item 12")).toBeVisible();
+    const action = tab.waitForResponse(
+      (res) => res.request().method() === "POST" && /\/actions\/ping$/.test(res.url()),
+    );
+    await tab.getByRole("button", { name: "Ping" }).click();
+    expect((await action).status()).toBe(200);
+
+    await tab.goto(pageDev.url);
+    const frame = tab.frameLocator("iframe");
+    await expect(frame.getByRole("heading", { name: "ui-dev sample page" })).toBeVisible({
+      timeout: 60_000,
+    });
+    // The fixture's KV entry (41) was copied, and the page's own increment goes to the copy.
+    await expect(frame.locator("#visits")).toContainText("42", { timeout: 20_000 });
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+    appDev.child.kill("SIGTERM");
+    pageDev.child.kill("SIGTERM");
+  }
+});
