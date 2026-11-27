@@ -7,7 +7,7 @@
  *     bun packages/storage-postgres/bench/memory-fts.ts [--rows 50000] [--runs 5] [--parity]
  *
  * The URL names a maintenance database on a server with pgvector (for example
- * `docker run -e POSTGRES_PASSWORD=bench -p 5432:5432 pgvector/pgvector:pg16`).
+ * `docker run -e POSTGRES_PASSWORD=bench -p 5432:5432 pgvector/pgvector:pg18`).
  * The run creates one scratch database and drops it at the end.
  *
  * Steps: apply the chain up to `--existing-head` (default 385, the head before

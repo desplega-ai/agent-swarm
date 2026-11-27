@@ -376,7 +376,7 @@ function issueBody(report: string, runUrl: string | undefined, sha: string | und
     "",
     "### Repro",
     "",
-    "1. Start PostgreSQL 16 with pgvector and set `E2E_POSTGRES_URL`.",
+    "1. Start PostgreSQL 18 with pgvector and set `E2E_POSTGRES_URL`.",
     "2. Run `bun run e2e:bench --check --only <scenario>` on the commit below.",
     "3. The check prints the scenarios over budget.",
     "",

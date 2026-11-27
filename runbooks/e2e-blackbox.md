@@ -117,7 +117,7 @@ The job uses only `contents: read` permission.
 
 `.github/workflows/nightly-commit-budget.yml` checks the PostgreSQL commit budget
 (`scripts/e2e/bench-budget.json`). An external scheduler dispatches it on `main` daily. Six
-`measure` jobs run one Merge Gate band each, on SQLite and on PostgreSQL 16 with pgvector.
+`measure` jobs run one Merge Gate band each, on SQLite and on PostgreSQL 18 with pgvector.
 The `report` job compares, per scenario, the most PostgreSQL commits and write statements of
 one HTTP request with the budget. The budget guards the slow path: one commit per row costs
 one WAL flush per row on PostgreSQL and nearly nothing on SQLite. Scenario totals are no gate:

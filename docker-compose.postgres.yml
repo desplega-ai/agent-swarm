@@ -23,8 +23,10 @@ services:
         condition: service_healthy
 
   postgres:
-    # Postgres 16 with pgvector (memory vector search).
-    image: pgvector/pgvector:pg16
+    # Postgres 18 with pgvector (memory vector search). The API supports 16 and later.
+    # A volume from the old pg16 overlay does not start here: move it first
+    # (https://docs.agent-swarm.dev/docs/guides/postgres#upgrade-a-compose-database-from-postgres-16).
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: swarm
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -32,7 +34,8 @@ services:
       # Byte text order and ASCII case folding, like SQLite (runbooks/postgres.md).
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --lc-collate=C --lc-ctype=C
     volumes:
-      - swarm_postgres:/var/lib/postgresql/data
+      # Postgres 18+ images keep the data in /var/lib/postgresql/18/docker.
+      - swarm_postgres:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U swarm -d swarm"]
       interval: 5s
