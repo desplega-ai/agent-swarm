@@ -160,7 +160,9 @@ function ConnectFilesHint() {
   const needsKey = agentFs?.state === "needs-connect" || agentFs?.state === "invalid-key";
   if (!needsKey || embedded) return null;
   return (
-    <div className="shrink-0 px-4 pt-2">
+    // Shrinks and scrolls so a composer grown by files keeps Send in the fixed-height thread;
+    // `relative` and the fill cover a session timeline squeezed to its padded scroller.
+    <div className="relative min-h-0 overflow-y-auto [scrollbar-gutter:auto] bg-background px-4 pt-2">
       <AlertCallout
         tone="info"
         icon={Paperclip}
