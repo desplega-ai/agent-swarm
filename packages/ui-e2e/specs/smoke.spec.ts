@@ -8,8 +8,17 @@ for (const route of routes) {
     test.skip(Boolean(route.skip), route.skip);
     const path = route.needs ? resolveRoute(route, seed!) : route.path;
     test.skip(path === null, "seed has no entity for this route");
-    await page.goto(path!);
-    await page.waitForLoadState("networkidle");
+    if (route.needs === "page") {
+      // networkidle also waits on the iframe's CDN fetches; one stalled fetch held it to the
+      // test timeout. The viewer is ready once the embedded page has rendered.
+      await page.goto(path!, { waitUntil: "domcontentloaded" });
+      await expect(
+        page.frameLocator("main iframe").getByRole("heading", { name: "e2e public page" }),
+      ).toBeVisible();
+    } else {
+      await page.goto(path!);
+      await page.waitForLoadState("networkidle");
+    }
     await expect(page.locator("main").first()).toBeVisible();
     const screenshot = testInfo.outputPath(`${route.name}.png`);
     await page.screenshot({ path: screenshot, fullPage: true });
