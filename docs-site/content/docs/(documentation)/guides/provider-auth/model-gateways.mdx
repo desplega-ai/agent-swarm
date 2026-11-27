@@ -29,6 +29,92 @@ There is no per-vendor gateway adapter in Agent Swarm, and adding one is not req
 
 For the standard harness credentials, model defaults, and Docker examples, see [Harness Configuration](/docs/guides/harness-configuration). For the contributor-facing adapter contract, see [Harness Providers](/docs/guides/harness-providers).
 
+## Model limit discovery
+
+For a trusted LiteLLM gateway, set `PROVIDER_MODEL_DISCOVERY` once in the
+existing global, agent or repository scoped configuration (repository wins),
+alongside the inference endpoint and its normal secret. The default is `{}`
+(off). Nothing probes public OpenRouter or arbitrary endpoints automatically.
+
+```bash
+HARNESS_PROVIDER=opencode
+OPENROUTER_BASE_URL=https://gateway.example/gateway/v1
+MODEL_OVERRIDE=openrouter/example-large-chat
+PROVIDER_MODEL_DISCOVERY='{"openrouter":{"mode":"litellm","baseURL":"https://gateway.example/gateway/v1"}}'
+```
+
+Keep the credential on the Secrets page as `OPENROUTER_API_KEY`, not in this
+JSON. It uses the **one key already selected for this task**, never a pool or
+an administrative metadata key. No per-alias limit edits are needed.
+The configured `baseURL` must match the resolved inference base URL exactly
+(trailing slashes are ignored). Registry OpenAI-compatible providers using the
+existing key splice also work; direct `openai/*`, auth-file-only credentials,
+base-URL-locked providers, ACP/subprocess OpenCode and other harnesses are not
+supported by this first discovery path.
+
+### Transport and refresh
+
+The metadata path removes only a terminal `/v1` from the inference path and
+appends `/model/info`: `/gateway/v1` becomes `/gateway/model/info`, while
+`/gateway` becomes `/gateway/model/info`. No alternate metadata host is accepted.
+HTTP and HTTPS explicitly configured gateways, including private self-hosted
+addresses, are permitted. Userinfo, query strings, fragments and other schemes
+are rejected. All redirects are rejected; normal corporate CA verification
+stays enabled. Only the selected bearer is sent, in a header.
+
+Each new session prepares its limits before host creation. Requests have a
+five-second budget, 1 MiB response ceiling and 10,000-row ceiling. The worker
+process keeps at most 128 selected-alias entries and 128 in-flight requests,
+with single-flight per provider, normalized inference URL, full credential
+identity and exact alias. It retains no raw metadata, headers or model inventory.
+Key rotation or route changes miss the cache. Optional `ttlMs` is a positive
+integer up to 3,600,000; its default is 300,000. Negative/backoff TTL is 30 seconds.
+
+Transient network, 429 or server failures may reuse last-known-good facts for
+at most 24 hours, marked stale. Access denial (401/403), malformed metadata,
+404/405 and a successful response without the alias invalidate previous facts.
+Metadata failures fall back to valid explicit, catalog or legacy behavior and
+emit a classified warning without response/error bodies. Reduced backend limits
+cannot be learned during an outage: stale use is **not** fail-closed safety.
+Active sessions never refresh or mutate when the TTL expires.
+
+### Semantics and precedence
+
+Only exact `model_name` matches count. Input is `max_input_tokens`, output is
+`max_output_tokens`; `max_tokens` is ignored. Duplicate deployments use the
+minimum bound only when **every** possible deployment supplies it. Missing or
+invalid bounds remain unknown, not unlimited. This adapter does not yet accept
+any version-specific combined-context metadata field.
+
+By default, input is the conservative combined context. For input `922000` and
+output `128000`, host limits and telemetry context are `922000`, not `200000`,
+`128000` or an unverified sum. Set `"semantics":"input-plus-output"` only after
+confirming that gateway's semantics; this yields `1050000` with a derived basis.
+OpenCode 2.4.2 compacts against `min(input, context)` with a safety reserve and
+fits output within context. Conservative context may compact early. Swarm's
+usage numerator stays input + cache read + cache create + output; no second
+output subtraction is made.
+
+Optional operator policy is `"limits":{"example-large-chat":{"context":1050000}}`
+inside the provider object. Explicit policy wins, but preparation rejects a
+policy exceeding a known gateway bound or a contradictory combination. Gateway
+facts take precedence over catalog fallback. Partial discovery never borrows
+an unverified output ceiling from the catalog. Without a context fact, the
+legacy fallback remains 200,000 and is labeled in safe diagnostics.
+Existing context-only catalog rows remain supported; this feature changes no
+database schema or inventory publication. Existing catalog output facts now
+survive the catalog/API/runtime projection; durable input discovery is deferred.
+
+Before the first prompt, the adapter waits for SDK model activation, verifies
+the selected runtime model and refuses unenforced ceilings. Smaller runtime
+limits become the session's limits. Session initialization includes only the
+selected non-secret effective facts and provenance; telemetry and context-bound
+notes use that immutable window. Model-profile permissions do not change.
+
+Rollback: set `PROVIDER_MODEL_DISCOVERY={}` or the route's `mode` to `off`.
+This applies to future sessions only; no deployment restart, history rewrite,
+catalog write or running-session mutation is performed.
+
 ## Vercel AI Gateway (Token Pass)
 
 OpenCode and pi-mono accept `AI_GATEWAY_API_KEY` natively. Use a [Token Pass API key](https://vercel.com/docs/ai-gateway/token-pass/getting-started) for Token Pass credit, or a regular AI Gateway key for usage billed to your AI Gateway balance.

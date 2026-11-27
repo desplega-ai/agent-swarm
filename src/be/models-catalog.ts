@@ -71,7 +71,7 @@ export interface CatalogModel {
   id: string;
   name?: string;
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
-  limit?: { context?: number };
+  limit?: { context?: number; input?: number; output?: number };
   /** models.dev `release_date` (ISO date). Drives newest-first ordering in harness lists. */
   release_date?: string;
   /** models.dev `status` (e.g. "deprecated"). Deprecated models drop out of harness lists. */
@@ -119,7 +119,7 @@ function slimModel(modelKey: string, model: ModelsDevModel): CatalogModel {
           },
         }
       : {}),
-    ...(model.limit?.context !== undefined ? { limit: { context: model.limit.context } } : {}),
+    ...(model.limit ? { limit: { context: model.limit.context, output: model.limit.output } } : {}),
     ...(typeof model.release_date === "string" ? { release_date: model.release_date } : {}),
     ...(typeof model.status === "string" ? { status: model.status } : {}),
     ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),

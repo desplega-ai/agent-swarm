@@ -448,7 +448,14 @@ function toCatalogModel(modelId: string, facts: ModelCatalogFacts): CatalogModel
     id: modelId,
     ...(facts.name ? { name: facts.name } : {}),
     ...(cost ? { cost } : {}),
-    ...(facts.contextWindow != null ? { limit: { context: facts.contextWindow } } : {}),
+    ...(facts.contextWindow != null || facts.maxOutput != null
+      ? {
+          limit: {
+            ...(facts.contextWindow != null ? { context: facts.contextWindow } : {}),
+            ...(facts.maxOutput != null ? { output: facts.maxOutput } : {}),
+          },
+        }
+      : {}),
     ...(facts.releaseDate ? { release_date: facts.releaseDate } : {}),
     ...(facts.status ? { status: facts.status } : {}),
     ...(reasoning != null ? { reasoning } : {}),

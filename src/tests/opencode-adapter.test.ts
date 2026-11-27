@@ -28,6 +28,73 @@ import { HELD_NOTE_TEXT, holdTemplateRender } from "./fixtures/held-template-ren
 
 const SESSION_ID = "ses_test";
 
+test("discovers an unknown gateway alias before host creation and uses its session window", async () => {
+  expect(await renderContextBoundNote(461000, "openrouter/example-large-chat", 922000)).toContain(
+    "50% of the 922,000-token window",
+  );
+  const server = Bun.serve({
+    port: 0,
+    fetch(req) {
+      expect(new URL(req.url).pathname).toBe("/gateway/model/info");
+      expect(req.headers.get("authorization")).toBe("Bearer synthetic-selected-key");
+      return Response.json({
+        data: [
+          {
+            model_name: "example-large-chat",
+            model_info: {
+              mode: "chat",
+              max_input_tokens: 922000,
+              max_output_tokens: 128000,
+              max_tokens: 128000,
+            },
+          },
+        ],
+      });
+    },
+  });
+  try {
+    const baseURL = `http://127.0.0.1:${server.port}/gateway/v1`;
+    const host = makeFakeHost([]);
+    installHost(host, (options) => {
+      const config = JSON.parse((options.config as { content: string }).content);
+      expect(config.provider.openrouter.models["example-large-chat"].limit).toEqual({
+        input: 922000,
+        output: 128000,
+        context: 922000,
+      });
+    });
+    const session = await new OpencodeAdapter().createSession(
+      testConfig({
+        model: "openrouter/example-large-chat",
+        env: {
+          OPENROUTER_API_KEY: "synthetic-selected-key",
+          CONTEXT_BOUND_NOTE_TOKENS: "400000",
+          OPENROUTER_BASE_URL: baseURL,
+          PROVIDER_MODEL_DISCOVERY: JSON.stringify({ openrouter: { mode: "litellm", baseURL } }),
+        },
+      }),
+    );
+    const events: ProviderEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    (session as OpencodeSession).handleOpencodeEvent(
+      ev("session.step.ended", {
+        sessionID: SESSION_ID,
+        tokens: tokens(460000, 1000),
+      }),
+    );
+    expect(events.find((event) => event.type === "context_usage")).toMatchObject({
+      contextTotalTokens: 922000,
+      contextUsedTokens: 461000,
+      contextPercent: 50,
+    });
+    await waitFor(() => host.synthetics.length === 1);
+    expect(host.synthetics[0]?.text).toContain("50% of the 922,000-token window");
+    await session.abort();
+  } finally {
+    server.stop(true);
+  }
+});
+
 function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSessionConfig {
   return {
     prompt: "do something",
@@ -63,6 +130,7 @@ type McpStatus =
   | { status: "failed" | "needs_auth"; error: string };
 
 type FakeHostOptions = {
+  runtimeLimits?: { input?: number; context: number; output: number };
   endStream?: boolean;
   promptError?: Error;
   /** Swarm MCP status per `mcp.list` call; the last entry repeats. Omit the server with `null`. */
@@ -93,6 +161,25 @@ function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
     interrupts: [] as unknown[],
     closeCalls: 0,
     mcpListCalls: 0,
+    plugin: { list: async () => ({ data: [{ id: "agent-swarm", state: { status: "active" } }] }) },
+    model: {
+      list: async () => {
+        const config = configOf(host);
+        const slash = config.model.indexOf("/");
+        const providerID = config.model.slice(0, slash);
+        const id = config.model.slice(slash + 1);
+        return {
+          data: [
+            {
+              providerID,
+              id,
+              type: "chat",
+              limit: opts.runtimeLimits ?? config.provider?.[providerID]?.models?.[id]?.limit,
+            },
+          ],
+        };
+      },
+    },
     /** Session hooks the plugins registered, with their options. */
     sessionHooks: {} as Record<
       string,
@@ -217,6 +304,135 @@ function configOf(host: FakeHost): Record<string, any> {
 }
 
 const succeeded = ev("session.execution.succeeded", { sessionID: SESSION_ID });
+
+test("runtime reconciliation happens before prompt and a smaller window remains session-local", async () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch: () =>
+      Response.json({
+        data: [
+          {
+            model_name: "example-large-chat",
+            model_info: { max_input_tokens: 922000, max_output_tokens: 128000 },
+          },
+        ],
+      }),
+  });
+  const baseURL = `http://127.0.0.1:${server.port}/v1`;
+  const cfg = testConfig({
+    model: "openrouter/example-large-chat",
+    env: {
+      OPENROUTER_API_KEY: "synthetic-runtime-key",
+      OPENROUTER_BASE_URL: baseURL,
+      PROVIDER_MODEL_DISCOVERY: JSON.stringify({
+        openrouter: { mode: "litellm", baseURL, semantics: "input-plus-output" },
+      }),
+    },
+  });
+  try {
+    const { host, session, emitted } = await startSession([], cfg, {
+      runtimeLimits: { input: 500000, context: 600000, output: 100000 },
+    });
+    expect(configOf(host).provider.openrouter.models["example-large-chat"].limit.context).toBe(
+      1050000,
+    );
+    await waitFor(() => host.prompts.length === 1);
+    session.handleOpencodeEvent(
+      ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(299000, 1000) }),
+    );
+    expect(emitted.find((event) => event.type === "context_usage")).toMatchObject({
+      contextTotalTokens: 600000,
+      contextPercent: 50,
+    });
+    await session.abort();
+    const unsafe = makeFakeHost([], {
+      runtimeLimits: { input: 999000, context: 1050000, output: 128000 },
+    });
+    installHost(unsafe);
+    await expect(new OpencodeAdapter().createSession(cfg)).rejects.toThrow("did not enforce");
+    expect(unsafe.prompts).toHaveLength(0);
+    expect(unsafe.closeCalls).toBe(1);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("disabled discovery and mismatched routes make no metadata calls", async () => {
+  let calls = 0;
+  const server = Bun.serve({
+    port: 0,
+    fetch: () => {
+      calls++;
+      return new Response(null, { status: 404 });
+    },
+  });
+  try {
+    const baseURL = `http://127.0.0.1:${server.port}/v1`;
+    for (const settings of [
+      "{}",
+      JSON.stringify({ openrouter: { mode: "litellm", baseURL: `${baseURL}/other` } }),
+    ]) {
+      const { session } = await startSession(
+        [],
+        testConfig({
+          model: "openrouter/example-large-chat",
+          env: {
+            OPENROUTER_API_KEY: "synthetic-off-key",
+            OPENROUTER_BASE_URL: baseURL,
+            PROVIDER_MODEL_DISCOVERY: settings,
+          },
+        }),
+      );
+      await session.abort();
+    }
+    expect(calls).toBe(0);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("partial deployment facts do not acquire a discovery-sourced output from SDK inheritance", async () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch: () =>
+      Response.json({
+        data: [
+          {
+            model_name: "example-large-chat",
+            model_info: { max_input_tokens: 922000, max_output_tokens: 128000 },
+          },
+          { model_name: "example-large-chat", model_info: { max_input_tokens: 922000 } },
+        ],
+      }),
+  });
+  try {
+    const baseURL = `http://127.0.0.1:${server.port}/v1`;
+    const { session, emitted } = await startSession(
+      [],
+      testConfig({
+        model: "openrouter/example-large-chat",
+        env: {
+          OPENROUTER_BASE_URL: baseURL,
+          OPENROUTER_API_KEY: "synthetic-partial-key",
+          PROVIDER_MODEL_DISCOVERY: JSON.stringify({ openrouter: { mode: "litellm", baseURL } }),
+        },
+      }),
+      { runtimeLimits: { input: 922000, context: 922000, output: 16384 } },
+    );
+    const init = emitted.find((e) => e.type === "session_init");
+    expect(init?.type === "session_init" && init.harnessVariantMeta?.modelLimits).toMatchObject({
+      input: 922000,
+      context: 922000,
+    });
+    expect(
+      init?.type === "session_init" &&
+        (init.harnessVariantMeta?.modelLimits as Record<string, unknown>).output,
+    ).toBeUndefined();
+    await session.abort();
+  } finally {
+    server.stop(true);
+  }
+});
 
 const prevEnv: Record<string, string | undefined> = {};
 beforeAll(() => {

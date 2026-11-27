@@ -13682,6 +13682,8 @@ export interface paths {
                                             };
                                             limit?: {
                                                 context?: number;
+                                                input?: number;
+                                                output?: number;
                                             };
                                             release_date?: string;
                                             status?: string;

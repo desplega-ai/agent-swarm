@@ -40,7 +40,14 @@ import {
   getOpenRouterAttributionHeaders,
   getOpenRouterBaseUrl,
 } from "../utils/openrouter-base-url";
-import { snapshotCatalogRows } from "../utils/runtime-model-catalog";
+import { discoverProviderModel, parseDiscoveryConfig } from "../utils/provider-model-discovery";
+import {
+  type EffectiveModelLimits,
+  effectiveModelLimits,
+  type ModelLimits,
+  positiveTokenLimit,
+} from "../utils/provider-model-limits";
+import { runtimeCatalogModel, snapshotCatalogRows } from "../utils/runtime-model-catalog";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { OpenRouterBilling } from "./opencode-billing";
@@ -617,6 +624,7 @@ export class OpencodeSession implements ProviderSession {
     private readonly cwd: string,
     private readonly appliedReasoningEffort: ReasoningEffort | null = null,
     private readonly billing?: OpenRouterBilling,
+    private readonly effectiveLimits?: Readonly<EffectiveModelLimits>,
   ) {
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
       this.completionResolve = resolve;
@@ -624,6 +632,7 @@ export class OpencodeSession implements ProviderSession {
     this.observeContextBound = createContextBoundNote({
       threshold: contextBoundNoteThreshold(swarm.env ?? process.env),
       model: () => this.model,
+      window: () => this.effectiveLimits?.context,
       canDeliver: () => !this.completed && !this.aborted,
       // A steer is promoted at the next step boundary mid-work; `resume: false`
       // leaves an idle session idle. Same route as OpenCode's own Plan reminder.
@@ -775,7 +784,10 @@ export class OpencodeSession implements ProviderSession {
         const contextUsed = t.input + t.cache.read + t.cache.write + t.output;
         void this.observeContextBound(t.input + t.cache.read + t.cache.write);
         this.composition?.observeUsage(t.input + t.cache.read + t.cache.write, this.model);
-        const contextTotal = getContextWindowSize(this.model || "default");
+        const contextTotal = getContextWindowSize(
+          this.model || "default",
+          this.effectiveLimits?.context,
+        );
         if (contextTotal > 0 && contextUsed > 0) {
           this.emit({
             type: "context_usage",
@@ -1057,6 +1069,76 @@ export class OpencodeAdapter implements ProviderAdapter {
 
     applyOpenRouterBaseUrlOverride(opencodeConfig, env);
 
+    // Bind opt-in to the exact resolved inference route, after the existing key
+    // splice. Never resolve another key or read an OpenCode auth store to probe.
+    const slash = config.model.indexOf("/");
+    const providerId = config.model.slice(0, slash);
+    const modelId = config.model.slice(slash + 1);
+    const discoverySettings = parseDiscoveryConfig(env.PROVIDER_MODEL_DISCOVERY)[providerId];
+    let effectiveLimits: Readonly<EffectiveModelLimits> | undefined;
+    let discoveryObservation:
+      | { observedAt?: number; stale?: boolean; discovered?: ModelLimits }
+      | undefined;
+    if (slash > 0 && discoverySettings?.mode === "litellm") {
+      const provider = opencodeConfig.provider?.[providerId];
+      const baseURL = provider?.options?.baseURL;
+      const compatible = providerId === "openrouter" || !!openAICompatibleProvider(providerId);
+      const sameRoute =
+        typeof baseURL === "string" &&
+        new URL(baseURL).href.replace(/\/+$/, "") ===
+          new URL(discoverySettings.baseURL).href.replace(/\/+$/, "");
+      if (compatible && splicedKey && sameRoute) {
+        const discovered = await discoverProviderModel({
+          provider: providerId,
+          modelId,
+          baseURL: baseURL as string,
+          key: splicedKey.key,
+          ttlMs: discoverySettings.ttlMs,
+          scope: JSON.stringify([config.agentId, config.vcsRepo ?? null]),
+        });
+        discoveryObservation = {
+          observedAt: discovered.observedAt,
+          stale: discovered.stale,
+          discovered: discovered.limits,
+        };
+        const explicit = Object.hasOwn(discoverySettings.limits ?? {}, modelId)
+          ? discoverySettings.limits?.[modelId]
+          : undefined;
+        effectiveLimits = effectiveModelLimits({
+          discovered: discovered.limits,
+          explicit,
+          catalog: runtimeCatalogModel(providerId, modelId)?.limit,
+          semantics: discoverySettings.semantics,
+        });
+        // Safe, selected-model facts only. No endpoint, credential, fingerprint,
+        // model inventory or untrusted response/error text crosses this boundary.
+        if (discovered.diagnostic)
+          console.warn(
+            `[opencode] model discovery: ${discovered.diagnostic}${discovered.stale ? " (stale facts)" : ""}; limits source: ${effectiveLimits.source}`,
+          );
+        const existing = provider?.models?.[modelId];
+        opencodeConfig.provider = {
+          ...opencodeConfig.provider,
+          [providerId]: {
+            ...provider,
+            models: {
+              ...provider?.models,
+              [modelId]: {
+                ...existing,
+                limit: {
+                  input: effectiveLimits.input,
+                  output: effectiveLimits.output,
+                  context: effectiveLimits.context,
+                },
+              },
+            },
+          },
+        };
+      } else {
+        console.warn("[opencode] model discovery skipped: no matching resolved credential route");
+      }
+    }
+
     const swarm: SwarmHooksConfig = {
       apiUrl: config.apiUrl,
       apiKey: config.apiKey,
@@ -1098,6 +1180,59 @@ export class OpencodeAdapter implements ProviderAdapter {
 
     let sessionId: string;
     try {
+      if (effectiveLimits) {
+        // Pinned SDK 2.4.2: model.list returns the post-transform model facts.
+        // An unexpectedly higher/missing enforced bound cannot be fixed by a
+        // different gauge. Refuse before any prompt; smaller runtime limits win.
+        const deadline = Date.now() + 5000;
+        // model.list can expose provisional models before config transforms.
+        // Plugin inventory is published only after the activation batch settles.
+        let activated = false;
+        do {
+          const plugins = await host.plugin.list(
+            { location: { directory: config.cwd } },
+            { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) },
+          );
+          const swarmPlugin = plugins.data.find((plugin) => plugin.id === "agent-swarm");
+          if (swarmPlugin?.state.status === "failed")
+            throw new Error("OpenCode plugin activation failed before model reconciliation");
+          activated = swarmPlugin?.state.status === "active";
+          if (!activated) await Bun.sleep(25);
+        } while (!activated && Date.now() < deadline);
+        if (!activated)
+          throw new Error("OpenCode plugin activation timed out before model reconciliation");
+        let selected:
+          | Awaited<ReturnType<OpenCode.Interface["model"]["list"]>>["data"][number]
+          | undefined;
+        do {
+          const models = await host.model.list(
+            { location: { directory: config.cwd } },
+            { signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) },
+          );
+          selected = models.data.find(
+            (model) => model.providerID === providerId && model.id === modelId,
+          );
+          if (selected || Date.now() >= deadline) break;
+          await Bun.sleep(25);
+        } while (Date.now() < deadline);
+        if (!selected || (selected.type !== undefined && selected.type !== "chat"))
+          throw new Error("Discovered model is unavailable in OpenCode runtime");
+        const runtime = selected.limit;
+        for (const field of ["input", "output", "context"] as const) {
+          const bound = effectiveLimits[field];
+          if (bound && (!positiveTokenLimit(runtime[field]) || runtime[field] > bound)) {
+            throw new Error("OpenCode runtime did not enforce the injected model limits");
+          }
+        }
+        // Only reconcile fields with established facts. An uncovered deployment
+        // bound must not return as 'discovered' via SDK catalog/default inheritance.
+        effectiveLimits = Object.freeze({
+          ...effectiveLimits,
+          context: runtime.context,
+          ...(effectiveLimits.input ? { input: runtime.input } : {}),
+          ...(effectiveLimits.output ? { output: runtime.output } : {}),
+        });
+      }
       const created = await host.sessions.create({
         location: { directory: config.cwd },
         agent: SWARM_AGENT_NAME,
@@ -1116,8 +1251,12 @@ export class OpencodeAdapter implements ProviderAdapter {
       config.cwd,
       appliedReasoningEffort,
       billing,
+      effectiveLimits,
     );
-    session.emitSessionInit(opencodeVersion ? { version: opencodeVersion } : undefined);
+    session.emitSessionInit({
+      ...(opencodeVersion ? { version: opencodeVersion } : {}),
+      ...(effectiveLimits ? { modelLimits: { ...effectiveLimits, ...discoveryObservation } } : {}),
+    });
     if (config.runnerSessionId && taskId) {
       const composition = new HookCompositionReporter(
         { sessionId: config.runnerSessionId, provider: "opencode" },

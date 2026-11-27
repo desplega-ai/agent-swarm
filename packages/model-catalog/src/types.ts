@@ -7,7 +7,7 @@ export interface ModelsDevModel {
   reasoning_options?: { type?: string; values?: string[] }[];
   tool_call?: boolean;
   release_date?: string;
-  limit?: { context?: number };
+  limit?: { context?: number; input?: number; output?: number };
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
 }
 

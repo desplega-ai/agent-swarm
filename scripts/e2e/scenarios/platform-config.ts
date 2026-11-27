@@ -147,6 +147,42 @@ export const platformConfig: Scenario = {
 
       // ── scopes and precedence ──────────────────────────────────────────────
       const agentId = await registerAgent(ctx, "config");
+      const discovery = JSON.stringify({
+        openrouter: {
+          mode: "litellm",
+          baseURL: "https://gateway.example/gateway/v1",
+          ttlMs: 300000,
+        },
+      });
+      const discoveryRow = await track({
+        scope: "agent",
+        scopeId: agentId,
+        key: "PROVIDER_MODEL_DISCOVERY",
+        value: discovery,
+      });
+      expect(
+        discoveryRow.value === discovery,
+        "discovery settings round-trip in agent scope without credentials",
+      );
+      for (const value of [
+        "[]",
+        "null",
+        JSON.stringify({
+          openrouter: { mode: "litellm", baseURL: "https://user:pass@gateway.example/v1" },
+        }),
+        JSON.stringify({
+          openrouter: { mode: "litellm", baseURL: "https://gateway.example/v1", ttlMs: 0 },
+        }),
+      ]) {
+        expectStatus(
+          await ctx.api("PUT", "/api/config", {
+            body: { scope: "agent", scopeId: agentId, key: "PROVIDER_MODEL_DISCOVERY", value },
+          }),
+          [400],
+          "reject invalid discovery configuration",
+        );
+      }
+      await ctx.api("DELETE", `/api/config/${String(discoveryRow.id)}`);
       const repoId = crypto.randomUUID();
       await track({ key: keyScoped, value: "from-global" });
       const agentRow = await track({
