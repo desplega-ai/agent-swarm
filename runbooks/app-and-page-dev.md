@@ -15,6 +15,7 @@ bun run ui:dev --app <appId>              # opens /apps/<appId>
 bun run ui:dev --page <id|slug>           # opens /pages/<id>; a slug resolves to the newest matching page
 bun run ui:dev --route '/apps/<id>/p/<page>?mode=chromeless'   # any dashboard path
 bun run app:dev <appId>                   # alias for --app
+bun run ui:dev --api local --app <appId>  # a throwaway API with a copy of the app (see Local mode)
 ```
 
 | Option | Default | Notes |
@@ -23,6 +24,9 @@ bun run app:dev <appId>                   # alias for --app
 | `--as-email <email>` | first user with an email | The dashboard user you view as (primary email or alias). |
 | `--port <n>` | `5274` | Fails fast when the port is taken. Any port works. |
 | `--json` | off | Print only the ready JSON. |
+| `--api prod\|local` | `prod` | `bun run ui:dev` only. `local`: see [Local mode](#local-mode). |
+| `--fixture <file>` | none | Local mode: copy an app or page bundle file instead of reading a source API. |
+| `--state-dir <dir>` | `.ui-dev/<kind>-<id>` | Local mode: the throwaway API's database, log and `api-key` file. |
 
 Needs `AGENT_SWARM_API_KEY` or `API_KEY`. Agents run it in the background (`run_in_background`) and wait for the one stdout line:
 
@@ -30,7 +34,7 @@ Needs `AGENT_SWARM_API_KEY` or `API_KEY`. Agents run it in the background (`run_
 UI_DEV_READY {"url":"http://127.0.0.1:5274/apps/<id>","target":{"kind":"app","id":"...","name":"..."},"apiUrl":"...","userId":"...","userEmail":"...","warnings":[...],"pid":123}
 ```
 
-Vite logs go to stderr. The process holds until SIGINT or SIGTERM and stops the dev server with it. Exit codes: 0 clean stop, 1 dev server failure, 2 usage or config error (unknown app, page or user; bad `--api-url`; port taken).
+Vite logs go to stderr. The process holds until SIGINT or SIGTERM and stops the dev server with it. Exit codes: 0 clean stop, 1 dev server, local API or copy failure, 2 usage or config error (unknown app, page or user; bad `--api-url`; port taken; unreadable fixture).
 
 ## How it connects
 
@@ -56,7 +60,43 @@ Page bodies are HTML stored in the API, not repo code. With `bun run ui:dev`, ho
 
 ## Prod writes
 
-With `$MCP_BASE_URL` the dashboard acts with your swarm key on the live swarm. An app action click runs the action; a page form or KV write lands in prod. The ready line says so in `warnings`. Rule: in prod, do not click actions or submit forms unless the task asks for it. A local copy mode (a throwaway API with the app or page copied in) is planned and not available yet.
+With `$MCP_BASE_URL` the dashboard acts with your swarm key on the live swarm. An app action click runs the action; a page form or KV write lands in prod. The ready line says so in `warnings`. Rule: in prod, do not click actions or submit forms unless the task asks for it. To click, submit or edit freely, use [Local mode](#local-mode).
+
+## Local mode
+
+`bun run ui:dev --api local` boots a throwaway API from the checkout (`src/http.ts` on a fresh SQLite file in `--state-dir`, `NODE_ENV=development`, integrations and heartbeat off, listening on `127.0.0.1` only, with the checkout's `.env` files ignored so a `DATABASE_URL` there cannot pick Postgres), copies the target into it, and points the dev server at it. Nothing it does reaches prod. Code: `scripts/ui-dev/local.ts`.
+
+```bash
+bun run ui:dev --api local --app <appId>                  # copy from $MCP_BASE_URL (or --api-url)
+bun run ui:dev --api local --page <id|slug>
+bun run ui:dev --api local --fixture scripts/ui-dev/fixtures/sample-app.json   # no source API
+bun run ui:dev --api local --route /apps                  # empty local dashboard, nothing copied
+```
+
+| Use prod when | Use local when |
+|---|---|
+| Showing real data (QA of a live app or page, a demo video) | Changing `apps/ui` code that renders apps or pages, or editing a definition or page body you do not want live yet |
+| Read-only clicking | Clicking actions, forms, or anything that writes |
+| The UI change needs real data shapes to judge | A PR's before/after (reproducible, no prod writes) |
+
+What the copy holds:
+
+- **App**: `GET /api/apps/<id>/export` on the source, then `POST /api/apps/import?keepId=1` locally. Every row (no 1,000-row list cap) and the scripts its actions use; the app keeps its id. Import warnings (a script needing a connection or secret absent locally) land in the ready line's `warnings`. Script actions run locally, as a local `ui-dev` agent.
+- **Page**: the record from `GET /api/pages/<id>` and its KV namespace, under a new local page id (the ready line's `target.id`). A password page becomes `authed`, with a warning: the password is not readable through the API. A page that calls swarm APIs beyond its own KV gets a "local data is empty" warning.
+- **User**: the source user you view as (`--as-email`, else the first user with an email), recreated by email. With a fixture or `--route`: `--as-email`, else `ui-dev@example.com`.
+- Not copied: sync schedules, connections, secrets, tasks and any other swarm data a page reads.
+
+The ready line adds `"mode":"local"`, `source` (the source API, `fixture:<path>` or `none`), `stateDir` and `apiKeyFile`. The local key sits in that file, never in the ready line. Use it to drive the copy, for example to iterate on a page body:
+
+```bash
+KEY=$(cat "$STATE_DIR/api-key")
+curl -X PUT "$API_URL/api/pages/<localId>" -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' -d '{"body":"<h1>v2</h1>"}'   # then reload the tab
+```
+
+Each start wipes the state directory's database. The directory stays after exit for its `api.log`; `.ui-dev/` is gitignored.
+
+Fixtures are bundle files: an app bundle is the `GET /api/apps/<id>/export` body (`swarm-app-bundle/v1`); a page bundle is `{ "format": "swarm-page-bundle/v1", "page": { title, slug?, contentType, authMode?, body, theme?, themeTokens?, designVersion? }, "kv": [{ key, value, valueType? }] }`. The committed ones in `scripts/ui-dev/fixtures/` are synthetic. Prod rows never go into this public repo.
 
 ## Screenshots and video
 
@@ -77,9 +117,18 @@ Stage files under the repo or `/workspace/personal`, not `/tmp`. Upload with `ag
 
 ## Before and after for a PR
 
-Run `ui:dev` on `main` (a worktree) and on the branch, same target, same viewport, different `--port`. Put both frames in the PR's `## Before / after`. For a flow, record one video per side. Against prod, prefer a target whose data you may show publicly, or a dev API you seeded yourself (`--api-url http://127.0.0.1:<port>`).
+Use local mode with a fixture: the same data on both sides, no prod writes, nothing private in the frames.
+
+```bash
+git worktree add ../swarm-main origin/main
+(cd ../swarm-main && bun install && bun run ui:dev --api local --fixture scripts/ui-dev/fixtures/sample-app.json --port 5301)   # before
+bun run ui:dev --api local --fixture scripts/ui-dev/fixtures/sample-app.json --port 5302                                           # after
+```
+
+Each side gets its own state directory (the default is per checkout). Capture the same viewport on both (1440x900, plus 375 wide for mobile), and put both frames in the PR's `## Before / after`. For a flow, record one video per side. When the change needs a shape the sample lacks, commit a new synthetic fixture with the PR, or copy a real app with `--app <id>` and keep those frames out of the public PR (link them from `## Swarm provenance`).
 
 ## Proof
 
 - Black-box, both commands: `bun run e2e --only ui-dev-remote` (`scripts/e2e/scenarios/ui-dev-remote.ts`).
+- Local mode: `bun run e2e --only ui-dev-local` (`scripts/e2e/scenarios/ui-dev-local.ts`).
 - Browser: `bun run e2e:ui -- specs/ui-dev.spec.ts` (`packages/ui-e2e/specs/ui-dev.spec.ts`).

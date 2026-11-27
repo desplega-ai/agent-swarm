@@ -920,8 +920,8 @@
       ]
     },
     "ui-dev-tooling": {
-      "description": "`bun run ui:dev` and `agent-swarm ui-dev` against a running swarm as a black box: ready line, same-origin proxy, injected connection, slug lookup, usage errors and teardown",
-      "scenarios": ["ui-dev-remote"]
+      "description": "`bun run ui:dev` and `agent-swarm ui-dev` as a black box, against a running swarm or a throwaway local API (`--api local`): ready line, same-origin proxy, injected connection, slug lookup, usage errors and teardown",
+      "scenarios": ["ui-dev-remote", "ui-dev-local"]
     }
   }
 }

@@ -7,7 +7,7 @@ import { registerAgent } from "./knowledge-helpers";
 type Run = { code: number; stdout: string; stderr: string };
 
 /** `bun run ui:dev` against this SUT. `held` runs while the dev server is up, then SIGTERM. */
-async function uiDev(
+export async function uiDev(
   args: string[],
   env: Record<string, string>,
   held?: (ready: Record<string, unknown>) => Promise<void>,

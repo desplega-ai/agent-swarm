@@ -1,0 +1,182 @@
+{
+  "format": "swarm-app-bundle/v1",
+  "app": {
+    "id": "0d7e1c2a-5f3b-4c8e-9a61-7b2e4d9f1c35",
+    "name": "ui-dev sample app",
+    "description": "Synthetic fixture for bun run ui:dev --api local",
+    "definition": {
+      "models": {
+        "item": {
+          "columns": {
+            "title": {
+              "kind": "string"
+            },
+            "done": {
+              "kind": "boolean"
+            },
+            "points": {
+              "kind": "number"
+            }
+          }
+        }
+      },
+      "queries": {
+        "items": {
+          "model": "item",
+          "sort": {
+            "column": "points",
+            "dir": "asc"
+          }
+        }
+      },
+      "actions": {
+        "ping": {
+          "kind": "script",
+          "scriptId": "5b0c6a1e-7c1d-4f43-9a0e-2d1f3c4b5a60"
+        }
+      },
+      "defaultPage": "main",
+      "pages": {
+        "main": {
+          "root": "root",
+          "elements": {
+            "root": {
+              "type": "Stack",
+              "props": {},
+              "children": ["title", "pingBtn", "itemsTable"]
+            },
+            "title": {
+              "type": "Heading",
+              "props": {
+                "text": "ui-dev sample app"
+              }
+            },
+            "pingBtn": {
+              "type": "Button",
+              "props": {
+                "label": "Ping"
+              },
+              "on": {
+                "press": [
+                  {
+                    "action": "app.action",
+                    "params": {
+                      "name": "ping"
+                    }
+                  }
+                ]
+              }
+            },
+            "itemsTable": {
+              "type": "Table",
+              "props": {
+                "data": {
+                  "$state": "/queries/items/data"
+                },
+                "columns": [
+                  {
+                    "key": "title",
+                    "label": "Item"
+                  },
+                  {
+                    "key": "done",
+                    "label": "Done"
+                  },
+                  {
+                    "key": "points",
+                    "label": "Points"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "rows": {
+    "item": [
+      {
+        "id": "item-01",
+        "title": "Sample item 1",
+        "done": false,
+        "points": 2
+      },
+      {
+        "id": "item-02",
+        "title": "Sample item 2",
+        "done": false,
+        "points": 4
+      },
+      {
+        "id": "item-03",
+        "title": "Sample item 3",
+        "done": true,
+        "points": 6
+      },
+      {
+        "id": "item-04",
+        "title": "Sample item 4",
+        "done": false,
+        "points": 8
+      },
+      {
+        "id": "item-05",
+        "title": "Sample item 5",
+        "done": false,
+        "points": 10
+      },
+      {
+        "id": "item-06",
+        "title": "Sample item 6",
+        "done": true,
+        "points": 12
+      },
+      {
+        "id": "item-07",
+        "title": "Sample item 7",
+        "done": false,
+        "points": 14
+      },
+      {
+        "id": "item-08",
+        "title": "Sample item 8",
+        "done": false,
+        "points": 16
+      },
+      {
+        "id": "item-09",
+        "title": "Sample item 9",
+        "done": true,
+        "points": 18
+      },
+      {
+        "id": "item-10",
+        "title": "Sample item 10",
+        "done": false,
+        "points": 20
+      },
+      {
+        "id": "item-11",
+        "title": "Sample item 11",
+        "done": false,
+        "points": 22
+      },
+      {
+        "id": "item-12",
+        "title": "Sample item 12",
+        "done": true,
+        "points": 24
+      }
+    ]
+  },
+  "scripts": [
+    {
+      "id": "5b0c6a1e-7c1d-4f43-9a0e-2d1f3c4b5a60",
+      "name": "ui-dev-sample-ping",
+      "description": "Returns pong",
+      "intent": "Prove an app action runs in ui:dev local mode",
+      "source": "export default async function () {\n  return { pong: true };\n}\n"
+    }
+  ]
+}
