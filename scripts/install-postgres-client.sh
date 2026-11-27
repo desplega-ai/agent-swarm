@@ -35,7 +35,7 @@ install_client() {
 }
 if [ -n "$SRC" ]; then
   $SUDO apt-get update -qq -o Dir::Etc::sourcelist="$SRC" -o Dir::Etc::sourceparts="-" \
-    -o APT::Get::List-Cleanup="0" >&2
+    -o APT::Get::List-Cleanup="0" >&2 || echo "warning: the PGDG source did not update" >&2
 fi
 if [ -z "$SRC" ] || ! install_client >&2; then
   # A dependency from another source is not in the package lists (a bare image): refresh
