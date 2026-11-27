@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { acquireOAuthRefreshLock, releaseOAuthRefreshLock } from "../be/db-queries/oauth";
+import { MAX_CODEX_OAUTH_SLOT } from "../providers/codex-oauth/storage";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -12,15 +13,27 @@ import { jsonError } from "./utils";
  * refresh in `src/providers/codex-oauth/storage.ts`) can't import `be/db`,
  * so it serializes its refreshes through these endpoints instead.
  *
- * Lock keys are caller-defined strings scoped by the caller — e.g. the Codex
- * pool uses `codex_oauth_<slot>`, distinct from tracker provider names like
- * `linear`/`jira`/`github` that already live in this table.
+ * The only worker-side caller is the Codex pool, so these routes accept only
+ * its `codex_oauth_<slot>` keys. Every other key in the table (the server's
+ * `authz:<authorizationId>` refresh locks) stays server-owned: a worker must
+ * not be able to hold it.
  */
 
 const MAX_LOCK_TTL_MS = 5 * 60 * 1000;
-const LOCK_KEY_PATTERN = /^[a-zA-Z0-9._:-]{1,200}$/;
+// The regex spells out 0..100 so the OpenAPI pattern matches the runtime check.
+// The refine below keeps MAX_CODEX_OAUTH_SLOT the authority if it ever shrinks;
+// if it grows past 100, widen this regex too.
+const LOCK_KEY_PATTERN = /^codex_oauth_(0|[1-9]\d?|100)$/;
 
-const LockKeySchema = z.object({ key: z.string().regex(LOCK_KEY_PATTERN) });
+const LockKeySchema = z.object({
+  key: z
+    .string()
+    .regex(LOCK_KEY_PATTERN)
+    .refine(
+      (key) => Number(key.slice("codex_oauth_".length)) <= MAX_CODEX_OAUTH_SLOT,
+      "slot out of range",
+    ),
+});
 
 const acquireBodySchema = z.object({
   ttlMs: z.number().int().positive().max(MAX_LOCK_TTL_MS),
