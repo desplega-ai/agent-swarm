@@ -712,7 +712,7 @@ export const workflowDefinitions: Scenario = {
 
       const mcpDeleted = await callToolOk(connection, "delete-workflow", { id: mcpId });
       expect(mcpDeleted.text.includes(mcpId), "delete-workflow names the workflow");
-      created.pop();
+      created.splice(created.indexOf(mcpId), 1);
       await callToolErr(connection, "delete-workflow", { id: mcpId }, "not found");
       expectStatus(await ctx.api("GET", `/api/workflows/${mcpId}`), [404], "tool-deleted workflow");
     } finally {
