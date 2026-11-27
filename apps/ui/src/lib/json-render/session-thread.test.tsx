@@ -28,6 +28,7 @@ type ConversationProps = {
   followUpAttachments?: unknown;
   requestFiles?: (task: AgentTask) => React.ReactNode;
   placeholder?: string;
+  composerNotice?: React.ReactNode;
 };
 let conversation: ConversationProps | undefined;
 
@@ -49,6 +50,19 @@ const connectedUploader = async (path: string, file: File) => {
   return path;
 };
 mock.module("./form-file", () => ({ useFormFileUploader: () => uploader }));
+// This browser's agent-fs connection, and whether the app runs in an embed frame.
+let agentFsState = "ready";
+let embedded = false;
+mock.module("@/contexts/agent-fs-context", () => ({
+  useOptionalAgentFs: () => ({ state: agentFsState }),
+}));
+mock.module("@/components/comb/connect-dialog", () => ({
+  useEmbeddedFrame: () => embedded,
+  ConnectDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="connect-card" /> : null,
+}));
+mock.module("@/components/ui/alert-callout", () => require("../../components/ui/alert-callout"));
+mock.module("@/lib/chat-width", () => require("../chat-width"));
 mock.module("./session-thread-files", () => ({
   ThreadMessageFiles: ({ files }: { files: { name: string }[] }) => (
     <ul data-testid="thread-files">
@@ -78,7 +92,12 @@ mock.module("@/api/hooks/use-sessions", () => ({
 mock.module("@/components/sessions/session-conversation", () => ({
   SessionConversation: (props: ConversationProps) => {
     conversation = props;
-    return <div data-testid="conversation">{props.value}</div>;
+    return (
+      <div data-testid="conversation">
+        {props.value}
+        {props.composerNotice}
+      </div>
+    );
   },
 }));
 mock.module("@/components/sessions/composer-dock", () => ({
@@ -150,6 +169,8 @@ beforeEach(() => {
   uploads = [];
   failUpload = null;
   uploader = connectedUploader;
+  agentFsState = "ready";
+  embedded = false;
 });
 
 afterAll(async () => {
@@ -570,4 +591,57 @@ test("a follow-up with files uploads them and chains under the leaf; bubbles sho
   expect(conversation?.requestFiles?.(task({ task: "plain" }))).toBeNull();
   await act(async () => filesRoot.unmount());
   await unmount();
+});
+
+const HINT = '[data-testid="json-render-session-thread"] [role="note"]';
+const connectButton = (host: HTMLElement) =>
+  [...host.querySelectorAll("button")].find((b) => b.textContent === "Connect Files");
+
+test("files and no agent-fs key: steps above the composer, and Connect Files opens the connect card", async () => {
+  agentFsState = "needs-connect";
+  const { host, rerender, unmount } = await mount({ attachments: ATTACHMENTS }, () => ({}));
+  const hint = host.querySelector(HINT);
+  expect(hint?.textContent).toContain("Press Connect Files.Wait a few seconds.Press Send again.");
+  // Right above the composer.
+  expect(hint?.parentElement?.nextElementSibling?.tagName).toBe("FORM");
+  expect(host.querySelector('[data-testid="connect-card"]')).toBeNull();
+  await act(async () => connectButton(host)?.click());
+  expect(host.querySelector('[data-testid="connect-card"]')).not.toBeNull();
+  // Connected: the hint and its dialog go away.
+  agentFsState = "ready";
+  await rerender({ attachments: ATTACHMENTS });
+  expect(host.querySelector(HINT)).toBeNull();
+  expect(host.querySelector('[data-testid="connect-card"]')).toBeNull();
+  await unmount();
+});
+
+test("a rejected saved key shows the steps too; a session hands them to its composer", async () => {
+  agentFsState = "invalid-key";
+  roots = [task({ id: "root", contextKey: KEY })];
+  chains = { root: roots };
+  const { host, unmount } = await mount({ attachments: ATTACHMENTS }, () => ({}));
+  expect(conversation?.rootTaskId).toBe("root");
+  expect(host.querySelector(HINT)?.textContent).toContain("Press Connect Files.");
+  await unmount();
+});
+
+test("connected viewers, threads without files and embed frames never see the steps", async () => {
+  const connected = await mount({ attachments: ATTACHMENTS }, () => ({}));
+  expect(connected.host.querySelector(HINT)).toBeNull();
+  await connected.unmount();
+  agentFsState = "needs-connect";
+  const noFiles = await mount({}, () => ({}));
+  expect(noFiles.host.querySelector(HINT)).toBeNull();
+  await noFiles.unmount();
+  for (const state of ["loading", "disabled", "unreachable"]) {
+    agentFsState = state;
+    const other = await mount({ attachments: ATTACHMENTS }, () => ({}));
+    expect(other.host.querySelector(HINT)).toBeNull();
+    await other.unmount();
+  }
+  agentFsState = "needs-connect";
+  embedded = true;
+  const framed = await mount({ attachments: ATTACHMENTS }, () => ({}));
+  expect(framed.host.querySelector(HINT)).toBeNull();
+  await framed.unmount();
 });

@@ -17,9 +17,8 @@
 import type { InferComponentProps } from "@json-render/core";
 import { AlertCircle, ChevronRight, FileQuestion, FolderOpen, HardDrive, Lock } from "lucide-react";
 import { type ReactNode, Suspense, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { isAccessDenied, useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-agent-fs";
-import { ConnectCard } from "@/components/comb/connect-card";
+import { ConnectDialog, useEmbeddedFrame } from "@/components/comb/connect-dialog";
 import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileKindIcon } from "@/components/comb/file-icon";
 import { UploadButton, UploadDropZone, UploadList } from "@/components/comb/upload-zone";
@@ -31,7 +30,6 @@ import { MarkdownView } from "@/components/shared/markdown-view";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { StatResult } from "@/lib/agent-fs/types";
@@ -91,13 +89,11 @@ export function AgentFsGate({ children }: { children: (drive: Drive) => ReactNod
 
 /**
  * Not connected. In the dashboard: Comb's connect flow in a dialog. In a
- * chromeless iframe the browser partitions storage, so a key saved there does
- * not persist: link to the app in the dashboard instead.
+ * chromeless iframe (`useEmbeddedFrame`): link to the app in the dashboard.
  */
 function ConnectPrompt({ invalidKey }: { invalidKey: boolean }) {
   const [open, setOpen] = useState(false);
-  const [searchParams] = useSearchParams();
-  const embedded = searchParams.get("mode") === "chromeless" && window.self !== window.top;
+  const embedded = useEmbeddedFrame();
   const title = invalidKey
     ? "agent-fs rejected your saved key"
     : "Connect agent-fs to see these files";
@@ -133,16 +129,7 @@ function ConnectPrompt({ invalidKey }: { invalidKey: boolean }) {
           </Button>
         }
       />
-      {/* Connecting changes the state, which unmounts this prompt and the dialog. */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent
-          aria-describedby={undefined}
-          className="border-0 bg-transparent p-0 shadow-none sm:max-w-md"
-        >
-          <DialogTitle className="sr-only">Connect agent-fs</DialogTitle>
-          <ConnectCard />
-        </DialogContent>
-      </Dialog>
+      <ConnectDialog open={open} onOpenChange={setOpen} />
     </>
   );
 }

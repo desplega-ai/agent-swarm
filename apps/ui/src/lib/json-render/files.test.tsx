@@ -141,6 +141,10 @@ mock.module("@/components/ui/alert-callout", () => require("../../components/ui/
 mock.module("@/components/ui/button", () => require("../../components/ui/button"));
 mock.module("@/components/ui/card", () => require("../../components/ui/card"));
 mock.module("@/components/ui/dialog", () => require("../../components/ui/dialog"));
+// After its own aliases: a module another test file already loaded is rebuilt right away.
+mock.module("@/components/comb/connect-dialog", () =>
+  require("../../components/comb/connect-dialog"),
+);
 mock.module("@/lib/agent-fs/client", () => require("../agent-fs/client"));
 mock.module("@/lib/comb/file-kinds", () => require("../comb/file-kinds"));
 mock.module("@/lib/format-bytes", () => require("../format-bytes"));
