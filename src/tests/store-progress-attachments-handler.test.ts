@@ -327,6 +327,44 @@ describe("store-progress handler — attachments insert path", () => {
     expect(requestedAgentFsUrls).toEqual([
       "https://agent-fs.test/orgs/org-abc/drives/drive-xyz/files/thoughts/doc.md/raw",
     ]);
+
+    // An agent without its own key never verifies with a global or API key.
+    const keyless = await createAgent({
+      name: "Handler Attachments Keyless Worker",
+      description: "Agent without an agent-scoped agent-fs key",
+      role: "worker",
+      isLead: false,
+      status: "busy",
+      maxTasks: 1,
+      capabilities: [],
+    });
+    for (const key of ["API_AGENT_FS_API_KEY", "AGENT_FS_API_KEY"]) {
+      await upsertSwarmConfig({ scope: "global", key, value: "global-key", isSecret: true });
+    }
+    const keylessTask = await createTaskExtended("keyless agent-fs attachment", {
+      agentId: keyless.id,
+    });
+    await startTask(keylessTask.id);
+    requestedAgentFsUrls = [];
+    const refused = (await tool.handler(
+      {
+        taskId: keylessTask.id,
+        attachments: [
+          { kind: "agent-fs", name: "doc.md", path: "/doc.md", orgId: "org-abc", driveId: "d" },
+        ],
+      },
+      {
+        sessionId: `session-${crypto.randomUUID()}`,
+        requestInfo: { headers: { "x-agent-id": keyless.id } },
+      },
+    )) as StoreProgressResult;
+    expect(requestedAgentFsUrls).toEqual([]);
+    expect(refused.structuredContent.success).toBe(false);
+    expect(refused.structuredContent.message).toContain("AGENT_FS_API_KEY of its own");
+    expect(await getTaskAttachments(keylessTask.id)).toHaveLength(0);
+    await getDbClient().run(
+      "DELETE FROM swarm_config WHERE scope = 'global' AND key IN ('API_AGENT_FS_API_KEY', 'AGENT_FS_API_KEY')",
+    );
   });
 
   test("agent-fs attachment without a resolvable org/drive hard-fails before registration", async () => {

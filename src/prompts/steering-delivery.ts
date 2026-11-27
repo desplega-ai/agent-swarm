@@ -1,6 +1,8 @@
 // The codex hook is a standalone CLI entry point, so it does not load the
 // base-prompt module that normally registers these code-default templates.
 import "./session-templates.ts";
+import type { SteeringAttachment } from "../types.ts";
+import { steeringAttachmentsSection } from "../utils/task-attachment-links.ts";
 import { resolveTemplateAsync } from "./resolver.ts";
 
 /**
@@ -15,12 +17,17 @@ import { resolveTemplateAsync } from "./resolver.ts";
  * Shared by the runner's dispatch poll (in-process `deliverSteering`
  * providers) and the codex-hook (harness-side delivery via hook
  * `additionalContext`).
+ *
+ * Attached files go into the body as one fetch command each, so a custom
+ * template that only prints `{{body}}` still hands them to the agent.
  */
 export async function renderSteeringDelivery(
   steeringMessageId: string,
-  body: string,
+  messageBody: string,
   sender = "Unknown sender",
+  attachments?: readonly SteeringAttachment[],
 ): Promise<string> {
+  const body = messageBody + steeringAttachmentsSection(attachments);
   try {
     const result = await resolveTemplateAsync("system.agent.steering.delivery", {
       steeringMessageId,

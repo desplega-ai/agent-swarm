@@ -28,6 +28,7 @@ import type {
   MetricColumnUpdate,
   MetricRow,
   MetricVersionRow,
+  NewSessionLog,
   PageColumnUpdate,
   PageRow,
   PageVersionRow,
@@ -44,7 +45,6 @@ import type {
   SkillFileRow,
   SkillRow,
   SkillWithInstallRow,
-  SlackMessageRow,
   SwarmConfigRow,
   SwarmRepoColumnUpdate,
   SwarmRepoRow,
@@ -184,6 +184,7 @@ import {
   OPEN_TASK_STATUSES,
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+  type SteeringAttachment,
   type UserAvatar,
 } from "../types";
 import {
@@ -287,6 +288,7 @@ import {
   sessionPageFields,
 } from "./db/session-tree";
 import { searchSkillRowsRanked } from "./db/skill-search";
+import { rowToSlackMessage } from "./db/slack-messages";
 import { taskAttachmentWrite } from "./db/tasks/attachment-write";
 import { getEligibilityScanCap } from "./db/tasks/eligibility-scan";
 import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
@@ -301,6 +303,7 @@ import {
   rowToAgentTask,
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
+import { parseSteeringAttachments } from "./db/tasks/steering-attachments";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { parseUserAvatar } from "./db/users/avatar";
 import { tombstoneWorkflowIdempotencyKeys } from "./db/workflow-idempotency";
@@ -353,6 +356,7 @@ export {
   ExtensionAgentAssignmentError,
   extensionAgentAssignmentError,
   getActiveTaskCount,
+  getActiveTaskCounts,
   getAgentById,
   getAgentDailyTaskCounts,
   getAgentHarnessProviders,
@@ -705,30 +709,6 @@ export function isPendingSlackMessage(record: SlackMessageRecord): boolean {
 /** True when the renderer must not touch this card again: delivered, or given up on. */
 export function isSettledSlackMessage(record: SlackMessageRecord): boolean {
   return !!record.finalizedAt || !!record.deliveryAbandonedAt;
-}
-
-function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
-  return {
-    id: row.id,
-    contextKey: row.context_key,
-    channelId: row.channel_id,
-    threadTs: row.thread_ts,
-    ts: row.ts,
-    kind: row.kind as SlackMessageKind,
-    taskId: row.task_id ?? undefined,
-    permalink: row.permalink ?? undefined,
-    finalizedAt: row.finalized_at ?? undefined,
-    streamChunksAppended: row.stream_chunks_appended,
-    conclusionKind: (row.conclusion_kind as SlackConclusionKind | null) ?? undefined,
-    deferralResolvedAt: row.deferral_resolved_at ?? undefined,
-    deferralAbandonedAt: row.deferral_abandoned_at ?? undefined,
-    deliveryAttempts: row.delivery_attempts,
-    deliveryAbandonedAt: row.delivery_abandoned_at ?? undefined,
-    deliveryLastError: row.delivery_last_error ?? undefined,
-    closedAt: row.closed_at ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 export async function recordSlackMessage(input: {
@@ -1546,6 +1526,7 @@ function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
     deliveredAt: row.delivered_at ?? undefined,
     handledAt: row.handled_at ?? undefined,
     handledNote: row.handled_note ?? undefined,
+    attachments: parseSteeringAttachments(row.attachments),
   };
 }
 
@@ -1557,6 +1538,7 @@ export interface CreateSteeringMessageArgs {
   createdByKind: SteeringMessage["createdByKind"];
   createdByUserId?: string;
   createdByAgentId?: string;
+  attachments?: SteeringAttachment[];
 }
 
 export async function createSteeringMessage(
@@ -1572,6 +1554,7 @@ export async function createSteeringMessage(
     created_by_kind: args.createdByKind,
     created_by_user_id: args.createdByUserId ?? null,
     created_by_agent_id: args.createdByAgentId ?? null,
+    attachments: args.attachments?.length ? JSON.stringify(args.attachments) : null,
   });
   if (!row) throw new Error("Failed to create steering message");
 
@@ -1590,6 +1573,7 @@ export async function createSteeringMessage(
         steeringMessageId: id,
         mode: args.mode,
         source: args.source,
+        ...(args.attachments?.length ? { attachmentCount: args.attachments.length } : {}),
       },
     });
   } catch {}
@@ -4021,8 +4005,16 @@ export async function createSessionLogs(logs: {
       // Consecutive Claude thinking lines of one message just before the current line.
       let run = 0;
       let runMessageId: string | undefined;
+      // Rows are buffered and written as multi-row INSERTs. The buffer is
+      // flushed before each classifyClaudeUpdate, which reads the rows stored
+      // so far, so it sees exactly what the one-insert-per-line loop showed it.
+      const pending: NewSessionLog[] = [];
+      const flush = async () => {
+        if (pending.length === 0) return;
+        await getStorage().repos.sessions.insertLogs(pending.splice(0));
+      };
       for (const [index, { content, reasoning }] of batch.entries()) {
-        await getStorage().repos.sessions.insertLog({
+        pending.push({
           id: crypto.randomUUID(),
           taskId: logs.taskId ?? null,
           sessionId: logs.sessionId,
@@ -4039,6 +4031,7 @@ export async function createSessionLogs(logs: {
           // Only a run of 2+ can hold an update. A run that reaches the batch
           // start may continue in an earlier POST, so the DB decides that case.
           if (before >= 2 || before === index) {
+            await flush();
             await classifyClaudeUpdate(logs.sessionId, toolMessageId, lineNumber);
           }
         }
@@ -4052,6 +4045,7 @@ export async function createSessionLogs(logs: {
         }
         lineNumber++;
       }
+      await flush();
     });
   }
 }

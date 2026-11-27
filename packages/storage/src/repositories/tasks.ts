@@ -577,6 +577,8 @@ export type TaskSteeringMessageRow = {
   delivered_at: string | null;
   handled_at: string | null;
   handled_note: string | null;
+  /** JSON array of attachment refs (migration 394); NULL for a text-only message. */
+  attachments?: string | null;
 };
 
 export type NewSteeringMessage = {
@@ -588,6 +590,7 @@ export type NewSteeringMessage = {
   created_by_kind: string;
   created_by_user_id: string | null;
   created_by_agent_id: string | null;
+  attachments: string | null;
 };
 
 /** The columns `createTaskExtended` writes on a new `agent_tasks` row (flags as JS booleans). */
@@ -1504,6 +1507,11 @@ export interface TasksRepository {
     oldestTaskId: string | null;
     oldestClaimableAt: string | null;
   } | null>;
+  /**
+   * Tasks that `failed` with `finishedAt` at or after `since`. Cascade
+   * failures are left out, so one root failure counts once.
+   */
+  countFailedSince(since: string): Promise<number>;
   /** True when a user exists or any task other than boot triage and the heartbeat checklist. */
   hasUserOrNonSystemTask(): Promise<boolean>;
   /**
@@ -3113,9 +3121,10 @@ export abstract class BaseTasksRepository implements TasksRepository {
   insertSteeringMessage(r: NewSteeringMessage): Promise<TaskSteeringMessageRow | null> {
     return this.db.get<TaskSteeringMessageRow>(sql`
       INSERT INTO task_steering_messages
-        (id, task_id, body, mode, source, created_by_kind, created_by_user_id, created_by_agent_id)
+        (id, task_id, body, mode, source, created_by_kind, created_by_user_id, created_by_agent_id,
+          attachments)
       VALUES (${r.id}, ${r.task_id}, ${r.body}, ${r.mode}, ${r.source}, ${r.created_by_kind},
-        ${r.created_by_user_id}, ${r.created_by_agent_id})
+        ${r.created_by_user_id}, ${r.created_by_agent_id}, ${r.attachments})
       RETURNING *`);
   }
 
@@ -3727,6 +3736,14 @@ export abstract class BaseTasksRepository implements TasksRepository {
     oldestTaskId: string | null;
     oldestClaimableAt: string | null;
   } | null>;
+
+  async countFailedSince(since: string): Promise<number> {
+    const row = await this.db.get<{ n: number }>(sql`
+      SELECT count(*) AS n FROM agent_tasks
+       WHERE status = 'failed' AND "finishedAt" >= ${since}
+         AND COALESCE("statusKind", '') != 'cascade'`);
+    return Number(row?.n ?? 0);
+  }
 
   async hasUserOrNonSystemTask(): Promise<boolean> {
     const row = await this.db.get<{ existing: number }>(sql`

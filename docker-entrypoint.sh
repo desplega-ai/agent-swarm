@@ -400,13 +400,16 @@ if [ -n "$AGENT_ID" ]; then
             if [ -n "$SKIPPED_NONIDENT" ]; then
                 echo "[entrypoint] debug: skipping non-identifier config keys (not valid POSIX shell variable names, still available via headerConfigKeys): $(echo "$SKIPPED_NONIDENT" | tr '\n' ' ')"
             fi
-            swarm_config_env_lines /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
-            if [ -f /tmp/swarm_config.env ]; then
+            # A fresh mktemp file, not a fixed /tmp name: a worker-owned file of that
+            # name can survive a restart, and root must not source it.
+            SWARM_CONFIG_ENV=$(mktemp) || SWARM_CONFIG_ENV=""
+            if [ -n "$SWARM_CONFIG_ENV" ] && swarm_config_env_lines /tmp/swarm_config.json > "$SWARM_CONFIG_ENV" 2>/dev/null; then
                 set -a
-                . /tmp/swarm_config.env
+                . "$SWARM_CONFIG_ENV"
                 set +a
-                rm -f /tmp/swarm_config.env
             fi
+            [ -z "$SWARM_CONFIG_ENV" ] || rm -f "$SWARM_CONFIG_ENV"
+            unset SWARM_CONFIG_ENV
             WITHHELD_COUNT=0
             for withheld_key in $(swarm_config_withheld_keys /tmp/swarm_config.json 2>/dev/null || true); do
                 unset "$withheld_key"
@@ -790,10 +793,11 @@ fi
 echo "==============================="
 
 
-# Find existing startup script in /workspace (start-up.sh, .bash, .js, .ts, .bun, or bare)
+# Find existing startup script in /workspace (start-up.sh, .bash, .js, .ts, .bun, or bare).
+# A symlink counts too, even a dangling one, so the root-side compose below can skip it.
 find_startup_script() {
     for pattern in start-up.sh start-up.bash start-up.js start-up.ts start-up.bun start-up; do
-        if [ -f "/workspace/${pattern}" ]; then
+        if [ -f "/workspace/${pattern}" ] || [ -L "/workspace/${pattern}" ]; then
             echo "/workspace/${pattern}"
             return 0
         fi
@@ -839,7 +843,10 @@ if [ -n "$AGENT_ID" ]; then
         if [ -n "$GLOBAL_SCRIPT" ] || [ -n "$AGENT_SCRIPT" ]; then
             EXISTING_STARTUP=$(find_startup_script) || true
 
-            if [ -n "$EXISTING_STARTUP" ]; then
+            if [ -n "$EXISTING_STARTUP" ] && [ -L "$EXISTING_STARTUP" ]; then
+                # /workspace is worker-owned, so root never reads or writes through a link there.
+                echo "Warning: not updating ${EXISTING_STARTUP}: it is a symlink"
+            elif [ -n "$EXISTING_STARTUP" ]; then
                 # Prepend to existing file (preserve operator content)
                 echo "Prepending agent setup script to existing ${EXISTING_STARTUP}..."
                 TEMP_FILE=$(mktemp)
@@ -945,20 +952,24 @@ elif [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
         "${MCP_BASE_URL}/api/agents/${AGENT_ID}/skills" 2>/dev/null) || true
 
     if [ -n "$SKILLS_RESPONSE" ]; then
-        # Write simple skills to ~/.claude/skills/ and ~/.pi/agent/skills/
+        # Write simple skills to ~/.claude/skills/, ~/.pi/agent/skills/ and ~/.codex/skills/
+        SKILL_HOME=$(realpath -m -- "$HOME")
         echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == false) | select(.content != "") | @base64' 2>/dev/null | while read -r skill_b64; do
             SKILL_NAME=$(echo "$skill_b64" | base64 -d | jq -r '.name')
             SKILL_CONTENT=$(echo "$skill_b64" | base64 -d | jq -r '.content')
 
             if [ -n "$SKILL_NAME" ] && [ "$SKILL_NAME" != "null" ]; then
-                mkdir -p "$HOME/.claude/skills/$SKILL_NAME"
-                echo "$SKILL_CONTENT" > "$HOME/.claude/skills/$SKILL_NAME/SKILL.md"
-
-                mkdir -p "$HOME/.pi/agent/skills/$SKILL_NAME"
-                cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.pi/agent/skills/$SKILL_NAME/SKILL.md"
-
-                mkdir -p "$HOME/.codex/skills/$SKILL_NAME"
-                cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.codex/skills/$SKILL_NAME/SKILL.md"
+                # Same rule as the runner-side writer (src/utils/skill-fs-writer.ts).
+                SKILL_NAME=$(printf '%s' "$SKILL_NAME" | tr -c 'a-zA-Z0-9_-' '_')
+                for skill_dir in "$SKILL_HOME/.claude/skills/$SKILL_NAME" "$SKILL_HOME/.pi/agent/skills/$SKILL_NAME" "$SKILL_HOME/.codex/skills/$SKILL_NAME"; do
+                    # The skill trees are worker-owned, so skip a path that resolves through a symlink.
+                    if [ "$(realpath -m -- "$skill_dir/SKILL.md")" != "$skill_dir/SKILL.md" ]; then
+                        echo "[entrypoint] Warning: not syncing ${skill_dir}/SKILL.md: it resolves through a symlink"
+                        continue
+                    fi
+                    mkdir -p "$skill_dir"
+                    echo "$SKILL_CONTENT" > "$skill_dir/SKILL.md"
+                done
                 echo "[entrypoint] Synced skill: $SKILL_NAME"
             fi
         done
@@ -1005,11 +1016,11 @@ chown -R worker:worker /home/worker/.local 2>/dev/null || true
 # documentation of the skill-fs-writer intent.
 chown -R worker:worker /home/worker/.claude 2>/dev/null || true
 
-# Optional: initialize a local PostgreSQL 16 cluster before dropping privileges.
+# Optional: initialize a local PostgreSQL 18 cluster before dropping privileges.
 # command -v guard: postgres/redis servers only ship in the full image — on the
 # slim image these flags log a warning instead of killing the boot (set -e).
 if [ "${SWARM_DEP_POSTGRES_ENABLED:-false}" = "true" ]; then
-  if [ -x /usr/lib/postgresql/16/bin/initdb ]; then
+  if [ -x /usr/lib/postgresql/18/bin/initdb ]; then
     /usr/local/bin/init-local-postgres.sh
   else
     echo "WARNING: SWARM_DEP_POSTGRES_ENABLED=true but PostgreSQL is not installed (slim image?) - skipping"

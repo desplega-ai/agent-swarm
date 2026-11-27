@@ -311,8 +311,9 @@
       "scenarios": ["health", "auth"]
     },
     "app-engine": {
-      "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete",
+      "description": "app definition write, rows, queries, actions, swarm-tasks sync, versions, lossy migration, rollback, delete, bundle export and import",
       "scenarios": [
+        "apps-export-import",
         "knowledge-apps",
         "knowledge-apps-action-runs",
         "knowledge-apps-app-context",
@@ -518,6 +519,10 @@
       "description": "The storage StatementObserver exports agentswarm.db.statement.duration with engine, operation and table labels, a statement span under its request span with no parameter values (OTEL_TRACE_DB_STATEMENTS), and the Postgres transaction outcome counter",
       "scenarios": ["platform-otel-db-statements"]
     },
+    "otel-detached-timers": {
+      "description": "Timers and background work armed while serving a request run outside that request's trace, so the request span ends on time and background spans start their own root trace",
+      "scenarios": ["platform-otel-detached-timers"]
+    },
     "primitive-boards": {
       "description": "board-create/get/list/add/update/remove round trip, refusals (unknown id, invalid elements, agent-fs 409s, stock save without swarm.id) and ctx.boards in both executors over an agent-fs stub",
       "scenarios": ["knowledge-boards"]
@@ -617,7 +622,7 @@
       ]
     },
     "rbac-integration-role": {
-      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events and durable script runs, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
+      "description": "A scoped user token (requester) is refused on workflow trigger, workflow events, durable script runs and Slack-thread-bound task creation, and admitted with the obs-lite-integration role: a named global script runs as its owning agent, idempotency keys are scoped by caller, and a scoped user cancels only its own runs. The operator key and agents are unchanged.",
       "scenarios": ["rbac-integration-role"]
     },
     "script-sandbox-identity": {
@@ -629,8 +634,12 @@
       "scenarios": ["script-saved-lifecycle"]
     },
     "script-sdk-calls": {
-      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API.",
-      "scenarios": ["script-sdk-calls", "script-memory-rate"]
+      "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API. Failed calls throw a typed SwarmToolError, and an unknown ctx.swarm method names the closest exposed ones.",
+      "scenarios": ["script-sdk-calls", "script-memory-rate", "script-tool-errors"]
+    },
+    "script-tool-idempotency": {
+      "description": "An Idempotency-Key on the scripts MCP bridge runs a write once and answers repeats from the first result; read-only tools, refusals and unkeyed calls run every time, and keys are scoped to the caller. One-off runs dedupe with an explicit per-call key, or with a run-level idempotencyKey on the script-run tool or API that keys every call, nested script_run included. A durable run re-executed after an API restart repeats none of its ctx.swarm writes.",
+      "scenarios": ["script-tool-idempotency"]
     },
     "session-sharing": {
       "description": "Owner, reader, writer and everyone access on a session, triage and moves",
@@ -913,6 +922,10 @@
         "cli-api",
         "cli-controller"
       ]
+    },
+    "ui-dev-tooling": {
+      "description": "`bun run ui:dev` and `agent-swarm ui-dev` against a running swarm as a black box: ready line, same-origin proxy, injected connection, slug lookup, usage errors and teardown",
+      "scenarios": ["ui-dev-remote"]
     }
   }
 }

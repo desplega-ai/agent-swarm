@@ -24,7 +24,9 @@ export interface SpanOptions {
   kind?: SwarmSpanKind;
 }
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { PostgresStats } from "@desplega/storage";
+import type { SwarmStateStats } from "./be/swarm-state-stats";
 // eslint-disable-next-line import/no-duplicates -- type-only import, no side-effects
 import type { SessionCostMetric } from "./otel-impl";
 export type { SessionCostMetric };
@@ -95,6 +97,7 @@ let realWithRemoteContext:
   | (<T>(carrier: Record<string, unknown>, fn: () => Promise<T> | T) => Promise<T>)
   | undefined;
 let realWithSpanContext: (<T>(span: SwarmSpan, fn: () => T) => T) | undefined;
+let realRunDetached: (<T>(fn: () => T) => T) | undefined;
 let realInjectTraceContext:
   | ((headers: Record<string, string>) => Record<string, string>)
   | undefined;
@@ -110,6 +113,7 @@ let realRecordDbTransaction: ((m: DbTransactionMetric) => void) | undefined;
 let realStartPostgresStatsMetrics:
   | ((read: () => Promise<PostgresStats | null>) => void)
   | undefined;
+let realStartSwarmStateMetrics: ((read: () => Promise<SwarmStateStats>) => void) | undefined;
 
 export function isOtelEnabled(): boolean {
   return otelConfigured();
@@ -143,6 +147,15 @@ export function isPgMetricsEnabled(): boolean {
   return !(v === "0" || v === "false" || v === "no" || v === "off");
 }
 
+/**
+ * The API's swarm state gauges (failed tasks, approvals, queue). On by default:
+ * only `OTEL_SWARM_METRICS` set to false, 0, no or off turns them off.
+ */
+export function isSwarmMetricsEnabled(): boolean {
+  const v = (process.env.OTEL_SWARM_METRICS ?? "").trim().toLowerCase();
+  return !(v === "0" || v === "false" || v === "no" || v === "off");
+}
+
 export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): Promise<void> {
   if (!otelConfigured() || initialized) return;
   initialized = true;
@@ -156,6 +169,7 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realStartSpan = impl.startSpan;
     realWithRemoteContext = impl.withRemoteContext;
     realWithSpanContext = impl.withSpanContext;
+    realRunDetached = impl.runDetached;
     realInjectTraceContext = impl.injectTraceContext;
     realShutdown = impl.shutdown;
     realRecordSessionCost = impl.recordSessionCost;
@@ -165,6 +179,7 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realRecordDbStatement = impl.recordDbStatement;
     realRecordDbTransaction = impl.recordDbTransaction;
     realStartPostgresStatsMetrics = impl.startPostgresStatsMetrics;
+    realStartSwarmStateMetrics = impl.startSwarmStateMetrics;
     console.log(`[OTel] enabled for ${impl.resolveServiceName(serviceRole)} (${serviceRole})`);
   } catch (error) {
     console.warn(`[OTel] disabled after initialization failure: ${error}`);
@@ -204,6 +219,20 @@ export async function withRemoteContext<T>(
     return fn();
   }
   return realWithRemoteContext(carrier, fn);
+}
+
+// Taken at module load, where no request, span or DB transaction is active.
+const runContextFree = AsyncLocalStorage.snapshot();
+
+/**
+ * Run `fn` outside the caller's async context. A timer or interval armed inside
+ * `fn` fires with no request span (its work starts a new root trace) and no open
+ * DbClient transaction. Without it, a background loop armed from a request
+ * handler keeps parenting its spans to that request's trace for as long as the
+ * process lives. Wrap the arming call: `runDetached(() => setTimeout(...))`.
+ */
+export function runDetached<T>(fn: () => T): T {
+  return runContextFree(() => (realRunDetached ? realRunDetached(fn) : fn()));
 }
 
 export function injectTraceContext(headers: Record<string, string>): Record<string, string> {
@@ -262,12 +291,19 @@ export function startPostgresStatsMetrics(read: () => Promise<PostgresStats | nu
   realStartPostgresStatsMetrics(read);
 }
 
+/** Register the swarm state gauges over `read` (called once per metric export). No-op without OTLP. */
+export function startSwarmStateMetrics(read: () => Promise<SwarmStateStats>): void {
+  if (!realStartSwarmStateMetrics || !otelConfigured()) return;
+  realStartSwarmStateMetrics(read);
+}
+
 export function _resetOtelForTests() {
   initialized = false;
   realWithSpan = undefined;
   realStartSpan = undefined;
   realWithRemoteContext = undefined;
   realWithSpanContext = undefined;
+  realRunDetached = undefined;
   realInjectTraceContext = undefined;
   realShutdown = undefined;
   realRecordSessionCost = undefined;
@@ -277,4 +313,5 @@ export function _resetOtelForTests() {
   realRecordDbStatement = undefined;
   realRecordDbTransaction = undefined;
   realStartPostgresStatsMetrics = undefined;
+  realStartSwarmStateMetrics = undefined;
 }

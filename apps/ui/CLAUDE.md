@@ -103,6 +103,8 @@ Use `<Streamdown>{text}</Streamdown>` from `streamdown` for all markdown renderi
 
 A PR that changes what the dashboard shows carries screenshots of the change running locally (static/layout changes included), as GitHub user attachments in the PR body's `## Before / after` section. Add a recording only for a new or changed interaction or flow. A new configuration-catalog entry that reuses an existing control shows its key and default as a table, not a screenshot. When nothing visible changes (a type-only refactor, a test fix), write `No visible change: <reason>` there. Capture with the `agent-browser` skill (`qa-use` only when asked). Recipe: [LOCAL_TESTING.md § When you need to verify a UI change](../../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port conflicts: [LOCAL_TESTING.md § Dashboard UI](../../LOCAL_TESTING.md#dashboard-ui).
 
+To view, capture or record a swarm app or page, run `bun run ui:dev --app <id>` or `--page <id>` from the repo root: a pre-connected dashboard URL, no setup. [runbooks/app-and-page-dev.md](../../runbooks/app-and-page-dev.md).
+
 ## UI E2E
 
 `bun run e2e:ui` (repo root) runs the Playwright suite in `packages/ui-e2e` against a seeded API per worker. Package layout, fixtures, and the seed manifest: [../../packages/ui-e2e/README.md](../../packages/ui-e2e/README.md). Selectors use roles, accessible names, and link or row text (`getByRole`, `getByText`). Tasks, Pages, and Settings carry no `data-testid`; add one only on purpose, never as a shortcut. When a change moves a sidebar route or renames a control, update `packages/ui-e2e/specs/routes.ts` or the flow spec in the same PR.

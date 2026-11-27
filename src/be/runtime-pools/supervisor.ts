@@ -1,3 +1,4 @@
+import { runDetached } from "../../otel";
 import { canProvisionKind, type RuntimeHandle } from "../../runtime-providers";
 import {
   type ControllerCommands,
@@ -904,10 +905,13 @@ const onTaskCreated = (data: unknown): void => {
           : null;
     if (!agentId || !(await getPoolForAgent(agentId)) || !timer) return;
     if (kickTimer) clearTimeout(kickTimer);
-    kickTimer = setTimeout(() => {
-      kickTimer = null;
-      void reconcileOnce().catch(reportSupervisorError);
-    }, 250);
+    // Detached: task events fire inside request handlers.
+    kickTimer = runDetached(() =>
+      setTimeout(() => {
+        kickTimer = null;
+        void reconcileOnce().catch(reportSupervisorError);
+      }, 250),
+    );
     kickTimer.unref?.();
   })().catch(reportSupervisorError);
 };

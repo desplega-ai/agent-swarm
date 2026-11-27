@@ -232,6 +232,8 @@ export interface AgentsRepository {
   /** COALESCE profile update; see {@link AgentProfileUpdate}. */
   updateAgentProfile(id: string, update: AgentProfileUpdate): Promise<AgentRow | null>;
   touchAgentActivity(id: string): Promise<void>;
+  /** Sets only `lastUpdatedAt` to now; returns it, or null for an unknown agent. */
+  touchAgentUpdatedAt(id: string): Promise<string | null>;
   /** Returns the new count, or null for an unknown agent. */
   incrementEmptyPollCount(id: string): Promise<number | null>;
   resetEmptyPollCount(id: string): Promise<void>;
@@ -356,6 +358,8 @@ export interface AgentsRepository {
   // ---- capacity and activity (reads of agent_tasks keyed by agent) ----
   /** Tasks in one of the agent's slots: its in-progress tasks and the offers it is reviewing. */
   countActiveTasks(agentId: string): Promise<number>;
+  /** `countActiveTasks` for many agents in one statement. Agents with no active task are absent. */
+  countActiveTasksByAgent(agentIds: readonly string[]): Promise<Map<string, number>>;
   /**
    * Locks the agent row for the rest of the transaction (Postgres `FOR UPDATE`).
    * Serializes the transactions that hold it for one agent. True when the row exists.
@@ -479,6 +483,20 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
     return Number(row?.count ?? 0);
   }
 
+  async countActiveTasksByAgent(agentIds: readonly string[]): Promise<Map<string, number>> {
+    if (agentIds.length === 0) return new Map();
+    // A task is either in_progress or reviewing, never both, so UNION ALL counts no row twice.
+    const rows = await this.db.query<{ agent_id: string; count: number | string }>(sql`
+      SELECT agent_id, COUNT(*) AS count FROM (
+        SELECT "agentId" AS agent_id FROM agent_tasks
+         WHERE status = 'in_progress' AND "agentId" IN (${sqlList(agentIds)})
+        UNION ALL
+        SELECT "offeredTo" AS agent_id FROM agent_tasks
+         WHERE status = 'reviewing' AND "offeredTo" IN (${sqlList(agentIds)})
+      ) slots GROUP BY agent_id`);
+    return new Map(rows.map((row) => [row.agent_id, Number(row.count)]));
+  }
+
   /** The day of a timestamp column differs per engine (text on SQLite). */
   abstract dailyTaskCounts(
     agentId: string,
@@ -557,6 +575,13 @@ export abstract class BaseAgentsRepository implements AgentsRepository {
 
   async touchAgentActivity(id: string): Promise<void> {
     await this.db.run(sql`UPDATE agents SET "lastActivityAt" = ${nowIso} WHERE id = ${id}`);
+  }
+
+  async touchAgentUpdatedAt(id: string): Promise<string | null> {
+    const row = await this.db.get<{ lastUpdatedAt: string }>(
+      sql`UPDATE agents SET "lastUpdatedAt" = ${nowIso} WHERE id = ${id} RETURNING "lastUpdatedAt"`,
+    );
+    return row?.lastUpdatedAt ?? null;
   }
 
   async incrementEmptyPollCount(id: string): Promise<number | null> {

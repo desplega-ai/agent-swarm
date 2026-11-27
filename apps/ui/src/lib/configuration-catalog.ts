@@ -1380,6 +1380,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_CARD_MERGE_WINDOW_SEC",
+        label: "Follow-up card merge window",
+        description:
+          "Seconds after a Lead card posts during which a Lead follow-up edits that card instead of posting a new reply. Slack sends no notification for an edit, so a slower follow-up posts a new reply and the earlier card is deleted.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "120",
+        placeholder: "120",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "SLACK_CONCLUSION_TIMEOUT_MIN",
         label: "Conclusion timeout",
         description:
@@ -2154,6 +2165,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Postgres server metrics",
         description:
           "On the Postgres engine, export the server's pg_stat_* gauges (connections, database size, commits, cache hit ratio, deadlocks, oldest query, top tables) once per metric export. Requires the OTLP endpoint. No effect on SQLite.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/observability-opentelemetry`,
+      },
+      {
+        key: "OTEL_SWARM_METRICS",
+        label: "Swarm state metrics",
+        description:
+          "Export swarm state gauges (failed tasks in the last hour, pending and overdue approvals, claimable queue size and age) once per metric export, on any engine. Requires the OTLP endpoint.",
         kind: "boolean",
         defaultValue: "true",
         restartRequired: true,

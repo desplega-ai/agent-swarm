@@ -370,20 +370,13 @@ export const platformChatSdk: Scenario = {
               },
             },
           ),
-          [200],
-          "inject an invalid stored default through KV",
+          [403],
+          "generic KV writes cannot store an invalid default topic",
         );
-        const requestCount: number = calls.length;
-        expectToolError(
-          await callTool(lead, "chat-post", {
-            adapter: "telegram",
-            channelId: threadId,
-            text: ctx.nonce,
-          }),
-          "invalid stored default topic",
-          "topic",
+        expect(
+          JSON.parse(mappingRow()?.value ?? "null").defaultThreadId === defaultThreadId,
+          "A refused KV write preserves the saved default",
         );
-        expect(calls.length === requestCount, "An invalid saved default makes no platform request");
       }
       expectToolOk(
         await callTool(lead, "register-chat-channel", {

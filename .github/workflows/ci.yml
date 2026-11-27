@@ -389,7 +389,7 @@ jobs:
     # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: postgres
         ports:

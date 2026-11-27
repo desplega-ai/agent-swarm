@@ -4,15 +4,25 @@ import { Redacted } from "./redacted";
 import { readScriptSdkJsonResponse } from "./response-limit";
 import {
   assertNamespaces,
+  isRestRoutedSdkMethod,
   isSdkToolAllowed,
   mcpToolNameForSdkMethod,
   SDK_NAMESPACES,
   type SdkNamespaceRegistry,
   sdkMethodForNamespace,
+  unavailableSdkToolError,
   unwrapToolPayload,
 } from "./sdk-allowlist";
 import { backoffMs, retryAfterMs } from "./stdlib/retry";
 import type { SwarmConfig } from "./swarm-config";
+import { SwarmToolError, swarmToolHttpError, toSwarmToolError } from "./swarm-tool-error";
+
+export {
+  SWARM_TOOL_ERROR_CODES,
+  SwarmToolError,
+  type SwarmToolErrorCode,
+  type SwarmToolErrorInit,
+} from "./swarm-tool-error";
 
 export const DurableObject = new Function(`${DURABLE_OBJECT_BASE_JS}; return DurableObject;`)();
 
@@ -74,8 +84,12 @@ function kvPath(args: Record<string, unknown>, keyRequired = true): string {
 /**
  * Maps SDK method names to specific REST endpoints where they exist.
  * Returns null for tools that should fall through to the generic MCP bridge.
+ * `REST_ROUTED_SDK_METHODS` lists the cases: a case missing from it, or a name
+ * in it with no case, fails to compile.
  */
 function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
+  // ── fallthrough: proxy via generic MCP bridge ──
+  if (!isRestRoutedSdkMethod(name)) return null;
   const body = argsRecord(args);
   switch (name) {
     // ── memory ──
@@ -481,9 +495,10 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       return { method: "DELETE", path: `/api/mcp-servers/${encodeURIComponent(id)}` };
     }
 
-    // ── fallthrough: proxy via generic MCP bridge ──
-    default:
-      return null;
+    default: {
+      const unrouted: never = name;
+      throw new Error(`swarm-sdk: ${String(unrouted)} has no REST route`);
+    }
   }
 }
 
@@ -636,14 +651,83 @@ async function bridgeFetch(
   }
 }
 
+type BridgeCallOptions = {
+  throwOnError?: boolean;
+  preserveData?: boolean;
+  signal?: AbortSignal;
+  /** Sent as the MCP bridge's `Idempotency-Key`; see `SwarmCallOptions`. */
+  idempotencyKey?: string;
+  /**
+   * The key a keyed run derived for this call. Unlike `idempotencyKey` it never
+   * throws: a REST-routed method has no dedupe point and simply sends none.
+   */
+  runIdempotencyKey?: string;
+};
+
+/** Per-call options: the second argument of `ctx.swarm.<tool>(args, options)`. */
+export type SwarmCallOptions = {
+  /**
+   * Run this write at most once per key: a later call of the same tool with the
+   * same key returns the first call's result. Scoped to the calling agent.
+   */
+  idempotencyKey?: string;
+};
+
+/** Mirrors the server's `IDEMPOTENCY_KEY_PATTERN` (src/http/idempotency-key.ts). */
+const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7E]{1,255}$/;
+
+/** A bridge call whose every failure reaches the script as a SwarmToolError. */
 async function callBridgeApi(
   name: string,
   args: unknown,
   config: SwarmConfig,
-  options: { throwOnError?: boolean; preserveData?: boolean; signal?: AbortSignal } = {},
+  options: BridgeCallOptions = {},
+): Promise<unknown> {
+  let request: BridgeRequest | null;
+  try {
+    request = bridgeRequestFor(name, args);
+  } catch (error) {
+    // bridgeRequestFor only throws on a missing or malformed argument.
+    throw new SwarmToolError(error instanceof Error ? error.message : String(error), {
+      code: "invalid_args",
+      tool: name,
+    });
+  }
+  const { idempotencyKey } = options;
+  if (idempotencyKey !== undefined) {
+    if (typeof idempotencyKey !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+      throw new SwarmToolError(
+        `swarm-sdk: ${name} idempotencyKey must be 1-255 visible ASCII characters`,
+        { code: "invalid_args", tool: name },
+      );
+    }
+    // Only the MCP bridge dedupes by key. A REST-routed method would ignore it silently.
+    if (request) {
+      throw new SwarmToolError(
+        `swarm-sdk: ${name} does not take an idempotencyKey option (it calls ${request.method} ${request.path}, not the tool bridge)`,
+        { code: "invalid_args", tool: name },
+      );
+    }
+  }
+  const effectiveKey = idempotencyKey ?? (request ? undefined : options.runIdempotencyKey);
+  try {
+    return await sendBridgeRequest(name, args, request, config, {
+      ...options,
+      idempotencyKey: effectiveKey,
+    });
+  } catch (error) {
+    throw toSwarmToolError(name, error);
+  }
+}
+
+async function sendBridgeRequest(
+  name: string,
+  args: unknown,
+  request: BridgeRequest | null,
+  config: SwarmConfig,
+  options: BridgeCallOptions,
 ): Promise<unknown> {
   const baseUrl = Redacted.value(config.sdkBaseUrl).replace(/\/$/, "");
-  const request = bridgeRequestFor(name, args);
 
   // Tools without a specific REST route go through the generic MCP bridge
   if (!request) {
@@ -652,10 +736,14 @@ async function callBridgeApi(
       `${baseUrl}/api/mcp-bridge`,
       {
         method: "POST",
-        headers: headers(config),
+        headers: {
+          ...headers(config),
+          ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
+        },
         body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
       },
-      bridgeSafety(isReadOnlyBridgeCall(name, "POST"), false),
+      // A keyed write is safe to repeat: the bridge answers the repeat from its record.
+      bridgeSafety(isReadOnlyBridgeCall(name, "POST"), options.idempotencyKey !== undefined),
       options.signal,
     );
     const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
@@ -664,7 +752,11 @@ async function callBridgeApi(
         data && typeof data === "object" && "error" in data
           ? String((data as { error: unknown }).error)
           : `api failed with ${res.status}`;
-      throw new Error(`swarm-sdk: ${name} failed with ${res.status}: ${message}`);
+      throw swarmToolHttpError(
+        name,
+        res.status,
+        `swarm-sdk: ${name} failed with ${res.status}: ${message}`,
+      );
     }
     // The bridge answers 200 with the tool's structuredContent, whose registrar
     // envelope always carries `success: ok` (data cannot override it). A tool
@@ -702,30 +794,74 @@ async function callBridgeApi(
       data && typeof data === "object" && "error" in data
         ? String((data as { error: unknown }).error)
         : `api failed with ${res.status}`;
-    throw new Error(`swarm-sdk: ${name} failed with ${res.status}: ${message}`);
+    throw swarmToolHttpError(
+      name,
+      res.status,
+      `swarm-sdk: ${name} failed with ${res.status}: ${message}`,
+    );
   }
   const result = { success: res.ok, status: res.status, data };
   return options.preserveData ? result : scrubObject(result);
 }
 
+/** REST-routed methods whose route takes an `idempotencyKey` body field of its own. */
+const RUN_KEYED_BODY_METHODS = new Set(["script_run", "workflow_trigger"]);
+
+const runCallOrdinals = new WeakMap<SwarmConfig, Map<string, number>>();
+
+/**
+ * The derived key of this call in a keyed run: the run's prefix, the method
+ * and the call's ordinal among this run's calls to that method. Numbered in
+ * call order, synchronously, so a re-run makes the same calls under the same
+ * keys. Every call takes an ordinal, an explicitly keyed one too, as in a
+ * durable run's guest ctx.
+ */
+function nextRunToolCallKey(config: SwarmConfig, method: string): string | undefined {
+  const prefix = config.toolCallKeyPrefix;
+  if (!prefix) return undefined;
+  let ordinals = runCallOrdinals.get(config);
+  if (!ordinals) {
+    ordinals = new Map();
+    runCallOrdinals.set(config, ordinals);
+  }
+  const ordinal = (ordinals.get(method) ?? 0) + 1;
+  ordinals.set(method, ordinal);
+  return `${prefix}:${method}:${ordinal}`;
+}
+
 async function callTool(
   name: string,
-  args: unknown,
+  rawArgs: unknown,
   config: SwarmConfig,
   signal: AbortSignal | undefined,
+  callOptions?: SwarmCallOptions,
 ): Promise<unknown> {
-  if (!isSdkToolAllowed(name)) {
-    throw new Error(
-      `Tool '${name}' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent`,
-    );
-  }
+  if (!isSdkToolAllowed(name)) throw unavailableSdkToolError(name);
+  const keyed = callOptions?.idempotencyKey !== undefined;
+  const runKey = nextRunToolCallKey(config, name);
+  const idempotencyKey = {
+    ...(keyed ? { idempotencyKey: callOptions?.idempotencyKey } : {}),
+    ...(runKey ? { runIdempotencyKey: runKey } : {}),
+  };
+  // These REST routes dedupe on their own body key: a keyed run hands its
+  // derived key down, so a nested script_run keys its own calls in turn.
+  const args =
+    runKey &&
+    !keyed &&
+    RUN_KEYED_BODY_METHODS.has(name) &&
+    rawArgs !== null &&
+    typeof rawArgs === "object" &&
+    !Array.isArray(rawArgs) &&
+    (rawArgs as Record<string, unknown>).idempotencyKey === undefined
+      ? { ...(rawArgs as Record<string, unknown>), idempotencyKey: runKey }
+      : rawArgs;
 
   if (name === "script_search" || name === "script_run") {
-    return callBridgeApi(name, args, config, { throwOnError: true, signal });
+    return callBridgeApi(name, args, config, { throwOnError: true, signal, ...idempotencyKey });
   }
 
   if (name === "kv_getOrNull") {
-    const result = (await callBridgeApi(name, args, config, { signal })) as {
+    const result = (await callBridgeApi(name, args, config, { signal, ...idempotencyKey })) as {
       success: boolean;
       status: number;
       data: unknown;
@@ -736,19 +872,26 @@ async function callTool(
         result.data && typeof result.data === "object" && "error" in result.data
           ? String((result.data as { error: unknown }).error)
           : "api failed";
-      throw new Error(`swarm-sdk: ${name} failed with ${result.status}: ${message}`);
+      throw swarmToolHttpError(
+        name,
+        result.status,
+        `swarm-sdk: ${name} failed with ${result.status}: ${message}`,
+      );
     }
     return result.data;
   }
 
-  return callBridgeApi(name, args, config, { signal });
+  return callBridgeApi(name, args, config, { signal, ...idempotencyKey });
 }
 
 type RoomMethods = Record<
   "get" | "change" | "reset" | "decode",
   (args?: unknown) => Promise<unknown>
 >;
-type RuntimeSwarmSdk = Record<string, (args?: unknown) => Promise<unknown>> & { room: RoomMethods };
+type RuntimeSwarmSdk = Record<
+  string,
+  (args?: unknown, options?: SwarmCallOptions) => Promise<unknown>
+> & { room: RoomMethods };
 
 /** `signal`: the run's abort signal; it stops bridge retries when the run ends. */
 export function createSwarmSdk(
@@ -775,7 +918,8 @@ export function createSwarmSdk(
     get(target, prop) {
       if (typeof prop !== "string") return undefined;
       if (prop in target) return target[prop];
-      return (args?: unknown) => callTool(prop, args, config, signal);
+      return (args?: unknown, options?: SwarmCallOptions) =>
+        callTool(prop, args, config, signal, options);
     },
   }) as RuntimeSwarmSdk;
 }
@@ -795,7 +939,8 @@ export function createNamespaceClients(
   assertNamespaces(registry);
   const call = (ns: string, method: string) => async (args?: unknown) => {
     const label = `ctx.${ns}.${method}`;
-    const result = (await callTool(sdkMethodForNamespace(ns, method), args, config, signal)) as {
+    const tool = sdkMethodForNamespace(ns, method);
+    const result = (await callTool(tool, args, config, signal)) as {
       success: boolean;
       status: number;
       data: unknown;
@@ -805,9 +950,13 @@ export function createNamespaceClients(
     if (!result.success && data?.success !== false) {
       const reason =
         data && typeof data === "object" && "error" in data ? String(data.error) : "api failed";
-      throw new Error(`${label} failed with ${result.status}: ${reason}`);
+      throw swarmToolHttpError(
+        tool,
+        result.status,
+        `${label} failed with ${result.status}: ${reason}`,
+      );
     }
-    return unwrapToolPayload(label, result.data);
+    return unwrapToolPayload(label, result.data, tool);
   };
   return Object.freeze(
     Object.fromEntries(

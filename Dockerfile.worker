@@ -85,7 +85,9 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # clone repos, and run any of the four harnesses. Dev toolchain, postgres,
 # Playwright, glab etc. are worker-full-base additions.
 # Step 1: bootstrap curl/gnupg so we can add external apt repos
-# Step 2: add NodeSource + GitHub CLI repos, then install the slim set
+# Step 2: add NodeSource + GitHub CLI + PGDG repos, then install the slim set.
+# PGDG: Ubuntu 24.04 ships only PostgreSQL 16. The client is 18 here (pg_dump
+# refuses a newer server), and worker-full-base installs the 18 server from it.
 RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -93,6 +95,10 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+       -o /usr/share/keyrings/pgdg.asc \
+    && echo "deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update && apt-get install -y --no-install-recommends \
     wget lsb-release \
     git git-lfs \
@@ -100,7 +106,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     python3 python3-pip python3-venv \
     jq unzip zip tar gzip sqlite3 gosu tini \
     openssh-client \
-    postgresql-client \
+    postgresql-client-18 \
     nodejs=${NODE_VERSION} \
     gh \
     && test "$(node -v)" = "v22.23.5" \
@@ -237,7 +243,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.18.39
+ARG AGENT_FS_VERSION=0.18.40
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -483,9 +489,8 @@ RUN apt-get update && apt-get install -y \
     build-essential make cmake gcc g++ \
     python3-dev python3-setuptools python3-wheel \
     fuse3 libfuse2 \
-    postgresql-16 \
-    postgresql-16-pgvector \
-    postgresql-contrib-16 \
+    postgresql-18 \
+    postgresql-18-pgvector \
     redis-server redis-tools \
     && rm -rf /var/lib/apt/lists/*
 
@@ -579,9 +584,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795665646-gb77778
-ARG AMP_SHA512_AMD64=1bb66fbe74866efc19500ae0b1600b9ae24983a4519dfc7ff198476ed4b0cf9e62e2d438dde1488f21f469fd731c546949e22969c316e04a11b0bb56bf03f7c4
-ARG AMP_SHA512_ARM64=38ed0d3a7282b3df64df1e4bdd888fb2f867177cbdc8a8af2cbe0a64edf745dd196e1a4d7c41fcf5088a3be37f35fdd9e28efc21cbd2a9a9e72938b33225cc65
+ARG AMP_VERSION=0.0.1795752045-g36b26b
+ARG AMP_SHA512_AMD64=776e89de046ba66aa0351c6c887aab1b5d9443d3ed65a181b19e3d4715d8e6e91fa210ae10ae53709dffc062b4e0ae4181fbbfaec8be5f75d619fce82f089156
+ARG AMP_SHA512_ARM64=f80b0f9937cf12a8e776f6a25b1233acc4313a11ea87c2b32c907a687a3ba63cb88dfc175229b5492aeba3dbaa398386e97634c016f9525e7ea2052dbdd22d3b
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -639,8 +644,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.28.6), so none run as root.
-ARG QWEN_CODE_VERSION=0.28.6
+# scripts are not needed for ACP (verified on 0.28.7), so none run as root.
+ARG QWEN_CODE_VERSION=0.28.7
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \

@@ -31,7 +31,7 @@ jobs:
   measure:
     name: measure (shard ${{ matrix.shard }}/6)
     if: github.repository == 'desplega-ai/agent-swarm'
-    # The recovery scenario needs pg_dump and pg_restore 16 for the pg16 service.
+    # The recovery scenario needs pg_dump and pg_restore 18 for the pg18 service (a step below).
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -41,7 +41,7 @@ jobs:
       DESPLEGA_TELEMETRY_ENV: test
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -69,6 +69,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install the PostgreSQL 18 client
+        run: bash scripts/install-postgres-client.sh 18 >> "$GITHUB_PATH"
 
       # A failed scenario does not fail this step: the report lists it as not checked.
       - name: Run the band on SQLite and on Postgres

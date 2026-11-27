@@ -1478,6 +1478,7 @@ export function tasksContract(engine: ContractEngine): void {
         source: "ui",
         created_by_user_id: null,
         created_by_agent_id: null,
+        attachments: null,
       };
       const m1 = await repo.insertSteeringMessage({
         ...base,
@@ -1492,8 +1493,15 @@ export function tasksContract(engine: ContractEngine): void {
         created_by_kind: "agent",
         created_by_agent_id: "ag",
       });
-      await repo.insertSteeringMessage({ ...base, id: "m3", created_by_kind: "system" });
+      await repo.insertSteeringMessage({
+        ...base,
+        id: "m3",
+        created_by_kind: "system",
+        attachments: '[{"id":"a1"}]',
+      });
       expect((await repo.findSteeringMessage("m1"))?.sender_name).toBe("Ann");
+      expect((await repo.findSteeringMessage("m1"))?.attachments).toBeNull();
+      expect((await repo.findSteeringMessage("m3"))?.attachments).toBe('[{"id":"a1"}]');
       expect((await repo.findSteeringMessage("m2"))?.sender_name).toBe("ag");
       expect((await repo.findSteeringMessage("m3"))?.sender_name).toBeNull();
       expect(ids(await repo.listPendingSteeringForAgent("ag"))).toEqual(["m1", "m2", "m3"]);
@@ -1964,6 +1972,16 @@ export function tasksContract(engine: ContractEngine): void {
         oldestTaskId: "q2",
         oldestClaimableAt: "2026-11-21T10:30:00.000Z",
       });
+    });
+
+    test("countFailedSince skips cascade failures and older finishes", async () => {
+      expect(await repo.countFailedSince(T1)).toBe(0);
+      await seedTask(storage, { id: "f1", status: "failed", finishedAt: T1 });
+      await seedTask(storage, { id: "f2", status: "failed", statusKind: "agent", finishedAt: T1 });
+      await seedTask(storage, { id: "c", status: "failed", statusKind: "cascade", finishedAt: T1 });
+      await seedTask(storage, { id: "old", status: "failed", finishedAt: T0 });
+      await seedTask(storage, { id: "ok", status: "completed", finishedAt: T1 });
+      expect(await repo.countFailedSince(T1)).toBe(2);
     });
 
     test("install and tree aggregates", async () => {

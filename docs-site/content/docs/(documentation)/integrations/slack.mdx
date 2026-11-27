@@ -234,12 +234,12 @@ A continuation normally resolves its parent's waiting card in place, without pos
 
 Terminal task output is automatically delivered through the thread's outcome card. No additional relay message is created: extra messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. When `slack-reply` is used, the outcome card is compacted instead of duplicating that explicit reply. These tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains the originating agent and task without a Slack-message permalink.
 
-A Lead follow-up or resume result can merge into the previous outcome card instead of posting a new message. The previous card gets the new result under its own, separated by a blank line, and one footer links both tasks. An edit sends no notification, so the merge happens only when all of these are true:
+A Lead follow-up or resume result replaces the card of the ask it answers, so each ask leaves one message. That card (often an ack such as "on it, asked a specialist") belongs to the Lead task that dispatched the worker, or, for a resume, the task it resumes. With two asks running at once in one thread, each result finds its own ack. When that task has no card, the newest card in the thread stands in if it answers the same Slack ask and nothing came after it. The card is replaced only when all of these are true:
 
-- The follow-up completed. A failed or deferred follow-up posts its own card.
-- The previous card is from the same agent, changed at most 2 minutes ago, and is a plain completed result. A deferral, conclusion, delegated-child or Block Kit card is never a merge target.
-- No message, from a person or a bot, came after the previous card.
-- One card holds at most 5 results, and the merged text fits one card.
+- The follow-up completed or failed. A deferred or cancelled follow-up posts its own card.
+- The card is from the same agent and is a plain completed result. A deferral, conclusion, delegated-child or Block Kit card is never replaced.
+
+A quick completed follow-up edits the card in place: it finished within `SLACK_CARD_MERGE_WINDOW_SEC` seconds (default `120`) of the card's first post, nothing (from a person or a bot) came after the card, and the merged text fits one card. The card then shows the ask's own answer and the newest follow-up's answer, and one footer links both tasks. An edit sends no notification, so every other follow-up (slower, failed, or with a message after the card) posts its answer as a new reply, which notifies the requester, and then deletes the card. If Slack refuses the delete, the card is edited down to `✅ Done ↓` (or `❌ Failed ↓`) instead.
 
 Set `SLACK_RENDER_V2_QUIET_LEAD_THREADS=true` to keep Lead threads to the Lead's replies: a Lead deferral posts no ⏳ waiting card, and a successful Lead follow-up that ends without `slack-reply` posts no card; failed or cancelled follow-ups and resumed asks still post their cards. See [Quiet Lead threads](/docs/ui/configuration#quiet-lead-threads-in-slack).
 
@@ -247,7 +247,7 @@ Set `SLACK_REPLY_FOOTER_ENABLED=false` to hide the task details footer from outc
 
 ### Answer feedback
 
-`SLACK_FEEDBACK_BUTTONS` puts Slack's native 👍/👎 buttons under each final outcome card. It is on by default. Set it to `false`, or turn off **Slack answer feedback** in **Settings → Configuration**, to remove them. It applies without a restart. Deferral (⏳) cards and timed-out conclusions get no buttons. If Slack refuses the buttons, the card posts without them.
+`SLACK_FEEDBACK_BUTTONS` puts Slack's native 👍/👎 buttons under each final outcome card. It is on by default. Set it to `false`, or turn off **Slack answer feedback** in **Settings → Configuration**, to remove them. It applies without a restart. Deferral (⏳) cards, timed-out conclusions and acks whose delegated work is still running get no buttons: the result that replaces an ack carries them. If Slack refuses the buttons, the card posts without them.
 
 A click from an allowed person in the task's channel stores one row in the reserved KV namespace `slack-feedback`, at key `<taskId>/<slackUserId>`, so a person's later click on the same answer replaces their vote. The row holds `vote` (`up` or `down`), `votedAt`, and the task's `agentId`, `profile`, `model` and `modelTier`. A row also names the voter's Slack user ID and the task's channel and thread, so only a Lead agent can read the namespace: `GET /api/kv/_/slack-feedback` with the Lead's `X-Agent-ID` (add `?prefix=<taskId>/` for one task), or `kv_list` on that namespace as the Lead. Other agents and calls with no agent get 403, and no agent can write the namespace.
 

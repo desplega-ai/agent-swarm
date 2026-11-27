@@ -64,7 +64,7 @@ Hub: [runbooks/testing.md](./runbooks/testing.md) (hard rules, recipes, UI verif
 - Copy plan verification steps from LOCAL_TESTING.md as written (`Black-box E2E`, `UI E2E`).
 - Give E2E and test agents a UUID agent ID (`AGENT_ID=$(uuidgen)`). A slug ID fails MCP output validation after the write already landed, so a retry double-writes.
 - Take test ports from `src/tests/test-net.ts`: `listenOnFreePort(server)`, `getFreePort()` + `waitForServer()`, or `port: 0` for `Bun.serve`. CI runs `bun test --parallel=4`, so two files with one literal port collide. There is no global test retry: a timing-sensitive test opts in with `{ retry: 2 }` plus a comment.
-- Frontend PR: capture each visible change with `agent-browser` (`qa-use` only when asked) for `## Before / after`, and record a new or changed interaction or flow. Rules: the PR description block.
+- Frontend PR: capture each visible change with `agent-browser` (`qa-use` only when asked) for `## Before / after`, and record a new or changed interaction or flow. Rules: the PR description block. An app or page: `bun run ui:dev` ([runbooks/app-and-page-dev.md](./runbooks/app-and-page-dev.md)).
 
 </important>
 
@@ -215,4 +215,4 @@ Read the runbook first. The last column is the rule that causes damage when miss
 
 ## Related
 
-[runbooks/](./runbooks/) (also `db-retention`, `k8s-test-cluster`, `seed-scripts`) · [LOCAL_TESTING.md](./LOCAL_TESTING.md) · [MCP.md](./MCP.md) · [DEPLOYMENT.md](./DEPLOYMENT.md) · [docs-site guides](./docs-site/content/docs/(documentation)/guides/)
+[runbooks/](./runbooks/) (also `app-and-page-dev`, `db-retention`, `k8s-test-cluster`, `seed-scripts`) · [LOCAL_TESTING.md](./LOCAL_TESTING.md) · [MCP.md](./MCP.md) · [DEPLOYMENT.md](./DEPLOYMENT.md) · [docs-site guides](./docs-site/content/docs/(documentation)/guides/)

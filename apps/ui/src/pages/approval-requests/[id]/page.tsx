@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   useApprovalRequest,
@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/detail-page-layout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useApprovalDraft } from "@/lib/approval-drafts";
 import {
   answerHint,
   answerProgress,
@@ -115,7 +116,8 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const finePointer = useFinePointer();
   const desktop = useMediaQuery("(min-width: 1024px)");
 
-  const [responses, setResponses] = useState<Record<string, unknown>>({});
+  const draft = useApprovalDraft(request);
+  const [responses, setResponses] = useState<Record<string, unknown>>(draft.initial);
   const [error, setError] = useState<string | null>(null);
   const [attempted, setAttempted] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -151,6 +153,10 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const compact = questions.length > COMPACT_AFTER;
   const submitting = respondMutation.isPending;
   const progress = useMemo(() => answerProgress(questions, responses), [questions, responses]);
+  const saveDraft = draft.save;
+  useEffect(() => {
+    if (editing) saveDraft(responses);
+  }, [editing, responses, saveDraft]);
 
   const firstOpenIndex = useMemo(
     () => questions.findIndex((question) => !isAnswered(question, responses[question.id])),
@@ -204,6 +210,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
       if (result.approvalRequest.status === "pending") setAnsweredHere(true);
       queryClient.setQueryData(["approval-request", request.id], result);
       // Drop the typed answers (a config secret among them) once the server has them.
+      draft.clear();
       setResponses({});
       setActiveIndex(-1);
       top.current?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });

@@ -723,6 +723,26 @@ export const SteeringSourceSchema = z.enum([
 ]);
 export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
 
+/**
+ * A file a steering message points at: a snapshot of one task attachment taken
+ * when the message was sent. `taskId` is the task the file lives on, which
+ * stays the same when the message is carried to a successor task.
+ */
+export const SteeringAttachmentSchema = z
+  .object({
+    id: z.string(),
+    taskId: z.string(),
+    name: z.string(),
+    mimeType: z.string().optional(),
+    sizeBytes: z.number().int().min(0).optional(),
+  })
+  .openapi("SteeringAttachment");
+export type SteeringAttachment = z.infer<typeof SteeringAttachmentSchema>;
+export const SteeringAttachmentsSchema = z.array(SteeringAttachmentSchema);
+
+/** At most this many files on one steering message. */
+export const MAX_STEERING_ATTACHMENTS = 20;
+
 export const SteeringMessageSchema = z
   .object({
     id: z.uuid(),
@@ -743,6 +763,8 @@ export const SteeringMessageSchema = z
     handledAt: z.iso.datetime().optional(),
     /** accept-steer's optional note describing how the steering was incorporated. */
     handledNote: z.string().optional(),
+    /** Files attached to the message. Absent: a text-only message. */
+    attachments: z.array(SteeringAttachmentSchema).optional(),
   })
   .openapi("SteeringMessage");
 export type SteeringMessage = z.infer<typeof SteeringMessageSchema>;

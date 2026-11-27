@@ -922,6 +922,25 @@ export function workflowsContract(engine: ContractEngine): void {
       });
     });
 
+    test("pendingApprovalStats counts pending, oldest and overdue", async () => {
+      expect(await repo.pendingApprovalStats(T1)).toEqual({
+        pending: 0,
+        oldestCreatedAt: null,
+        overdue: 0,
+      });
+      await repo.insertApproval(approval("late", { expiresAt: T0, now: T1 }));
+      await repo.insertApproval(approval("open", { now: T0 }));
+      await repo.insertApproval(approval("future", { expiresAt: T2, now: T1 }));
+      await repo.insertApproval(
+        approval("done", { status: "approved", now: "2026-11-21T09:00:00.000Z" }),
+      );
+      expect(await repo.pendingApprovalStats(T1)).toEqual({
+        pending: 3,
+        oldestCreatedAt: T0,
+        overdue: 1,
+      });
+    });
+
     test("run cancels and cancelled lists keep insertion order", async () => {
       await repo.insertApproval(approval("b", { workflowRunId: "r1", workflowRunStepId: "s1" }));
       await repo.insertApproval(approval("a", { workflowRunId: "r1", workflowRunStepId: "s1" }));

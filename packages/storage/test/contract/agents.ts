@@ -173,9 +173,14 @@ export function agentsContract(engine: ContractEngine): void {
       expect(await repo.incrementEmptyPollCount("missing")).toBeNull();
       await repo.resetEmptyPollCount("a1");
       await repo.touchAgentActivity("a1");
+      const touchedAt = await repo.touchAgentUpdatedAt("a1");
+      expect(touchedAt).toMatch(ISO_MS);
+      expect(await repo.touchAgentUpdatedAt("missing")).toBeNull();
       const row = await repo.findAgentById("a1");
       expect(row?.emptyPollCount).toBe(0);
       expect(row?.lastActivityAt).toMatch(ISO_MS);
+      expect(row?.lastUpdatedAt).toBe(touchedAt);
+      expect(row?.status).toBe("idle");
       expect(await repo.deleteAgent("a1")).toBe(1);
       expect(await repo.deleteAgent("a1")).toBe(0);
     });
@@ -345,6 +350,21 @@ export function agentsContract(engine: ContractEngine): void {
         { date: "2026-11-20", count: 1 },
         { date: "2026-11-21", count: 1 },
       ]);
+      await repo.insertAgent(newAgent({ id: "a2" }));
+      await task("t6", "reviewing", "2026-11-21T12:00:00.000Z", "a1", "a2");
+      await task("t7", "in_progress", "2026-11-21T13:00:00.000Z", "a2", "a1");
+      // The grouped read agrees with the per-agent count, offers counted only via offeredTo.
+      const counts = await repo.countActiveTasksByAgent(["a1", "a2", "nobody"]);
+      expect([...counts].sort()).toEqual([
+        ["a1", await repo.countActiveTasks("a1")],
+        ["a2", await repo.countActiveTasks("a2")],
+      ]);
+      expect([...counts].sort()).toEqual([
+        ["a1", 2],
+        ["a2", 2],
+      ]);
+      expect((await repo.countActiveTasksByAgent(["a2"])).get("a1")).toBeUndefined();
+      expect((await repo.countActiveTasksByAgent([])).size).toBe(0);
     });
 
     test("worker-reported model columns write only on change (NULL-safe)", async () => {

@@ -488,7 +488,16 @@ export type PostgresConnectionOptions = {
  */
 export const POSTGRES_POOL_IDLE_TIMEOUT_S = 60;
 
-/** Open the pool with the session defaults of decision D6 (SERIALIZABLE, UTC). */
+/**
+ * Open the pool with the session defaults of decision D6 (SERIALIZABLE, UTC)
+ * and JIT off.
+ *
+ * JIT: the API runs short statements. The planner prices some of them above
+ * `jit_above_cost` (the session tree summary, the user-scoped task list), and
+ * LLVM then spends 0.2-3.6 s compiling a statement that runs in 50-150 ms.
+ * Measured on a copy of production data: the session tree statement took
+ * 3.8 s with JIT and 0.15 s without.
+ */
 export function openPostgresPool(options: PostgresConnectionOptions): PoolHandle {
   return new Bun.SQL({
     url: options.url,
@@ -498,6 +507,7 @@ export function openPostgresPool(options: PostgresConnectionOptions): PoolHandle
     connection: {
       default_transaction_isolation: "serializable",
       TimeZone: "UTC",
+      jit: "off",
       ...POSTGRES_KEEPALIVE_PARAMS,
     },
   }) as unknown as PoolHandle;

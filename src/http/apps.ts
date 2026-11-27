@@ -8,6 +8,12 @@ import {
 } from "../apps/action-run-status";
 import { runAppAction } from "../apps/action-runner";
 import {
+  AppBundleSchema,
+  type AppImportWriter,
+  exportAppBundle,
+  importAppBundle,
+} from "../apps/bundle";
+import {
   CATALOG_TOPICS,
   catalogAction,
   catalogComponent,
@@ -102,6 +108,12 @@ import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./util
 const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;
 export const MAX_APP_ROW_BODY_BYTES = 1 * 1024 * 1024;
 export const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_APP_BUNDLE_BODY_BYTES = 64 * 1024 * 1024;
+/**
+ * Callers with an import in flight: one import per caller at a time.
+ * shortcut: in-process only; move to a shared lock if the API runs replicas.
+ */
+const importsInFlight = new Set<string>();
 const MAX_USER_CONFIG_BODY_BYTES = 64 * 1024;
 const MAX_USER_CONFIG_VALUES_BYTES = 16 * 1024;
 const DECIMAL_NUMBER_PATTERN = /^[+-]?\d+(?:\.\d+)?$/;
@@ -431,6 +443,68 @@ const rollbackAppRoute = route({
     400: { description: "Invalid rollback definition or schema migration" },
     403: { description: "Permission denied" },
     404: { description: "App or app version not found" },
+  },
+  rbac: { permission: "app.manage" },
+});
+
+const exportAppRoute = route({
+  method: "get",
+  path: "/api/apps/{id}/export",
+  pattern: ["api", "apps", null, "export"],
+  summary: "Export an app as a bundle",
+  description:
+    "The definition, every row of every model (no list cap) and the scripts the definition references. POST the response body to /api/apps/import to copy the app.",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  responses: {
+    200: {
+      description: "App bundle",
+      schema: AppBundleSchema.extend({
+        rows: z.record(z.string(), z.array(AppRowSchema)),
+        warnings: z.array(z.string()).optional(),
+      }),
+    },
+    403: { description: "Permission denied" },
+    404: { description: "App not found" },
+    409: { description: "App definition needs repair" },
+    413: { description: "App has more rows than one export carries" },
+  },
+  rbac: { permission: "app.manage" },
+});
+
+const importAppRoute = route({
+  method: "post",
+  path: "/api/apps/import",
+  pattern: ["api", "apps", "import"],
+  summary: "Import an app bundle",
+  description:
+    "Creates a new app from a bundle that GET /api/apps/{id}/export produced: scripts first (reused by id or by name and source, created in the caller's scope otherwise), then the definition with script ids rewritten, then the rows with their ids. A warning names each script action or sync source that needs a connection, credential binding or config key this swarm lacks.",
+  tags: ["Apps"],
+  query: z.object({
+    keepId: z
+      .enum(["0", "1", "true", "false"])
+      .optional()
+      .describe("Keep the bundle's app id instead of minting a new one (409 when it exists)"),
+  }),
+  body: AppBundleSchema,
+  maxBodyBytes: MAX_APP_BUNDLE_BODY_BYTES,
+  responses: {
+    201: {
+      description: "Imported app",
+      schema: z.object({
+        app: AppRecordSchema,
+        scriptIds: z
+          .record(z.string(), z.string())
+          .describe("Bundle script id to the local script id"),
+        rows: z.record(z.string(), z.number()).describe("Rows written per model"),
+        warnings: z.array(z.string()),
+      }),
+    },
+    400: { description: "Invalid bundle, definition, scripts or rows" },
+    403: { description: "Permission denied" },
+    409: { description: "App id or script name conflict" },
+    413: { description: "Bundle too large" },
+    429: { description: "This caller already has an import in flight" },
   },
   rbac: { permission: "app.manage" },
 });
@@ -1216,6 +1290,78 @@ export async function handleApps(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  if (exportAppRoute.match(req.method, pathSegments)) {
+    const parsed = await exportAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
+    const result = await exportAppBundle(parsed.params.id);
+    if (!result.ok) {
+      json(
+        res,
+        { error: result.error, ...(result.issues ? { issues: result.issues } : {}) },
+        result.status,
+      );
+      return true;
+    }
+    exportAppRoute.respond(res, 200, {
+      ...result.bundle,
+      ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+    });
+    return true;
+  }
+
+  if (importAppRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_APP_BUNDLE_BODY_BYTES) === BODY_TOO_LARGE) {
+      return true;
+    }
+    const parsed = await importAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    // A new app has no app resource to scope yet, as for create.
+    const authorized = await authorizeAppCaller(req, res, myAgentId, "app.manage", {
+      kind: "none",
+    });
+    if (!authorized) return true;
+    const { caller } = authorized;
+    const writer: AppImportWriter =
+      caller.kind === "agent" && caller.id
+        ? {
+            kind: "agent",
+            agentId: caller.id,
+            writerIsUser: authUserId(getRequestAuth(req)) !== undefined,
+          }
+        : caller.kind === "operator"
+          ? { kind: "operator" }
+          : { kind: "other" };
+    const keepId = parsed.query.keepId === "1" || parsed.query.keepId === "true";
+    const flightKey = `${caller.kind}:${caller.id ?? ""}`;
+    if (importsInFlight.has(flightKey)) {
+      json(res, { error: "an import from this caller is already running" }, 429);
+      return true;
+    }
+    importsInFlight.add(flightKey);
+    let result: Awaited<ReturnType<typeof importAppBundle>>;
+    try {
+      result = await importAppBundle(parsed.body, { keepId, writer });
+    } finally {
+      importsInFlight.delete(flightKey);
+    }
+    if (!result.ok) {
+      json(
+        res,
+        { error: result.error, ...(result.issues ? { issues: result.issues } : {}) },
+        result.status,
+      );
+      return true;
+    }
+    importAppRoute.respond(res, 201, {
+      app: result.app,
+      scriptIds: result.scriptIds,
+      rows: result.rows,
+      warnings: result.warnings,
+    });
+    return true;
+  }
+
   if (createAppRoute.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await createAppRoute.parse(req, res, pathSegments, queryParams);

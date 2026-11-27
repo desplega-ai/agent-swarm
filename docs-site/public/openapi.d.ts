@@ -602,6 +602,8 @@ export interface paths {
                 header?: {
                     /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
                     "X-Runtime-Instance-ID"?: string;
+                    /** @description Optional key, 1-255 visible ASCII characters, scoped to the caller and the tool. The first successful call of a tool that is not read-only runs it and records its result; a later call with the same key and tool returns that result (with `Idempotent-Replayed: true`) and runs nothing, whatever its args. A call that fails or that the tool refuses records nothing. A second call while the first still runs waits for it, then gets a 409. Read-only tools ignore the key. Records expire after 7 days. Durable script runs send one on every ctx.swarm call. */
+                    "Idempotency-Key"?: string;
                 };
                 path?: never;
                 cookie?: never;
@@ -646,6 +648,15 @@ export interface paths {
                 };
                 /** @description Tool not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description A call with the same Idempotency-Key is still running */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1387,6 +1398,263 @@ export interface paths {
                 };
                 /** @description App or app version not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apps/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export an app as a bundle
+         * @description The definition, every row of every model (no list cap) and the scripts the definition references. POST the response body to /api/apps/import to copy the app.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description App bundle */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            format: "swarm-app-bundle/v1";
+                            exportedAt?: string;
+                            app: {
+                                id: string;
+                                name: string;
+                                description?: string;
+                                definition: {
+                                    [key: string]: unknown;
+                                };
+                            };
+                            rows: {
+                                [key: string]: ({
+                                    id: string;
+                                    createdAt: string;
+                                    updatedAt: string;
+                                    createdBy?: string;
+                                    updatedBy?: string;
+                                } & {
+                                    [key: string]: unknown;
+                                })[];
+                            };
+                            scripts: {
+                                id: string;
+                                name: string;
+                                description: string;
+                                intent: string;
+                                source: string;
+                                argsSchema?: unknown;
+                                /** @enum {string} */
+                                fsMode?: "none" | "workspace-rw";
+                                /** @enum {string|null} */
+                                executor?: "native" | "quickjs" | null;
+                            }[];
+                            warnings?: string[];
+                        };
+                    };
+                };
+                /** @description Permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description App not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description App definition needs repair */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description App has more rows than one export carries */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apps/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import an app bundle
+         * @description Creates a new app from a bundle that GET /api/apps/{id}/export produced: scripts first (reused by id or by name and source, created in the caller's scope otherwise), then the definition with script ids rewritten, then the rows with their ids. A warning names each script action or sync source that needs a connection, credential binding or config key this swarm lacks.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Keep the bundle's app id instead of minting a new one (409 when it exists) */
+                    keepId?: "0" | "1" | "true" | "false";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        format: "swarm-app-bundle/v1";
+                        exportedAt?: string;
+                        app: {
+                            id: string;
+                            name: string;
+                            description?: string;
+                            definition: {
+                                [key: string]: unknown;
+                            };
+                        };
+                        rows: {
+                            [key: string]: {
+                                [key: string]: unknown;
+                            }[];
+                        };
+                        scripts: {
+                            id: string;
+                            name: string;
+                            description: string;
+                            intent: string;
+                            source: string;
+                            argsSchema?: unknown;
+                            /** @enum {string} */
+                            fsMode?: "none" | "workspace-rw";
+                            /** @enum {string|null} */
+                            executor?: "native" | "quickjs" | null;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Imported app */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            app: {
+                                id: string;
+                                name: string;
+                                description?: string;
+                                definition: {
+                                    [key: string]: unknown;
+                                } | unknown[] | string | number | boolean | null;
+                                definitionError?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                createdAt: string;
+                                updatedAt: string;
+                            };
+                            /** @description Bundle script id to the local script id */
+                            scriptIds: {
+                                [key: string]: string;
+                            };
+                            /** @description Rows written per model */
+                            rows: {
+                                [key: string]: number;
+                            };
+                            warnings: string[];
+                        };
+                    };
+                };
+                /** @description Invalid bundle, definition, scripts or rows */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description App id or script name conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Bundle too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description This caller already has an import in flight */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16635,6 +16903,10 @@ export interface paths {
                         profile?: string;
                         modelGroup?: string;
                         draft?: boolean;
+                        /** @description Slack channel the task's progress and outcome post to. Set together with `slackThreadTs`. Needs `task.slack.thread.bind`. */
+                        slackChannelId?: string;
+                        /** @description Slack thread ts in `slackChannelId` the task posts into. */
+                        slackThreadTs?: string;
                     };
                 };
             };
@@ -16657,7 +16929,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Parent/session access denied, unauthorized chat-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
+                /** @description Parent/session access denied, unauthorized chat-thread or Slack-thread binding, routing requirements reject the assignment, or an Idempotency-Key replay of a task whose session the caller can no longer read */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -16947,6 +17219,7 @@ export interface paths {
                         /** @enum {string} */
                         source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat" | "app-page";
                         requestedByUserId?: string;
+                        attachmentIds?: string[];
                     };
                 };
             };
@@ -34103,6 +34376,14 @@ export interface components {
             /** Format: date-time */
             handledAt?: string;
             handledNote?: string;
+            attachments?: components["schemas"]["SteeringAttachment"][];
+        };
+        SteeringAttachment: {
+            id: string;
+            taskId: string;
+            name: string;
+            mimeType?: string;
+            sizeBytes?: number;
         };
         AgentLog: {
             /** Format: uuid */
@@ -35349,6 +35630,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The ext:<name> agent name is held by an agent that is not an extension identity */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     extensions_catalog: {
@@ -35692,6 +35982,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The ext:<name> agent name is held by an agent that is not an extension identity */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     extensions_disable: {
@@ -35784,6 +36083,15 @@ export interface operations {
             };
             /** @description Extension or version not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The ext:<name> agent name is held by an agent that is not an extension identity */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -38380,6 +38688,7 @@ export interface operations {
                     fsMode?: "none" | "workspace-rw";
                     /** @enum {string|null} */
                     executor?: "native" | "quickjs" | null;
+                    /** @description Run key. A successful run saves its output to kv script:executions/{key} (a re-run overwrites it). Every ctx.swarm call in the run also derives its own key from it, so a re-run under the same key (same agent, within 7 days) replays the first run's tool-bridge writes (task_send, slack_post, ...) and workflow_trigger calls instead of repeating them, and a nested script_run inherits a derived key. Reads and REST-routed writes (kv_*, schedule_*) run again. */
                     idempotencyKey?: string;
                     parentScriptRunId?: string;
                 };

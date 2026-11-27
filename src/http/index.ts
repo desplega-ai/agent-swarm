@@ -43,6 +43,7 @@ import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import { getStorage } from "../be/storage";
 import { readEngineStats } from "../be/storage-root";
+import { readSwarmStateStats } from "../be/swarm-state-stats";
 import { startTaskAutoTitleListener } from "../be/task-auto-title-listener";
 import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
@@ -63,8 +64,10 @@ import {
   initOtel,
   isPgMetricsEnabled,
   isPollTracingEnabled,
+  isSwarmMetricsEnabled,
   startPostgresStatsMetrics,
   startSpan,
+  startSwarmStateMetrics,
   withRemoteContext,
   withSpanContext,
 } from "../otel";
@@ -855,6 +858,8 @@ initialize();
 await initOtel("api");
 // Postgres server gauges (pg_stat_*), read once per metric export over the engine pool.
 if (isPostgresEngine() && isPgMetricsEnabled()) startPostgresStatsMetrics(readEngineStats);
+// Swarm state gauges (failed tasks, approvals, queue) on any engine.
+if (isSwarmMetricsEnabled()) startSwarmStateMetrics(() => readSwarmStateStats());
 
 httpServer
   .listen(port, async () => {

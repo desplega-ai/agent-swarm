@@ -6,6 +6,8 @@ import {
   scriptAppTypesWarnings,
 } from "@/apps/script-types";
 import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
+import { REST_ROUTED_SDK_METHODS } from "@/scripts-runtime/sdk-allowlist";
+import { SWARM_TOOL_ERROR_CODES } from "@/scripts-runtime/swarm-tool-error";
 import type { ScriptTypeContext } from "./type-contributors";
 
 /**
@@ -989,6 +991,49 @@ export type ScriptCaller =
   | { kind: "script"; agentId: string; scriptId?: string; objectId?: string }
   | null;
 
+export type SwarmToolErrorCode = ${SWARM_TOOL_ERROR_CODES.map((code) => JSON.stringify(code)).join(" | ")};
+
+/** The second argument of \`new SwarmToolError(message, init)\`. */
+export interface SwarmToolErrorInit {
+  code: SwarmToolErrorCode;
+  tool: string;
+  status?: number;
+  suggestions?: string[];
+  cause?: unknown;
+}
+
+/**
+ * What a failed \`ctx.swarm.*\`, \`ctx.<namespace>.*\` or \`ctx.db.query\` call throws.
+ * Branch on \`code\` instead of matching the message:
+ * \`unknown_tool\` (no such method; \`suggestions\` names the closest ones),
+ * \`not_exposed\` (a lifecycle or credential tool kept from scripts),
+ * \`invalid_args\`, \`permission\`, \`not_found\`, \`rate_limited\`, \`timeout\`,
+ * \`refused\` (the tool declined the call) and \`upstream\` (any other failure).
+ * Calls that return \`{ success, status, data }\` still return a failed status instead of throwing.
+ *
+ * @example
+ * import { SwarmToolError } from "swarm-sdk";
+ * try { await ctx.swarm.kv_getOrNull({ key }); }
+ * catch (err) { if (SwarmToolError.is(err) && err.code === "rate_limited") { ... } }
+ */
+export class SwarmToolError extends Error {
+  constructor(
+    message: string,
+    init: SwarmToolErrorInit,
+  );
+  readonly name: "SwarmToolError";
+  readonly code: SwarmToolErrorCode;
+  /** The SDK method called, e.g. \`kv_get\`. */
+  readonly tool: string;
+  /** HTTP status of the failed call, when there was one. */
+  readonly status?: number;
+  readonly suggestions?: string[];
+  /** True for a SwarmToolError; also works on one rebuilt across the sandbox boundary. */
+  static is(value: unknown): value is SwarmToolError;
+}
+
+export const SWARM_TOOL_ERROR_CODES: readonly SwarmToolErrorCode[];
+
 export abstract class DurableObject<S> {
   constructor(id: string);
   readonly id: string;
@@ -999,12 +1044,42 @@ export abstract class DurableObject<S> {
   static idleTtlSec?: number;
 }
 
+/**
+ * Second argument of any \`ctx.swarm.<tool>\` call.
+ *
+ * \`idempotencyKey\` runs a write at most once per key: a later call of the same tool with
+ * the same key returns the first call's result and does nothing (args are not compared).
+ * Keys are scoped to the calling agent and kept 7 days. Read-only tools ignore it. Only
+ * tools that go through the MCP bridge take it: a REST-routed method (kv_*, memory_search,
+ * task_get, schedule_*, workflow_*, script_run, ...) has no options argument, and throws
+ * \`invalid_args\` if one is passed anyway. Durable runs
+ * (\`launch-script-run\`) key every call from the run id, tool and call ordinal by
+ * themselves, so a respawned run does not repeat its sends; pass a key to override that.
+ * A one-off run started with an \`idempotencyKey\` (\`script-run\` tool or API) does the
+ * same from that key, and hands a derived key to each nested \`script_run\` and
+ * \`workflow_trigger\` that sets none.
+ */
+export interface SwarmCallOptions {
+  idempotencyKey?: string;
+}
+
+/** Adds the optional \`SwarmCallOptions\` argument to every method of \`T\`. */
+export type WithSwarmCallOptions<T> = {
+  [K in keyof T]: T[K] extends (...args: infer P) => infer R
+    ? (...args: [...P, options?: SwarmCallOptions]) => R
+    : T[K];
+};
+
+/** Methods routed to a REST endpoint, not the MCP bridge: they take no \`SwarmCallOptions\`. */
+type SwarmSdkRestRoutedMethods = ${REST_ROUTED_SDK_METHODS.map((name) => JSON.stringify(name)).join(" | ")};
+
 export interface ScriptContext {
   /** Frozen caller identity supplied by the host. */
   caller: ScriptCaller;
   run?: ScriptRunContext;
   step?: ScriptWorkflowSteps;
-  swarm: SwarmSdk & { config: SwarmConfig };
+  swarm: WithSwarmCallOptions<Omit<SwarmSdk, SwarmSdkRestRoutedMethods>> &
+    Pick<SwarmSdk, Extract<keyof SwarmSdk, SwarmSdkRestRoutedMethods>> & { config: SwarmConfig };
   api: ScriptApiRegistry;
   mcp: ScriptMcpRegistry;
   /** The run's virtual filesystem. Same files as \`ctx.sh\` sees. */
