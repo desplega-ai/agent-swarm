@@ -26,9 +26,23 @@ if ! grep -rqs "apt.postgresql.org" /etc/apt/sources.list /etc/apt/sources.list.
     | $SUDO tee /etc/apt/sources.list.d/pgdg.list > /dev/null
 fi
 
-$SUDO apt-get update -qq >&2
-$SUDO env DEBIAN_FRONTEND=noninteractive \
-  apt-get install -y -qq --no-install-recommends "postgresql-client-${MAJOR}" >&2
+# Refresh only the PGDG source. A full `apt-get update` fails when any other source of the
+# machine is down (a GitHub runner has several), and that has nothing to do with PostgreSQL.
+SRC="$(grep -rls "apt.postgresql.org" /etc/apt/sources.list.d/ | head -1)"
+install_client() {
+  $SUDO env DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y -qq --no-install-recommends "postgresql-client-${MAJOR}"
+}
+if [ -n "$SRC" ]; then
+  $SUDO apt-get update -qq -o Dir::Etc::sourcelist="$SRC" -o Dir::Etc::sourceparts="-" \
+    -o APT::Get::List-Cleanup="0" >&2
+fi
+if [ -z "$SRC" ] || ! install_client >&2; then
+  # A dependency from another source is not in the package lists (a bare image): refresh
+  # every source. One broken source must not stop the install.
+  $SUDO apt-get update -qq >&2 || echo "warning: one apt source did not update" >&2
+  install_client >&2
+fi
 
 BIN="/usr/lib/postgresql/${MAJOR}/bin"
 "$BIN/pg_dump" --version >&2
