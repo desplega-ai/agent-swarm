@@ -1290,3 +1290,18 @@ unchanged. ACTIONS.md re-pins `runTransactionAttempt` (`client.ts:417`, +12) and
 Every config keeps its verdict and distinct-state count from the #3485 / #3494 / #3562 table above
 (tla2tools 2026.11.19, BFS, `-workers 4 -deadlock`, `-workers 8` for
 `Probe-join-retry-sweep.cfg`). The same ten test files: 168 pass / 0 fail / 0 `test.failing`.
+
+## Sync with #3690, #3705, #3715, #3725, #3727, #3729 and #3732 (`main` @ `0f0276701`)
+
+None of these PRs changes a modelled guard, ordering or write path, so the `.tla` and `.cfg` files
+are unchanged. The `src/be/db.ts` edits are outside the workflow functions the model encodes:
+cheaper Postgres reads for retention, budgets, mentions and connections (#3690), constant-statement
+inbox counts (#3705), steering-message attachments (#3715), multi-row session-log inserts (#3725),
+a Slack message epoch in the request memo (#3727) and batched per-agent reads (#3729). #3732 adds
+a read-only `pendingApprovalStats` count over `approval_requests`, a node kind the model does not
+have. ACTIONS.md re-pins every `db.ts` line (-16 around `getStepExecutionBlock`, -40 for the
+workflow helpers) and every `storage/workflows.ts` line (+7); the cited code is byte-identical.
+
+Every config keeps its verdict and distinct-state count from the #3485 / #3494 / #3562 table above
+(tla2tools 2026.11.19, BFS, `-workers 4 -deadlock`, `-workers 8` for
+`Probe-join-retry-sweep.cfg`). The same ten test files: 168 pass / 0 fail / 0 `test.failing`.
