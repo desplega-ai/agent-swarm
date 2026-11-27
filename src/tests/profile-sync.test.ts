@@ -653,7 +653,11 @@ describe("collectProfilePayloads (baseline integration)", () => {
 
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
     expect(payloads.map((payload) => payload.body)).toEqual([
-      { toolsMd: "edited tools", changeSource: "self_edit" },
+      {
+        toolsMd: "edited tools",
+        changeSource: "self_edit",
+        expectedHashes: { toolsMd: contentSha256("tools") },
+      },
     ]);
   });
 
