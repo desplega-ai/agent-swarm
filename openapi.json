@@ -26233,6 +26233,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The ext:<name> agent name is held by an agent that is not an extension identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -26825,6 +26835,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The ext:<name> agent name is held by an agent that is not an extension identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -26979,6 +26999,16 @@
           },
           "404": {
             "description": "Extension or version not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ext:<name> agent name is held by an agent that is not an extension identity",
             "content": {
               "application/json": {
                 "schema": {

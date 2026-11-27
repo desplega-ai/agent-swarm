@@ -144,6 +144,42 @@ export const extensions: Scenario = {
         "MCP install did not store a disabled draft",
       );
 
+      // The ext:<name> identity is never bound by name alone: a worker that renamed
+      // itself to it keeps its own role, and the install is refused.
+      const claimTemplate = "github-sender-allowlist";
+      const claimWorkerId = await registerWorker(ctx, `e2e-extension-claim-${ctx.nonce}`);
+      expectStatus(
+        await ctx.api("PUT", `/api/agents/${claimWorkerId}/name`, {
+          agentId: claimWorkerId,
+          body: { name: `ext:${claimTemplate}` },
+        }),
+        [200],
+        "worker renames itself to an extension identity name",
+      );
+      const claimed = await ctx.api("POST", "/api/extensions/install", {
+        agentId: claimWorkerId,
+        body: { template: claimTemplate },
+      });
+      if (claimed.status === 200) {
+        installedIds.add(extensionId(asRecord(asRecord(claimed.json).extension), claimTemplate));
+      }
+      expectStatus(claimed, [409], "refuse install over a worker-held ext name");
+      const claimWorker = await ctx.api("GET", `/api/agents/${claimWorkerId}`);
+      expectStatus(claimWorker, [200], "read the renamed worker");
+      expect(
+        asRecord(claimWorker.json).role !== "extension" &&
+          asRecord(claimWorker.json).maxTasks !== 0,
+        "Install adopted a worker row as the extension identity",
+      );
+      expectStatus(
+        await ctx.api("PUT", `/api/agents/${claimWorkerId}/name`, {
+          agentId: claimWorkerId,
+          body: { name: `e2e-extension-claim-${ctx.nonce}` },
+        }),
+        [200],
+        "restore the renamed worker's name",
+      );
+
       const ticketInstall = await install(ctx, "require-ticket-ref", { origins: ["rest"] });
       const ticket = asRecord(ticketInstall.extension);
       const ticketId = extensionId(ticket, "require-ticket-ref");

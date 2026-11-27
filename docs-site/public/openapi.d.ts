@@ -35463,6 +35463,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The ext:<name> agent name is held by an agent that is not an extension identity */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     extensions_catalog: {
@@ -35806,6 +35815,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description The ext:<name> agent name is held by an agent that is not an extension identity */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     extensions_disable: {
@@ -35898,6 +35916,15 @@ export interface operations {
             };
             /** @description Extension or version not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The ext:<name> agent name is held by an agent that is not an extension identity */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
