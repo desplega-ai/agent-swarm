@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rm, unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
-import { getFreePort, waitForServer } from "./test-net";
+import { PORT_IN_USE_LOG, PortInUseError, startOnFreePort, waitForServer } from "./test-net";
 
 const API_KEY = "example-test-api-drain-key";
 const BOOT_TIMEOUT_MS = 90_000;
@@ -24,42 +24,73 @@ interface Api {
 
 const booted: Api[] = [];
 
-/** An `undefined` value removes the key from the inherited environment. */
+/** Drain a child pipe into a string that can be read while the child still runs. */
+function collect(stream: ReadableStream<Uint8Array>) {
+  let text = "";
+  const done = (async () => {
+    const decoder = new TextDecoder();
+    for await (const chunk of stream) text += decoder.decode(chunk, { stream: true });
+    return text;
+  })();
+  return { read: () => text, done };
+}
+
+/**
+ * An `undefined` value removes the key from the inherited environment.
+ *
+ * `getFreePort()` releases the port before the child binds it, and under
+ * `--parallel` another test's server can take it first. That server answers
+ * `/health` too, so readiness is trusted only after this child logs that it
+ * bound the port, and a child that lost the port is started again on a new one.
+ */
 async function bootApi(env: Record<string, string | undefined>): Promise<Api> {
-  const port = await getFreePort();
-  const stamp = `${Date.now()}-${port}`;
-  const dbPath = `/tmp/test-api-drain-${stamp}.sqlite`;
-  const fsDir = `/tmp/test-api-drain-fs-${stamp}`;
-  const childEnv: Record<string, string | undefined> = {
-    ...process.env,
-    PORT: String(port),
-    DATABASE_PATH: dbPath,
-    API_KEY,
-    AGENT_FS_LOCAL_DIR: fsDir,
-    AGENT_FS_API_URL: "",
-    API_AGENT_FS_API_KEY: "",
-    AGENT_FS_API_KEY: "",
-    CAPABILITIES: "core,task-pool,messaging,profiles,services,memory",
-    SLACK_BOT_TOKEN: "",
-    GITHUB_WEBHOOK_SECRET: "",
-    AGENTMAIL_API_KEY: "",
-    ...env,
-  };
-  for (const [key, value] of Object.entries(childEnv))
-    if (value === undefined) delete childEnv[key];
-  const proc = Bun.spawn(["bun", "src/http.ts"], {
-    cwd: `${import.meta.dir}/../..`,
-    env: childEnv as Record<string, string>,
-    stdout: "pipe",
-    stderr: "pipe",
+  return startOnFreePort(async (port) => {
+    const stamp = `${Date.now()}-${port}`;
+    const dbPath = `/tmp/test-api-drain-${stamp}.sqlite`;
+    const fsDir = `/tmp/test-api-drain-fs-${stamp}`;
+    const childEnv: Record<string, string | undefined> = {
+      ...process.env,
+      PORT: String(port),
+      DATABASE_PATH: dbPath,
+      API_KEY,
+      AGENT_FS_LOCAL_DIR: fsDir,
+      AGENT_FS_API_URL: "",
+      API_AGENT_FS_API_KEY: "",
+      AGENT_FS_API_KEY: "",
+      CAPABILITIES: "core,task-pool,messaging,profiles,services,memory",
+      SLACK_BOT_TOKEN: "",
+      GITHUB_WEBHOOK_SECRET: "",
+      AGENTMAIL_API_KEY: "",
+      ...env,
+    };
+    for (const [key, value] of Object.entries(childEnv))
+      if (value === undefined) delete childEnv[key];
+    const proc = Bun.spawn(["bun", "src/http.ts"], {
+      cwd: `${import.meta.dir}/../..`,
+      env: childEnv as Record<string, string>,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    // Drain both pipes from the start so a full buffer cannot stall the server.
+    const out = collect(proc.stdout);
+    const err = collect(proc.stderr);
+    const api: Api = { proc, base: `http://127.0.0.1:${port}`, stdout: out.done, dbPath, fsDir };
+    booted.push(api);
+    const bound = `MCP HTTP server running on http://localhost:${port}/mcp`;
+    const deadline = Date.now() + BOOT_TIMEOUT_MS / 2;
+    while (!out.read().includes(bound)) {
+      if (proc.exitCode !== null) {
+        const log = `${out.read()}\n${err.read()}`;
+        const message = `API exited with code ${proc.exitCode} before listening:\n${log.slice(-2000)}`;
+        if (PORT_IN_USE_LOG.test(log)) throw new PortInUseError(message);
+        throw new Error(message);
+      }
+      if (Date.now() > deadline) throw new Error("API did not log that it bound its port");
+      await Bun.sleep(50);
+    }
+    await waitForServer(`${api.base}/health`);
+    return api;
   });
-  // Drain both pipes from the start so a full buffer cannot stall the server.
-  const stdout = new Response(proc.stdout).text();
-  void new Response(proc.stderr).text();
-  const api: Api = { proc, base: `http://127.0.0.1:${port}`, stdout, dbPath, fsDir };
-  booted.push(api);
-  await waitForServer(`${api.base}/health`);
-  return api;
 }
 
 afterEach(async () => {
