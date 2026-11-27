@@ -20,7 +20,10 @@ import { jsonError } from "./utils";
  */
 
 const MAX_LOCK_TTL_MS = 5 * 60 * 1000;
-const LOCK_KEY_PATTERN = /^codex_oauth_(0|[1-9]\d{0,2})$/;
+// The regex spells out 0..100 so the OpenAPI pattern matches the runtime check.
+// The refine below keeps MAX_CODEX_OAUTH_SLOT the authority if it ever shrinks;
+// if it grows past 100, widen this regex too.
+const LOCK_KEY_PATTERN = /^codex_oauth_(0|[1-9]\d?|100)$/;
 
 const LockKeySchema = z.object({
   key: z

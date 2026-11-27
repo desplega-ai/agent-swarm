@@ -36619,7 +36619,7 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^codex_oauth_(0|[1-9]\\d{0,2})$"
+              "pattern": "^codex_oauth_(0|[1-9]\\d?|100)$"
             },
             "required": true,
             "name": "key",
@@ -36700,7 +36700,7 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^codex_oauth_(0|[1-9]\\d{0,2})$"
+              "pattern": "^codex_oauth_(0|[1-9]\\d?|100)$"
             },
             "required": true,
             "name": "key",
