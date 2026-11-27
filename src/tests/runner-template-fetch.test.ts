@@ -73,20 +73,38 @@ describe("fetchTemplate", () => {
     expect(template).toEqual(validTemplate);
   });
 
-  test("rejects a template with wrongly typed fields", async () => {
-    bodies.set(
-      "official/coder",
-      JSON.stringify({
-        config: {
-          ...validTemplate.config,
-          agentDefaults: { role: "coder", capabilities: "all", maxTasks: "99", isLead: "false" },
-        },
-        files: { ...validTemplate.files, setupScript: 42 },
+  // One bad field per case, so dropping any single schema guard fails its case.
+  const badFields: Array<[string, (t: typeof validTemplate) => unknown]> = [
+    [
+      "isLead as a string",
+      (t) => ({
+        ...t,
+        config: { ...t.config, agentDefaults: { ...t.config.agentDefaults, isLead: "false" } },
       }),
-    );
-    const template = await fetchTemplate("official/coder", registryUrl, await freshCacheDir());
-    expect(template).toBeNull();
-  });
+    ],
+    [
+      "maxTasks as a string",
+      (t) => ({
+        ...t,
+        config: { ...t.config, agentDefaults: { ...t.config.agentDefaults, maxTasks: "99" } },
+      }),
+    ],
+    [
+      "capabilities as a string",
+      (t) => ({
+        ...t,
+        config: { ...t.config, agentDefaults: { ...t.config.agentDefaults, capabilities: "all" } },
+      }),
+    ],
+    ["setupScript as a number", (t) => ({ ...t, files: { ...t.files, setupScript: 42 } })],
+  ];
+  for (const [label, mutate] of badFields) {
+    test(`rejects a template with ${label}`, async () => {
+      bodies.set("official/coder", JSON.stringify(mutate(validTemplate)));
+      const template = await fetchTemplate("official/coder", registryUrl, await freshCacheDir());
+      expect(template).toBeNull();
+    });
+  }
 
   test("rejects a template whose body does not match the configured sha256", async () => {
     const pinned = sha256(JSON.stringify(validTemplate));
