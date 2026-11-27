@@ -18,17 +18,14 @@ import {
 } from "../be/memory/raters/llm";
 import { materializeClaudeMd, stopClaudeMd } from "../commands/claude-md-session";
 import {
-  advanceIdentityBaselines,
-  buildIndependentIdentityPayloads,
-  contentSha256,
   fetchWithSyncTimeout,
+  PROFILE_FILE_IO,
   type ProfilePayload,
-  readIdentityBaselines,
-  warnProfileFileTooLarge,
+  syncProfileFilesToServer,
 } from "../commands/profile-sync";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
+import { getMcpBaseUrl } from "../utils/constants";
 import { isSessionSummarySkipped } from "../utils/env-flag";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -53,7 +50,6 @@ const SOUL_MD_PATH = "/workspace/SOUL.md";
 const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
 const TOOLS_MD_PATH = "/workspace/TOOLS.md";
 const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
-const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 
 type McpServerConfig = {
   url: string;
@@ -693,152 +689,31 @@ export async function handleHook(): Promise<void> {
     });
   };
 
-  // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption.
-  // Raised from 100 to 500 after Picateclas profile corruption recurrences where
-  // a 234-char test sentinel payload was syncing into the real agent's DB row.
-  const IDENTITY_FILE_MIN_LENGTH = 500;
-
-  /**
-   * Sync SOUL.md and IDENTITY.md content back to the server.
-   *
-   * Loads the baseline hashes and skips any file whose content hasn't changed.
-   * This prevents clobbering DB-side edits that Lead made via `update-profile`
-   * during the running session: at Stop, and on a `"self_edit"` too, where an
-   * edit to one file re-reads all four.
-   */
-  const syncIdentityFilesToServer = async (
+  /** Runner and hooks share the CAS and recovery path, including setup extracts. */
+  const syncProfileGroup = async (
     agentId: string,
-    changeSource: "self_edit" | "session_sync" = "session_sync",
+    field: "identity" | "setup",
+    changeSource: "self_edit" | "session_sync",
   ): Promise<void> => {
     if (!mcpConfig) return;
-
-    const baselines = await readIdentityBaselines();
-
-    const updates: Record<string, string> = {};
-
-    const soulFile = Bun.file(SOUL_MD_PATH);
-    if (await soulFile.exists()) {
-      const content = await soulFile.text();
-      if (baselines?.soulMd && contentSha256(content) === baselines.soulMd) {
-        // Unchanged during session — skip to preserve Lead's DB edits
-      } else if (content.trim()) {
-        if (content.length < IDENTITY_FILE_MIN_LENGTH) {
-          console.error(
-            `[hook] Skipping SOUL.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
-          );
-        } else {
-          updates.soulMd = content;
-        }
-      }
-    }
-
-    const identityFile = Bun.file(IDENTITY_MD_PATH);
-    if (await identityFile.exists()) {
-      const content = await identityFile.text();
-      if (baselines?.identityMd && contentSha256(content) === baselines.identityMd) {
-        // Unchanged during session — skip
-      } else if (content.trim()) {
-        if (content.length < IDENTITY_FILE_MIN_LENGTH) {
-          console.error(
-            `[hook] Skipping IDENTITY.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
-          );
-        } else {
-          updates.identityMd = content;
-        }
-      }
-    }
-
-    const toolsMdFile = Bun.file(TOOLS_MD_PATH);
-    if (await toolsMdFile.exists()) {
-      const content = await toolsMdFile.text();
-      if (baselines?.toolsMd && contentSha256(content) === baselines.toolsMd) {
-        // Unchanged during session — skip
-      } else if (content.trim()) {
-        updates.toolsMd = content;
-      }
-    }
-
-    const heartbeatFile = Bun.file(HEARTBEAT_MD_PATH);
-    if (await heartbeatFile.exists()) {
-      const content = await heartbeatFile.text();
-      if (baselines?.heartbeatMd && contentSha256(content) === baselines.heartbeatMd) {
-        // Unchanged during session — skip
-      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
-        warnProfileFileTooLarge(agentId, "heartbeatMd", content.length, "hook");
-      } else {
-        updates.heartbeatMd = content;
-      }
-    }
-
-    if (Object.keys(updates).length === 0) return;
-
-    const synced: Record<string, string> = {};
-    for (const [field, value] of Object.entries(updates)) {
-      const [payload] = buildIndependentIdentityPayloads({ [field]: value }, changeSource);
-      if (!payload) continue;
-      const ok = await postHookProfileUpdate({
-        url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
-        headers: mcpConfig.headers,
-        body: payload.body,
-        label: payload.label,
-      });
-      if (ok) synced[field] = value;
-    }
-    await advanceIdentityBaselines(synced);
+    await syncProfileFilesToServer({
+      agentId,
+      apiUrl: getBaseUrl(),
+      apiKey: mcpConfig.headers.Authorization.replace(/^Bearer\s+/i, ""),
+      fields: [field],
+      changeSource,
+      fetchImpl: fetchWithSyncTimeout(),
+      io: PROFILE_FILE_IO,
+    });
   };
-
-  /**
-   * Sync setup script content back to the server.
-   * Extracts only agent-managed content between markers to avoid duplicating operator content.
-   */
-  const syncSetupScriptToServer = async (
+  const syncIdentityFilesToServer = (
     agentId: string,
     changeSource: "self_edit" | "session_sync" = "session_sync",
-  ): Promise<void> => {
-    if (!mcpConfig) return;
-
-    const file = Bun.file(SETUP_SCRIPT_PATH);
-    if (!(await file.exists())) return;
-
-    const raw = await file.text();
-    if (!raw.trim()) return;
-
-    const markerStart = "# === Agent-managed setup (from DB) ===";
-    const markerEnd = "# === End agent-managed setup ===";
-    const startIdx = raw.indexOf(markerStart);
-    const endIdx = raw.indexOf(markerEnd);
-
-    let content: string;
-    if (startIdx !== -1 && endIdx !== -1) {
-      // Markers present — extract ONLY the content between them.
-      content = raw.substring(startIdx + markerStart.length, endIdx).trim();
-    } else {
-      // No markers — agent created/replaced the entire file. Store as-is minus shebang.
-      content = raw.replace(/^#!\/bin\/bash\n/, "").trim();
-    }
-
-    if (!content) return;
-    if (content.length > MAX_PROFILE_FILE_LENGTH) {
-      warnProfileFileTooLarge(agentId, "setupScript", content.length, "hook");
-      return;
-    }
-    // Unchanged since it last matched the DB: not an edit, so don't send it.
-    if ((await readIdentityBaselines())?.setupScript === contentSha256(content)) return;
-
-    try {
-      const resp = await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
-        method: "PUT",
-        headers: {
-          ...mcpConfig.headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ setupScript: content, changeSource }),
-      });
-      if (resp.ok) await advanceIdentityBaselines({ setupScript: content });
-    } catch {
-      /* silently fail */
-    }
-  };
+  ) => syncProfileGroup(agentId, "identity", changeSource);
+  const syncSetupScriptToServer = (
+    agentId: string,
+    changeSource: "self_edit" | "session_sync" = "session_sync",
+  ) => syncProfileGroup(agentId, "setup", changeSource);
 
   /**
    * Check for recently cancelled tasks for this agent.

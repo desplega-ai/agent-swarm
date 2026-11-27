@@ -180,7 +180,11 @@ export async function syncIdentityFilesToServer(
   for (const [key, path] of Object.entries(paths)) {
     try {
       const content = await io.readFile(path);
-      if (content === undefined || baselines?.[key] === contentSha256(content)) continue;
+      if (
+        content === undefined ||
+        baselines?.[key as "soulMd" | "identityMd" | "toolsMd"] === contentSha256(content)
+      )
+        continue;
       if (content.trim() && content.length <= 65536) {
         updates[key] = content;
       }

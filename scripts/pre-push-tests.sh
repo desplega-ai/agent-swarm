@@ -54,7 +54,7 @@ if [[ "${PRE_PUSH_TESTS_LOCKED:-}" == 1 ]]; then
   echo "pid $$ in $PWD since $(date +%H:%M:%S)" >"$lock_file.owner" 2>/dev/null || true
 fi
 
-FULL_RUN_PATHS='^(src/tests/(preload|hang-watchdog|hang-watchdog-worker)\.ts$|bunfig\.toml$|tsconfig\.json$)'
+FULL_RUN_PATHS='^(src/tests/(preload|hang-watchdog|hang-watchdog-worker|fixtures/child-write-guard|fixtures/child-write-guard-preload|fixtures/profile-write-guard)\.ts$|bunfig\.toml$|tsconfig\.json$)'
 
 # The push compares commits only. `bun run check:local` (scripts/check.sh) sets
 # PRE_PUSH_TESTS_INCLUDE_WORKTREE=1 so uncommitted edits count as changes too.

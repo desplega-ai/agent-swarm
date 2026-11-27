@@ -19,9 +19,16 @@ import { DB_RETENTION_TABLES } from "../be/db-retention";
 import "../be/seed-prompt-templates";
 import { getAllTemplateDefinitions } from "../prompts/registry";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
+import { propagateWriteGuardToChildren } from "./fixtures/child-write-guard";
 import { startHangWatchdog } from "./hang-watchdog";
 
 startHangWatchdog();
+
+// Every process the suite spawns loads the profile write guard, including those
+// given an explicit env (the e2e suites that launch the real CLI). On a live
+// worker a child writing /workspace/*.md or /tmp/identity-baselines.json would
+// overwrite that worker's profile (agent-swarm-ops#884).
+propagateWriteGuardToChildren();
 
 // Worker deployments configure Slack rendering, links, organization, and provider defaults.
 // Start tests from the same unset defaults as CI; suites can still opt in by

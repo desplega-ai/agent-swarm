@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  bootIdentityBaselines,
   buildIdentityPayload,
   buildIndependentIdentityPayloads,
   CLAUDE_MD_LINEAGE_PATH,
@@ -328,11 +329,16 @@ describe("collectProfilePayloads (field gate)", () => {
       [TOOLS_MD_PATH]: "tools",
       [CLAUDE_MD_PATH]: "claude md content",
       [SETUP_SCRIPT_PATH]: `${MARKER_START}\nexport X=1\n${MARKER_END}`,
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(bootIdentityBaselines({}, undefined)),
     });
 
     const setupOnly = await collectProfilePayloads(["setup"], "session_sync", files);
     expect(setupOnly.map((p) => p.label)).toEqual(["setup"]);
-    expect(setupOnly[0]?.body).toEqual({ setupScript: "export X=1", changeSource: "session_sync" });
+    expect(setupOnly[0]?.body).toEqual({
+      setupScript: "export X=1",
+      changeSource: "session_sync",
+      expectedHashes: { setupScript: contentSha256("") },
+    });
 
     const claudeOnly = await collectProfilePayloads(["claude"], "session_sync", files);
     expect(claudeOnly.map((p) => p.label)).toEqual(["claude"]);
@@ -362,7 +368,10 @@ describe("collectProfilePayloads (field gate)", () => {
   });
 
   test("propagates the changeSource into every body", async () => {
-    const files = reader({ [TOOLS_MD_PATH]: "tools" });
+    const files = reader({
+      [TOOLS_MD_PATH]: "tools",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(bootIdentityBaselines({}, undefined)),
+    });
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
     expect(payloads[0]?.body.changeSource).toBe("self_edit");
   });
@@ -370,7 +379,10 @@ describe("collectProfilePayloads (field gate)", () => {
   test("non-Claude providers sync /workspace/CLAUDE.md, not the personal file", async () => {
     // A codex/pi/opencode session edits the runner-materialized workspace file;
     // the Claude personal file (~/.claude/CLAUDE.md) is absent for them.
-    const files = reader({ [WORKSPACE_CLAUDE_MD_PATH]: "workspace claude md edit" });
+    const files = reader({
+      [WORKSPACE_CLAUDE_MD_PATH]: "workspace claude md edit",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(bootIdentityBaselines({}, undefined)),
+    });
 
     const payloads = await collectProfilePayloads(
       ["claude"],
@@ -382,6 +394,7 @@ describe("collectProfilePayloads (field gate)", () => {
     expect(payloads[0]?.body).toEqual({
       claudeMd: "workspace claude md edit",
       changeSource: "session_sync",
+      expectedHashes: { claudeMd: contentSha256("") },
     });
   });
 
@@ -618,6 +631,7 @@ describe("collectProfilePayloads (baseline integration)", () => {
       soulMd: contentSha256(identityContent),
       identityMd: contentSha256(identityContent),
       toolsMd: contentSha256(toolsContent),
+      expected: { toolsMd: contentSha256(toolsContent) },
     };
 
     const files = reader({
@@ -645,12 +659,17 @@ describe("collectProfilePayloads (baseline integration)", () => {
         soulMd: contentSha256(LONG),
         identityMd: contentSha256(LONG),
         toolsMd: contentSha256("tools"),
+        expected: { toolsMd: contentSha256("tools") },
       }),
     });
 
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
     expect(payloads.map((payload) => payload.body)).toEqual([
-      { toolsMd: "edited tools", changeSource: "self_edit" },
+      {
+        toolsMd: "edited tools",
+        changeSource: "self_edit",
+        expectedHashes: { toolsMd: contentSha256("tools") },
+      },
     ]);
   });
 
@@ -750,10 +769,8 @@ describe("collectProfilePayloads (baseline integration)", () => {
     ]);
   });
 
-  test("session_sync of the workspace CLAUDE.md stays unconditional", async () => {
-    // Non-Claude harnesses edit /workspace/CLAUDE.md directly and nothing
-    // rematerializes it mid-life, so the boot baseline is not a valid base.
-    const baselines: IdentityBaselines = { claudeMd: contentSha256("original") };
+  test("session_sync of the workspace CLAUDE.md uses its boot DB token", async () => {
+    const baselines = bootIdentityBaselines({ claudeMd: "original" }, undefined);
     const files = reader({
       [WORKSPACE_CLAUDE_MD_PATH]: "modified workspace md",
       [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
@@ -766,19 +783,37 @@ describe("collectProfilePayloads (baseline integration)", () => {
       WORKSPACE_CLAUDE_MD_PATH,
     );
     expect(payloads.map((p) => p.body)).toEqual([
-      { claudeMd: "modified workspace md", changeSource: "session_sync" },
+      {
+        claudeMd: "modified workspace md",
+        changeSource: "session_sync",
+        expectedHashes: { claudeMd: contentSha256("original") },
+      },
     ]);
   });
 
-  test("session_sync proceeds normally when baselines file is missing", async () => {
+  test("session_sync holds the workspace CLAUDE.md when no DB token was recorded", async () => {
+    const files = reader({
+      [WORKSPACE_CLAUDE_MD_PATH]: "modified workspace md",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("original") }),
+    });
+
+    const payloads = await collectProfilePayloads(
+      ["claude"],
+      "session_sync",
+      files,
+      WORKSPACE_CLAUDE_MD_PATH,
+    );
+    expect(payloads).toEqual([]);
+  });
+
+  test("session_sync holds identity uploads when no DB tokens were recorded", async () => {
     const files = reader({
       [TOOLS_MD_PATH]: "tools content",
-      // No IDENTITY_BASELINES_PATH → baselines will be null → no skipping
+      // Missing snapshot must never turn into an unconditional PUT.
     });
 
     const payloads = await collectProfilePayloads(["identity"], "session_sync", files);
-    expect(payloads).toHaveLength(1);
-    expect(payloads[0]?.body.toolsMd).toBe("tools content");
+    expect(payloads).toEqual([]);
   });
 
   test("all identity files unchanged → no identity payload at all", async () => {

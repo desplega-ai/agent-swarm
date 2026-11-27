@@ -61,6 +61,8 @@ src/tests/primitives-object-webhooks.test.ts  # interleaved applyFileChange race
 src/tests/link-preview.test.ts  # fetch failures, a DNS answer that rebinds to a private address and a redirect to loopback need an injected fetch and resolver no route exposes; the route's literal-host refusals are in scripts/e2e/scenarios/link-preview.ts
 src/tests/spend-cap-credentials.test.ts  # resolveCredentialPools runs only inside the worker harness, which the contract e2e suite never starts
 src/tests/key-usage-selection.test.ts  # selectCredential and resolveCredentialPools run only inside the worker harness; tie-breaking and window expiry need many enumerated cases
+src/tests/profile-sync-cas.test.ts  # compare-and-set of the worker profile files runs only inside the worker harness and its hooks, which the contract e2e suite never starts; the cases interleave late and conflicting profile responses, hold the identity baselines lock past its wait, and seed the agent row directly in the DB, none of which a scenario can drive over HTTP
+src/tests/profile-sync.test.ts  # the profile sync runs only inside the worker harness, which the contract e2e suite never starts; the cases feed collectProfilePayloads an in-memory copy of the workspace profile files and the boot baselines snapshot, which never cross an HTTP boundary
 
 # Dashboard: stays on until Playwright is required and fills in (plan section 4).
 apps/ui/  # dashboard units, until the Playwright delete PR
