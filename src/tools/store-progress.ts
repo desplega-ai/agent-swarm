@@ -7,6 +7,7 @@ import {
   getAgentById,
   getAgentCurrentTask,
   getResolvedConfig,
+  getSwarmConfigs,
   getTaskById,
   insertTaskAttachment,
   skipTask,
@@ -351,11 +352,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
         const defaultOrgId = configValue("AGENT_FS_DEFAULT_ORG_ID");
         const defaultDriveId = configValue("AGENT_FS_DEFAULT_DRIVE_ID");
         const apiUrl = configValue("AGENT_FS_API_URL") || process.env.AGENT_FS_API_URL?.trim();
-        const apiKey =
-          configValue("AGENT_FS_API_KEY") ||
-          configValue("API_AGENT_FS_API_KEY") ||
-          process.env.AGENT_FS_API_KEY?.trim() ||
-          process.env.API_AGENT_FS_API_KEY?.trim();
+        // Only the agent's own agent-scoped key: a global row or the API env key
+        // would verify as a different agent-fs identity (see agent-fs-identity.ts).
+        const [ownKey] = await getSwarmConfigs({
+          scope: "agent",
+          scopeId: caller.id,
+          key: "AGENT_FS_API_KEY",
+        });
+        const apiKey = ownKey?.value?.trim();
 
         for (const attachment of agentFsAttachments) {
           const hasExplicitScope = Boolean(attachment.orgId || attachment.driveId);
@@ -371,7 +375,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         if (!apiUrl || !apiKey) {
           return toolErr(
-            "Agent-fs attachments cannot be verified because the registering agent's agent-fs API URL or credential is unavailable. No attachment was registered and task state was unchanged.",
+            "Agent-fs attachments cannot be verified because the registering agent has no agent-fs API URL or no AGENT_FS_API_KEY of its own (agent scope). No attachment was registered and task state was unchanged.",
           );
         }
 

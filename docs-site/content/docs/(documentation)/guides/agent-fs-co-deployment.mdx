@@ -14,7 +14,7 @@ Agent prompts direct short answers to the task output and documents such as repo
 
 ## What Changes
 
-With agent-fs enabled, task attachments and `/api/fs/*` use a shared filesystem provider instead of the local data directory. The dashboard can upload, preview, download, and delete task files. Workers can also write agent-fs pointers through `store-progress`; before changing task state, the server verifies that every pointer exists in the exact organization and drive supplied on the attachment or resolved from the registering agent's configured defaults. If scope, credentials, or a file is missing, the entire call fails without registering any attachment or terminal result.
+With agent-fs enabled, task attachments and `/api/fs/*` use a shared filesystem provider instead of the local data directory. The dashboard can upload, preview, download, and delete task files. Workers can also write agent-fs pointers through `store-progress`; before changing task state, the server verifies that every pointer exists in the exact organization and drive supplied on the attachment or resolved from the registering agent's configured defaults, using only that agent's own agent-scoped `AGENT_FS_API_KEY`. If scope, credentials, or a file is missing, the entire call fails without registering any attachment or terminal result.
 
 Assigned-task prompts now also include a ready-to-run download recipe for each attachment using the provider-agnostic raw route:
 
