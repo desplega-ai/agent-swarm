@@ -381,8 +381,8 @@
       "scenarios": ["mcp-user-events"]
     },
     "cost-and-orphan-recovery": {
-      "description": "Session costs priced and billed, active sessions, orphan task recovery",
-      "scenarios": ["core-session-data"]
+      "description": "Session costs priced and billed, active sessions, orphan task recovery, write-time bounds on session logs",
+      "scenarios": ["core-session-data", "core-session-log-bounds"]
     },
     "credential-bindings": {
       "description": "Standalone credential broker bindings swap a stored secret into a script's outbound fetch without the script ever seeing it.",

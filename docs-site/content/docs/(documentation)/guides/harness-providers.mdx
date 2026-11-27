@@ -796,6 +796,37 @@ adapter emits raw_log  ─▶  runner flushLogBuffer  ─▶  POST /api/session-
 - API read: same file L155–166 — `GET /api/tasks/{taskId}/session-logs` → `getSessionLogsByTaskId`.
 - UI hook: `useTaskSessionLogs` in [`ui/src/api/hooks/use-tasks.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/ui/src/api/hooks/use-tasks.ts), consumed at `ui/src/pages/tasks/[id]/page.tsx:42` and rendered by `<SessionLogViewer />` at `ui/src/components/shared/session-log-viewer.tsx`.
 
+### What a raw log may cost
+
+Every layer of that path bounds what it stores, because one opencode session
+once wrote 7.3 GB of `session_logs` in 27 minutes and OOM-killed the API.
+
+| Layer | Bound |
+|---|---|
+| OpenCode adapter | 100,000 UTF-8 bytes per tool text payload; serialized `args` over 150 KiB become a preview; serialized mirrors over 200 KiB become a valid marker |
+| Worker buffer | 1 MB per line, flushed at 4 MB |
+| `POST /api/session-logs` | 16 MB body, else 413 |
+| `createSessionLogs` | 256 KB per row; `SESSION_LOG_SESSION_MAX_MB` (default 256) per session |
+
+All of these count UTF-8 bytes. A session that spends its budget stores one
+`session_log_budget_exhausted` marker and nothing more, and the route's `201`
+reports the rows actually stored, not the lines posted.
+
+Budget ownership is derived by the server: task uploads use the authorized
+task id, and uploads before a pool worker claims a task use that worker's
+authenticated agent identity. A user upload must name a writable task;
+choosing the same `sessionId` in another scope cannot exhaust its budget.
+Row charges include repeated session/task ids, their indexes, and the harness
+name. Session/task ids are capped at 200 characters and `cli` at 64.
+
+**Emit one row per event, never two.** The opencode adapter used to write an
+unconditional `raw_log` of the whole event *and* a translated copy, doubling
+storage for mirrors the dashboard discards. It now skips the raw copy for the
+event types the UI renders from the translated form (`UNRENDERED_EVENT_TYPES`:
+`session.tool.*`, and the text/reasoning deltas whose `*.ended` event carries
+the full text). Cumulative assistant text is emitted without a raw mirror, so a
+long message costs its own length once rather than once per delta.
+
 ### What this means for a new provider
 
 Your `emit()` implementation must do three things for the UI to light up:

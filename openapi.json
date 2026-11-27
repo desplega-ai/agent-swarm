@@ -57734,7 +57734,8 @@
                 "properties": {
                   "sessionId": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 200
                   },
                   "iteration": {
                     "type": "integer",
@@ -57748,10 +57749,14 @@
                     "minItems": 1
                   },
                   "taskId": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
                   },
                   "cli": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
                   }
                 },
                 "required": [
@@ -57792,6 +57797,16 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds the session-log body limit",
             "content": {
               "application/json": {
                 "schema": {

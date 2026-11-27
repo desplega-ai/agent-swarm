@@ -879,6 +879,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     1,
     MAX_DB_RETENTION_DAYS,
   ),
+  // Per-session session_logs budget. Below 1 MB a normal session loses its
+  // transcript; 64 GB is far past any disk this guards.
+  ...boundedIntegerValidators(["SESSION_LOG_SESSION_MAX_MB"], 1, 65_536),
   // 0 is meaningful here: "auto-assign nothing this sweep".
   ...integerValidators(["HEARTBEAT_MAX_AUTO_ASSIGN"], 0),
   // 0 disables the `latest:...@stable` soak window.

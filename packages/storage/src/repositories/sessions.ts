@@ -492,6 +492,8 @@ export type SourceBackfillRootRow = {
 };
 
 export interface SessionsRepository {
+  findLogBudget(key: string): Promise<{ bytes: number; exhaustedAt: string | null } | null>;
+  saveLogBudget(key: string, bytes: number, exhaustedAt: string | null): Promise<void>;
   // ---- session_logs ----
   /** `lineNumber` of the newest stored line of `(sessionId, iteration)`, by insert order. */
   lastLogLineNumber(sessionId: string, iteration: number): Promise<number | null>;
@@ -886,6 +888,19 @@ const COMPOSITION_COLUMNS = sql`id, "taskId", "agentId", "sessionId", seq, provi
 
 export abstract class BaseSessionsRepository implements SessionsRepository {
   constructor(protected readonly db: SqlExecutor) {}
+
+  findLogBudget(key: string): Promise<{ bytes: number; exhaustedAt: string | null } | null> {
+    return this.db.get(
+      sql`SELECT bytes, "exhaustedAt" FROM session_log_bytes WHERE "sessionId" = ${key}`,
+    );
+  }
+
+  async saveLogBudget(key: string, bytes: number, exhaustedAt: string | null): Promise<void> {
+    await this.db.run(sql`
+      INSERT INTO session_log_bytes ("sessionId", bytes, "exhaustedAt")
+      VALUES (${key}, ${bytes}, ${exhaustedAt})
+      ON CONFLICT ("sessionId") DO UPDATE SET bytes = excluded.bytes, "exhaustedAt" = excluded."exhaustedAt"`);
+  }
 
   // ---- session_logs ----
 

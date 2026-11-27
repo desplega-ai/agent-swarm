@@ -2949,6 +2949,7 @@ export function activeTaskRefs(state: RunnerState): ActiveTaskRef[] {
 /** Buffer for session logs */
 interface LogBuffer {
   lines: string[];
+  bytes: number;
   lastFlush: number;
   partialLine: string; // Accumulates incomplete line across chunks
 }
@@ -2956,6 +2957,36 @@ interface LogBuffer {
 /** Configuration for log streaming */
 const LOG_BUFFER_SIZE = 50; // Flush after this many lines
 const LOG_FLUSH_INTERVAL_MS = 5000; // Flush every 5 seconds
+/**
+ * Flush once the buffered lines reach this size. Line count alone let a
+ * tool-heavy session build ~95 MB request bodies, which the API had to buffer
+ * whole; staying under the route's 16 MB cap keeps every flush accepted.
+ */
+const LOG_BUFFER_MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * Hard cap on one buffered line, in UTF-8 bytes. A single event above the
+ * route's body cap would be rejected with 413 after `flushLogBuffer` already
+ * cleared the batch, losing every line it carried — so the line is cut here,
+ * before it can poison a flush. The API truncates again at 256 KB per row.
+ */
+const LOG_LINE_MAX_BYTES = 1024 * 1024;
+
+export function boundLogLine(content: string): string {
+  const encoded = new TextEncoder().encode(content);
+  if (encoded.length <= LOG_LINE_MAX_BYTES) return content;
+  // The suffix spends part of the cap, so the count reports what was really
+  // dropped from the cut point rather than `length - cap`.
+  const suffixWidth = new TextEncoder().encode(
+    ` [truncated ${encoded.length} bytes by agent-swarm]`,
+  ).length;
+  // `stream: true` drops a trailing partial sequence instead of emitting U+FFFD.
+  const head = new TextDecoder("utf-8").decode(
+    encoded.subarray(0, LOG_LINE_MAX_BYTES - suffixWidth),
+    { stream: true },
+  );
+  const dropped = encoded.length - new TextEncoder().encode(head).length;
+  return `${head} [truncated ${dropped} bytes by agent-swarm]`;
+}
 
 /** Push buffered logs to the API */
 async function flushLogBuffer(
@@ -2976,6 +3007,7 @@ async function flushLogBuffer(
   // (fire-and-forget callers would otherwise race on the same buffer)
   const lines = buffer.lines;
   buffer.lines = [];
+  buffer.bytes = 0;
   buffer.lastFlush = Date.now();
 
   const headers: Record<string, string> = {
@@ -4951,7 +4983,7 @@ export async function spawnProviderProcess(
   }
 
   // Set up log streaming
-  const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
+  const logBuffer: LogBuffer = { lines: [], bytes: 0, lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
 
   // Event buffer (flushes to API periodically)
@@ -5056,11 +5088,18 @@ export async function spawnProviderProcess(
   // snapshots carry a real `cumulativeOutputTokens` (was 0 until completion).
   let cumulativeProgressOutputTokens = 0;
 
-  function bufferSessionLogLine(content: string) {
+  function bufferSessionLogLine(raw: string) {
     if (!shouldStream) return;
+    const content = boundLogLine(raw);
     logBuffer.lines.push(content);
+    // Measured as it will be sent: the flush posts JSON, and escaping can
+    // multiply control-heavy text ~6x. Counting the raw bytes would let four
+    // 1 MB NUL-filled lines become a 24 MB body against the route's 16 MB cap,
+    // which 413s after flushLogBuffer has already cleared the batch.
+    logBuffer.bytes += new TextEncoder().encode(JSON.stringify(content)).length;
     const shouldFlush =
       logBuffer.lines.length >= LOG_BUFFER_SIZE ||
+      logBuffer.bytes >= LOG_BUFFER_MAX_BYTES ||
       Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
     if (shouldFlush) {
       flushLogBuffer(logBuffer, {

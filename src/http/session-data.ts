@@ -30,10 +30,22 @@ import {
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { bodyTask, route } from "./route-def";
-import { canReadSession, SESSION_READ_DENIED } from "./session-access";
+import {
+  canReadSession,
+  resolveSessionActor,
+  SESSION_READ_DENIED,
+  SESSION_WRITE_DENIED,
+} from "./session-access";
 import { recomputeSessionCost } from "./session-cost-recompute";
 import { cachedUsageReport } from "./usage-cache";
 import { jsonError } from "./utils";
+
+/**
+ * A worker flushes 50 buffered lines per POST. The cap keeps a runaway session
+ * from forcing the API to buffer the whole batch in memory — one did, at ~95 MB
+ * a flush, until the container hit its limit and was SIGKILLed.
+ */
+const SESSION_LOGS_MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
 
@@ -140,12 +152,16 @@ const createSessionLogsRoute = route({
   session: bodyTask("taskId"),
   summary: "Store session logs",
   tags: ["Session Data"],
+  maxBodyBytes: SESSION_LOGS_MAX_BODY_BYTES,
   body: z.object({
-    sessionId: z.string().min(1),
+    // Bounded, not just non-empty: the id repeats in every row and in the
+    // session index, and the per-session byte budget charges only `content`.
+    // Real ids are a UUID or a short harness session id.
+    sessionId: z.string().min(1).max(200),
     iteration: z.number().int().min(1),
     lines: z.array(z.string()).min(1),
-    taskId: z.string().optional(),
-    cli: z.string().optional(),
+    taskId: z.string().min(1).max(200).optional(),
+    cli: z.string().min(1).max(64).optional(),
   }),
   responses: {
     201: {
@@ -153,6 +169,7 @@ const createSessionLogsRoute = route({
       schema: z.object({ success: z.literal(true), count: z.number().int().nonnegative() }),
     },
     400: { description: "Validation error" },
+    413: { description: "Request body exceeds the session-log body limit" },
   },
   rbac: { ungated: "worker telemetry ingest; no user flow writes it" },
 });
@@ -343,12 +360,37 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
-      await createSessionLogs({
+      const auth = getRequestAuth(req);
+      const actor = await resolveSessionActor(req, myAgentId);
+      // A user cannot skip the task's session gate by omitting taskId. Pool
+      // workers still upload before claiming a task, under their own identity.
+      if (!parsed.body.taskId && actor.kind !== "bypass") {
+        jsonError(res, SESSION_WRITE_DENIED, 403);
+        return true;
+      }
+      if (parsed.body.taskId && auth?.kind === "agent") {
+        const task = await getTaskById(parsed.body.taskId);
+        if (
+          !task ||
+          task.agentId !== auth.agentId ||
+          (auth.taskId !== null && auth.taskId !== task.id)
+        ) {
+          jsonError(res, SESSION_WRITE_DENIED, 403);
+          return true;
+        }
+      }
+      const stored = await createSessionLogs({
         taskId: parsed.body.taskId || undefined,
         sessionId: parsed.body.sessionId,
         iteration: parsed.body.iteration,
         cli: parsed.body.cli || "claude",
         lines: parsed.body.lines,
+        budgetOwner:
+          auth?.kind === "agent"
+            ? `agent:${auth.agentId}`
+            : myAgentId
+              ? `agent:${myAgentId}`
+              : "operator",
       });
       // Every harness streams its output through this endpoint, so a task that
       // is producing output keeps its session alive here instead of per
@@ -360,10 +402,9 @@ export async function handleSessionData(
           console.warn("[HTTP] Failed to refresh session liveness from session logs:", error);
         }
       }
-      createSessionLogsRoute.respond(res, 201, {
-        success: true,
-        count: parsed.body.lines.length,
-      });
+      // The stored count, not the posted one: a session past its byte budget
+      // keeps only a prefix, or nothing at all.
+      createSessionLogsRoute.respond(res, 201, { success: true, count: stored });
     } catch (error) {
       console.error("[HTTP] Failed to create session logs:", error);
       jsonError(res, "Failed to store session logs", 500);

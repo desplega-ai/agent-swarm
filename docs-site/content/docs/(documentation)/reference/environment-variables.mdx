@@ -31,6 +31,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `STEERING_ENABLED` | `true` | [Task steering](/docs/guides/task-steering) is enabled by default. Set `false` or `0` (API server and worker containers) to opt out: steering routes reject writes, `steer-task`/`accept-steer` are not registered, and workers skip steering delivery polls. |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
+| `SESSION_LOG_SESSION_MAX_MB` | `256` | Stop storing `session_logs` for one session once it has written this many megabytes, and log a `[session-logs]` warning. Accepted range: 1–65,536. A single oversized line is truncated at 256 KB with a marker. This is a safety bound against a runaway session, not a retention policy: retention is age-based and cannot act inside its day granularity. |
 | `DATABASE_URL` | — | A `postgres://` URL runs the API on Postgres 16 with pgvector instead of SQLite. Deployment env only. See [Postgres](/docs/guides/postgres). |
 | `DATABASE_PASSWORD` | — | Postgres only: raw password that the API URL-encodes into `DATABASE_URL`. Deployment env only. |
 | `DATABASE_QUERY_URL` | — | Postgres only: URL of the restricted read-only role the `db-query` tool uses. Unset turns `db-query` off on Postgres. |

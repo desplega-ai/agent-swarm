@@ -50,10 +50,28 @@ The server sweeps only this closed code-reviewed list:
 
 Table and column names never come from configuration. An operator can set a retention value only. An unset key disables that table's sweep.
 
+Retention is age-based, so it cannot bound a table that grows inside its own
+granularity: one session once wrote 7.3 GB of `session_logs` in 27 minutes and
+OOM-killed the API container, with nothing old enough to sweep. That class of
+growth is bounded at write time instead, by `SESSION_LOG_SESSION_MAX_MB`
+(default 256) and a 256 KB cap per line, both counted in UTF-8 bytes. Crossing
+the budget logs a `[session-logs]` warning and stops that one session's
+logging; retention still owns reclaiming the rows afterwards.
+
+Each session's spend lives in `session_log_bytes`, updated inside the same
+transaction as the inserts: that is what makes a restart keep the budget and
+concurrent batches reserve bytes atomically. Rows are small (one per authorized session scope)
+and sweeping them is a separate opt-in candidate.
+
+Accounting keys include the authorized task id, or the authenticated agent id
+for pre-claim uploads. A user upload without a task is rejected. Reusing a
+session id in another task cannot spend the first task's budget. Row costs
+include repeated session/task metadata and indexes as well as content; the
+HTTP route also bounds session/task ids at 200 characters and `cli` at 64.
+
 Workflow deletion and opt-in run retention both reclaim only snapshots referenced by
 the deleted runs, after checking that no other run still references them. Unrelated
 orphan snapshots are not swept. Snapshot age alone never makes a snapshot eligible.
-
 
 - **age**: the value is whole days from 1 through 1,000,000. Rows older than the horizon are deleted, oldest first. Use at least seven days unless you have verified that a shorter window is suitable for your deployment.
 - **keep latest**: the value is a count from 1 through 1,000,000. Within each `(agentId, field)`, only the newest N rows by `version` are kept. Age plays no part, so the only version of a rarely edited field is never deleted. The floor of 1 means the newest version of every field always survives, so the next edit still numbers itself from it. Each sweep deletes the deepest history first, so an interrupted sweep leaves every field's surviving versions contiguous. A version can be hundreds of KB, so this table's batches start at 50 rows and never exceed 100.

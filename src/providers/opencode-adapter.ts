@@ -455,6 +455,33 @@ export function applyProviderKeySplice(
 const SWARM_AGENT_NAME = "swarm";
 const TRANSCRIPT_TAIL_CHARS = 20_000;
 const TOOL_RESULT_PREVIEW_CHARS = 500;
+/**
+ * Cap on a persisted tool argument or result, in UTF-8 bytes. Tool payloads are
+ * the only unbounded field in an OpenCode session: one run wrote 7.3 GB of
+ * session_logs in 27 minutes and OOM-killed the API container.
+ */
+const TOOL_PAYLOAD_MAX_BYTES = 100_000;
+
+const textEncoder = new TextEncoder();
+/**
+ * Raw events the dashboard never renders: tool events are covered by the
+ * `tool_start` / `tool_end` mirrors, and text or reasoning deltas by their
+ * `.ended` part. Keep in sync with `OPENCODE_V2_COVERED` in
+ * `apps/ui/src/logs-parser/adapters.ts`, which drops them at parse time.
+ */
+const UNRENDERED_EVENT_TYPES = new Set([
+  "session.tool.input.started",
+  "session.tool.input.delta",
+  "session.tool.input.ended",
+  "session.tool.called",
+  "session.tool.progress",
+  "session.tool.success",
+  "session.tool.failed",
+  "session.text.started",
+  "session.text.delta",
+  "session.reasoning.started",
+  "session.reasoning.delta",
+]);
 // The last response body finishes streaming with the step; this only covers
 // a read still in flight when the session ends.
 const BILLING_SETTLE_MS = 2_000;
@@ -581,6 +608,88 @@ export function measureOpencodeContext(
   });
 }
 
+/**
+ * A serialized mirror, bounded to stay inside one `session_logs` row. The
+ * payload caps apply to raw text, but JSON escaping can multiply it — 50k NUL
+ * bytes serialize to 300 KB — and a row cut by the API would be invalid JSON
+ * the dashboard's parser drops. Over the bound the mirror is replaced by a
+ * marker rather than emitted broken.
+ */
+const MIRROR_MAX_BYTES = 200 * 1024;
+
+function boundedMirror(value: string): string {
+  if (textEncoder.encode(value).length <= MIRROR_MAX_BYTES) return value;
+  return JSON.stringify({
+    type: "raw_log_truncated",
+    reason: "serialized event exceeded the session-log row bound",
+    bytes: textEncoder.encode(value).length,
+  });
+}
+
+/**
+ * Truncate to {@link TOOL_PAYLOAD_MAX_BYTES} UTF-8 bytes — the unit the row cap
+ * downstream counts. Bounding characters instead would let 100k 4-byte
+ * characters through as 400 KB, which the API then cuts mid-value. The cut
+ * lands on a code-point boundary, so no U+FFFD is stored.
+ */
+function boundedToolText(value: string): string {
+  const encoded = textEncoder.encode(value);
+  if (encoded.length <= TOOL_PAYLOAD_MAX_BYTES) return value;
+  // The suffix spends part of the budget, so the count reports what was really
+  // dropped from the cut point — not `length - cap`, which ignores both the
+  // suffix and the code-point boundary.
+  const suffixWidth = textEncoder.encode(`… [truncated ${encoded.length} bytes]`).length;
+  const head = new TextDecoder("utf-8").decode(
+    encoded.subarray(0, TOOL_PAYLOAD_MAX_BYTES - suffixWidth),
+    { stream: true },
+  );
+  return `${head}… [truncated ${encoded.length - textEncoder.encode(head).length} bytes]`;
+}
+
+/**
+ * Aggregate ceiling for a whole `args` object, in UTF-8 bytes, kept under the
+ * API's 256 KB per-row cap with room for the rest of the event. A mirror cut by
+ * that cap instead would be truncated mid-JSON, and the dashboard's parser
+ * reports a parse error rather than pairing the call with its `tool_end`.
+ * Past the ceiling the shape is dropped for a preview.
+ */
+const TOOL_ARGS_MAX_BYTES = 150 * 1024;
+const TOOL_ARGS_MAX_DEPTH = 8;
+
+/** Truncate every string in `input`, at any depth. */
+function boundStringsDeep(input: unknown, depth: number): unknown {
+  if (typeof input === "string") return boundedToolText(input);
+  if (!input || typeof input !== "object") return input;
+  if (depth >= TOOL_ARGS_MAX_DEPTH) return { truncated: true, reason: "max depth" };
+  if (Array.isArray(input)) return input.map((item) => boundStringsDeep(item, depth + 1));
+  const bounded: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    bounded[key] = boundStringsDeep(value, depth + 1);
+  }
+  return bounded;
+}
+
+/**
+ * Bound a tool's input for persistence. Strings are truncated in place so the
+ * shape stays usable by the dashboard and the context preamble, both of which
+ * read `args` field by field.
+ */
+function boundedToolArgs(input: unknown): unknown {
+  if (typeof input === "string") return boundedToolText(input);
+  if (!input || typeof input !== "object") return input;
+  const serialized = JSON.stringify(input);
+  if (serialized === undefined || textEncoder.encode(serialized).length <= TOOL_PAYLOAD_MAX_BYTES)
+    return input;
+  const bounded = boundStringsDeep(input, 0);
+  // A wide or deeply nested structure survives per-string truncation and can
+  // still be far over the cap — many fields, or many array items.
+  const reserialized = JSON.stringify(bounded);
+  if (reserialized === undefined || textEncoder.encode(reserialized).length > TOOL_ARGS_MAX_BYTES) {
+    return { truncated: true, preview: boundedToolText(serialized) };
+  }
+  return bounded;
+}
+
 export class OpencodeSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   // The runner attaches its listener after `createSession` resolves; buffer
@@ -684,7 +793,10 @@ export class OpencodeSession implements ProviderSession {
   /** Emit `event` plus its scrubbed `raw_log` mirror. */
   private emit(event: ProviderEvent): void {
     this.emitDirect(event);
-    this.emitDirect({ type: "raw_log", content: scrubSecrets(JSON.stringify(event)) });
+    this.emitDirect({
+      type: "raw_log",
+      content: boundedMirror(scrubSecrets(JSON.stringify(event))),
+    });
   }
 
   /** Process one OpenCode 2 event. */
@@ -698,7 +810,16 @@ export class OpencodeSession implements ProviderSession {
     const data = (ev as { data?: { sessionID?: string } }).data;
     if (data?.sessionID !== this._sessionId) return;
 
-    this.emitDirect({ type: "raw_log", content: scrubSecrets(JSON.stringify(ev)) });
+    // Persist the raw event only when the dashboard can render it. Tool
+    // payloads carry the whole result, so storing the raw event next to its
+    // bounded mirror doubled the largest rows in session_logs for a copy the
+    // parser discards; streaming deltas are discarded the same way.
+    if (!UNRENDERED_EVENT_TYPES.has(ev.type)) {
+      this.emitDirect({
+        type: "raw_log",
+        content: boundedMirror(scrubSecrets(JSON.stringify(ev))),
+      });
+    }
 
     switch (ev.type) {
       case "session.step.started": {
@@ -727,10 +848,11 @@ export class OpencodeSession implements ProviderSession {
           toolName,
           // OpenCode's native skill tool names the skill with `id`, not `name`.
           // Normalize only this tool for the shared skill.invoke tracker.
-          args:
+          args: boundedToolArgs(
             toolName === "skill" && typeof ev.data.input?.id === "string"
               ? { ...ev.data.input, name: ev.data.input.id }
               : ev.data.input,
+          ),
         });
         break;
       }
@@ -746,7 +868,7 @@ export class OpencodeSession implements ProviderSession {
           type: "tool_end",
           toolCallId: ev.data.id,
           toolName: this.toolNames.get(ev.data.id) ?? "tool",
-          result,
+          result: boundedToolText(result),
           isError,
         });
         break;
@@ -759,7 +881,11 @@ export class OpencodeSession implements ProviderSession {
         const text = parts.join("").trim();
         if (!text) break;
         this.transcript.push(`[assistant]: ${ev.data.text}`);
-        this.emit({
+        // The content is cumulative across the message's parts, so persisting
+        // every mirror rewrites the whole message per part — O(N²) bytes for
+        // rows the parser drops in favour of the raw `.ended` parts. The
+        // runner still needs the event itself for the final assistant text.
+        this.emitDirect({
           type: "message",
           role: "assistant",
           content: text,

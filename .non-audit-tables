@@ -35,6 +35,7 @@ script_embeddings
 script_run_sources     # immutable content-addressed source; attribution lives on script_runs (342)
 seed_state
 session_costs
+session_log_bytes      # byte accounting for the session_logs write bound; no user attribution (3297)
 session_logs
 session_members        # derived chain index, written only by triggers; attribution lives on agent_tasks (253)
 session_summaries      # derived chain aggregates, written only by triggers; attribution lives on agent_tasks (253)

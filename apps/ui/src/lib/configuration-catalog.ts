@@ -1027,6 +1027,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Database,
     entries: [
       {
+        key: "SESSION_LOG_SESSION_MAX_MB",
+        label: "Session log budget per session",
+        description:
+          "Stop storing session_logs for one session once it has written this many megabytes, and warn. Guards against a runaway session filling the disk inside the retention window. Defaults to 256.",
+        kind: "number",
+        defaultValue: "256",
+        placeholder: "256",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
         key: "SESSION_LOG_RETENTION_DAYS",
         label: "Session log retention",
         description:
