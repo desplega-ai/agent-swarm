@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
+import { bootLocalApi, createLocalIdentity, importPage, PAGE_BUNDLE_FORMAT } from "../../ui-dev/local";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { repoRoot, reservedPort } from "../sut";
@@ -14,6 +15,70 @@ const PAGE_FIXTURE = "scripts/ui-dev/fixtures/sample-page.json";
 const ROWS = 1_100;
 
 type Ready = Record<string, unknown>;
+
+/** A non-loopback IPv4 of this host, or undefined when it has none. */
+function hostIpv4(): string | undefined {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) return address.address;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The local API stays off the checkout's env files and off the network. A cwd whose `.env*`
+ * files name an unreachable Postgres must still boot on SQLite, and a public page answers on
+ * loopback but not on the host's LAN address.
+ */
+async function isolation(ctx: ScenarioContext, stateRoot: string) {
+  const cwd = join(stateRoot, "cwd");
+  await mkdir(cwd);
+  for (const entry of ["src", "node_modules", "package.json"]) {
+    await symlink(join(repoRoot, entry), join(cwd, entry));
+  }
+  const probe = "DATABASE_URL=postgres://probe:probe@127.0.0.1:1/probe\n";
+  for (const name of [".env", ".env.local", ".env.development", ".env.development.local"]) {
+    await Bun.write(join(cwd, name), probe);
+  }
+  const api = await bootLocalApi(join(stateRoot, "isolation"), cwd);
+  try {
+    const log = await Bun.file(api.logPath).text();
+    expect(
+      !log.includes("Postgres engine selected"),
+      `the local API read a cwd .env file: ${log.slice(-800)}`,
+    );
+    const owner = await createLocalIdentity(api, { email: `isolation-${ctx.nonce}@e2e.invalid` });
+    const sentinel = `isolation-${ctx.nonce}`;
+    const page = await importPage(
+      api,
+      {
+        format: PAGE_BUNDLE_FORMAT,
+        page: { title: "isolation", contentType: "text/html", authMode: "public", body: sentinel },
+        kv: [],
+      },
+      owner,
+    );
+    const port = new URL(api.baseUrl).port;
+    const local = await fetch(`http://127.0.0.1:${port}/p/${page.id}`);
+    const text = await local.text();
+    expect(local.status === 200 && text.includes(sentinel), `loopback page: HTTP ${local.status}`);
+    const ip = hostIpv4();
+    if (!ip) {
+      ctx.log("ui-dev-local: no non-loopback IPv4 on this host, the bind check is skipped");
+      return;
+    }
+    const remote = await fetch(`http://${ip}:${port}/p/${page.id}`, {
+      signal: AbortSignal.timeout(5_000),
+    }).then(
+      async (res) => `HTTP ${res.status}: ${(await res.text()).slice(0, 80)}`,
+      () => undefined,
+    );
+    expect(remote === undefined, `the local API answers on ${ip}: ${remote}`);
+  } finally {
+    await api.stop();
+  }
+}
 
 async function local(ready: Ready) {
   const apiUrl = asString(ready.apiUrl, "local apiUrl");
@@ -56,7 +121,8 @@ async function seedPageKv(ctx: ScenarioContext, pageId: string, userId: string, 
  * `bun run ui:dev --api local`: a throwaway API with the target copied in. From the committed
  * fixtures (synthetic app and page bundles), then from this SUT standing in for prod: equal app
  * row counts past the list cap, a resolving script action, an identical page body and KV keys,
- * and the password page downgraded to authed with a warning. Usage errors exit 2.
+ * and the password page downgraded to authed with a warning. Usage errors exit 2. The local API
+ * ignores the cwd's .env files and listens on loopback only.
  */
 export const uiDevLocal: Scenario = {
   name: "ui-dev-local",
@@ -99,6 +165,9 @@ export const uiDevLocal: Scenario = {
         expect(result.code === 0, `ui:dev ${args.join(" ")}: exit ${result.code}`);
         return result;
       };
+
+      // 0. Env-file and network isolation of the local API itself.
+      await isolation(ctx, stateRoot);
 
       // 1. Committed fixtures.
       const appFixture = asRecord(await Bun.file(join(repoRoot, APP_FIXTURE)).json());

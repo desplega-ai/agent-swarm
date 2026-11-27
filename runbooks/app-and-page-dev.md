@@ -64,7 +64,7 @@ With `$MCP_BASE_URL` the dashboard acts with your swarm key on the live swarm. A
 
 ## Local mode
 
-`bun run ui:dev --api local` boots a throwaway API from the checkout (`src/http.ts` on a fresh SQLite file in `--state-dir`, `NODE_ENV=development`, integrations and heartbeat off), copies the target into it, and points the dev server at it. Nothing it does reaches prod. Code: `scripts/ui-dev/local.ts`.
+`bun run ui:dev --api local` boots a throwaway API from the checkout (`src/http.ts` on a fresh SQLite file in `--state-dir`, `NODE_ENV=development`, integrations and heartbeat off, listening on `127.0.0.1` only, with the checkout's `.env` files ignored so a `DATABASE_URL` there cannot pick Postgres), copies the target into it, and points the dev server at it. Nothing it does reaches prod. Code: `scripts/ui-dev/local.ts`.
 
 ```bash
 bun run ui:dev --api local --app <appId>                  # copy from $MCP_BASE_URL (or --api-url)

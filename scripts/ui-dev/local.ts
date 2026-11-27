@@ -77,7 +77,7 @@ export async function readFixture(path: string): Promise<Fixture> {
 }
 
 /**
- * Boot `src/http.ts` on a fresh SQLite file in `stateDir`, on a free loopback port, with a new
+ * Boot `src/http.ts` on a fresh SQLite file in `stateDir`, bound to a free loopback port, with a new
  * random key. NODE_ENV=development: page cookies are SameSite=Lax on loopback. Integrations,
  * heartbeat and telemetry are off. The previous run's database in `stateDir` is deleted first.
  * shortcut: own spawn, not scripts/e2e/sut.ts startSut (that one carries coverage, Postgres and
@@ -105,7 +105,12 @@ export async function bootLocalApi(stateDir: string, repoRoot: string): Promise<
   const port = await reservedPort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const log = Bun.file(logPath).writer();
-  const child = Bun.spawn(["bun", "--no-orphans", "run", "src/http.ts"], {
+  // --no-env-file: Bun would load the cwd's .env files over this env, and a DATABASE_URL there
+  // selects Postgres ahead of DATABASE_PATH. The preload binds the API to loopback only; it
+  // needs the `=` form, as `--preload <file>` before `run` makes bun drop the subcommand.
+  const preload = resolve(import.meta.dir, "loopback-preload.ts");
+  const args = ["--no-orphans", "--no-env-file", `--preload=${preload}`, "run", "src/http.ts"];
+  const child = Bun.spawn(["bun", ...args], {
     cwd: repoRoot,
     env: {
       ...minimalEnv(),
