@@ -134,6 +134,32 @@ describe("script run writers scrub at write", () => {
     expectRedacted((run.args as { note: string }).note, "run.args");
   });
 
+  test("a run whose executor fails to start revokes its agent token", async () => {
+    const id = crypto.randomUUID();
+    await createScriptRun({ id, agentId: AGENT_ID, source: "export default () => 1", args: {} });
+    await updateScriptRun(id, { status: "running" });
+    const [recovered] = (await getRunningScriptRuns()).filter((run) => run.id === id);
+    let token: string | undefined;
+    setScriptRunExecutor({
+      async start(input) {
+        token = input.apiKey;
+        throw new Error("spawn failed");
+      },
+      isRunning: () => false,
+      async terminatePid() {},
+    });
+    try {
+      await expect(startScriptRunProcess(recovered!, "http://127.0.0.1:1")).rejects.toThrow(
+        "spawn failed",
+      );
+      expect(token).toBeDefined();
+      expect(await resolveBySessionToken(token!, { touch: false })).toBeNull();
+    } finally {
+      setScriptRunExecutor(localProcessScriptExecutor);
+      await updateScriptRun(id, { status: "failed" });
+    }
+  });
+
   test("a relaunch after restart executes with the exact sealed args on a run-bound agent token", async () => {
     const id = crypto.randomUUID();
     const args = { note: secretText("relaunch"), n: 3 };

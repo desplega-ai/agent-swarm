@@ -113,8 +113,11 @@ export async function startScriptRunProcess(
     })
     .finally(async () => {
       managed.delete(run.id);
-      await credential.release();
-      await execution.cleanup();
+      try {
+        await credential.release();
+      } finally {
+        await execution.cleanup();
+      }
     });
 }
 
