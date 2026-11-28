@@ -12,6 +12,21 @@ jobs:
     name: Root src coverage baseline
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      STORAGE_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    # Postgres 16 with pgvector (storage engine, decision D17): a real server, no PGlite.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     steps:
       - name: Checkout repository
