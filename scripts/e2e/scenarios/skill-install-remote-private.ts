@@ -1,5 +1,6 @@
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
+import { cancelQuietly, claimTask, createAssignedTask } from "./core-helpers";
 import { callTool, ensureLead, expectToolError, expectToolOk } from "./knowledge-helpers";
 
 // Remote skill install from a private GitHub repo. The API restarts with GITHUB_URL and
@@ -66,6 +67,76 @@ export const skillInstallRemotePrivate: Scenario = {
       );
       noToken(JSON.stringify(skill), "the stored skill");
       noToken(outcome.text, "the tool result");
+
+      // The token-carrying URL takes no dot or empty segment from any input: `../orgs` would
+      // turn /repos/../orgs/contents/... into /orgs/contents/... on the API host.
+      const sent = auths.length;
+      const badInputs = [
+        { sourceRepo: "../orgs", sourcePath: "skills/private" },
+        { sourceRepo: `${REPO.split("/")[0]}/..`, sourcePath: "skills/private" },
+        { sourceRepo: "./private-skills", sourcePath: "skills/private" },
+        { sourceRepo: `${REPO}/extra`, sourcePath: "skills/private" },
+        { sourceRepo: REPO, sourcePath: "../private" },
+        { sourceRepo: REPO, sourcePath: "skills//private" },
+      ];
+      for (const input of badInputs) {
+        expectToolError(
+          await callTool(sessionLead, "skill-install-remote", input),
+          `skill-install-remote of ${JSON.stringify(input)}`,
+          /invalid sourceRepo, branch or sourcePath/i,
+        );
+        const http = await ctx.api("POST", "/api/skills/install-remote", { body: input });
+        expectStatus(http, [400], `install-remote of ${JSON.stringify(input)}`);
+      }
+      // The stored branch is validated too: sync refuses a dot segment instead of reading.
+      const badBranch = await ctx.api("PUT", `/api/skills/${skillId}`, {
+        body: { sourceBranch: "../../orgs" },
+      });
+      expectStatus(badBranch, [200], "set a dot-segment sourceBranch");
+      const branchSync = await ctx.api("POST", "/api/skills/sync-remote", { body: { skillId } });
+      expectStatus(branchSync, [200], "sync with a dot-segment sourceBranch");
+      expect(
+        /invalid sourceRepo, branch or sourcePath/i.test(JSON.stringify(branchSync.json)),
+        `sync refuses the branch: ${JSON.stringify(branchSync.json)}`,
+      );
+      const restored = await ctx.api("PUT", `/api/skills/${skillId}`, {
+        body: { sourceBranch: "main" },
+      });
+      expectStatus(restored, [200], "restore sourceBranch");
+      expect(
+        auths.length === sent,
+        `invalid input sends no request, got ${JSON.stringify(auths.slice(sent))}`,
+      );
+
+      // An ACP task token never reads with the server's token: its sync of the private skill
+      // is unauthenticated, so GitHub answers 404.
+      const tokenTask = await createAssignedTask(ctx, lead, `Private skill sync ${ctx.nonce}`);
+      await claimTask(ctx, lead, tokenTask);
+      const minted = await ctx.api("POST", "/api/sessions/tokens", {
+        body: { agentId: lead, taskId: tokenTask, ttlMs: 600_000 },
+      });
+      expectStatus(minted, [200, 201], "mint task-scoped token");
+      const scoped = await ctx.connectMcp(lead, {
+        apiKey: String(asRecord(minted.json).plaintext),
+        headers: { "X-Source-Task-Id": tokenTask },
+      });
+      const beforeScoped = auths.length;
+      try {
+        const scopedSync = await callTool(scoped, "skill-sync-remote", { skillId, force: true });
+        const scopedErrors = JSON.stringify(scopedSync.data.errors ?? []);
+        expect(
+          /not found \(HTTP 404\)/i.test(scopedErrors),
+          `task-token sync reads unauthenticated: ${scopedErrors.slice(0, 300)}`,
+        );
+      } finally {
+        await scoped.close();
+      }
+      const scopedAuths = auths.slice(beforeScoped);
+      expect(
+        scopedAuths.length === 1 && scopedAuths[0] === "",
+        `task-token sync sends no token, got ${JSON.stringify(scopedAuths)}`,
+      );
+      await cancelQuietly(ctx, tokenTask);
 
       // A missing file is a 404, and its error says so, not "auth failed".
       const missing = await callTool(sessionLead, "skill-install-remote", {

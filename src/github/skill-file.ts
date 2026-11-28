@@ -1,11 +1,23 @@
 import { githubApiUrl, isGitHubEnterprise } from "../utils/github-host";
+import { getCurrentRequestAuth } from "../utils/request-auth-context";
 import { getWorkerInstallationToken } from "./app";
 
 export type RemoteSkillFile =
   | { ok: true; content: string; sourceUrl: string }
   | { ok: false; status: number; error: string; sourceUrl: string };
 
-const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const NAME = /^[A-Za-z0-9_.-]+$/;
+// Branch and path segments may hold any character: each one is URL-encoded, so only the dot
+// and empty segments a URL resolver would collapse are refused.
+const REF_SEGMENT = /^[\s\S]+$/;
+
+/** Split on `/`; null when any segment is empty, `.`, `..` or fails `allowed`. */
+function segmentsOf(value: string, allowed: RegExp): string[] | null {
+  const parts = value.split("/");
+  return parts.every((p) => p !== "." && p !== ".." && allowed.test(p)) ? parts : null;
+}
+
+const encodePath = (parts: string[]) => parts.map(encodeURIComponent).join("/");
 
 /**
  * Fetch `<sourcePath>/SKILL.md` from a GitHub repo. With a server-side token (the App
@@ -19,15 +31,22 @@ export async function fetchRemoteSkillFile(
   branch: string,
   sourcePath?: string | null,
 ): Promise<RemoteSkillFile> {
-  const filePath = sourcePath ? `${sourcePath}/SKILL.md` : "SKILL.md";
-  const sourceUrl = `https://raw.githubusercontent.com/${sourceRepo}/${branch}/${filePath}`;
-  const segments = filePath.split("/");
-  // The token goes to the API base: a dot segment would resolve to another endpoint.
-  if (!REPO.test(sourceRepo) || segments.some((s) => s === "" || s === "." || s === "..")) {
-    return { ok: false, status: 400, error: "invalid sourceRepo or sourcePath", sourceUrl };
+  // Every segment reaches a URL, and the API URL carries the token: a dot segment would
+  // resolve to another endpoint (`../orgs` leaves /repos/), so each one is checked and encoded.
+  const repo = segmentsOf(sourceRepo, NAME);
+  const ref = segmentsOf(branch, REF_SEGMENT);
+  const path = segmentsOf(sourcePath ? `${sourcePath}/SKILL.md` : "SKILL.md", REF_SEGMENT);
+  if (repo?.length !== 2 || !ref || !path) {
+    return {
+      ok: false,
+      status: 400,
+      error: "invalid sourceRepo, branch or sourcePath",
+      sourceUrl: "",
+    };
   }
+  const sourceUrl = `https://raw.githubusercontent.com/${encodePath(repo)}/${encodePath(ref)}/${encodePath(path)}`;
   const apiUrl = githubApiUrl(
-    `/repos/${sourceRepo}/contents/${segments.map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(branch)}`,
+    `/repos/${encodePath(repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`,
   );
   const read = (url: string, token?: string) =>
     fetch(url, {
@@ -39,8 +58,15 @@ export async function fetchRemoteSkillFile(
       signal: AbortSignal.timeout(15_000),
     });
 
-  const auth = await getWorkerInstallationToken();
-  const token = auth.status === "ok" ? auth.token : process.env.GITHUB_TOKEN?.trim();
+  // ACP task tokens never get server-held credentials (see /api/github/installation-token).
+  const caller = getCurrentRequestAuth();
+  const taskToken = caller?.kind === "agent" && caller.tokenKind === "task";
+  const auth = taskToken ? null : await getWorkerInstallationToken();
+  const token = taskToken
+    ? undefined
+    : auth?.status === "ok"
+      ? auth.token
+      : process.env.GITHUB_TOKEN?.trim();
   let authStatus: number | undefined;
   if (token) {
     const res = await read(apiUrl, token);
