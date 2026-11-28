@@ -324,6 +324,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `WORKER2_PORT` | No | `3022` | Host port for worker-2 service. Example — see `LEAD_PORT`. |
 | `TEMPLATE_ID` | No | — | Template for initial profile on first boot (e.g., `official/coder`) |
 | `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
+| `TEMPLATE_SHA256` | No | — | Hex sha256 of the exact `TEMPLATE_ID` registry response body (for example `curl -s <registry>/api/templates/official/coder \| sha256sum`). When set, the worker ignores a template whose body has another digest |
 | `MODEL_TIER_MAP` | No | — | JSON object overriding portable tier-to-model resolution for the current worker, for example `{\"smol\":\"gpt-5.4-mini\",\"smart\":\"gpt-5.5\"}`. Applies when a task, schedule, or workflow uses `modelTier`. |
 | `MODEL_TIER_<TIER>` | No | — | Per-tier override for `smol`, `regular`, `smart`, or `ultra` (for example `MODEL_TIER_SMART=gpt-5.5`). Wins over `MODEL_TIER_MAP`. |
 | `SWARM_DEP_POSTGRES_ENABLED` | No | `false` | Set to `true` to start the optional bundled PostgreSQL 18 cluster on worker boot. The root-stage entrypoint runs `scripts/init-local-postgres.sh` before privilege drop; binaries ship dormant in the worker image since `v1.93.0` |
