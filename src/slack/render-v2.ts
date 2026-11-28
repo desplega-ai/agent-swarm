@@ -47,7 +47,7 @@ import {
   slackThreadHasBotReplySince,
   slackThreadHasOutcomeWork,
 } from "../be/db/slack-trees";
-import { requestMemoEpoch } from "../be/request-memo";
+import { requestMemoEpoch, withRequestMemo } from "../be/request-memo";
 import { getTaskCitations } from "../be/task-citations";
 import { getTaskUiSpec } from "../be/task-ui-spec";
 import { runDetached, withSpan } from "../otel";
@@ -3096,7 +3096,11 @@ function runExclusive(kind: "dirty" | "reconcile", work: () => Promise<void>): P
   if (renderInFlight) return renderInFlight;
   // Each pass is its own root trace, whoever triggered it.
   const run = runDetached(() =>
-    withSpan("slack.render.pass", () => work(), { "slack.render.kind": kind }),
+    // A pass is detached, so it has no request scope: give it one, or every card
+    // re-reads the same agent and task rows.
+    withRequestMemo(() =>
+      withSpan("slack.render.pass", () => work(), { "slack.render.kind": kind }),
+    ),
   ).finally(() => {
     renderInFlight = null;
   });
