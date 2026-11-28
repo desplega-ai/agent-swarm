@@ -1,7 +1,13 @@
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
-import { bootLocalApi, createLocalIdentity, importPage, PAGE_BUNDLE_FORMAT } from "../../ui-dev/local";
+import {
+  bootLocalApi,
+  createLocalIdentity,
+  importApp,
+  importPage,
+  PAGE_BUNDLE_FORMAT,
+} from "../../ui-dev/local";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import { repoRoot, reservedPort } from "../sut";
@@ -80,6 +86,94 @@ async function isolation(ctx: ScenarioContext, stateRoot: string) {
   }
 }
 
+/**
+ * Copied app scripts are untrusted: they must not read the developer's files. A script that
+ * copies an owned file outside the state dir at module load (the import path: schema extraction
+ * evaluates the module) writes nothing, and an action that tries to read it (pinned to native,
+ * which the copy drops) runs but gets no content. A plain action on the same API still runs.
+ */
+async function sandbox(ctx: ScenarioContext, stateRoot: string) {
+  const secretDir = join(stateRoot, "owned");
+  await mkdir(secretDir);
+  const secret = join(secretDir, "sentinel.txt");
+  const leak = join(secretDir, "import-leak.txt");
+  const marker = `owned-${ctx.nonce}-${crypto.randomUUID()}`;
+  await Bun.write(secret, marker);
+  await chmod(secret, 0o600);
+  const api = await bootLocalApi(join(stateRoot, "sandbox"), repoRoot);
+  try {
+    const owner = await createLocalIdentity(api, { email: `sandbox-${ctx.nonce}@e2e.invalid` });
+    const bundle = asRecord(await Bun.file(join(repoRoot, APP_FIXTURE)).json());
+    const app = asRecord(bundle.app);
+    const appId = asString(app.id, "fixture app id");
+    const [ping] = asRecords(bundle, "scripts");
+    const path = JSON.stringify(secret);
+    const importProbe = {
+      ...ping,
+      id: crypto.randomUUID(),
+      name: "ui-dev-sandbox-import",
+      source: `await Bun.write(${JSON.stringify(leak)}, await Bun.file(${path}).text());\nexport default async function () {\n  return {};\n}\n`,
+    };
+    const actionProbe = {
+      ...ping,
+      id: crypto.randomUUID(),
+      name: "ui-dev-sandbox-action",
+      executor: "native",
+      source: [
+        "export default async function () {",
+        "  const got: string[] = [];",
+        `  try { got.push(await Bun.file(${path}).text()); } catch (e) { got.push(String(e)); }`,
+        // A static node: import is refused before the run (import_violation): no need to probe it.
+        `  try { got.push(String((globalThis as any).require("fs").readFileSync(${path}, "utf8"))); } catch (e) { got.push(String(e)); }`,
+        "  return { ran: true, got };",
+        "}",
+        "",
+      ].join("\n"),
+    };
+    const definition = asRecord(app.definition);
+    const sandboxed = {
+      ...bundle,
+      app: {
+        ...app,
+        definition: {
+          ...definition,
+          actions: {
+            ...asRecord(definition.actions),
+            importProbe: { kind: "script", scriptId: importProbe.id },
+            actionProbe: { kind: "script", scriptId: actionProbe.id },
+          },
+        },
+      },
+      scripts: [ping, importProbe, actionProbe],
+    };
+    const warnings = await importApp(api, sandboxed, owner.agentId);
+    expect(
+      warnings.some((w) => w.includes("ui-dev-sandbox-action") && w.includes("quickjs")),
+      `native pin warning: ${JSON.stringify(warnings)}`,
+    );
+    expect(!(await Bun.file(leak).exists()), "a copied script read an owned file at import");
+    const act = async (name: string) => {
+      const res = await fetch(`${api.baseUrl}/api/apps/${appId}/actions/${name}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${api.apiKey}`, "Content-Type": "application/json" },
+        body: "{}",
+      });
+      return { status: res.status, text: await res.text() };
+    };
+    const control = await act("ping");
+    expect(control.status === 200, `sandbox control action: HTTP ${control.status}`);
+    const probe = await act("actionProbe");
+    expect(
+      probe.status === 200 && probe.text.includes('"ran":true'),
+      `the action probe did not run: HTTP ${probe.status} ${probe.text.slice(0, 400)}`,
+    );
+    expect(!probe.text.includes(marker), "a copied script action read an owned file");
+    expect(!(await Bun.file(leak).exists()), "a copied script read an owned file at run time");
+  } finally {
+    await api.stop();
+  }
+}
+
 async function local(ready: Ready) {
   const apiUrl = asString(ready.apiUrl, "local apiUrl");
   const key = (await Bun.file(asString(ready.apiKeyFile, "apiKeyFile")).text()).trim();
@@ -122,7 +216,8 @@ async function seedPageKv(ctx: ScenarioContext, pageId: string, userId: string, 
  * fixtures (synthetic app and page bundles), then from this SUT standing in for prod: equal app
  * row counts past the list cap, a resolving script action, an identical page body and KV keys,
  * and the password page downgraded to authed with a warning. Usage errors exit 2. The local API
- * ignores the cwd's .env files and listens on loopback only.
+ * ignores the cwd's .env files and listens on loopback only, and its copied scripts cannot read
+ * host files.
  */
 export const uiDevLocal: Scenario = {
   name: "ui-dev-local",
@@ -168,6 +263,8 @@ export const uiDevLocal: Scenario = {
 
       // 0. Env-file and network isolation of the local API itself.
       await isolation(ctx, stateRoot);
+      // 0b. Copied scripts cannot read the developer's files.
+      await sandbox(ctx, stateRoot);
 
       // 1. Committed fixtures.
       const appFixture = asRecord(await Bun.file(join(repoRoot, APP_FIXTURE)).json());
