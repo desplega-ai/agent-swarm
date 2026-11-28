@@ -5,6 +5,7 @@ import { isReservedProviderEvent } from "../event-waits";
 import { isExtensionBridgedEvent } from "../extensions/post-bridge";
 import { WORKFLOW_EVENT_TRIGGER_NAMES } from "../types";
 import { workflowEventBus } from "../workflows/event-bus";
+import { ensureHttpPermission } from "./config";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -27,6 +28,7 @@ const runScopedSignalRoute = route({
     "Used by wait nodes in `event` mode with `scope: 'run'`. The body's `name` " +
     "is the bus event name; `payload` is forwarded as-is plus `_runId`.",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.run.event", alsoAdmits: ["workflow.run.any"] },
   params: z.object({ runId: z.string().uuid() }),
   body: z.object({
     name: z.string().min(1),
@@ -42,11 +44,13 @@ const runScopedSignalRoute = route({
       }),
     },
     404: { description: "Workflow run not found" },
-    403: { description: "Event name is reserved for provider webhooks or server-emitted events" },
+    403: {
+      description:
+        "Caller may not signal workflow events, or the event name is reserved for provider webhooks or server-emitted events",
+    },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
-  rbac: { permission: "workflow.run.event" },
 });
 
 /**
@@ -63,6 +67,7 @@ const globalSignalRoute = route({
     "`scope: 'global'` may match. Run-scoped waits will NOT match this " +
     "broadcast unless the payload carries a matching `workflowRunId`.",
   tags: ["Workflows"],
+  rbac: { permission: "workflow.run.event", alsoAdmits: ["workflow.run.any"] },
   body: z.object({
     name: z.string().min(1),
     payload: z.record(z.string(), z.unknown()).optional(),
@@ -75,13 +80,17 @@ const globalSignalRoute = route({
         name: z.string(),
       }),
     },
-    403: { description: "Event name is reserved for provider webhooks or server-emitted events" },
+    403: {
+      description:
+        "Caller may not signal workflow events, or the event name is reserved for provider webhooks or server-emitted events",
+    },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
-  rbac: { permission: "workflow.run.event" },
 });
 
+const WORKFLOW_EVENT_DENIED =
+  "Signalling workflow events requires the lead agent, operator, or user authentication";
 const RESERVED_EVENT_MESSAGE = "Event name is reserved for provider webhooks";
 const SERVER_EVENT_MESSAGE = "Event name is reserved for server-emitted events";
 // Trigger names start runs from authenticated integration deliveries (the Jira webhook, ...).
@@ -106,6 +115,8 @@ export async function handleWorkflowEvents(
 ): Promise<boolean> {
   // POST /api/workflow-runs/{runId}/events
   if (runScopedSignalRoute.match(req.method, pathSegments)) {
+    if (!(await ensureHttpPermission(req, res, "workflow.run.any", WORKFLOW_EVENT_DENIED)))
+      return true;
     const parsed = await runScopedSignalRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
@@ -133,6 +144,8 @@ export async function handleWorkflowEvents(
 
   // POST /api/workflow-events
   if (globalSignalRoute.match(req.method, pathSegments)) {
+    if (!(await ensureHttpPermission(req, res, "workflow.run.any", WORKFLOW_EVENT_DENIED)))
+      return true;
     const parsed = await globalSignalRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 

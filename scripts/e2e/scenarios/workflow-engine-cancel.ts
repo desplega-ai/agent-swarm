@@ -3,7 +3,9 @@ import { sql } from "../db";
 // on an approval, a fan-out, and a whole sub-workflow tree. Cancel finishes every piece
 // of open work and a late signal or answer cannot revive the run.
 import { asRecord, asRecords, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
+import { registerLead, retireAgent } from "./core-helpers";
 import {
   approvalsForRun,
   callToolErr,
@@ -31,9 +33,12 @@ export const workflowEngineCancel: Scenario = {
     const workerId = await registerWorker(ctx, "wf-cancel");
     // Registered but never polling: tasks pinned to it stay open until the cancel.
     const idleId = await registerWorker(ctx, "wf-idle");
-    const connection = await ctx.connectMcp(workerId);
+    // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-mcp");
+    let connection: McpConnection | undefined;
 
     try {
+      connection = await ctx.connectMcp(leadId);
       // ── a waiting run ───────────────────────────────────────────────────────
       const waitId = await createWorkflow(
         ctx,
@@ -355,7 +360,7 @@ export const workflowEngineCancel: Scenario = {
       await waitForStep(ctx, parkRun.runId, "park", "waiting");
       await waitForRun(ctx, parkRun.runId, "waiting", 20_000, "parked time-wait run");
     } finally {
-      await connection.close();
+      await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
     }
   },
 };

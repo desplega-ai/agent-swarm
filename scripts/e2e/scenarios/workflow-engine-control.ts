@@ -5,7 +5,9 @@ import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { sql } from "../db";
 import { asRecord, asRecords, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
+import { registerLead, retireAgent } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -58,9 +60,12 @@ export const workflowEngineControl: Scenario = {
     });
     const make = (name: string, definition: WorkflowDef, extra: Record<string, unknown> = {}) =>
       createWorkflow(ctx, name, definition, extra, workerId);
-    const connection = await ctx.connectMcp(workerId);
+    // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-mcp");
+    let connection: McpConnection | undefined;
 
     try {
+      connection = await ctx.connectMcp(leadId);
       // ── start the slow runs first so their waits overlap ────────────────────
       const failId = await make("ctl-fail", {
         nodes: [
@@ -949,8 +954,8 @@ export const workflowEngineControl: Scenario = {
         "list-workflows filters on run history",
       );
     } finally {
+      await Promise.all([connection?.close(), retireAgent(ctx, leadId)]);
       await sim.stop();
-      await connection.close();
       for (const file of [flakyFile, ...Object.values(healFiles)]) await rm(file, { force: true });
     }
   },

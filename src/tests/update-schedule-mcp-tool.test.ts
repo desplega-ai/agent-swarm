@@ -19,6 +19,7 @@ import {
   getScheduledTaskById,
   initDb,
 } from "../be/db";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerDeleteScheduleTool } from "../tools/schedules/delete-schedule";
 import { registerPatchScheduleTool } from "../tools/schedules/patch-schedule";
 import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
@@ -106,6 +107,9 @@ beforeAll(async () => {
   });
   creatorId = creator.id;
   otherAgentId = otherAgent.id;
+  // The schedule write gate is lead-only for agents; this test is not about authorization.
+  grantLeadEquivalence(creatorId);
+  grantLeadEquivalence(otherAgentId);
 });
 
 afterAll(async () => {
@@ -165,7 +169,7 @@ describe("update-schedule MCP tool", () => {
     expect((await getScheduledTaskById(schedule.id))?.nextRunAt).toBeUndefined();
   });
 
-  test("non-lead, non-creator agent can update a schedule", async () => {
+  test("non-creator agent with the schedule write gate can update a schedule", async () => {
     const server = buildServer();
     const schedule = await createScheduledTask({
       name: `mcp-noncreator-update-${Date.now()}`,
@@ -187,7 +191,7 @@ describe("update-schedule MCP tool", () => {
     expect((await getScheduledTaskById(schedule.id))?.intervalMs).toBe(120000);
   });
 
-  test("non-lead, non-creator agent can delete a schedule and writes an audit event", async () => {
+  test("non-creator agent with the schedule write gate can delete a schedule and writes an audit event", async () => {
     const server = buildServer();
     const schedule = await createScheduledTask({
       name: `mcp-noncreator-delete-${Date.now()}`,

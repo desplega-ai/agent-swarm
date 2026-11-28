@@ -1,15 +1,17 @@
 import { sql } from "../db";
 // A schedule fires as the agent that created it, so only that agent or a lead may change
-// what it runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs, params), over
-// MCP and HTTP. Other agents keep every other edit; the operator keeps every edit.
+// what it runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs, params). Over MCP a
+// non-lead agent may not change schedules at all (the schedule write gate); over HTTP the shared
+// key with an X-Agent-ID passes that gate as the operator, and this owner rule still applies.
 import { asRecord, asString, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import { registerLead, retireAgent } from "./core-helpers";
-import { callToolErr, callToolOk, createWorkflow, registerWorker } from "./workflow-helpers";
+import { callToolErr, createWorkflow, registerWorker } from "./workflow-helpers";
 
 // 03:00 on 1 January: never due while the suite runs.
 const YEARLY = "0 3 1 1 *";
 const DENIED = "runs as the agent that created it";
+const GATE_DENIED = "requires the lead agent, operator, or user";
 
 export const scheduleTargetOwner: Scenario = {
   name: "schedule-target-owner",
@@ -47,19 +49,26 @@ export const scheduleTargetOwner: Scenario = {
           sql`SELECT "targetType", "taskTemplate", "cronExpression" FROM scheduled_tasks WHERE id = ${scheduleId as string}`,
         );
 
-      // Another agent cannot change what the schedule runs, on any surface.
+      // Over MCP a non-lead agent, the owner included, may not change a schedule at all.
       await callToolErr(
         other,
         "update-schedule",
         { scheduleId, taskTemplate: "other work" },
-        DENIED,
+        GATE_DENIED,
       );
       await callToolErr(
         other,
         "patch-schedule",
         { scheduleId, targetType: "workflow", workflowId },
-        DENIED,
+        GATE_DENIED,
       );
+      await callToolErr(
+        owner,
+        "update-schedule",
+        { scheduleId, taskTemplate: "owner v2" },
+        GATE_DENIED,
+      );
+      // Another agent cannot change what the schedule runs over HTTP.
       for (const [method, body] of [
         ["PATCH", { taskTemplate: "other work" }],
         ["PATCH", { params: { topic: "other" } }],
@@ -77,16 +86,26 @@ export const scheduleTargetOwner: Scenario = {
         `refused edits left the target alone: ${JSON.stringify(row())}`,
       );
 
-      // It keeps every other edit, and restating the current target is not a change.
-      await callToolOk(other, "update-schedule", {
-        scheduleId,
-        cronExpression: "0 4 1 1 *",
-        taskTemplate: "owner work",
-      });
+      // Over HTTP it keeps every other edit, and restating the current target is not a change.
+      expectStatus(
+        await ctx.api("PATCH", `/api/schedules/${scheduleId}`, {
+          agentId: otherId,
+          body: { cronExpression: "0 4 1 1 *", taskTemplate: "owner work" },
+        }),
+        [200],
+        "another agent changes the timing",
+      );
       expect(row()?.cronExpression === "0 4 1 1 *", "another agent changed the timing");
 
       // The owner, a lead and the operator may change the target.
-      await callToolOk(owner, "update-schedule", { scheduleId, taskTemplate: "owner v2" });
+      expectStatus(
+        await ctx.api("PATCH", `/api/schedules/${scheduleId}`, {
+          agentId: ownerId,
+          body: { taskTemplate: "owner v2" },
+        }),
+        [200],
+        "the owner changes the template",
+      );
       expect(row()?.taskTemplate === "owner v2", "the owner changed the template");
       expectStatus(
         await ctx.api("PATCH", `/api/schedules/${scheduleId}`, {

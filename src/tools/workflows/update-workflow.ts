@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow } from "@/be/db";
+import { denyCatalog } from "@/tools/catalog-auth";
 import {
   createToolRegistrar,
   findLongScriptTimeoutHint,
@@ -118,6 +119,12 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
       },
       requestInfo,
     ) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "workflow.write.any",
+        "Changing workflows requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       try {
         // Check workflow exists
         const existing = await getWorkflow(id);

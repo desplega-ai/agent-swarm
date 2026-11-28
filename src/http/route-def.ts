@@ -62,6 +62,8 @@ export interface RouteDef<
   path: string; // OpenAPI-style: "/api/tasks/{id}"
   pattern: readonly (string | null)[]; // matchRoute-style: ["api", "tasks", null]
   exact?: boolean; // default true
+  /** Match only the literal URL in `path`, without a query string or extra slashes. */
+  literalUrl?: boolean;
   operationId?: string;
   summary: string;
   description?: string;
@@ -233,8 +235,10 @@ export function isPublicRoute(method: string | undefined, pathSegments: string[]
 export function findRoute(
   method: string | undefined,
   pathSegments: string[],
+  rawUrl = `/${pathSegments.join("/")}`,
 ): RouteDef | undefined {
   for (const def of routeRegistry) {
+    if (def.literalUrl && rawUrl !== def.path) continue;
     if (
       matchRoute(method, pathSegments, def.method.toUpperCase(), def.pattern, def.exact ?? true)
     ) {
@@ -286,7 +290,7 @@ export interface RequestRouteDescriptor {
  * `toleratesQueryString` mirrors whether `handleCore` matches the path when
  * the raw URL carries a `?`. Most of these entries compare the raw URL with
  * strict equality (`req.url === "/health"` and similarly for
- * `openapi.json`/`docs`/`internal/reload-config`/`mcp`/`mcp-user`), so
+ * `openapi.json`/`docs`/`mcp`/`mcp-user`), so
  * `GET /health?t=123` 404s in `handleCore` even though `pathSegments` still
  * resolves to `health`. `/me` and `/cancelled-tasks` explicitly accept the
  * `?`-suffixed form (`req.url === "/me" || req.url?.startsWith("/me?")`), so
@@ -325,7 +329,6 @@ const CORE_ROUTE_TEMPLATES: Record<
     methods: ["GET"],
     toleratesQueryString: true,
   },
-  "internal/reload-config": { path: "/internal/reload-config", methods: ["POST"] },
   mcp: { path: "/mcp", methods: ["GET", "POST", "DELETE"] },
   "mcp-user": { path: "/mcp-user", methods: ["GET", "POST", "DELETE"] },
 };
@@ -357,7 +360,11 @@ export function describeRequestRoute(
   hasTrailingSlash = false,
 ): RequestRouteDescriptor {
   const m = (method ?? "").toUpperCase() || "UNKNOWN";
-  const matched = findRoute(method, pathSegments);
+  const matched = findRoute(
+    method,
+    pathSegments,
+    hasQueryString || hasTrailingSlash ? "" : undefined,
+  );
   if (matched) return { spanName: `${m} ${matched.path}`, httpRoute: matched.path };
   const coreTemplate = CORE_ROUTE_TEMPLATES[pathSegments.join("/")];
   if (

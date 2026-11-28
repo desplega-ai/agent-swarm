@@ -11,11 +11,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, getDbClient, getWorkflow, initDb, upsertSwarmConfig } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerCreateWorkflowTool } from "../tools/workflows/create-workflow";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
 import { registerPatchWorkflowNodeTool } from "../tools/workflows/patch-workflow-node";
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
 import type { Workflow, WorkflowDefinition } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { initWorkflows, stopRetryPoller } from "../workflows";
 import { listenOnFreePort } from "./test-net";
 
@@ -71,6 +73,7 @@ const headers = { "Content-Type": "application/json", "X-Agent-ID": crypto.rando
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    setRequestAuth(req, { kind: "operator", fingerprint: "workflow-test" });
     res.setHeader("Content-Type", "application/json");
     const handled = await handleWorkflows(
       req,
@@ -138,6 +141,8 @@ describe("saving a workflow whose system-one-decision node has no working key", 
   let savedOpenRouterKey: string | undefined;
 
   beforeAll(async () => {
+    // The workflow write gate is lead-only for agents; this test is not about authorization.
+    grantLeadEquivalence("agent-test");
     for (const suffix of ["", "-wal", "-shm"]) await unlink(TEST_DB_PATH + suffix).catch(() => {});
     initDb(TEST_DB_PATH);
     await initWorkflows();

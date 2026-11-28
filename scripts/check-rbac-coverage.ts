@@ -46,6 +46,7 @@ const GATE_HELPER_SPECIFIERS = [
   "kv-write-auth", // kv-set / kv-delete / kv-incr shared write guard
   "task-tool-ctx", // assertOwnsTask → task.read.own / task.cancel.own / task.action.own
   "workflows/approval-cancel", // cancelApprovalRequest → approval.cancel.any
+  "tools/catalog-auth", // denyCatalog → workflow.write.any / workflow.run.any / schedule.write.any
   "memory/key-guard", // assertKeyWritable → memory.write.consolidated (memory-store, memory-edit)
 ];
 
@@ -128,8 +129,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/repos/get-repos.ts": PIN_REASON,
   "src/tools/request-human-input.ts": PIN_REASON,
   "src/tools/resolve-user.ts": PIN_REASON,
-  "src/tools/schedules/create-schedule.ts": PIN_REASON,
-  "src/tools/schedules/delete-schedule.ts": PIN_REASON,
   "src/tools/schedules/list-schedules.ts": PIN_REASON,
   "src/tools/script-delete.ts": PIN_REASON,
   "src/tools/script-query-types.ts": PIN_REASON,
@@ -155,18 +154,10 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/tracker/tracker-sync-status.ts": PIN_REASON,
   "src/tools/tracker/tracker-unlink.ts": PIN_REASON,
   "src/tools/whatsapp-message.ts": PIN_REASON,
-  "src/tools/workflows/cancel-workflow-run.ts": PIN_REASON,
-  "src/tools/workflows/create-workflow.ts": PIN_REASON,
-  "src/tools/workflows/delete-workflow.ts": PIN_REASON,
   "src/tools/workflows/get-workflow-run.ts": PIN_REASON,
   "src/tools/workflows/get-workflow.ts": PIN_REASON,
   "src/tools/workflows/list-workflow-runs.ts": PIN_REASON,
   "src/tools/workflows/list-workflows.ts": PIN_REASON,
-  "src/tools/workflows/patch-workflow-node.ts": PIN_REASON,
-  "src/tools/workflows/patch-workflow.ts": PIN_REASON,
-  "src/tools/workflows/retry-workflow-run.ts": PIN_REASON,
-  "src/tools/workflows/trigger-workflow.ts": PIN_REASON,
-  "src/tools/workflows/update-workflow.ts": PIN_REASON,
 };
 
 function walk(dir: string, out: string[] = []): string[] {

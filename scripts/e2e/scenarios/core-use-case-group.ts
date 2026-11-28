@@ -16,6 +16,8 @@ export const coreUseCaseGroup: Scenario = {
     let movedRootId: unknown;
     const agent = await ctx.startAgent({
       name: `use-case-worker-${ctx.nonce}`,
+      // Schedule writes are lead-only for agents.
+      role: "lead",
       async onTask({ taskId, task }) {
         if (task.task === planText) {
           const connection = await ctx.connectMcp(agent.agentId, {

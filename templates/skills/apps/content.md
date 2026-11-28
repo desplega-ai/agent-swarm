@@ -676,7 +676,26 @@ export default async function run(args, ctx) {
 }
 ```
 
-Durable wait: when the follow-up must run even if nobody watches the page, put it in a workflow whose human-in-the-loop node waits server-side, and use `Approval` only to answer. A script action starts the run with `ctx.swarm.workflow_trigger({ id, triggerData, wait: false })` and returns `runId`. The request appears once the run reaches its human-in-the-loop node, so a second script action (pressed from the page, or retried) finds it and returns its id: `ctx.swarm.db_query({ sql: "SELECT id FROM approval_requests WHERE \"workflowRunId\" = $1 AND status = 'pending' ORDER BY \"createdAt\" DESC, id LIMIT 1", params: [args.runId] })`, then `{ requestId: res.data.rows[0]?.[0] }`. Bind `Approval.requestId` to that action's result. The workflow resumes on the answer whether or not the page is open.
+Durable wait: when the follow-up must run even if nobody watches the page, put it in a workflow whose human-in-the-loop node waits server-side. Use `Approval` only to answer; the workflow resumes even if the page closes.
+
+- **Execution identity.** A script action calls the SDK as the saved script's owning agent, not as the viewer. `ctx.swarm.workflow_trigger` returns `success: false` with `status: 403` for a script owned by a non-lead worker, even when the viewer could trigger the workflow directly. The viewer still answers the approval with their own credential.
+- **Before upgrading.** Inventory apps with script actions that call `workflow_trigger` and check who owns each referenced script. For affected worker-owned actions, have the lead review and save a narrowly scoped copy under its own agent scope with `script-upsert`. Find the new ID in the script catalog (`GET /api/scripts`). Have the lead use `app-patch` to replace the whole `definition.actions.<name>` entry, including `kind: "script"`, the new `scriptId`, and any needed `args`. Action entries are replaced, not merged. Use the lead's own identity; do not share keys or elevate the worker. Verify the updated action starts the intended workflow and the approval appears.
+- **Start the run.** Bind the approved workflow ID in the lead-owned script, not in action arguments or page state. Validate allowlisted fields, types, values, and any caller or record scope server-side before constructing `triggerData` from those fields. Reject unexpected input; never forward a caller-supplied workflow ID or raw trigger payload. Then call `ctx.swarm.workflow_trigger({ id: APPROVED_WORKFLOW_ID, triggerData, wait: false })`. Throw an actionable error if `!res.success`, `res.data.skipped` is true (cooldown), or `res.data.runId` is missing. Show the error instead of starting the lookup.
+- **Find the request.** Use a second script action scoped to the same approved workflow. Validate `args.runId` and check that the caller may access that run before calling `ctx.swarm.db_query({ sql, params: [args.runId, APPROVED_WORKFLOW_ID] })`. Choose `sql` for the deployment's database engine; keep both IDs in `params`, not interpolated into the query.
+
+  ```sql
+  -- SQLite
+  SELECT a.id FROM approval_requests a JOIN workflow_runs r ON r.id = a."workflowRunId"
+  WHERE r.id = ? AND r."workflowId" = ? AND a.status = 'pending'
+  ORDER BY a."createdAt" DESC, a.id LIMIT 1;
+
+  -- PostgreSQL
+  SELECT a.id FROM approval_requests a JOIN workflow_runs r ON r.id = a."workflowRunId"
+  WHERE r.id = $1 AND r."workflowId" = $2 AND a.status = 'pending'
+  ORDER BY a."createdAt" DESC, a.id LIMIT 1;
+  ```
+
+  On error, stop and show it. On success, return `{ requestId: res.data.rows[0]?.[0] }` and bind `Approval.requestId` to that result. Retry only a successful lookup with no row, and bound those retries. The viewer answers through `Approval` with their own credential, never the lead's. If the deployment enforces a separate `db.query` permission, check the lookup script's owner independently of the trigger script's owner.
 
 SessionThread details — a chat on an app page, one session per viewer and `sessionKey`:
 

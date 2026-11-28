@@ -12,6 +12,21 @@ import { jsonError } from "./utils";
 
 export { authUser, authUserId, isOperatorAuth };
 
+/**
+ * The principal a catalog gate (workflows, schedules, prompt templates, config reload) evaluates
+ * for a page session: the agent that owns the page, with its lead flag read live. A page's code
+ * is agent-authored, so a viewer's user or operator identity must not widen what it may do.
+ * Null when the request is not a user or operator page session.
+ */
+export async function pageExecutionPrincipal(
+  auth: HttpRequestAuth | null | undefined,
+): Promise<RbacPrincipal | null> {
+  if (!auth?.page || (auth.kind !== "user" && auth.kind !== "operator")) return null;
+  const agentId = auth.page.executionAgentId;
+  const agent = agentId ? await getAgentById(agentId) : null;
+  return { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead === true };
+}
+
 function assertNever(value: never): never {
   throw new Error(`Unhandled request auth kind: ${JSON.stringify(value)}`);
 }

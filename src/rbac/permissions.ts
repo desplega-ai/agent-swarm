@@ -501,6 +501,28 @@ export const PERMISSIONS = {
     description: "Enable, disable, or activate a version of a swarm extension.",
     namespace: "extension",
   },
+  "workflow.write.any": {
+    description:
+      "Create, update, patch or delete a workflow. A script node runs code inside the API process.",
+    namespace: "workflow",
+  },
+  "workflow.run.any": {
+    description: "Trigger a workflow, retry or cancel a run, or signal a workflow event.",
+    namespace: "workflow",
+  },
+  "prompt-template.write.any": {
+    description:
+      "Create, change, delete, check out or reset a prompt template override. A template shapes every agent's prompt.",
+    namespace: "prompt-template",
+  },
+  "schedule.write.any": {
+    description: "Create, update, patch, delete or run a schedule, over HTTP or MCP.",
+    namespace: "schedule",
+  },
+  "config.reload": {
+    description: "Re-read swarm_config into the API process environment and re-init integrations.",
+    namespace: "config",
+  },
   "extension.install.inline": {
     description:
       "Install a swarm extension from an inline manifest and files instead of the catalog.",

@@ -17,6 +17,7 @@ import {
   startTask,
   updateScheduledTask,
 } from "../be/db";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import {
   DEFERRED_WAIT_WOKE_EVENT,
   dispatchDeferredTaskWait,
@@ -60,6 +61,8 @@ beforeAll(async () => {
   ).id;
   const server = new McpServer({ name: "wake-follow-up-test", version: "1.0.0" });
   otherWorkerId = (await createAgent({ name: "Other worker", status: "busy" })).id;
+  // The schedule write gate is lead-only for agents; this test is not about authorization.
+  grantLeadEquivalence(otherWorkerId);
   registerDeferTaskTool(server);
   registerDeleteScheduleTool(server);
   deleteTool = (server as unknown as { _registeredTools: Record<string, Tool> })._registeredTools[
@@ -133,7 +136,7 @@ describe("worker follow-up vs. deferred wake", () => {
     "event",
     "timer",
     "failed dispatch",
-  ])("another worker deleting an unfired %s deferral notifies the Lead once", async (kind) => {
+  ])("another agent with the schedule write gate deleting an unfired %s deferral notifies the Lead once", async (kind) => {
     const producer = await activeTask(workerId);
     const instructions = "Report that the scheduled continuation stopped.";
     const { waiter, scheduleId } = await deferOn(

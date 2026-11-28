@@ -1192,7 +1192,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer `profile` for a named harness + model + effort. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the tier's group) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile of each assignee's harness. |
-| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model and modelTier. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles): a named harness + model + effort, applied when each task is claimed. Must run on the target agent. Exclusive with model, modelTier and modelGroup. |
 | `modelGroup` | `string` | No | - | Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
@@ -1217,7 +1217,7 @@ Completes this task now with status `completed` and books a wake-up for you. Use
 
 **Update Scheduled Task**
 
-Update an existing scheduled task. Any registered agent can update schedules; only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).
+Update an existing scheduled task. Requires the lead agent, operator, or user; a worker asks the lead via send-task. Only the creator or a lead can change what one runs (targetType, taskTemplate, workflowId, scriptName, scriptArgs).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1241,7 +1241,7 @@ Update an existing scheduled task. Any registered agent can update schedules; on
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the group of that tier) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule, resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile. Set to null to clear. |
-| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Do not set a profile together with model, modelTier or modelGroup in the same request. Setting a profile clears those stored values, and setting any of them clears the stored profile. Set to null to clear the profile. |
 | `modelGroup` | `string` | No | - | Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile: setting a group clears them, and setting any of them clears the group. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
@@ -1249,7 +1249,7 @@ Update an existing scheduled task. Any registered agent can update schedules; on
 
 **Patch Scheduled Task**
 
-Patch an existing scheduled task by shallow-merging provided fields over the current row. Any registered agent can patch schedules.
+Patch an existing scheduled task by shallow-merging provided fields over the current row. Requires the lead agent, operator, or user; a worker asks the lead via send-task.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1273,7 +1273,7 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Deprecated: pass modelGroup "<tier>" (the group of that tier) or profile "<harness>-<tier>" (same model) instead. Portable model tier for tasks created by this schedule, resolved at claim time through the model group named after the tier, else the seeded <harness>-<tier> profile. Set to null to clear. |
-| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear. |
+| `profile` | `string` | No | - | Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Do not set a profile together with model, modelTier or modelGroup in the same request. Setting a profile clears those stored values, and setting any of them clears the stored profile. Set to null to clear the profile. |
 | `modelGroup` | `string` | No | - | Model group name for tasks created by this schedule (GET /api/model-groups): an ordered list of profiles that may span harnesses. Each fired task runs the first member that runs on the claiming agent and hops to the next one on a provider error. With a target agent, one member must run there. Exclusive with model, modelTier and profile: setting a group clears them, and setting any of them clears the group. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
@@ -1281,7 +1281,7 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 
 **Delete Scheduled Task**
 
-Delete a scheduled task permanently. Any registered agent can delete schedules.
+Delete a scheduled task permanently. Requires the lead agent, operator, or user; a worker asks the lead via send-task.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

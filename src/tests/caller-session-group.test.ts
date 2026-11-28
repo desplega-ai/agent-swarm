@@ -10,6 +10,7 @@ import {
   getTaskById,
   initDb,
 } from "../be/db";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerCreatePageTool } from "../tools/create-page";
 import { registerCreateScheduleTool } from "../tools/schedules/create-schedule";
 
@@ -43,6 +44,8 @@ beforeAll(async () => {
   leadId = (await createAgent({ name: "group-lead", isLead: true, status: "busy" })).id;
   workerId = (await createAgent({ name: "group-worker", isLead: false, status: "busy" })).id;
   userId = (await createUser({ name: "Use case owner" })).id;
+  // The schedule write gate is lead-only for agents; this test is not about authorization.
+  grantLeadEquivalence(workerId);
 });
 
 afterAll(() => closeDb());
@@ -180,19 +183,21 @@ describe("an explicit group key files the caller's session into the group", () =
   });
 
   test("a worker that may not mutate the chain moves nothing", async () => {
+    // A plain worker is refused by the schedule write gate before any chain move.
+    const plainWorker = (await createAgent({ name: "plain-worker", status: "busy" })).id;
     const otherWorker = (await createAgent({ name: "other-worker", status: "busy" })).id;
     const root = await createTaskExtended("Planning by another agent", {
       agentId: otherWorker,
       requestedByUserId: userId,
     });
     const child = await createTaskExtended("Worker step", {
-      agentId: workerId,
+      agentId: plainWorker,
       parentTaskId: root.id,
       key: root.key,
     });
-    const { result } = createSchedule("shared/worker-group/", workerId, child.id);
+    const { result } = createSchedule("shared/worker-group/", plainWorker, child.id);
     const outcome = await result;
-    expect(outcome.isError).not.toBe(true);
+    expect(outcome.isError).toBe(true);
     expect(data(outcome).movedSessionRootId).toBeUndefined();
     expect((await getTaskById(root.id))?.key).toBe(root.key);
   });

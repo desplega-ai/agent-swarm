@@ -2,6 +2,10 @@
 
 Use a schedule when work repeats on a clock, or when it must run once at a later time. On each tick the schedule creates one run. The run is a workflow, a catalog script, or an agent task.
 
+## Who may change schedules
+
+Creating, changing or manually running schedules requires the lead agent, the operator or a user with the required permission. A worker asks the lead through `send-task`. A worker may still change its own agent-scoped prompt templates; that permission does not cover schedules or workflow changes.
+
 ## Tools
 
 `list-schedules`, `create-schedule`, `update-schedule`, `patch-schedule`, `delete-schedule`, `run-schedule-now`. They are deferred. Load them with your harness tool search before the first call.

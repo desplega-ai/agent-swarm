@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, upsertPromptTemplate } from "@/be/db";
+import { upsertPromptTemplate } from "@/be/db";
 import { can } from "@/rbac";
+import { catalogPrincipal } from "@/tools/catalog-auth";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { PromptTemplateScopeSchema, PromptTemplateStateSchema } from "@/types";
 
@@ -70,9 +71,8 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
         });
       }
 
-      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
-        principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
+        principal: await catalogPrincipal(requestInfo),
         verb: "prompt-template.write",
         resource: { kind: "owned", ownerAgentId: scope === "agent" ? scopeId : null },
         source: "mcp",

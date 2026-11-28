@@ -4,6 +4,7 @@ import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { closeDb, deleteWorkflow, getWorkflow, initDb } from "../be/db";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { registerCreateWorkflowTool } from "../tools/workflows/create-workflow";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
@@ -80,6 +81,8 @@ describe("MCP workflow tools accept webhook filter and preset", () => {
   const createdIds: string[] = [];
 
   beforeAll(async () => {
+    // The workflow write gate is lead-only for agents; this test is not about authorization.
+    grantLeadEquivalence("agent-test");
     await unlink(TEST_DB_PATH).catch(() => {});
     initDb(TEST_DB_PATH);
     await initWorkflows();

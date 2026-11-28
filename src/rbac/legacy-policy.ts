@@ -398,4 +398,11 @@ export const LEGACY_POLICY = {
   "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
   "extension.install.inline": leadOrOperatorOrUser,
+  // A workflow script node runs in the API process, so a non-lead agent may not change or start workflows.
+  "workflow.write.any": leadOrOperatorOrUser,
+  "workflow.run.any": leadOrOperatorOrUser,
+  // Prompt templates, schedules and a config reload change what every agent runs or reads.
+  "prompt-template.write.any": leadOrOperatorOrUser,
+  "schedule.write.any": leadOrOperatorOrUser,
+  "config.reload": leadOrOperatorOrUser,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

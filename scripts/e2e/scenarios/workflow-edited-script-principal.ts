@@ -1,12 +1,13 @@
-// A workflow's swarm-script and sub-workflow nodes run as its creator. Any
-// agent may edit a workflow, so the creator's identity holds only while the
-// last edit came from the creator, a lead or a person: after another worker's
-// edit the node fails instead of running as the creator. The run decides this
-// from the definition it pins, so a re-save while it runs changes nothing.
-import { asRecord, expect, expectStatus } from "../http";
+// Workers cannot edit workflows. Stored edits from earlier versions still have
+// to pass the creator-identity check, including after a later trusted save.
+import { loadHistoricalWorkflowFixture, sql } from "../db";
+import { asRecord, asRecords, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario, ScenarioContext } from "../run";
+import { GATE_DENIED } from "./authz-helpers";
 import { registerLead, retireAgent } from "./core-helpers";
 import {
+  callToolErr,
   callToolOk,
   createWorkflow,
   deleteWorkflowQuietly,
@@ -31,14 +32,104 @@ async function upsertAgentScript(ctx: ScenarioContext, agentId: string, name: st
   expectStatus(upsert, [200], `upsert agent script ${name}`);
 }
 
+async function checkHistoricalEdits(ctx: ScenarioContext) {
+  const creatorId = crypto.randomUUID();
+  const editorId = crypto.randomUUID();
+  const delayedId = crypto.randomUUID();
+  const parentId = crypto.randomUUID();
+  const childId = crypto.randomUUID();
+  const eventName = `e2e.historical-edit.${ctx.nonce}`;
+  const fixture = await ctx.startFixtureSut(
+    await loadHistoricalWorkflowFixture({
+      creatorId,
+      editorId,
+      workflows: [
+        {
+          id: delayedId,
+          name: "historical edited workflow",
+          historicalEdit: true,
+          definition: {
+            nodes: [
+              {
+                id: "hold",
+                type: "wait",
+                config: { mode: "event", scope: "run", eventName },
+                next: { event: "probe" },
+              },
+              {
+                id: "probe",
+                type: "swarm-script",
+                config: { scriptName: `not-installed-${ctx.nonce}`, scope: "agent" },
+              },
+            ],
+          },
+        },
+        {
+          id: parentId,
+          name: "historical edited parent workflow",
+          historicalEdit: true,
+          definition: {
+            nodes: [{ id: "sub", type: "sub-workflow", config: { workflowId: childId } }],
+          },
+        },
+        {
+          id: childId,
+          name: "historical workflow child",
+          historicalEdit: false,
+          definition: {
+            nodes: [{ id: "hold", type: "wait", config: { mode: "time", durationMs: 100 } }],
+          },
+        },
+      ],
+    }),
+  );
+  const historical = { ...ctx, api: fixture.api, db: fixture.db };
+  try {
+    const delayed = await triggerWorkflow(historical, delayedId, {}, { wait: false });
+    await waitForStep(historical, delayed.runId, "hold", "waiting");
+    expectStatus(
+      await fixture.api("PATCH", `/api/workflows/${delayedId}/nodes/probe`, {
+        body: { label: "saved by operator" },
+      }),
+      [200],
+      "operator re-saves the live workflow while the run waits",
+    );
+    expectStatus(
+      await fixture.api("POST", `/api/workflow-runs/${delayed.runId}/events`, {
+        body: { name: eventName },
+      }),
+      [200],
+      "release the historical run after the trusted save",
+    );
+    const detail = await expectRunStatus(historical, delayed.runId, "failed");
+    expect(
+      String(stepOf(detail, "probe").error).includes(`last edited by agent ${editorId}`),
+      "the pinned historical editor still blocks the script after the operator saves",
+    );
+
+    const parent = await triggerWorkflow(historical, parentId);
+    const parentDetail = await expectRunStatus(historical, parent.runId, "failed");
+    expect(
+      String(stepOf(parentDetail, "sub").error).includes(`last edited by agent ${editorId}`),
+      "the historical editor blocks the parent from starting the child",
+    );
+    expect(
+      !fixture.db.get(sql`SELECT id FROM workflow_runs WHERE "workflowId" = ${childId}`),
+      "the historical parent did not create a child run",
+    );
+  } finally {
+    await fixture.stop();
+  }
+}
+
 export const workflowEditedScriptPrincipal: Scenario = {
   name: "workflow-edited-script-principal",
   order: 358,
   async run(ctx) {
-    const leadId = await registerLead(ctx, "wf-edit-principal");
     const workerId = await registerWorker(ctx, "wf-edit-principal");
-    const leadMcp = await ctx.connectMcp(leadId);
-    const workerMcp = await ctx.connectMcp(workerId);
+    const leadId = await registerLead(ctx, "wf-edit-principal");
+    let leadMcp: McpConnection | undefined;
+    let workerMcp: McpConnection | undefined;
     const leadScript = `e2e-lead-probe-${ctx.nonce}`;
     const workerScript = `e2e-worker-probe-${ctx.nonce}`;
     const workflowIds: string[] = [];
@@ -49,6 +140,8 @@ export const workflowEditedScriptPrincipal: Scenario = {
     });
 
     try {
+      leadMcp = await ctx.connectMcp(leadId);
+      workerMcp = await ctx.connectMcp(workerId);
       await upsertAgentScript(ctx, leadId, leadScript);
       await upsertAgentScript(ctx, workerId, workerScript);
 
@@ -66,33 +159,20 @@ export const workflowEditedScriptPrincipal: Scenario = {
       let detail = await expectRunStatus(ctx, run.runId, "completed");
       expect(asRecord(outputOf(detail, "probe").result).ran === leadScript, "lead control run");
 
-      // A worker edits the lead's node, then starts it: it must not run as the lead.
-      await callToolOk(workerMcp, "patch-workflow-node", {
-        id: leadWorkflow,
-        nodeId: "probe",
-        config: probe(leadScript, "b"),
-      });
-      run = await triggerWorkflow(ctx, leadWorkflow, {}, { agentId: workerId });
-      detail = await expectRunStatus(ctx, run.runId, "failed");
-      const step = stepOf(detail, "probe");
-      expect(
-        String(step.error).includes("last edited by agent"),
-        `worker-edited node did not fail on the edit: ${String(step.error).slice(0, 300)}`,
+      // A label-only change is enough to check the worker's write admission.
+      await callToolErr(
+        workerMcp,
+        "patch-workflow-node",
+        { id: leadWorkflow, nodeId: "probe", label: "worker edit" },
+        GATE_DENIED,
       );
+      const unchanged = await ctx.api("GET", `/api/workflows/${leadWorkflow}`);
+      expectStatus(unchanged, [200], "read the workflow after the denied edit");
+      const nodes = asRecords(asRecord(unchanged.json).definition, "nodes");
       expect(
-        !JSON.stringify(detail.steps).includes(`"ran":"${leadScript}"`),
-        "worker-edited node ran the lead's agent-scoped script",
+        nodes[0]?.id === "probe" && nodes[0].label !== "worker edit",
+        "the refused edit did not change the node",
       );
-
-      // The creator saving the workflow again restores its own identity.
-      await callToolOk(leadMcp, "patch-workflow-node", {
-        id: leadWorkflow,
-        nodeId: "probe",
-        config: probe(leadScript, "c"),
-      });
-      run = await triggerWorkflow(ctx, leadWorkflow, {}, { agentId: workerId });
-      detail = await expectRunStatus(ctx, run.runId, "completed");
-      expect(asRecord(outputOf(detail, "probe").result).ran === leadScript, "creator re-save");
 
       // A lead's edit of a worker's workflow keeps the worker as the principal.
       const workerWorkflow = await createWorkflow(
@@ -115,48 +195,12 @@ export const workflowEditedScriptPrincipal: Scenario = {
         "lead-edited worker workflow did not run as its worker creator",
       );
 
-      // A lead re-save while a worker-edited run is in flight does not lend the
-      // lead's identity to the definition the run pinned.
-      const delayed = await createWorkflow(
-        ctx,
-        "wf-edit-principal-midrun",
-        {
-          nodes: [
-            { id: "hold", type: "wait", config: { mode: "time", durationMs: 5000 }, next: "probe" },
-            { id: "probe", type: "swarm-script", config: probe(leadScript, "a") },
-          ],
-        },
-        {},
-        leadId,
-      );
-      workflowIds.push(delayed);
-      await callToolOk(workerMcp, "patch-workflow-node", {
-        id: delayed,
-        nodeId: "probe",
-        config: probe(leadScript, "b"),
-      });
-      run = await triggerWorkflow(ctx, delayed, {}, { agentId: workerId, wait: false });
-      await waitForStep(ctx, run.runId, "hold", "waiting");
-      await callToolOk(leadMcp, "patch-workflow-node", {
-        id: delayed,
-        nodeId: "probe",
-        config: probe(leadScript, "c"),
-      });
-      detail = await expectRunStatus(ctx, run.runId, "failed");
-      expect(
-        String(stepOf(detail, "probe").error).includes("last edited by agent"),
-        `mid-run lead re-save let the worker-edited node run: ${String(stepOf(detail, "probe").error).slice(0, 300)}`,
-      );
-      expect(
-        !JSON.stringify(detail.steps).includes(`"ran":"${leadScript}"`),
-        "mid-run lead re-save ran the lead's agent-scoped script",
-      );
-
-      // sub-workflow: a creator-less child runs as the agent the parent starts it
-      // as, so a worker-edited parent must not start it as the parent's creator.
+      // The operator starts the parent without an agent identity. The child
+      // inherits the parent's creator, not the identity that started the run.
       const child = await createWorkflow(ctx, "wf-edit-principal-child", {
         nodes: [{ id: "probe", type: "swarm-script", config: probe(leadScript, "a") }],
       });
+      workflowIds.push(child);
       const parent = await createWorkflow(
         ctx,
         "wf-edit-principal-parent",
@@ -164,37 +208,28 @@ export const workflowEditedScriptPrincipal: Scenario = {
         {},
         leadId,
       );
-      workflowIds.push(parent, child);
-      const subConfig = (marker: string) => ({ workflowId: child, inputs: { marker } });
-      await callToolOk(workerMcp, "patch-workflow-node", {
-        id: parent,
-        nodeId: "sub",
-        config: subConfig("b"),
-      });
-      run = await triggerWorkflow(ctx, parent, {}, { agentId: workerId });
-      detail = await expectRunStatus(ctx, run.runId, "failed");
-      expect(
-        String(stepOf(detail, "sub").error).includes("last edited by agent"),
-        `worker-edited sub-workflow node did not fail on the edit: ${String(stepOf(detail, "sub").error).slice(0, 300)}`,
-      );
-
-      await callToolOk(leadMcp, "patch-workflow-node", {
-        id: parent,
-        nodeId: "sub",
-        config: subConfig("c"),
-      });
-      run = await triggerWorkflow(ctx, parent, {}, { agentId: workerId });
+      workflowIds.push(parent);
+      run = await triggerWorkflow(ctx, parent);
       detail = await expectRunStatus(ctx, run.runId, "completed");
+      const parentRun = ctx.db.get<{ triggeredByAgentId: string | null }>(
+        sql`SELECT "triggeredByAgentId" FROM workflow_runs WHERE id = ${run.runId}`,
+      );
+      expect(
+        parentRun?.triggeredByAgentId === null,
+        "the operator did not name a triggering agent",
+      );
       const childOutputs = asRecord(outputOf(detail, "sub").outputs);
       expect(
         asRecord(asRecord(childOutputs.probe).result).ran === leadScript,
-        `creator re-save did not start the child as the creator: ${JSON.stringify(childOutputs).slice(0, 300)}`,
+        "the child ran as the parent workflow's creator",
       );
     } finally {
-      for (const id of workflowIds) await deleteWorkflowQuietly(ctx, id);
-      await leadMcp.close();
-      await workerMcp.close();
-      await retireAgent(ctx, leadId);
+      try {
+        for (const id of workflowIds.reverse()) await deleteWorkflowQuietly(ctx, id);
+      } finally {
+        await Promise.all([leadMcp?.close(), workerMcp?.close(), retireAgent(ctx, leadId)]);
+      }
     }
+    await checkHistoricalEdits(ctx);
   },
 };

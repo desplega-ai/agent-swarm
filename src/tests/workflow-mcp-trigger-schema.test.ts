@@ -25,6 +25,7 @@ import {
 } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
+import { grantLeadEquivalence } from "../rbac/elevated-agents";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
 import { SwarmConfig } from "../scripts-runtime/swarm-config";
 import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
@@ -35,6 +36,7 @@ import { registerPatchWorkflowNodeTool } from "../tools/workflows/patch-workflow
 import { registerTriggerWorkflowTool } from "../tools/workflows/trigger-workflow";
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
 import type { Workflow, WorkflowDefinition } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { initWorkflows, stopRetryPoller } from "../workflows";
 import { listenOnFreePort } from "./test-net";
 
@@ -86,6 +88,8 @@ function buildServerWithTools() {
   const callTool =
     (name: string) =>
     async (args: Record<string, unknown>, agentId = "agent-test", sourceTaskId?: string) => {
+      // The workflow gates are lead-only for agents; these tests are not about authorization.
+      grantLeadEquivalence(agentId);
       const tool = registeredTools[name];
       expect(tool).toBeDefined();
       const extra = {
@@ -113,6 +117,7 @@ function buildServerWithTools() {
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    setRequestAuth(req, { kind: "operator", fingerprint: "workflow-test" });
     res.setHeader("Content-Type", "application/json");
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
@@ -172,6 +177,8 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
   let server: Server;
 
   beforeAll(async () => {
+    // The workflow write gate is lead-only for agents; this test is not about authorization.
+    grantLeadEquivalence("agent-test");
     try {
       await unlink(TEST_DB_PATH);
     } catch {

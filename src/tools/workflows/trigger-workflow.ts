@@ -10,6 +10,7 @@ import {
   workflowRequestFingerprint,
 } from "@/be/db/workflow-idempotency";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/http/idempotency-key";
+import { denyCatalog } from "@/tools/catalog-auth";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getExecutorRegistry, startWorkflowExecution } from "@/workflows";
 import { TriggerSchemaError } from "@/workflows/engine";
@@ -81,6 +82,12 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
       }),
     },
     async ({ id, triggerData, wait, idempotencyKey }, requestInfo) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "workflow.run.any",
+        "Running workflows requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       try {
         if (idempotencyKey !== undefined && !requestInfo.agentId) {
           return toolErr("idempotencyKey needs an identified caller (X-Agent-ID).");

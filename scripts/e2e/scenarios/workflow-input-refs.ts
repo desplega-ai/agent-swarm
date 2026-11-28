@@ -3,7 +3,9 @@
 // definition of a workflow that stores them, needs config.read.secrets. The
 // operator key has it; a non-lead worker does not. Dummy values only.
 import { asRecord, asString, expect, expectStatus } from "../http";
+import type { McpConnection } from "../mcp";
 import type { Scenario } from "../run";
+import { registerLead, retireAgent } from "./core-helpers";
 import {
   callToolErr,
   callToolOk,
@@ -25,7 +27,13 @@ export const workflowInputRefs: Scenario = {
     const secretValue = `wfref-${ctx.nonce}`;
     const dropSecret = await setGlobalConfig(ctx, secretKey, secretValue, true);
     const workerId = await registerWorker(ctx, "wf-input-refs");
-    const connection = await ctx.connectMcp(workerId);
+    // Workflow tools are lead-only for agents, so the MCP calls go through a lead.
+    const leadId = await registerLead(ctx, "wf-mcp");
+    let connection: McpConnection | undefined;
+    let workerConnection: McpConnection | undefined;
+    // The operator key through the script bridge with an agent id nobody registered: the
+    // operator, which passes the workflow write gate but holds no config.read.secrets as an agent.
+    const ghostId = crypto.randomUUID();
     const workflowIds: string[] = [];
 
     const scriptNode = (env: Record<string, string>): WorkflowNodeDef => ({
@@ -33,9 +41,26 @@ export const workflowInputRefs: Scenario = {
       type: "script",
       config: { runtime: "bash", script: 'printf %s "$B" | rev', env, timeout: 10_000 },
     });
-    const denied = "config.read.secrets";
+    // A non-lead agent is refused at the workflow write gate, before any secret-ref check.
+    const gateDenied = "requires the lead agent, operator, or user";
+    // A caller that passes the write gate but lacks config.read.secrets is refused for refs.
+    const secretsDenied = "config.read.secrets";
+
+    const bridgeDenied = async (tool: string, args: Record<string, unknown>) => {
+      const response = await ctx.api("POST", "/api/mcp-bridge", {
+        agentId: ghostId,
+        body: { tool, args },
+      });
+      expectStatus(response, [200], `bridge ${tool}`);
+      expect(
+        asRecord(response.json).success === false && response.text.includes(secretsDenied),
+        `bridged ${tool} was not refused for ${secretsDenied}: ${response.text.slice(0, 300)}`,
+      );
+    };
 
     try {
+      connection = await ctx.connectMcp(leadId);
+      workerConnection = await ctx.connectMcp(workerId);
       // Control: the operator key may store a secret ref, and the run resolves it.
       const created = await ctx.api("POST", "/api/workflows", {
         body: {
@@ -54,30 +79,32 @@ export const workflowInputRefs: Scenario = {
         "operator-authored secret input did not reach the script node",
       );
 
-      // A non-lead worker cannot store env or secret refs.
+      // A non-lead worker cannot write workflows at all, so it cannot store env or secret refs.
+      await bridgeDenied("create-workflow", {
+        name: `wf-input-refs-secret-${ctx.nonce}`,
+        definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
+        input: { b: `secret.${secretKey}` },
+      });
+      await bridgeDenied("create-workflow", {
+        name: `wf-input-refs-env-${ctx.nonce}`,
+        definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: env-ref syntax under test
+        input: { b: "${HOME}" },
+      });
+
+      // The worker is refused at the write gate whatever the input holds.
       await callToolErr(
-        connection,
+        workerConnection,
         "create-workflow",
         {
-          name: `wf-input-refs-secret-${ctx.nonce}`,
+          name: `wf-input-refs-gate-${ctx.nonce}`,
           definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
           input: { b: `secret.${secretKey}` },
         },
-        denied,
-      );
-      await callToolErr(
-        connection,
-        "create-workflow",
-        {
-          name: `wf-input-refs-env-${ctx.nonce}`,
-          definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: env-ref syntax under test
-          input: { b: "${HOME}" },
-        },
-        denied,
+        gateDenied,
       );
 
-      // Control: literal input stays open to the worker.
+      // Control: the lead may write literal input.
       const literal = await callToolOk(connection, "create-workflow", {
         name: `wf-input-refs-literal-${ctx.nonce}`,
         definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
@@ -85,33 +112,24 @@ export const workflowInputRefs: Scenario = {
       });
       const literalId = asString(asRecord(literal.structured.workflow).id, "literal workflow id");
       workflowIds.push(literalId);
-      await callToolErr(
-        connection,
-        "update-workflow",
-        { id: literalId, input: { b: `secret.${secretKey}` } },
-        denied,
-      );
+      await bridgeDenied("update-workflow", { id: literalId, input: { b: `secret.${secretKey}` } });
 
       // The worker cannot rewire the operator workflow that stores a secret ref.
-      await callToolErr(
-        connection,
-        "patch-workflow-node",
-        { id: opWorkflowId, nodeId: "s", config: scriptNode({ B: "{{input.b}}" }).config },
-        denied,
-      );
-      await callToolErr(
-        connection,
-        "patch-workflow",
-        { id: opWorkflowId, delete: ["s"], create: [{ ...scriptNode({}), id: "t" }] },
-        denied,
-      );
-      await callToolErr(
-        connection,
-        "update-workflow",
-        { id: opWorkflowId, definition: { nodes: [scriptNode({ B: "{{input.b}}" })] } },
-        denied,
-      );
-      // Edits that leave the definition alone stay open.
+      await bridgeDenied("patch-workflow-node", {
+        id: opWorkflowId,
+        nodeId: "s",
+        config: scriptNode({ B: "{{input.b}}" }).config,
+      });
+      await bridgeDenied("patch-workflow", {
+        id: opWorkflowId,
+        delete: ["s"],
+        create: [{ ...scriptNode({}), id: "t" }],
+      });
+      await bridgeDenied("update-workflow", {
+        id: opWorkflowId,
+        definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
+      });
+      // Control: the lead may edit without touching the definition.
       await callToolOk(connection, "update-workflow", {
         id: opWorkflowId,
         description: `renamed ${ctx.nonce}`,
@@ -171,8 +189,8 @@ export const workflowInputRefs: Scenario = {
         const response = await asWorker(method, path, body);
         expectStatus(response, [403], label);
         expect(
-          String(asRecord(response.json).error).includes(denied),
-          `${label}: 403 lacks the ${denied} reason`,
+          String(asRecord(response.json).error).includes(gateDenied),
+          `${label}: 403 lacks the ${gateDenied} reason`,
         );
       };
 
@@ -199,14 +217,17 @@ export const workflowInputRefs: Scenario = {
         "worker HTTP create with a secret split across params",
       );
 
-      // Control: a literal param stays open, then rewriting it to a ref is not.
-      const literalParams = await asWorker("POST", "/api/workflows", {
-        name: `wf-input-refs-param-literal-${ctx.nonce}`,
-        definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
-        input: exactToken,
-        params: { p: "literal" },
+      // Control: the lead may store a literal param; the worker may not rewrite it to a ref.
+      const literalParams = await ctx.api("POST", "/api/workflows", {
+        agentId: leadId,
+        body: {
+          name: `wf-input-refs-param-literal-${ctx.nonce}`,
+          definition: { nodes: [scriptNode({ B: "{{input.b}}" })] },
+          input: exactToken,
+          params: { p: "literal" },
+        },
       });
-      expectStatus(literalParams, [201], "worker HTTP create with a literal param");
+      expectStatus(literalParams, [201], "lead HTTP create with a literal param");
       const literalParamsId = asString(asRecord(literalParams.json).id, "literal params id");
       workflowIds.push(literalParamsId);
       await httpDenied(
@@ -222,11 +243,12 @@ export const workflowInputRefs: Scenario = {
         "worker HTTP patch of a param to a secret ref",
       );
       expectStatus(
-        await asWorker("PATCH", `/api/workflows/${literalParamsId}`, {
-          params: { p: "other-literal" },
+        await ctx.api("PATCH", `/api/workflows/${literalParamsId}`, {
+          agentId: leadId,
+          body: { params: { p: "other-literal" } },
         }),
         [200],
-        "worker HTTP patch to another literal param",
+        "lead HTTP patch to another literal param",
       );
 
       // A token in new input picks up a ref the stored params already hold.
@@ -241,12 +263,7 @@ export const workflowInputRefs: Scenario = {
       expectStatus(storedParams, [201], "operator creates a workflow with a secret param");
       const storedParamsId = asString(asRecord(storedParams.json).id, "stored params id");
       workflowIds.push(storedParamsId);
-      await callToolErr(
-        connection,
-        "update-workflow",
-        { id: storedParamsId, input: exactToken },
-        denied,
-      );
+      await bridgeDenied("update-workflow", { id: storedParamsId, input: exactToken });
       await httpDenied(
         "PUT",
         `/api/workflows/${storedParamsId}`,
@@ -255,18 +272,16 @@ export const workflowInputRefs: Scenario = {
       );
 
       // The param-borne ref is a stored ref: the worker cannot rewire it.
-      await callToolErr(
-        connection,
-        "patch-workflow-node",
-        { id: opParamsId, nodeId: "s", config: scriptNode({ B: "{{input.b}}" }).config },
-        denied,
-      );
-      await callToolErr(
-        connection,
-        "patch-workflow",
-        { id: opParamsId, delete: ["s"], create: [{ ...scriptNode({}), id: "t" }] },
-        denied,
-      );
+      await bridgeDenied("patch-workflow-node", {
+        id: opParamsId,
+        nodeId: "s",
+        config: scriptNode({ B: "{{input.b}}" }).config,
+      });
+      await bridgeDenied("patch-workflow", {
+        id: opParamsId,
+        delete: ["s"],
+        create: [{ ...scriptNode({}), id: "t" }],
+      });
       await httpDenied(
         "PATCH",
         `/api/workflows/${opParamsId}/nodes/s`,
@@ -280,9 +295,19 @@ export const workflowInputRefs: Scenario = {
         "worker HTTP definition update over a param-borne secret",
       );
     } finally {
-      await connection.close();
-      for (const id of workflowIds) await deleteWorkflowQuietly(ctx, id);
-      await dropSecret();
+      try {
+        try {
+          for (const id of workflowIds) await deleteWorkflowQuietly(ctx, id);
+        } finally {
+          await dropSecret();
+        }
+      } finally {
+        await Promise.all([
+          connection?.close(),
+          workerConnection?.close(),
+          retireAgent(ctx, leadId),
+        ]);
+      }
     }
   },
 };

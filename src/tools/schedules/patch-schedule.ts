@@ -26,6 +26,7 @@ import {
 import { getScript } from "@/be/scripts/db";
 import { can } from "@/rbac";
 import { calculateNextRun } from "@/scheduler";
+import { denyCatalog } from "@/tools/catalog-auth";
 import {
   createToolRegistrar,
   modelTierDeprecatedOutputSchema,
@@ -102,7 +103,7 @@ export const patchScheduleInputSchema = z.object({
     .nullable()
     .optional()
     .describe(
-      "Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Exclusive with model and modelTier: setting a profile clears them, and setting either clears the profile. Set to null to clear.",
+      "Model profile name for tasks created by this schedule (see list-model-profiles). Must run on the target agent. Do not set a profile together with model, modelTier or modelGroup in the same request. Setting a profile clears those stored values, and setting any of them clears the stored profile. Set to null to clear the profile.",
     ),
   modelGroup: z
     .string()
@@ -159,7 +160,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
       title: "Patch Scheduled Task",
       annotations: { idempotentHint: true },
       description:
-        "Patch an existing scheduled task by shallow-merging provided fields over the current row. Any registered agent can patch schedules.",
+        "Patch an existing scheduled task by shallow-merging provided fields over the current row. Requires the lead agent, operator, or user; a worker asks the lead via send-task.",
       inputSchema: patchScheduleInputSchema,
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -196,6 +197,12 @@ export const registerPatchScheduleTool = (server: McpServer) => {
       requestInfo,
       _meta,
     ) => {
+      const denied = await denyCatalog(
+        requestInfo,
+        "schedule.write.any",
+        "Changing schedules requires the lead agent, operator, or user authentication.",
+      );
+      if (denied) return denied;
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
