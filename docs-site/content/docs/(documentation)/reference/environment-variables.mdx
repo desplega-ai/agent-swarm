@@ -316,6 +316,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SHUTDOWN_TIMEOUT` | No | `30000` | Grace period (ms) before pausing tasks |
 | `RUNNER_TERMINAL_TASK_GRACE_MS` | No | `45000` | When a task turns terminal server-side while its session is still running, the runner closes the session's input and waits this long (ms) for the turn to end and report its cost before aborting. `0` aborts at once; a negative or non-numeric value uses the default. Cancels always abort at once |
 | `MAX_CONCURRENT_TASKS` | No | `1` | Maximum parallel tasks per worker |
+| `SWARM_WORKSPACE_DIR` | No | `/workspace` | Directory of the worker's profile mirrors (`SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, `CLAUDE.md`, `start-up.sh`), pre-boot backups and `identity-baselines.json` with its lock. Unset, the baseline file stays in `/tmp`. Set it for a test worker that shares the host filesystem, so it cannot overwrite the container's mirrors |
 | `SWARM_DELIVERY_MODE` | No | Pool setting | `poll` or `push`. Overrides the delivery mode a runtime pool worker gets at registration. Pool supervisors set it on the workers they start. See [Runtime pools](/docs/guides/runtime-pools#push-and-poll-delivery) |
 | `SWARM_URL` | No | `localhost` | Base domain for service URLs |
 | `LEAD_PORT` | No | `3020` | Host port for lead service. Example variable used in `docker-compose.example.yml` — adjust to your setup. In isolated network namespaces all services can share the same port. |

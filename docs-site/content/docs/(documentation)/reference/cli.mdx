@@ -322,6 +322,9 @@ agent-swarm ui-dev --page my-report --json
 Pass exactly one of `--app`, `--page` or `--route`. Only `127.0.0.1:<port>` and
 `localhost:<port>` Host headers are served. In an agent-swarm checkout,
 `bun run ui:dev` takes the same arguments and serves `apps/ui` source with Vite instead.
+`bun run ui:dev --api local` boots a throwaway API from the checkout (fresh SQLite, loopback
+only, integrations off), copies the app or page into it, and points the dev server there, so
+clicks never write to prod. `--fixture <bundle.json>` seeds it with no source API.
 
 ### docs
 
