@@ -9,11 +9,14 @@ import {
   initDb,
 } from "../be/db";
 import { startTask } from "../be/db/tasks/write";
+import { requestMemoStats } from "../be/request-memo";
 import { workflowEventBus } from "../workflows/event-bus";
 
 let messageCounter = 0;
+const apiCallScopes: boolean[] = [];
 const mockApiCall = async (method: string, payload: Record<string, unknown> = {}) => {
   messageCounter++;
+  apiCallScopes.push(requestMemoStats() !== undefined);
   return {
     ok: true,
     ts: `${messageCounter}.000100`,
@@ -105,6 +108,15 @@ describe("slack render-v2 reconcile scheduling", () => {
       restore();
     }
     expect(seen.filter(isTreeSweep)).toHaveLength(1);
+  });
+
+  test("a reconcile pass runs inside a request memo scope", async () => {
+    await runningThread("MEMO_SCOPE");
+    apiCallScopes.length = 0;
+    await processSlackRenderV2();
+    // Outside a scope every card re-reads the same agent and task rows.
+    expect(apiCallScopes.length).toBeGreaterThan(0);
+    expect(apiCallScopes.every(Boolean)).toBe(true);
   });
 
   test("a full tick visits bounded pages of old work and preserves queued events outside its page", async () => {
