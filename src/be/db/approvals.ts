@@ -169,15 +169,21 @@ export async function listUndeliveredCancelledApprovalRequestIds(
 
 /**
  * Every terminal transition passes through here: once it commits, edit each
- * request's Slack card to show the outcome. Fire and forget; a Slack failure
+ * request's Slack and Telegram cards to show the outcome. Fire and forget; a Slack failure
  * never touches the resolution.
  */
 export function scheduleApprovalCardUpdates(
   approvals: Array<{ id: string; notificationChannels: unknown[] | null }>,
 ): void {
   const posted = approvals.filter((approval) =>
-    (approval.notificationChannels as Array<{ channel?: string; messageTs?: string }> | null)?.some(
-      (n) => n.channel === "slack" && n.messageTs,
+    (
+      approval.notificationChannels as Array<{
+        channel?: string;
+        messageTs?: string;
+        messageId?: string;
+      }> | null
+    )?.some(
+      (n) => (n.channel === "slack" && n.messageTs) || (n.channel === "telegram" && n.messageId),
     ),
   );
   if (posted.length === 0) return;

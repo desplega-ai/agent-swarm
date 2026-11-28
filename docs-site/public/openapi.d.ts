@@ -672,6 +672,1640 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/used-by": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant or revoke the 'used by' logo consent
+         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        granted: boolean;
+                        /** Format: email */
+                        contactEmail?: string;
+                        /** @enum {string} */
+                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "marketing" | "sales" | "research" | "ops" | "other";
+                        quote?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Consent recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            granted: boolean;
+                            changedAt: string;
+                        };
+                    };
+                };
+                /** @description Invalid contact details, or missing organization name or website */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can change the consent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The telemetry proxy did not accept the consent */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public ranking state
+         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Ranking state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            eligible: boolean;
+                            missing: ("SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE")[];
+                            telemetryOn: boolean;
+                            enabled: boolean;
+                            name: string | null;
+                            domain: string | null;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            } | null;
+                            listingMatchesDomain: boolean;
+                            verifyUrl: string | null;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can read the ranking state */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Opt this install into the public ranking
+         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                        subcategory?: string | null;
+                        description?: string | null;
+                        sourceCodeUrl?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Opted in */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            domain: string;
+                            listing: {
+                                /** @enum {number} */
+                                v: 1;
+                                name: string;
+                                domain: string;
+                                /** @enum {string} */
+                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
+                                subcategory: string | null;
+                                description: string | null;
+                                sourceCodeUrl: string | null;
+                                updatedAt: string;
+                            };
+                            verifyUrl: string;
+                        };
+                    };
+                };
+                /** @description A listing field is invalid */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt in */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ranking/opt-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave the public ranking
+         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Opted out */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            enabled: false;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only a config admin can opt out */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/resolved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get resolved config (merged global + agent + repo scopes) */
+        get: {
+            parameters: {
+                query?: {
+                    agentId?: string;
+                    repoId?: string;
+                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
+                    key?: string;
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Resolved config entries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            configs: components["schemas"]["SwarmConfig"][];
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/env-presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check which of the given env var keys are currently set in process.env (presence only, no values) */
+        get: {
+            parameters: {
+                query: {
+                    keys: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            presence: {
+                                [key: string]: boolean;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Reload result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            configsLoaded: number;
+                            keysUpdated: string[];
+                            integrationsReinitialized: string[];
+                        };
+                    };
+                };
+                /** @description Reload failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a single config entry by ID */
+        get: {
+            parameters: {
+                query?: {
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Config entry */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwarmConfig"] & {
+                            message?: string;
+                        };
+                    };
+                };
+                /** @description Config not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Config deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                        };
+                    };
+                };
+                /** @description Config not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List config entries with optional filters */
+        get: {
+            parameters: {
+                query?: {
+                    scope?: string;
+                    scopeId?: string;
+                    /** @description Return only entries with this exact key. Omit to return every entry. */
+                    key?: string;
+                    includeSecrets?: "true" | "false";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description List of config entries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            configs: components["schemas"]["SwarmConfig"][];
+                            message?: string;
+                        };
+                    };
+                };
+            };
+        };
+        /** Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        scope: "global" | "agent" | "repo";
+                        scopeId?: string | null;
+                        key: string;
+                        value?: unknown;
+                        isSecret?: boolean;
+                        envPath?: string | null;
+                        description?: string | null;
+                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
+                        exportToEnv?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Config entry upserted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwarmConfig"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/approval-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List approval requests with optional filters
+         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: string;
+                    workflowRunId?: string;
+                    limit?: number | null;
+                    fields?: "full" | "slim";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description List of approval requests */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            approvalRequests: {
+                                id: string;
+                                title: string;
+                                questions: {
+                                    id: string;
+                                    /** @enum {string} */
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
+                                    label: string;
+                                    required?: boolean;
+                                    description?: string;
+                                    placeholder?: string;
+                                    multiline?: boolean;
+                                    options?: {
+                                        value: string;
+                                        label: string;
+                                        description?: string;
+                                    }[];
+                                    minSelections?: number;
+                                    maxSelections?: number;
+                                    defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
+                                }[];
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                approvers: {
+                                    users?: string[];
+                                    roles?: string[];
+                                    policy: "any" | "all" | {
+                                        min: number;
+                                    };
+                                };
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                responses: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                resolutionReason: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                notificationChannels: {
+                                    /** @enum {string} */
+                                    channel: "slack" | "email" | "telegram";
+                                    target: string;
+                                    messageTs?: string;
+                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    threadId?: string;
+                                    /** @description Telegram: the card's message id. */
+                                    messageId?: string;
+                                }[] | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
+                            }[] | {
+                                id: string;
+                                title: string;
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                questionCount: number;
+                                /** @description Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed). */
+                                viewerCanRespond?: boolean;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Create a new approval request */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        title: string;
+                        /** @description A request with a `config` question needs `approvers.policy: "any"`. The answer is written to swarm_config; the request stores only `{ key, scope, scopeId, isSecret, status, updatedAt }` (plus `value` for non-secret keys). */
+                        questions: {
+                            id: string;
+                            /** @enum {string} */
+                            type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
+                            label?: string;
+                            /** @default true */
+                            required?: boolean;
+                            description?: string;
+                            placeholder?: string;
+                            multiline?: boolean;
+                            options?: {
+                                value: string;
+                                label: string;
+                                description?: string;
+                            }[];
+                            minSelections?: number;
+                            maxSelections?: number;
+                            defaultValue?: boolean;
+                            /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                            config?: {
+                                /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                key: string;
+                                /**
+                                 * @description Config scope the value is written to
+                                 * @enum {string}
+                                 */
+                                scope: "global" | "agent" | "repo";
+                                /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                scopeId?: string;
+                                /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                isSecret?: boolean;
+                                /**
+                                 * Format: uri
+                                 * @description Link shown next to the field, e.g. where to create the token
+                                 */
+                                helpUrl?: string;
+                                /** @description Allowed values for a non-secret key, rendered as a choice */
+                                options?: {
+                                    value: string;
+                                    label: string;
+                                    description?: string;
+                                }[];
+                                /** @description Prefilled value for a non-secret key */
+                                defaultValue?: string;
+                            };
+                        }[];
+                        approvers: {
+                            users?: string[];
+                            roles?: string[];
+                            policy: "any" | "all" | {
+                                min: number;
+                            };
+                        };
+                        /** Format: uuid */
+                        workflowRunId?: string;
+                        /** Format: uuid */
+                        workflowRunStepId?: string;
+                        /** Format: uuid */
+                        sourceTaskId?: string;
+                        /** @description Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). */
+                        timeoutSeconds?: number;
+                        /** @description Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped. */
+                        notifications?: {
+                            /** @enum {string} */
+                            channel: "slack" | "email" | "telegram";
+                            target: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Approval request created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            approvalRequest: {
+                                id: string;
+                                title: string;
+                                questions: {
+                                    id: string;
+                                    /** @enum {string} */
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
+                                    label: string;
+                                    required?: boolean;
+                                    description?: string;
+                                    placeholder?: string;
+                                    multiline?: boolean;
+                                    options?: {
+                                        value: string;
+                                        label: string;
+                                        description?: string;
+                                    }[];
+                                    minSelections?: number;
+                                    maxSelections?: number;
+                                    defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
+                                }[];
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                approvers: {
+                                    users?: string[];
+                                    roles?: string[];
+                                    policy: "any" | "all" | {
+                                        min: number;
+                                    };
+                                };
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                responses: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                resolutionReason: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                notificationChannels: {
+                                    /** @enum {string} */
+                                    channel: "slack" | "email" | "telegram";
+                                    target: string;
+                                    messageTs?: string;
+                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    threadId?: string;
+                                    /** @description Telegram: the card's message id. */
+                                    messageId?: string;
+                                }[] | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Slack notifications require a lead agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/approval-requests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get approval request details
+         * @description Includes `configState` when the request has `config` questions: the live state of each target key, read now.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Approval request details */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            approvalRequest: {
+                                id: string;
+                                title: string;
+                                questions: {
+                                    id: string;
+                                    /** @enum {string} */
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
+                                    label: string;
+                                    required?: boolean;
+                                    description?: string;
+                                    placeholder?: string;
+                                    multiline?: boolean;
+                                    options?: {
+                                        value: string;
+                                        label: string;
+                                        description?: string;
+                                    }[];
+                                    minSelections?: number;
+                                    maxSelections?: number;
+                                    defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
+                                }[];
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                approvers: {
+                                    users?: string[];
+                                    roles?: string[];
+                                    policy: "any" | "all" | {
+                                        min: number;
+                                    };
+                                };
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                responses: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                resolutionReason: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                notificationChannels: {
+                                    /** @enum {string} */
+                                    channel: "slack" | "email" | "telegram";
+                                    target: string;
+                                    messageTs?: string;
+                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    threadId?: string;
+                                    /** @description Telegram: the card's message id. */
+                                    messageId?: string;
+                                }[] | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/approval-requests/{id}/respond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a response to an approval request
+         * @description Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`. A `config` question takes `{ action: "set", value }`, `{ action: "keep" }` (key must exist) or `{ action: "skip" }` (optional questions only); `set` also needs the config write permission. The value is written only when the request is approved, and the stored answer is the result, never a secret value.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        responses: {
+                            [key: string]: unknown;
+                        };
+                        /** @description Unverified display name. Stored as `claimedRespondedBy` on the answer; never used as the responder. */
+                        respondedBy?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Response recorded. `status` stays `pending` while the policy needs more approvals. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            approvalRequest: {
+                                id: string;
+                                title: string;
+                                questions: {
+                                    id: string;
+                                    /** @enum {string} */
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
+                                    label: string;
+                                    required?: boolean;
+                                    description?: string;
+                                    placeholder?: string;
+                                    multiline?: boolean;
+                                    options?: {
+                                        value: string;
+                                        label: string;
+                                        description?: string;
+                                    }[];
+                                    minSelections?: number;
+                                    maxSelections?: number;
+                                    defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
+                                }[];
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                approvers: {
+                                    users?: string[];
+                                    roles?: string[];
+                                    policy: "any" | "all" | {
+                                        min: number;
+                                    };
+                                };
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                responses: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                resolutionReason: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                notificationChannels: {
+                                    /** @enum {string} */
+                                    channel: "slack" | "email" | "telegram";
+                                    target: string;
+                                    messageTs?: string;
+                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    threadId?: string;
+                                    /** @description Telegram: the card's message id. */
+                                    messageId?: string;
+                                }[] | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller is an agent, or is not one of the request's approvers */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already resolved, or this responder already answered */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/approval-requests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a pending approval request */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        reason?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Request cancelled, or already cancelled. A request that gates a running or waiting workflow run cancels that run too. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            approvalRequest: {
+                                id: string;
+                                title: string;
+                                questions: {
+                                    id: string;
+                                    /** @enum {string} */
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
+                                    label: string;
+                                    required?: boolean;
+                                    description?: string;
+                                    placeholder?: string;
+                                    multiline?: boolean;
+                                    options?: {
+                                        value: string;
+                                        label: string;
+                                        description?: string;
+                                    }[];
+                                    minSelections?: number;
+                                    maxSelections?: number;
+                                    defaultValue?: boolean;
+                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
+                                    config?: {
+                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
+                                        key: string;
+                                        /**
+                                         * @description Config scope the value is written to
+                                         * @enum {string}
+                                         */
+                                        scope: "global" | "agent" | "repo";
+                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
+                                        scopeId?: string;
+                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
+                                        isSecret?: boolean;
+                                        /**
+                                         * Format: uri
+                                         * @description Link shown next to the field, e.g. where to create the token
+                                         */
+                                        helpUrl?: string;
+                                        /** @description Allowed values for a non-secret key, rendered as a choice */
+                                        options?: {
+                                            value: string;
+                                            label: string;
+                                            description?: string;
+                                        }[];
+                                        /** @description Prefilled value for a non-secret key */
+                                        defaultValue?: string;
+                                    };
+                                }[];
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                approvers: {
+                                    users?: string[];
+                                    roles?: string[];
+                                    policy: "any" | "all" | {
+                                        min: number;
+                                    };
+                                };
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                responses: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
+                                    via?: {
+                                        channel: string;
+                                        platformUserId: string;
+                                    };
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                resolutionReason: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                notificationChannels: {
+                                    /** @enum {string} */
+                                    channel: "slack" | "email" | "telegram";
+                                    target: string;
+                                    messageTs?: string;
+                                    /** @description Telegram: the Chat SDK thread the card was posted in. */
+                                    threadId?: string;
+                                    /** @description Telegram: the card's message id. */
+                                    messageId?: string;
+                                }[] | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
+                                configState?: {
+                                    [key: string]: {
+                                        exists: boolean;
+                                        isSecret: boolean;
+                                        updatedAt: string | null;
+                                        /** @description Current value; present only for non-secret rows */
+                                        value?: string;
+                                    };
+                                };
+                            };
+                            alreadyCancelled: boolean;
+                            runCancelled: boolean;
+                        };
+                    };
+                };
+                /** @description Caller may not cancel this request */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already resolved with approved, rejected, or timeout, or its expiresAt passed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ping": {
         parameters: {
             query?: never;
@@ -3981,1620 +5615,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/used-by": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Grant or revoke the 'used by' logo consent
-         * @description Records consent to show the organization's logo on agent-swarm.dev. A grant requires a valid contact email. It sends organization identity, contact details, and an optional quote to the proxy for manual review. This explicit admin action works when telemetry is off. A revoke clears the stored contact details and quote.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        granted: boolean;
-                        /** Format: email */
-                        contactEmail?: string;
-                        /** @enum {string} */
-                        contactFunction?: "engineer" | "eng_lead" | "founder" | "product" | "marketing" | "sales" | "research" | "ops" | "other";
-                        quote?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Consent recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            granted: boolean;
-                            changedAt: string;
-                        };
-                    };
-                };
-                /** @description Invalid contact details, or missing organization name or website */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can change the consent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description The telemetry proxy did not accept the consent */
-                502: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Public ranking state
-         * @description Whether this install can join the public agent-swarm.dev ranking (telemetry on, organization name and website set), whether it is opted in, and its stored listing. Only a config admin can read it.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Ranking state */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            eligible: boolean;
-                            missing: ("SWARM_ORG_NAME" | "SWARM_ORG_WEBSITE")[];
-                            telemetryOn: boolean;
-                            enabled: boolean;
-                            name: string | null;
-                            domain: string | null;
-                            listing: {
-                                /** @enum {number} */
-                                v: 1;
-                                name: string;
-                                domain: string;
-                                /** @enum {string} */
-                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                                subcategory: string | null;
-                                description: string | null;
-                                sourceCodeUrl: string | null;
-                                updatedAt: string;
-                            } | null;
-                            listingMatchesDomain: boolean;
-                            verifyUrl: string | null;
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can read the ranking state */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking/opt-in": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Opt this install into the public ranking
-         * @description Builds the telemetry_ranking listing from the organization name and website plus the chosen category, stores it, turns PUBLIC_RANKING_ENABLED on and sends ranking.opted_in. That is the whole opt-in: the install shows on agent-swarm.dev/ranking at the next hourly refresh.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                        subcategory?: string | null;
-                        description?: string | null;
-                        sourceCodeUrl?: string | null;
-                    };
-                };
-            };
-            responses: {
-                /** @description Opted in */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            domain: string;
-                            listing: {
-                                /** @enum {number} */
-                                v: 1;
-                                name: string;
-                                domain: string;
-                                /** @enum {string} */
-                                category: "engineering" | "product" | "marketing" | "support" | "operations" | "other";
-                                subcategory: string | null;
-                                description: string | null;
-                                sourceCodeUrl: string | null;
-                                updatedAt: string;
-                            };
-                            verifyUrl: string;
-                        };
-                    };
-                };
-                /** @description A listing field is invalid */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can opt in */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description telemetry_off: telemetry is off or the install has no ID. org_identity_missing: the organization name or website is not set (`missing` lists which). */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/ranking/opt-out": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Leave the public ranking
-         * @description Turns PUBLIC_RANKING_ENABLED off and sends ranking.opted_out, so workers stop sending ranking.usage. The install leaves agent-swarm.dev/ranking at the next hourly refresh.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Opted out */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            enabled: false;
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Only a config admin can opt out */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/resolved": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get resolved config (merged global + agent + repo scopes) */
-        get: {
-            parameters: {
-                query?: {
-                    agentId?: string;
-                    repoId?: string;
-                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
-                    key?: string;
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Resolved config entries */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            configs: components["schemas"]["SwarmConfig"][];
-                            message?: string;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/env-presence": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Check which of the given env var keys are currently set in process.env (presence only, no values) */
-        get: {
-            parameters: {
-                query: {
-                    keys: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Map of key -> boolean. Empty values are normally absent; an explicitly empty WORKFLOW_INPUT_ENV_ALLOWLIST or Slack icon setting counts as present. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            presence: {
-                                [key: string]: boolean;
-                            };
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail) */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            responses: {
-                /** @description Reload result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            configsLoaded: number;
-                            keysUpdated: string[];
-                            integrationsReinitialized: string[];
-                        };
-                    };
-                };
-                /** @description Reload failed */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a single config entry by ID */
-        get: {
-            parameters: {
-                query?: {
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Config entry */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SwarmConfig"] & {
-                            message?: string;
-                        };
-                    };
-                };
-                /** @description Config not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        /** Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload. */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Config deleted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                        };
-                    };
-                };
-                /** @description Config not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List config entries with optional filters */
-        get: {
-            parameters: {
-                query?: {
-                    scope?: string;
-                    scopeId?: string;
-                    /** @description Return only entries with this exact key. Omit to return every entry. */
-                    key?: string;
-                    includeSecrets?: "true" | "false";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description List of config entries */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            configs: components["schemas"]["SwarmConfig"][];
-                            message?: string;
-                        };
-                    };
-                };
-            };
-        };
-        /** Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call. */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        scope: "global" | "agent" | "repo";
-                        scopeId?: string | null;
-                        key: string;
-                        value?: unknown;
-                        isSecret?: boolean;
-                        envPath?: string | null;
-                        description?: string | null;
-                        /** @description Export this row into agent process env (default true on create, false for a few server-side secrets; omitted on update keeps the stored flag). Rejected as true for keys only the API server reads. */
-                        exportToEnv?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Config entry upserted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SwarmConfig"];
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/approval-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List approval requests with optional filters
-         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added, plus `viewerCanRespond` on pending rows. Fetch one request in full via `GET /api/approval-requests/{id}`.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    status?: string;
-                    workflowRunId?: string;
-                    limit?: number | null;
-                    fields?: "full" | "slim";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description List of approval requests */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            approvalRequests: {
-                                id: string;
-                                title: string;
-                                questions: {
-                                    id: string;
-                                    /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
-                                    label: string;
-                                    required?: boolean;
-                                    description?: string;
-                                    placeholder?: string;
-                                    multiline?: boolean;
-                                    options?: {
-                                        value: string;
-                                        label: string;
-                                        description?: string;
-                                    }[];
-                                    minSelections?: number;
-                                    maxSelections?: number;
-                                    defaultValue?: boolean;
-                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
-                                    config?: {
-                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
-                                        key: string;
-                                        /**
-                                         * @description Config scope the value is written to
-                                         * @enum {string}
-                                         */
-                                        scope: "global" | "agent" | "repo";
-                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
-                                        scopeId?: string;
-                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
-                                        isSecret?: boolean;
-                                        /**
-                                         * Format: uri
-                                         * @description Link shown next to the field, e.g. where to create the token
-                                         */
-                                        helpUrl?: string;
-                                        /** @description Allowed values for a non-secret key, rendered as a choice */
-                                        options?: {
-                                            value: string;
-                                            label: string;
-                                            description?: string;
-                                        }[];
-                                        /** @description Prefilled value for a non-secret key */
-                                        defaultValue?: string;
-                                    };
-                                }[];
-                                workflowRunId: string | null;
-                                workflowRunStepId: string | null;
-                                sourceTaskId: string | null;
-                                approvers: {
-                                    users?: string[];
-                                    roles?: string[];
-                                    policy: "any" | "all" | {
-                                        min: number;
-                                    };
-                                };
-                                /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
-                                responses: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
-                                approvals: {
-                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
-                                    responder: string;
-                                    approved: boolean;
-                                    responses: {
-                                        [key: string]: unknown;
-                                    };
-                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
-                                    claimedRespondedBy?: string;
-                                    respondedAt: string;
-                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
-                                    via?: {
-                                        channel: string;
-                                        platformUserId: string;
-                                    };
-                                }[] | null;
-                                /** @description Quorum progress while the request is pending; null once it is resolved. */
-                                approvalProgress: {
-                                    /** @description Approvals that count toward the policy so far. */
-                                    approved: number;
-                                    /** @description Approvals the policy needs before the request resolves. */
-                                    required: number;
-                                } | null;
-                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
-                                resolvedBy: string | null;
-                                resolvedAt: string | null;
-                                resolutionReason: string | null;
-                                timeoutSeconds: number | null;
-                                expiresAt: string | null;
-                                notificationChannels: {
-                                    /** @enum {string} */
-                                    channel: "slack" | "email";
-                                    target: string;
-                                    messageTs?: string;
-                                }[] | null;
-                                createdBy?: string;
-                                createdAt: string;
-                                updatedAt: string;
-                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
-                                configState?: {
-                                    [key: string]: {
-                                        exists: boolean;
-                                        isSecret: boolean;
-                                        updatedAt: string | null;
-                                        /** @description Current value; present only for non-secret rows */
-                                        value?: string;
-                                    };
-                                };
-                            }[] | {
-                                id: string;
-                                title: string;
-                                workflowRunId: string | null;
-                                workflowRunStepId: string | null;
-                                sourceTaskId: string | null;
-                                /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
-                                /** @description Quorum progress while the request is pending; null once it is resolved. */
-                                approvalProgress: {
-                                    /** @description Approvals that count toward the policy so far. */
-                                    approved: number;
-                                    /** @description Approvals the policy needs before the request resolves. */
-                                    required: number;
-                                } | null;
-                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
-                                resolvedBy: string | null;
-                                resolvedAt: string | null;
-                                timeoutSeconds: number | null;
-                                expiresAt: string | null;
-                                createdBy?: string;
-                                createdAt: string;
-                                updatedAt: string;
-                                questionCount: number;
-                                /** @description Pending rows only: whether the caller may answer, by the same rule as the respond route (a listed user or role, or no users and roles listed). */
-                                viewerCanRespond?: boolean;
-                            }[];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        /** Create a new approval request */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        title: string;
-                        /** @description A request with a `config` question needs `approvers.policy: "any"`. The answer is written to swarm_config; the request stores only `{ key, scope, scopeId, isSecret, status, updatedAt }` (plus `value` for non-secret keys). */
-                        questions: {
-                            id: string;
-                            /** @enum {string} */
-                            type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
-                            label?: string;
-                            /** @default true */
-                            required?: boolean;
-                            description?: string;
-                            placeholder?: string;
-                            multiline?: boolean;
-                            options?: {
-                                value: string;
-                                label: string;
-                                description?: string;
-                            }[];
-                            minSelections?: number;
-                            maxSelections?: number;
-                            defaultValue?: boolean;
-                            /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
-                            config?: {
-                                /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
-                                key: string;
-                                /**
-                                 * @description Config scope the value is written to
-                                 * @enum {string}
-                                 */
-                                scope: "global" | "agent" | "repo";
-                                /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
-                                scopeId?: string;
-                                /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
-                                isSecret?: boolean;
-                                /**
-                                 * Format: uri
-                                 * @description Link shown next to the field, e.g. where to create the token
-                                 */
-                                helpUrl?: string;
-                                /** @description Allowed values for a non-secret key, rendered as a choice */
-                                options?: {
-                                    value: string;
-                                    label: string;
-                                    description?: string;
-                                }[];
-                                /** @description Prefilled value for a non-secret key */
-                                defaultValue?: string;
-                            };
-                        }[];
-                        approvers: {
-                            users?: string[];
-                            roles?: string[];
-                            policy: "any" | "all" | {
-                                min: number;
-                            };
-                        };
-                        /** Format: uuid */
-                        workflowRunId?: string;
-                        /** Format: uuid */
-                        workflowRunStepId?: string;
-                        /** Format: uuid */
-                        sourceTaskId?: string;
-                        /** @description Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). */
-                        timeoutSeconds?: number;
-                        /** @description Where to announce the request. A Slack target (channel or user ID) gets a card with the title, the questions and a link to the dashboard page that answers it. Slack targets need a lead agent caller (403 otherwise). Email is not supported yet and is skipped. */
-                        notifications?: {
-                            /** @enum {string} */
-                            channel: "slack" | "email";
-                            target: string;
-                        }[];
-                    };
-                };
-            };
-            responses: {
-                /** @description Approval request created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            approvalRequest: {
-                                id: string;
-                                title: string;
-                                questions: {
-                                    id: string;
-                                    /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
-                                    label: string;
-                                    required?: boolean;
-                                    description?: string;
-                                    placeholder?: string;
-                                    multiline?: boolean;
-                                    options?: {
-                                        value: string;
-                                        label: string;
-                                        description?: string;
-                                    }[];
-                                    minSelections?: number;
-                                    maxSelections?: number;
-                                    defaultValue?: boolean;
-                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
-                                    config?: {
-                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
-                                        key: string;
-                                        /**
-                                         * @description Config scope the value is written to
-                                         * @enum {string}
-                                         */
-                                        scope: "global" | "agent" | "repo";
-                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
-                                        scopeId?: string;
-                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
-                                        isSecret?: boolean;
-                                        /**
-                                         * Format: uri
-                                         * @description Link shown next to the field, e.g. where to create the token
-                                         */
-                                        helpUrl?: string;
-                                        /** @description Allowed values for a non-secret key, rendered as a choice */
-                                        options?: {
-                                            value: string;
-                                            label: string;
-                                            description?: string;
-                                        }[];
-                                        /** @description Prefilled value for a non-secret key */
-                                        defaultValue?: string;
-                                    };
-                                }[];
-                                workflowRunId: string | null;
-                                workflowRunStepId: string | null;
-                                sourceTaskId: string | null;
-                                approvers: {
-                                    users?: string[];
-                                    roles?: string[];
-                                    policy: "any" | "all" | {
-                                        min: number;
-                                    };
-                                };
-                                /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
-                                responses: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
-                                approvals: {
-                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
-                                    responder: string;
-                                    approved: boolean;
-                                    responses: {
-                                        [key: string]: unknown;
-                                    };
-                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
-                                    claimedRespondedBy?: string;
-                                    respondedAt: string;
-                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
-                                    via?: {
-                                        channel: string;
-                                        platformUserId: string;
-                                    };
-                                }[] | null;
-                                /** @description Quorum progress while the request is pending; null once it is resolved. */
-                                approvalProgress: {
-                                    /** @description Approvals that count toward the policy so far. */
-                                    approved: number;
-                                    /** @description Approvals the policy needs before the request resolves. */
-                                    required: number;
-                                } | null;
-                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
-                                resolvedBy: string | null;
-                                resolvedAt: string | null;
-                                resolutionReason: string | null;
-                                timeoutSeconds: number | null;
-                                expiresAt: string | null;
-                                notificationChannels: {
-                                    /** @enum {string} */
-                                    channel: "slack" | "email";
-                                    target: string;
-                                    messageTs?: string;
-                                }[] | null;
-                                createdBy?: string;
-                                createdAt: string;
-                                updatedAt: string;
-                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
-                                configState?: {
-                                    [key: string]: {
-                                        exists: boolean;
-                                        isSecret: boolean;
-                                        updatedAt: string | null;
-                                        /** @description Current value; present only for non-secret rows */
-                                        value?: string;
-                                    };
-                                };
-                            };
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Slack notifications require a lead agent */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/approval-requests/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get approval request details
-         * @description Includes `configState` when the request has `config` questions: the live state of each target key, read now.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Approval request details */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            approvalRequest: {
-                                id: string;
-                                title: string;
-                                questions: {
-                                    id: string;
-                                    /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
-                                    label: string;
-                                    required?: boolean;
-                                    description?: string;
-                                    placeholder?: string;
-                                    multiline?: boolean;
-                                    options?: {
-                                        value: string;
-                                        label: string;
-                                        description?: string;
-                                    }[];
-                                    minSelections?: number;
-                                    maxSelections?: number;
-                                    defaultValue?: boolean;
-                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
-                                    config?: {
-                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
-                                        key: string;
-                                        /**
-                                         * @description Config scope the value is written to
-                                         * @enum {string}
-                                         */
-                                        scope: "global" | "agent" | "repo";
-                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
-                                        scopeId?: string;
-                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
-                                        isSecret?: boolean;
-                                        /**
-                                         * Format: uri
-                                         * @description Link shown next to the field, e.g. where to create the token
-                                         */
-                                        helpUrl?: string;
-                                        /** @description Allowed values for a non-secret key, rendered as a choice */
-                                        options?: {
-                                            value: string;
-                                            label: string;
-                                            description?: string;
-                                        }[];
-                                        /** @description Prefilled value for a non-secret key */
-                                        defaultValue?: string;
-                                    };
-                                }[];
-                                workflowRunId: string | null;
-                                workflowRunStepId: string | null;
-                                sourceTaskId: string | null;
-                                approvers: {
-                                    users?: string[];
-                                    roles?: string[];
-                                    policy: "any" | "all" | {
-                                        min: number;
-                                    };
-                                };
-                                /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
-                                responses: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
-                                approvals: {
-                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
-                                    responder: string;
-                                    approved: boolean;
-                                    responses: {
-                                        [key: string]: unknown;
-                                    };
-                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
-                                    claimedRespondedBy?: string;
-                                    respondedAt: string;
-                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
-                                    via?: {
-                                        channel: string;
-                                        platformUserId: string;
-                                    };
-                                }[] | null;
-                                /** @description Quorum progress while the request is pending; null once it is resolved. */
-                                approvalProgress: {
-                                    /** @description Approvals that count toward the policy so far. */
-                                    approved: number;
-                                    /** @description Approvals the policy needs before the request resolves. */
-                                    required: number;
-                                } | null;
-                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
-                                resolvedBy: string | null;
-                                resolvedAt: string | null;
-                                resolutionReason: string | null;
-                                timeoutSeconds: number | null;
-                                expiresAt: string | null;
-                                notificationChannels: {
-                                    /** @enum {string} */
-                                    channel: "slack" | "email";
-                                    target: string;
-                                    messageTs?: string;
-                                }[] | null;
-                                createdBy?: string;
-                                createdAt: string;
-                                updatedAt: string;
-                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
-                                configState?: {
-                                    [key: string]: {
-                                        exists: boolean;
-                                        isSecret: boolean;
-                                        updatedAt: string | null;
-                                        /** @description Current value; present only for non-secret rows */
-                                        value?: string;
-                                    };
-                                };
-                            };
-                        };
-                    };
-                };
-                /** @description Not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/approval-requests/{id}/respond": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Submit a response to an approval request
-         * @description Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`. A `config` question takes `{ action: "set", value }`, `{ action: "keep" }` (key must exist) or `{ action: "skip" }` (optional questions only); `set` also needs the config write permission. The value is written only when the request is approved, and the stored answer is the result, never a secret value.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        responses: {
-                            [key: string]: unknown;
-                        };
-                        /** @description Unverified display name. Stored as `claimedRespondedBy` on the answer; never used as the responder. */
-                        respondedBy?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Response recorded. `status` stays `pending` while the policy needs more approvals. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            approvalRequest: {
-                                id: string;
-                                title: string;
-                                questions: {
-                                    id: string;
-                                    /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
-                                    label: string;
-                                    required?: boolean;
-                                    description?: string;
-                                    placeholder?: string;
-                                    multiline?: boolean;
-                                    options?: {
-                                        value: string;
-                                        label: string;
-                                        description?: string;
-                                    }[];
-                                    minSelections?: number;
-                                    maxSelections?: number;
-                                    defaultValue?: boolean;
-                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
-                                    config?: {
-                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
-                                        key: string;
-                                        /**
-                                         * @description Config scope the value is written to
-                                         * @enum {string}
-                                         */
-                                        scope: "global" | "agent" | "repo";
-                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
-                                        scopeId?: string;
-                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
-                                        isSecret?: boolean;
-                                        /**
-                                         * Format: uri
-                                         * @description Link shown next to the field, e.g. where to create the token
-                                         */
-                                        helpUrl?: string;
-                                        /** @description Allowed values for a non-secret key, rendered as a choice */
-                                        options?: {
-                                            value: string;
-                                            label: string;
-                                            description?: string;
-                                        }[];
-                                        /** @description Prefilled value for a non-secret key */
-                                        defaultValue?: string;
-                                    };
-                                }[];
-                                workflowRunId: string | null;
-                                workflowRunStepId: string | null;
-                                sourceTaskId: string | null;
-                                approvers: {
-                                    users?: string[];
-                                    roles?: string[];
-                                    policy: "any" | "all" | {
-                                        min: number;
-                                    };
-                                };
-                                /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
-                                responses: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
-                                approvals: {
-                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
-                                    responder: string;
-                                    approved: boolean;
-                                    responses: {
-                                        [key: string]: unknown;
-                                    };
-                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
-                                    claimedRespondedBy?: string;
-                                    respondedAt: string;
-                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
-                                    via?: {
-                                        channel: string;
-                                        platformUserId: string;
-                                    };
-                                }[] | null;
-                                /** @description Quorum progress while the request is pending; null once it is resolved. */
-                                approvalProgress: {
-                                    /** @description Approvals that count toward the policy so far. */
-                                    approved: number;
-                                    /** @description Approvals the policy needs before the request resolves. */
-                                    required: number;
-                                } | null;
-                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
-                                resolvedBy: string | null;
-                                resolvedAt: string | null;
-                                resolutionReason: string | null;
-                                timeoutSeconds: number | null;
-                                expiresAt: string | null;
-                                notificationChannels: {
-                                    /** @enum {string} */
-                                    channel: "slack" | "email";
-                                    target: string;
-                                    messageTs?: string;
-                                }[] | null;
-                                createdBy?: string;
-                                createdAt: string;
-                                updatedAt: string;
-                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
-                                configState?: {
-                                    [key: string]: {
-                                        exists: boolean;
-                                        isSecret: boolean;
-                                        updatedAt: string | null;
-                                        /** @description Current value; present only for non-secret rows */
-                                        value?: string;
-                                    };
-                                };
-                            };
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Caller is an agent, or is not one of the request's approvers */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Already resolved, or this responder already answered */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/approval-requests/{id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel a pending approval request */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        reason?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Request cancelled, or already cancelled. A request that gates a running or waiting workflow run cancels that run too. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            approvalRequest: {
-                                id: string;
-                                title: string;
-                                questions: {
-                                    id: string;
-                                    /** @enum {string} */
-                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean" | "config";
-                                    label: string;
-                                    required?: boolean;
-                                    description?: string;
-                                    placeholder?: string;
-                                    multiline?: boolean;
-                                    options?: {
-                                        value: string;
-                                        label: string;
-                                        description?: string;
-                                    }[];
-                                    minSelections?: number;
-                                    maxSelections?: number;
-                                    defaultValue?: boolean;
-                                    /** @description Config question settings. Answers are written to swarm_config and replaced by a result that never holds a secret value. */
-                                    config?: {
-                                        /** @description The swarm config key to set, e.g. BITBUCKET_TOKEN */
-                                        key: string;
-                                        /**
-                                         * @description Config scope the value is written to
-                                         * @enum {string}
-                                         */
-                                        scope: "global" | "agent" | "repo";
-                                        /** @description Agent or repo id for agent/repo scope. From request-human-input, agent scope defaults to the calling agent; pass it explicitly when asking on behalf of another agent. */
-                                        scopeId?: string;
-                                        /** @description Store encrypted and never show the value (default true). An existing secret row always stays secret. */
-                                        isSecret?: boolean;
-                                        /**
-                                         * Format: uri
-                                         * @description Link shown next to the field, e.g. where to create the token
-                                         */
-                                        helpUrl?: string;
-                                        /** @description Allowed values for a non-secret key, rendered as a choice */
-                                        options?: {
-                                            value: string;
-                                            label: string;
-                                            description?: string;
-                                        }[];
-                                        /** @description Prefilled value for a non-secret key */
-                                        defaultValue?: string;
-                                    };
-                                }[];
-                                workflowRunId: string | null;
-                                workflowRunStepId: string | null;
-                                sourceTaskId: string | null;
-                                approvers: {
-                                    users?: string[];
-                                    roles?: string[];
-                                    policy: "any" | "all" | {
-                                        min: number;
-                                    };
-                                };
-                                /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
-                                responses: {
-                                    [key: string]: unknown;
-                                } | null;
-                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
-                                approvals: {
-                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
-                                    responder: string;
-                                    approved: boolean;
-                                    responses: {
-                                        [key: string]: unknown;
-                                    };
-                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
-                                    claimedRespondedBy?: string;
-                                    respondedAt: string;
-                                    /** @description Set when the answer came from a chat button: the channel and the platform user. */
-                                    via?: {
-                                        channel: string;
-                                        platformUserId: string;
-                                    };
-                                }[] | null;
-                                /** @description Quorum progress while the request is pending; null once it is resolved. */
-                                approvalProgress: {
-                                    /** @description Approvals that count toward the policy so far. */
-                                    approved: number;
-                                    /** @description Approvals the policy needs before the request resolves. */
-                                    required: number;
-                                } | null;
-                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
-                                resolvedBy: string | null;
-                                resolvedAt: string | null;
-                                resolutionReason: string | null;
-                                timeoutSeconds: number | null;
-                                expiresAt: string | null;
-                                notificationChannels: {
-                                    /** @enum {string} */
-                                    channel: "slack" | "email";
-                                    target: string;
-                                    messageTs?: string;
-                                }[] | null;
-                                createdBy?: string;
-                                createdAt: string;
-                                updatedAt: string;
-                                /** @description Live state of each config question's key, by question id. Read at request time and never stored. `value` appears only for non-secret keys. */
-                                configState?: {
-                                    [key: string]: {
-                                        exists: boolean;
-                                        isSecret: boolean;
-                                        updatedAt: string | null;
-                                        /** @description Current value; present only for non-secret rows */
-                                        value?: string;
-                                    };
-                                };
-                            };
-                            alreadyCancelled: boolean;
-                            runCancelled: boolean;
-                        };
-                    };
-                };
-                /** @description Caller may not cancel this request */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Already resolved with approved, rejected, or timeout, or its expiresAt passed */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;
@@ -33680,21 +33700,6 @@ export interface components {
             /** @enum {string} */
             type: "app";
         };
-        ProfileCheckResult: {
-            agentId: string;
-            ok: boolean;
-            profiles: {
-                name: string;
-                ok: boolean;
-                checks: {
-                    /** @enum {string} */
-                    check: "harness" | "model" | "harness-credentials" | "credential-allowlist";
-                    /** @enum {string} */
-                    state: "pass" | "warn" | "fail" | "unverified";
-                    detail?: string;
-                }[];
-            }[];
-        };
         SwarmConfig: {
             /** Format: uuid */
             id: string;
@@ -33710,6 +33715,21 @@ export interface components {
             lastUpdatedAt: string;
             encrypted: boolean;
             exportToEnv: boolean;
+        };
+        ProfileCheckResult: {
+            agentId: string;
+            ok: boolean;
+            profiles: {
+                name: string;
+                ok: boolean;
+                checks: {
+                    /** @enum {string} */
+                    check: "harness" | "model" | "harness-credentials" | "credential-allowlist";
+                    /** @enum {string} */
+                    state: "pass" | "warn" | "fail" | "unverified";
+                    detail?: string;
+                }[];
+            }[];
         };
         AssetSummary: {
             /** @enum {string} */

@@ -842,8 +842,8 @@
       "scenarios": ["platform-users-access"]
     },
     "workflow-approvals": {
-      "description": "Approval requests over REST and MCP, quorum policies, request-human-input, cancel-approval-request, workflow approval cards, inline Slack approval buttons",
-      "scenarios": ["workflow-approvals", "slack-approval-buttons"]
+      "description": "Approval requests over REST and MCP, quorum policies, request-human-input, cancel-approval-request, workflow approval cards, inline Slack and Telegram approval buttons",
+      "scenarios": ["workflow-approvals", "slack-approval-buttons", "telegram-approval-buttons"]
     },
     "workflow-definitions": {
       "description": "Workflow CRUD, versions, PATCH and node PATCH, trigger validation, executor types, and the config.read.secrets gate on env and secret inputs over HTTP and MCP",

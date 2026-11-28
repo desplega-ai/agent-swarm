@@ -3,10 +3,12 @@ import {
   ConfigQuestionSettingsSchema,
   normalizeApprovalQuestions,
 } from "../../be/approval-config-question";
+import { getUserGrant } from "../../be/rbac-roles";
+import { can, isRbacEnabled } from "../../rbac";
 import type { ExecutorMeta } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { dispatchApprovalNotifications } from "../approval-notifications";
-import type { ExecutorInput, ExecutorResult } from "./base";
+import type { ExecutorDependencies, ExecutorInput, ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 
 // ─── Config / Output Schemas ────────────────────────────────
@@ -78,7 +80,8 @@ export const ApproverConfigSchema = z.object({
 });
 
 export const NotificationConfigSchema = z.object({
-  channel: z.enum(["slack", "email"]),
+  channel: z.enum(["slack", "email", "telegram"]),
+  // Telegram: a chat id, or a Chat SDK thread id (`telegram:<chat>[:<topic>]`).
   target: z.string(),
 });
 
@@ -206,6 +209,59 @@ export function resolveHitlQuestions(
   return { ok: true, questions };
 }
 
+// ─── Telegram authorization ─────────────────────────────────
+
+export const TELEGRAM_HITL_NOTIFICATION_REFUSED =
+  "Telegram notifications require lead privileges (integration.chat.post): a writer of this workflow lacks them. Remove the telegram notification, or have the lead save the workflow.";
+
+type ExecutorDb = ExecutorDependencies["db"];
+
+/**
+ * May one writer of a workflow post to a Chat SDK destination? The same verb the
+ * REST create path and `chat-post` require. An agent needs `integration.chat.post`
+ * (lead-only by default); a user needs admin or a role granting it. A write with
+ * no recorded actor (operator key, system write) passes, as on the REST path.
+ */
+async function writerMayPostChat(
+  db: ExecutorDb,
+  agentId: string | undefined,
+  userId: string | undefined,
+): Promise<boolean> {
+  if (agentId) {
+    const agent = await db.getAgentById(agentId);
+    if (!agent) return false;
+    return can({
+      principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
+      verb: "integration.chat.post",
+      resource: { kind: "none" },
+      source: "mcp",
+    }).allow;
+  }
+  if (userId) {
+    if (!isRbacEnabled()) return true;
+    const grant = await getUserGrant(userId);
+    return grant.grantsAll || grant.verbs.has("integration.chat.post");
+  }
+  return true;
+}
+
+/**
+ * A workflow node chooses its Telegram target and card text, so both its creator
+ * and its last writer must hold the chat post verb. Otherwise a non-lead agent
+ * could author a workflow that makes the bot post anywhere.
+ */
+export async function workflowMaySendTelegram(
+  db: ExecutorDb,
+  workflowId: string,
+): Promise<boolean> {
+  const workflow = await db.getWorkflow(workflowId);
+  if (!workflow) return false;
+  return (
+    (await writerMayPostChat(db, workflow.createdByAgentId, workflow.createdBy)) &&
+    (await writerMayPostChat(db, workflow.updatedByAgentId, workflow.updatedBy))
+  );
+}
+
 // ─── Executor ───────────────────────────────────────────────
 
 export class HumanInTheLoopExecutor extends BaseExecutor<
@@ -281,6 +337,12 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
     // with the validated array; this guards direct execute callers.
     if (!Array.isArray(config.questions)) {
       return { status: "failed", error: "human-in-the-loop questions did not resolve to an array" };
+    }
+    if (
+      config.notifications?.some((notification) => notification.channel === "telegram") &&
+      !(await workflowMaySendTelegram(db, meta.workflowId))
+    ) {
+      return { status: "failed", error: TELEGRAM_HITL_NOTIFICATION_REFUSED };
     }
     const requestId = crypto.randomUUID();
     const created = await db.createApprovalRequest({
