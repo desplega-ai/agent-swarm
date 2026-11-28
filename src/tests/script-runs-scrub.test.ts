@@ -2,7 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
+  createAgent,
   createScriptRun,
+  deleteAgent,
   getDbClient,
   getRunningScriptRuns,
   getScriptRunJournalStep,
@@ -16,6 +18,7 @@ import {
 } from "../be/db";
 import { breaksJsonValidity, scrubJsonValue } from "../be/scrub-json";
 import { isSealedJson } from "../be/sealed-json";
+import { resolveBySessionToken } from "../be/users";
 import {
   localProcessScriptExecutor,
   type ScriptExecutionResult,
@@ -73,6 +76,7 @@ describe("script run writers scrub at write", () => {
     await removeDbFiles();
     initDb(TEST_DB_PATH);
     ghToken = ["ghp", randomToken(36)].join("_");
+    await createAgent({ id: AGENT_ID, name: "script-runs-scrub", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {
@@ -130,7 +134,7 @@ describe("script run writers scrub at write", () => {
     expectRedacted((run.args as { note: string }).note, "run.args");
   });
 
-  test("a relaunch after restart executes with the exact sealed args", async () => {
+  test("a relaunch after restart executes with the exact sealed args on a run-bound agent token", async () => {
     const id = crypto.randomUUID();
     const args = { note: secretText("relaunch"), n: 3 };
     await createScriptRun({ id, agentId: AGENT_ID, source: "export default () => 1", args });
@@ -161,12 +165,34 @@ describe("script run writers scrub at write", () => {
       isRunning: () => false,
       async terminatePid() {},
     });
+    const apiKeyEnv = process.env.AGENT_SWARM_API_KEY;
+    process.env.AGENT_SWARM_API_KEY = "example-operator-key-for-relaunch";
     try {
-      await startScriptRunProcess(recovered!, "http://127.0.0.1:1", "test-key");
+      await startScriptRunProcess(recovered!, "http://127.0.0.1:1");
       expect(launched?.run.args).toEqual(args);
+      // The relaunch holds a fresh token bound to the run's agent, not the swarm API key.
+      const token = launched!.apiKey;
+      expect(token).not.toBe("example-operator-key-for-relaunch");
+      expect((await resolveBySessionToken(token, { touch: false }))?.agentId).toBe(AGENT_ID);
+
+      exit({ exitCode: 0, stderr: "" });
+      for (let i = 0; i < 50 && (await resolveBySessionToken(token, { touch: false })); i++) {
+        await Bun.sleep(10);
+      }
+      expect(await resolveBySessionToken(token, { touch: false })).toBeNull();
+
+      // A run whose agent is gone is not relaunched.
+      launched = undefined;
+      await deleteAgent(AGENT_ID);
+      await expect(startScriptRunProcess(recovered!, "http://127.0.0.1:1")).rejects.toThrow(
+        "no longer exists",
+      );
+      expect(launched).toBeUndefined();
     } finally {
       exit({ exitCode: 0, stderr: "" });
       setScriptRunExecutor(localProcessScriptExecutor);
+      if (apiKeyEnv === undefined) delete process.env.AGENT_SWARM_API_KEY;
+      else process.env.AGENT_SWARM_API_KEY = apiKeyEnv;
     }
   });
 
