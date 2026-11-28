@@ -428,6 +428,10 @@
       "description": "Against @emulators/github: a maintainer's mention in an issue comment and a PR body become tasks through signed App webhooks, an outsider's mention and a mention-free issue do not, the minted installation token writes as the App bot, and a real merge wakes a vcs.pr.merged waiter",
       "scenarios": ["github-emulate-flows"]
     },
+    "github-private-skill-install": {
+      "description": "A remote skill install from a private repo reads SKILL.md with the server's GitHub token (200), a missing file is a 404 error distinct from a revoked token's auth error, sync reports the auth failure, no token reads unauthenticated (404 with a token hint), and the token never reaches an error or the stored skill",
+      "scenarios": ["skill-install-remote-private"]
+    },
     "github-app-worker-tokens": {
       "description": "POST /api/github/installation-token with a repo: only an owner listed in the deployment-only GITHUB_APP_REPO_OWNERS gets its repo's own installation, and only for a repo registered on the configured GitHub host; a worker-registered repo of an unlisted owner gets the fixed installation, a spoofed host or unregistered repo is 403, an installation of an unlisted account is 502, and the owner list cannot be stored in swarm_config",
       "scenarios": ["github-installation-token-repos"]
@@ -633,6 +637,10 @@
     "script-saved-lifecycle": {
       "description": "Script upsert with typecheck, versioning, run by name, types, search, delete, agent vs global scope.",
       "scenarios": ["script-saved-lifecycle"]
+    },
+    "script-typecheck-host-fs": {
+      "description": "The script upsert typecheck reads only the script source and the bundled SDK, lib and zod declarations: a reference path, import type query or relative import of a host file returns no content, and an existing host path gives the same diagnostics as a missing one.",
+      "scenarios": ["script-typecheck-host-fs"]
     },
     "script-sdk-calls": {
       "description": "A script drives ctx.swarm (kv, agent, tasks, memory rating aliases, read-only SQL), ctx.fs/ctx.sh scratch filesystem and ctx.stdlib on both executors, with effects visible through the API. Failed calls throw a typed SwarmToolError, and an unknown ctx.swarm method names the closest exposed ones.",

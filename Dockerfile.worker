@@ -164,7 +164,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.6.1
+ARG PI_CODING_AGENT_VERSION=1.7.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -568,8 +568,8 @@ COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.3-alpha.2
-ARG DSH_SHA512=9a2e61abdea7939c7a1cf53a8247074946442acd3fc68c9df0c57b1824c3a542d895c25521491f9f926236ff9400c695db654ee154306cb5a78e41415796ff8a
+ARG DSH_VERSION=0.2.3-alpha.3
+ARG DSH_SHA512=a328446800f9d8dcc253eac25bcc934ca9cc87c2b539a1b4cba0847f7a58f475ac970c259c29c392cb64d9699e222e750724d93a844e41d501ad5e1545c02db6
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -584,9 +584,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1795752045-g36b26b
-ARG AMP_SHA512_AMD64=776e89de046ba66aa0351c6c887aab1b5d9443d3ed65a181b19e3d4715d8e6e91fa210ae10ae53709dffc062b4e0ae4181fbbfaec8be5f75d619fce82f089156
-ARG AMP_SHA512_ARM64=f80b0f9937cf12a8e776f6a25b1233acc4313a11ea87c2b32c907a687a3ba63cb88dfc175229b5492aeba3dbaa398386e97634c016f9525e7ea2052dbdd22d3b
+ARG AMP_VERSION=0.0.1795867242-g5fd9f7
+ARG AMP_SHA512_AMD64=4938bf47e1a64d8f73ec34f81f584d64f9cc007d3496ed9092bdcc5e65cdb4c45d9dfc326479d5215153bebe151a5828e64b7ba36dd0bd29167bcaf32817af9f
+ARG AMP_SHA512_ARM64=32f9ee0763237c10dc0e67a557a1dbef1bfce7dce9ca6f97e932564510b3ccd0cd3a4ade26efa970497511007b6b29d1c761bf16b5cdb8e1ab56c2fcfb179db8
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -634,7 +634,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.116
+ARG COPILOT_CLI_VERSION=1.0.117
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -644,8 +644,8 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
 # keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
-# scripts are not needed for ACP (verified on 0.28.7), so none run as root.
-ARG QWEN_CODE_VERSION=0.28.7
+# scripts are not needed for ACP (verified on 0.29.0), so none run as root.
+ARG QWEN_CODE_VERSION=0.29.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
       "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
@@ -675,9 +675,9 @@ RUN case "$TARGETARCH" in \
 # (`kiro-cli-chat` is gone), and only that binary is extracted. Bump
 # KIRO_CLI_VERSION and both pins together. Proprietary (AWS): confirm its
 # licence before publishing.
-ARG KIRO_CLI_VERSION=3.6.2
-ARG KIRO_CLI_SHA256_AMD64=ffa5b53423a399249bbdbd69dc00686f60bbcf4637f59895796b81d401a1435f
-ARG KIRO_CLI_SHA256_ARM64=a957c6a92b1d58849e67a7e49c07f9c4f0344c1f07ce2b0d271c9d93415f5f01
+ARG KIRO_CLI_VERSION=3.7.0
+ARG KIRO_CLI_SHA256_AMD64=8ba5fad4d2d44af4731ea4c1f74447288c7b6e272249057cf9507f1cc088654a
+ARG KIRO_CLI_SHA256_ARM64=8d0e14c88a4b61c5409a81faf8123855a6d40fff7927ede55c9b1fa9493ff761
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \

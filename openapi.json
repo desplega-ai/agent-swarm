@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "2.16.0",
+    "version": "2.16.1",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -57330,7 +57330,7 @@
             "description": "Script run cancelled, or already terminal"
           },
           "403": {
-            "description": "A scoped user may cancel only the runs it launched",
+            "description": "A scoped user may cancel only the runs it launched, and an agent only its own runs",
             "content": {
               "application/json": {
                 "schema": {
@@ -57419,8 +57419,18 @@
               }
             }
           },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Journal step not found",
+            "description": "Script run or journal step not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -57518,6 +57528,16 @@
               }
             }
           },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Script run not found",
             "content": {
@@ -57557,6 +57577,16 @@
         "responses": {
           "204": {
             "description": "Heartbeat recorded"
+          },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Script run not found",
@@ -57653,6 +57683,16 @@
         "responses": {
           "204": {
             "description": "Status updated"
+          },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Script run not found",

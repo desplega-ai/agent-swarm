@@ -218,6 +218,7 @@ import { registerSwarmXTool } from "./tools/swarm-x";
 // Task pool capability
 import { registerSystemOneDecideTool } from "./tools/system-one-decide";
 import { registerTaskActionTool } from "./tools/task-action";
+import { CORE_TOOLS } from "./tools/tool-config";
 // Tracker capability
 import {
   registerTrackerLinkTaskTool,
@@ -414,6 +415,7 @@ export async function createServer(
   opts: {
     scriptsOnly?: boolean;
     fullSurface?: boolean;
+    preloadCoreTools?: boolean;
     preloadedTools?: readonly string[];
     /** Raw SWARM_ENABLED_TOOLS value for this session; defaults to the env. */
     enabledTools?: string;
@@ -496,7 +498,8 @@ export async function createServer(
     },
   );
 
-  if (opts.preloadedTools?.length) setPreloadedTools(server, opts.preloadedTools);
+  const taskTools = opts.preloadedTools ?? [];
+  setPreloadedTools(server, opts.preloadCoreTools ? [...CORE_TOOLS, ...taskTools] : taskTools);
 
   // Scripts-only surface (experimental code-mode): register just the script
   // catalog tools and stop. script-connections / script-apis stay out — they

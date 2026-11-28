@@ -2,8 +2,8 @@
 # (once as-is, once again under SLACK_RENDER_V2=true plus the delegated-delivery scenarios,
 # which only exist under v2), renders one PNG per Slack event from the slack-mock journal, and
 # uploads the result as an artifact.
-# Images live on the single-commit `ci-visuals` branch (rebuilt on every run, so history never
-# grows) — but publishing and commenting happen in a SEPARATE workflow,
+# Images live on agent-fs as a public share site per PR commit — but publishing and commenting
+# happen in a SEPARATE workflow,
 # slack-visuals-publish.yml, triggered by `workflow_run` once this one completes. This job
 # always runs with a read-only token (no `contents`/`pull-requests` permission at all), even on
 # a same-repo PR, so fork PRs and same-repo PRs behave identically here: build the visuals,

@@ -5,9 +5,10 @@ import {
   updateScriptRun,
   updateScriptRunIfRunning,
 } from "../be/db";
+import { acquireScriptApiCredential } from "../be/scripts/run-credential";
 import { isExecutorAllowedByDeployment } from "../scripts-runtime/executors/registry";
 import type { ScriptRun } from "../types";
-import { getApiKey } from "../utils/api-key";
+import type { ScriptRunProvenance } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   localProcessScriptExecutor,
@@ -19,6 +20,9 @@ import { scriptRunMaxWallMs } from "./limits";
 type ManagedRun = {
   execution: ScriptExecutionHandle;
 };
+
+/** Token lifetime past the wall-clock cap, so the reconcile abort lands before expiry. */
+const SCRIPT_RUN_TOKEN_GRACE_MS = 15 * 60 * 1000;
 
 const managed = new Map<string, ManagedRun>();
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -46,24 +50,33 @@ export function durableScriptRunsAllowed(): boolean {
 export async function startScriptRunProcess(
   run: ScriptRun,
   baseUrl: string,
-  apiKeyOverride?: string,
+  launcherProvenance: ScriptRunProvenance = {},
 ): Promise<void> {
   if (supervisorDisabled()) return;
   if (managed.has(run.id)) return;
   // Also covers reconcile respawns of runs created before the setting changed.
   if (!durableScriptRunsAllowed()) throw new Error(DURABLE_RUNS_NATIVE_REFUSED);
-  const apiKey = apiKeyOverride ?? getApiKey();
-  if (!apiKey) throw new Error("AGENT_SWARM_API_KEY is required to spawn script runs");
-  if (process.env.SCRIPT_WORKFLOW_DEBUG === "true") {
-    console.error(
-      `[script-workflows] spawning ${run.id} auth override=${apiKeyOverride ? "yes" : "no"} len=${apiKey.length}`,
-    );
-  }
+  // The broker acts as the run's agent on a token bound to this process and
+  // revoked when it ends, never the launcher's bearer or the swarm API key. A
+  // reconcile respawn mints a fresh one, so a deleted agent's run stops here.
+  const credential = await acquireScriptApiCredential(
+    run.agentId,
+    { ...launcherProvenance, sourceScriptRunId: run.id },
+    scriptRunMaxWallMs() + SCRIPT_RUN_TOKEN_GRACE_MS,
+  );
+  const apiKey = credential.apiKey;
+  if (!apiKey) throw new Error(`Script run agent ${run.agentId} no longer exists`);
 
-  // `run.args` is the redacted view; launch with the exact sealed value.
-  const sealedArgs = await getScriptRunExecutionArgs(run.id);
-  const args = sealedArgs === undefined ? run.args : sealedArgs;
-  const execution = await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
+  let execution: ScriptExecutionHandle;
+  try {
+    // `run.args` is the redacted view; launch with the exact sealed value.
+    const sealedArgs = await getScriptRunExecutionArgs(run.id);
+    const args = sealedArgs === undefined ? run.args : sealedArgs;
+    execution = await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
+  } catch (err) {
+    await credential.release();
+    throw err;
+  }
   managed.set(run.id, { execution });
   await updateScriptRun(run.id, {
     status: "running",
@@ -100,7 +113,11 @@ export async function startScriptRunProcess(
     })
     .finally(async () => {
       managed.delete(run.id);
-      await execution.cleanup();
+      try {
+        await credential.release();
+      } finally {
+        await execution.cleanup();
+      }
     });
 }
 

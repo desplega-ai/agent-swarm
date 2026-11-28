@@ -274,7 +274,11 @@ export const scriptRunsDurable: Scenario = {
       "launch a manual run",
     );
     const internal = `/api/internal/script-runs/${manualId}`;
-    expectStatus(await ctx.api("GET", `${internal}/steps/s1`), [404], "missing journal step");
+    expectStatus(
+      await ctx.api("GET", `${internal}/steps/s1`, { agentId: launcherId }),
+      [404],
+      "missing journal step",
+    );
     const stepBody = {
       stepKey: "s1",
       stepType: "raw-llm",
@@ -289,7 +293,7 @@ export const scriptRunsDurable: Scenario = {
     });
     expectStatus(wrote, [201], "write a journal step");
     expect(JSON.stringify(wrote.json) === JSON.stringify({ ok: true }), "step write response");
-    const read = await ctx.api("GET", `${internal}/steps/s1`);
+    const read = await ctx.api("GET", `${internal}/steps/s1`, { agentId: launcherId });
     expectStatus(read, [200], "read a journal step");
     expect(
       JSON.stringify(read.json) ===
@@ -304,20 +308,24 @@ export const scriptRunsDurable: Scenario = {
     // The journal is write-once per step key: a replayed write is acknowledged with 201 but the
     // first result stays, so a resumed run replays exactly what it recorded the first time.
     const rewrite = await ctx.api("POST", `${internal}/steps`, {
+      agentId: launcherId,
       body: { ...stepBody, result: { value: 2 } },
     });
     expectStatus(rewrite, [201], "rewrite a journal step");
-    const replayed = await ctx.api("GET", `${internal}/steps/s1`);
+    const replayed = await ctx.api("GET", `${internal}/steps/s1`, { agentId: launcherId });
     expect(
       JSON.stringify(asRecord(replayed.json).result) === JSON.stringify({ value: 1 }),
       "the first journal write for a step key must win",
     );
     const key = ["sk", "ant", "api03", "A".repeat(40)].join("-");
     const failedWrite = await ctx.api("POST", `${internal}/steps`, {
+      agentId: launcherId,
       body: { stepKey: "s2", stepType: "agent-task", status: "failed", error: `nope ${key}` },
     });
     expectStatus(failedWrite, [201], "write a failed journal step");
-    const failedRead = asRecord((await ctx.api("GET", `${internal}/steps/s2`)).json);
+    const failedRead = asRecord(
+      (await ctx.api("GET", `${internal}/steps/s2`, { agentId: launcherId })).json,
+    );
     expect(
       failedRead.status === "failed" &&
         String(failedRead.error).startsWith("nope ") &&
@@ -326,18 +334,24 @@ export const scriptRunsDurable: Scenario = {
     );
     expectStatus(
       await ctx.api("POST", `${internal}/steps`, {
+        agentId: launcherId,
         body: { stepKey: "s3", stepType: "x", status: "pending" },
       }),
       [400],
       "journal step with an invalid status",
     );
     expectStatus(
-      await ctx.api("POST", `/api/internal/script-runs/${UNKNOWN_ID}/steps`, { body: stepBody }),
+      await ctx.api("POST", `/api/internal/script-runs/${UNKNOWN_ID}/steps`, {
+        agentId: launcherId,
+        body: stepBody,
+      }),
       [404],
       "journal step for an unknown run",
     );
     expectStatus(
-      await ctx.api("GET", `/api/internal/script-runs/${UNKNOWN_ID}/steps/s1`),
+      await ctx.api("GET", `/api/internal/script-runs/${UNKNOWN_ID}/steps/s1`, {
+        agentId: launcherId,
+      }),
       [404],
       "read a step of an unknown run",
     );
@@ -353,14 +367,19 @@ export const scriptRunsDurable: Scenario = {
     );
     expect(typeof afterBeat.lastHeartbeatAt === "string", "heartbeat must stamp lastHeartbeatAt");
     expectStatus(
-      await ctx.api("POST", `/api/internal/script-runs/${UNKNOWN_ID}/heartbeat`),
+      await ctx.api("POST", `/api/internal/script-runs/${UNKNOWN_ID}/heartbeat`, {
+        agentId: launcherId,
+      }),
       [404],
       "heartbeat for an unknown run",
     );
 
     // status: pause is resumable, a paused run ignores a late completion, cancel ends it
     expectStatus(
-      await ctx.api("POST", `${internal}/status`, { body: { status: "paused" } }),
+      await ctx.api("POST", `${internal}/status`, {
+        agentId: launcherId,
+        body: { status: "paused" },
+      }),
       [204],
       "pause",
     );
@@ -370,7 +389,10 @@ export const scriptRunsDurable: Scenario = {
       "the run must be paused",
     );
     expectStatus(
-      await ctx.api("POST", `${internal}/status`, { body: { status: "completed", output: 1 } }),
+      await ctx.api("POST", `${internal}/status`, {
+        agentId: launcherId,
+        body: { status: "completed", output: 1 },
+      }),
       [204],
       "late completion of a paused run",
     );
@@ -380,12 +402,16 @@ export const scriptRunsDurable: Scenario = {
       "a status post for a run that is not running must be a no-op",
     );
     expectStatus(
-      await ctx.api("POST", `${internal}/status`, { body: { status: "exploded" } }),
+      await ctx.api("POST", `${internal}/status`, {
+        agentId: launcherId,
+        body: { status: "exploded" },
+      }),
       [400],
       "invalid status",
     );
     expectStatus(
       await ctx.api("POST", `/api/internal/script-runs/${UNKNOWN_ID}/status`, {
+        agentId: launcherId,
         body: { status: "paused" },
       }),
       [404],
@@ -418,6 +444,7 @@ export const scriptRunsDurable: Scenario = {
     );
     expectStatus(
       await ctx.api("POST", `/api/internal/script-runs/${completeId}/status`, {
+        agentId: launcherId,
         body: { status: "completed", output: { done: ctx.nonce } },
       }),
       [204],
@@ -447,6 +474,7 @@ export const scriptRunsDurable: Scenario = {
       "run to fail",
     );
     await ctx.api("POST", `/api/internal/script-runs/${failId}/status`, {
+      agentId: launcherId,
       body: { status: "failed", error: `broke ${ctx.nonce}` },
     });
     const failedRun = asRecord(
@@ -455,6 +483,58 @@ export const scriptRunsDurable: Scenario = {
     expect(
       failedRun.status === "failed" && failedRun.error === `broke ${ctx.nonce}`,
       "a failed status must store the error",
+    );
+
+    // ── per-run routes act only for the run's own agent ──
+    const ownedId = await createRun(
+      ctx,
+      launcherId,
+      { source: NOOP, background: false },
+      "run owned by the launcher",
+    );
+    const owned = `/api/internal/script-runs/${ownedId}`;
+    expectStatus(
+      await ctx.api("POST", `${owned}/steps`, { agentId: launcherId, body: stepBody }),
+      [201],
+      "the run's agent writes its journal",
+    );
+    const tokenResponse = await ctx.api("POST", `/api/agents/${outsiderId}/token`, { body: {} });
+    expectStatus(tokenResponse, [200], "mint the outsider's agent token");
+    const outsiderToken = asString(asRecord(tokenResponse.json).plaintext, "outsider token");
+    try {
+      const foreignCalls: [string, string, Record<string, unknown> | undefined][] = [
+        ["GET", `${owned}/steps/s1`, undefined],
+        ["POST", `${owned}/steps`, { ...stepBody, stepKey: "foreign" }],
+        ["POST", `${owned}/heartbeat`, undefined],
+        ["POST", `${owned}/status`, { status: "paused" }],
+        ["DELETE", `/api/script-runs/${ownedId}`, undefined],
+      ];
+      for (const [method, path, body] of foreignCalls) {
+        expectStatus(
+          await ctx.api(method, path, { apiKey: outsiderToken, body }),
+          [403],
+          `${method} ${path} with another agent's token`,
+        );
+        expectStatus(
+          await ctx.api(method, path, { agentId: outsiderId, body }),
+          [403],
+          `${method} ${path} as another agent`,
+        );
+      }
+    } finally {
+      await ctx.api("DELETE", `/api/agents/${outsiderId}/token`);
+    }
+    const untouched = asRecord((await ctx.api("GET", `/api/script-runs/${ownedId}`)).json);
+    expect(
+      asRecord(untouched.run).status === "running" &&
+        !asRecord(untouched.run).lastHeartbeatAt &&
+        asRecords(untouched, "journal").every((step) => step.stepKey !== "foreign"),
+      `refused calls changed the run: ${JSON.stringify(untouched).slice(0, 400)}`,
+    );
+    expectStatus(
+      await ctx.api("DELETE", `/api/script-runs/${ownedId}`, { agentId: launcherId }),
+      [204],
+      "the run's agent cancels its run",
     );
 
     // ── internal agent-task: ownership, parent authorization, replay, success, failure ──
@@ -614,6 +694,7 @@ export const scriptRunsDurable: Scenario = {
     let limited: Record<string, unknown> | undefined;
     for (let step = 1; step <= 60 && !limited; step += 1) {
       const wrote = await ctx.api("POST", `/api/internal/script-runs/${limitRunId}/steps`, {
+        agentId: launcherId,
         body: { stepKey: `limit-${step}`, stepType: "agent-task", status: "completed" },
       });
       if (wrote.status === 429) limited = asRecord(wrote.json);
@@ -643,6 +724,7 @@ export const scriptRunsDurable: Scenario = {
     );
     expectStatus(
       await ctx.api("POST", `/api/internal/script-runs/${parkedRunId}/status`, {
+        agentId: launcherId,
         body: { status: "paused" },
       }),
       [204],

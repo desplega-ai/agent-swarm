@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { chatgptSubscriptionModel, chatgptSubscriptionTrait } from "@desplega/model-catalog";
 import { deriveDefaultRoute } from "@desplega/model-routing";
-import type { TemplateResponse } from "../../templates/schema.ts";
+import * as z from "zod";
 import { isGroupKey } from "../assets/key.ts";
 import { sourceOfKey } from "../assets/source-key.ts";
 import {
@@ -6355,20 +6355,90 @@ async function saveGeneratedProfile({
   }
 }
 
-async function fetchTemplate(
+// Runtime shape of a registry template (templates/schema.ts): the fields the
+// runner reads must have the declared types; other metadata passes through.
+const TemplateResponseSchema = z.object({
+  config: z.looseObject({
+    displayName: z.string().optional(),
+    agentDefaults: z.looseObject({
+      role: z.string().optional(),
+      capabilities: z.array(z.string()).optional(),
+      maxTasks: z.number().int().positive().optional(),
+      isLead: z.boolean().optional(),
+    }),
+  }),
+  files: z.looseObject({
+    claudeMd: z.string().default(""),
+    soulMd: z.string().default(""),
+    identityMd: z.string().default(""),
+    toolsMd: z.string().default(""),
+    setupScript: z.string().default(""),
+    heartbeatMd: z.string().default(""),
+  }),
+});
+type TemplateResponse = z.infer<typeof TemplateResponseSchema>;
+
+/**
+ * Parse a registry template body. Returns null when the body does not match
+ * `expectedSha256` (hex digest of the exact body bytes, from TEMPLATE_SHA256)
+ * or does not fit the template schema.
+ */
+function parseTemplate(
+  templateId: string,
+  body: string,
+  expectedSha256: string | undefined,
+): TemplateResponse | null {
+  if (expectedSha256) {
+    const actual = new Bun.CryptoHasher("sha256").update(body).digest("hex");
+    if (actual !== expectedSha256.trim().toLowerCase()) {
+      console.warn(
+        `[template] Ignoring ${templateId}: sha256 ${actual} does not match TEMPLATE_SHA256`,
+      );
+      return null;
+    }
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    console.warn(`[template] Ignoring ${templateId}: body is not JSON`);
+    return null;
+  }
+  const parsed = TemplateResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    console.warn(`[template] Ignoring ${templateId}: ${z.prettifyError(parsed.error)}`);
+    return null;
+  }
+  return parsed.data;
+}
+
+export async function fetchTemplate(
   templateId: string,
   registryUrl: string,
   cacheDir: string,
+  expectedSha256?: string,
 ): Promise<TemplateResponse | null> {
   const safeId = templateId.replace(/[^a-zA-Z0-9_-]/g, "_");
   const cachePath = `${cacheDir}/${safeId}.json`;
+  const readCache = async (): Promise<TemplateResponse | null> => {
+    try {
+      return parseTemplate(templateId, await readFile(cachePath, "utf-8"), expectedSha256);
+    } catch {
+      return null;
+    }
+  };
+  const readExpiredCache = async (): Promise<TemplateResponse | null> => {
+    const cached = await readCache();
+    if (cached) console.log(`[template] Using expired cache for ${templateId}`);
+    return cached;
+  };
 
   // Check local cache
   try {
     const info = await stat(cachePath);
     if (Date.now() - info.mtimeMs < TEMPLATE_CACHE_TTL_MS) {
-      const cached = await readFile(cachePath, "utf-8");
-      return JSON.parse(cached) as TemplateResponse;
+      const cached = await readCache();
+      if (cached) return cached;
     }
   } catch {
     // No cache or expired, continue to fetch
@@ -6379,22 +6449,17 @@ async function fetchTemplate(
     const resp = await fetch(`${registryUrl}/api/templates/${templateId}`);
     if (!resp.ok) {
       console.warn(`[template] Registry returned ${resp.status} for ${templateId}`);
-      // Fall back to expired cache if available
-      try {
-        const cached = await readFile(cachePath, "utf-8");
-        console.log(`[template] Using expired cache for ${templateId}`);
-        return JSON.parse(cached) as TemplateResponse;
-      } catch {
-        return null;
-      }
+      return await readExpiredCache();
     }
 
-    const template = (await resp.json()) as TemplateResponse;
+    const body = await resp.text();
+    const template = parseTemplate(templateId, body, expectedSha256);
+    if (!template) return await readExpiredCache();
 
-    // Cache the response
+    // Cache the exact body so a later boot can check it against TEMPLATE_SHA256 again
     try {
       await mkdir(cacheDir, { recursive: true });
-      await writeFile(cachePath, JSON.stringify(template), "utf-8");
+      await writeFile(cachePath, body, "utf-8");
     } catch {
       console.warn(`[template] Could not cache template to ${cachePath}`);
     }
@@ -6402,14 +6467,7 @@ async function fetchTemplate(
     return template;
   } catch (err) {
     console.warn(`[template] Failed to fetch from registry: ${err}`);
-    // Fall back to expired cache
-    try {
-      const cached = await readFile(cachePath, "utf-8");
-      console.log(`[template] Using expired cache for ${templateId}`);
-      return JSON.parse(cached) as TemplateResponse;
-    } catch {
-      return null;
-    }
+    return await readExpiredCache();
   }
 }
 
@@ -6665,7 +6723,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   if (templateId) {
     try {
-      cachedTemplate = await fetchTemplate(templateId, registryUrl, "/workspace/.template-cache");
+      cachedTemplate = await fetchTemplate(
+        templateId,
+        registryUrl,
+        "/workspace/.template-cache",
+        process.env.TEMPLATE_SHA256,
+      );
       if (cachedTemplate) {
         console.log(`[${role}] Fetched template: ${templateId}`);
 

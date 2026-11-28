@@ -259,11 +259,12 @@ Local CLI adapters start each harness in a dedicated POSIX process group. Normal
 
 ### Task tool preloading
 
-The default-on `TASK_TOOL_PRELOAD_ENABLED` feature lets a new MCP session preload selected
-swarm tools by task type or schedule. The API adds Claude's per-tool `anthropic/alwaysLoad`
-metadata and a registered MCP instruction to call already-available tools directly. This does
+With the default `TASK_TOOL_PRELOAD_ENABLED=true`, new agent MCP sessions preload available core
+tools and any additional tools selected by task type or schedule. The API marks each preloaded tool
+with Claude's `anthropic/alwaysLoad` metadata. A matching task manifest also adds the MCP instruction
+to call available tools directly. This does
 not change the provider adapter contract, tool permissions, or other harnesses' loading policy.
-See [configuration and limits](/docs/ui/configuration#task-tool-preloading-proposal).
+See [configuration and limits](/docs/ui/configuration#task-tool-preloading).
 
 ### Live task steering
 
@@ -542,7 +543,7 @@ ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provide
 in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
-(`@ampcode/cli@0.0.1795752045-g36b26b`, SHA-512 verified, auto-update off); the
+(`@ampcode/cli@0.0.1795867242-g5fd9f7`, SHA-512 verified, auto-update off); the
 slim image does not include it. `AMP_BINARY` selects another trusted executable.
 Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
 before publishing an image that contains the binary.

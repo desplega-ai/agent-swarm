@@ -8,8 +8,8 @@
 #
 # $out_root is the extracted contents of a fork-controlled artifact (the E2E job that produced
 # it runs with the PR-branch copy of slack-visuals.yml for a fork PR). What gets staged — and
-# later published to ci-visuals, served from raw.githubusercontent.com under this repository's
-# name — is an explicit allowlist, not "whatever the artifact contains": per-profile only
+# later published to a public agent-fs share linked from this repository's PR comments —
+# is an explicit allowlist, not "whatever the artifact contains": per-profile only
 # index.json, channel.png, and frames/*.{png,gif}, no symlinks, no directory or file names
 # outside a safe charset, and a size cap per file.
 

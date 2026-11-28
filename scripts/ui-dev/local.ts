@@ -79,7 +79,9 @@ export async function readFixture(path: string): Promise<Fixture> {
 /**
  * Boot `src/http.ts` on a fresh SQLite file in `stateDir`, bound to a free loopback port, with a new
  * random key. NODE_ENV=development: page cookies are SameSite=Lax on loopback. Integrations,
- * heartbeat and telemetry are off. The previous run's database in `stateDir` is deleted first.
+ * heartbeat and telemetry are off. Copied scripts run in the quickjs sandbox, never as the
+ * developer: SCRIPT_EXECUTOR=quickjs is the deployment ceiling, so no per-script native override
+ * and no native schema extraction at import. The previous run's database in `stateDir` is deleted first.
  * shortcut: own spawn, not scripts/e2e/sut.ts startSut (that one carries coverage, Postgres and
  * fixture restores, and keeps state under /tmp); merge them if a third caller appears.
  */
@@ -127,6 +129,8 @@ export async function bootLocalApi(stateDir: string, repoRoot: string): Promise<
       SWARM_DEV_MODE: "true",
       // The copy registers a plain owner agent for pages, with no runtime instance.
       MULTI_RUNTIME_ENABLED: "false",
+      // Copied app scripts are untrusted code: no host file, env or process access.
+      SCRIPT_EXECUTOR: "quickjs",
       SLACK_DISABLE: "true",
       GITHUB_DISABLE: "true",
       LINEAR_DISABLE: "true",
@@ -260,14 +264,25 @@ export async function createLocalIdentity(
 
 /** Import an app bundle under its own id. Returns the import's warnings. */
 export async function importApp(api: LocalApi, bundle: Json, agentId: string): Promise<string[]> {
+  // The local API refuses a native executor pin (SCRIPT_EXECUTOR=quickjs): drop it so the
+  // script imports and runs in quickjs.
+  const pinned: string[] = [];
+  const scripts = ((bundle.scripts ?? []) as Json[]).map((script) => {
+    if (script.executor !== "native") return script;
+    pinned.push(String(script.name));
+    return { ...script, executor: null };
+  });
   // As the local agent: its action scripts land in that agent's scope, and a script action
   // runs as its owning agent (a global script has none).
   const { json } = await call(api.baseUrl, api.apiKey, "POST", "/api/apps/import?keepId=1", {
     headers: { "X-Agent-ID": agentId },
-    body: bundle,
+    body: { ...bundle, scripts },
     ok: [201],
   });
-  return ((json.warnings ?? []) as unknown[]).map(String);
+  return [
+    ...pinned.map((name) => `script ${name} pins the native executor: it runs in quickjs locally`),
+    ...((json.warnings ?? []) as unknown[]).map(String),
+  ];
 }
 
 /**

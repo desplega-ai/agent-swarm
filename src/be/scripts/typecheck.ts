@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import {
@@ -1577,6 +1578,47 @@ function sourceFileCacheKey(
   return `${fileName}\0${languageVersion.languageVersion}\0${languageVersion.impliedNodeFormat}\0${languageVersion.jsDocParsingMode}`;
 }
 
+/**
+ * The only host files a script typecheck may read: the TypeScript lib files and
+ * the zod declarations (the Dockerfile stages exactly these). The script source
+ * is untrusted, so `/// <reference path>`, `import("...")` type queries and
+ * module resolution must not reach any other host path. Everything else reads
+ * as missing, so diagnostics carry no host content and no existence signal.
+ */
+function createHostFileGate(libDir: string): {
+  allowsFile(fileName: string): boolean;
+  allowsDirectory(dirName: string): boolean;
+} {
+  const lib = posix.resolve(libDir);
+  // Bare imports resolve from `scriptTypesBase()` upward, one node_modules per ancestor.
+  const zodRoots: string[] = [];
+  for (let dir = posix.dirname(scriptTypesBase()); ; dir = posix.dirname(dir)) {
+    const root = posix.join(dir, "node_modules", "zod");
+    zodRoots.push(root);
+    // A linked install (bun's isolated linker) resolves zod files under the real path.
+    const real = ts.sys.directoryExists(root) ? ts.sys.realpath?.(root) : undefined;
+    if (real && real !== root) zodRoots.push(real);
+    if (dir === posix.dirname(dir)) break;
+  }
+  const roots = [lib, ...zodRoots];
+  const inside = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
+  return {
+    allowsFile(fileName) {
+      const path = posix.resolve(fileName.replace(/\\/g, "/"));
+      if (posix.dirname(path) === lib) return /^lib\.[^/]*\.d\.ts$/.test(posix.basename(path));
+      return (
+        zodRoots.some((root) => inside(path, root)) &&
+        /(\.d\.ts|\.d\.cts|\/package\.json)$/.test(path)
+      );
+    },
+    allowsDirectory(dirName) {
+      const path = posix.resolve(dirName.replace(/\\/g, "/"));
+      // Ancestors of a root must exist for node_modules lookup; they are fixed, not probed.
+      return roots.some((root) => inside(path, root) || inside(root, path));
+    },
+  };
+}
+
 function createCompilerHost(
   files: Map<string, string>,
   options: ts.CompilerOptions,
@@ -1584,6 +1626,16 @@ function createCompilerHost(
 ): ts.CompilerHost {
   const host = ts.createCompilerHost(options, true);
   const originalGetSourceFile = host.getSourceFile.bind(host);
+  // In compiled binary mode, TypeScript's lib .d.ts files live alongside
+  // typescript.js in /$bunfs/ — but .d.ts files are not embedded in the binary.
+  // Redirect lib lookups to TS_LIB_DIR where the Dockerfile copies real copies.
+  const tsLibDir = process.env.TS_LIB_DIR;
+  if (tsLibDir) {
+    host.getDefaultLibLocation = () => tsLibDir;
+  }
+  const gate = createHostFileGate(host.getDefaultLibLocation?.() ?? "");
+  const readHostFile = (fileName: string) =>
+    gate.allowsFile(fileName) ? ts.sys.readFile(fileName) : undefined;
 
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
     const normalized = fileName.replace(/\\/g, "/");
@@ -1593,7 +1645,8 @@ function createCompilerHost(
         return ts.createSourceFile(normalized, source, languageVersion, true, ts.ScriptKind.TS);
       }
     }
-    const text = source ?? ts.sys.readFile(fileName);
+    if (source === undefined && !gate.allowsFile(fileName)) return undefined;
+    const text = source ?? readHostFile(fileName);
     if (text === undefined || shouldCreateNewSourceFile) {
       if (source !== undefined) {
         return ts.createSourceFile(normalized, source, languageVersion, true, ts.ScriptKind.TS);
@@ -1613,13 +1666,20 @@ function createCompilerHost(
 
   host.fileExists = (fileName) => {
     const normalized = fileName.replace(/\\/g, "/");
-    return files.has(normalized) || ts.sys.fileExists(fileName);
+    return files.has(normalized) || (gate.allowsFile(fileName) && ts.sys.fileExists(fileName));
   };
 
   host.readFile = (fileName) => {
     const normalized = fileName.replace(/\\/g, "/");
-    return files.get(normalized) ?? ts.sys.readFile(fileName);
+    return files.get(normalized) ?? readHostFile(fileName);
   };
+
+  host.directoryExists = (dirName) =>
+    gate.allowsDirectory(dirName) && ts.sys.directoryExists(dirName);
+  host.getDirectories = (dirName) =>
+    gate.allowsDirectory(dirName) ? ts.sys.getDirectories(dirName) : [];
+  host.realpath = (path) =>
+    gate.allowsFile(path) || gate.allowsDirectory(path) ? (ts.sys.realpath?.(path) ?? path) : path;
 
   // Resolve external packages (e.g. "zod") from a real on-disk base rather than
   // the virtual path "/virtual/..." so TypeScript can find a real node_modules.
@@ -1638,14 +1698,6 @@ function createCompilerHost(
       const base = containingFile.startsWith("/virtual/") ? projectBase : containingFile;
       return ts.resolveModuleName(moduleName, base, options, host).resolvedModule;
     });
-
-  // In compiled binary mode, TypeScript's lib .d.ts files live alongside
-  // typescript.js in /$bunfs/ — but .d.ts files are not embedded in the binary.
-  // Redirect lib lookups to TS_LIB_DIR where the Dockerfile copies real copies.
-  const tsLibDir = process.env.TS_LIB_DIR;
-  if (tsLibDir) {
-    host.getDefaultLibLocation = () => tsLibDir;
-  }
 
   return host;
 }

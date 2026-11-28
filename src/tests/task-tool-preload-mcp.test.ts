@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { closeDb, createAgent, createTaskExtended, initDb, upsertSwarmConfig } from "../be/db";
 import { handleMcp } from "../http/mcp";
+import { CORE_TOOLS } from "../tools/tool-config";
 import { listenOnFreePort } from "./test-net";
 
 const dbPath = "./test-task-tool-preload.sqlite";
@@ -77,11 +78,22 @@ async function pins(client: Client): Promise<string[]> {
 // Keep the session-lifetime assertions together with room for connection setup.
 test("wire response is default-on, per-task, additive, and fixed for one MCP session", async () => {
   const task = await createTaskExtended("review fixture", { agentId, taskType: "review" });
-  const other = await createTaskExtended("other fixture", { agentId, taskType: "other" });
+  const untyped = await createTaskExtended("untyped fixture", { agentId });
   const foreign = await createTaskExtended("unowned", { taskType: "review" });
-  await configure("TASK_TOOL_MANIFESTS", '{"taskTypes":{"review":["script-run","get-tasks"]}}');
+  await configure(
+    "TASK_TOOL_MANIFESTS",
+    '{"taskTypes":{"review":["create-workflow","get-tasks"]}}',
+  );
   const defaultOn = await connect(task.id);
-  expect(await pins(defaultOn)).toEqual(["get-tasks", "script-run"]);
+  const { tools } = await defaultOn.listTools();
+  const core = tools
+    .map((tool) => tool.name)
+    .filter((name) => CORE_TOOLS.has(name))
+    .sort();
+  const withManifest = [...core, "create-workflow"].sort();
+  expect(core).toContain("get-task-details");
+  expect(core).toContain("store-progress");
+  expect(await pins(defaultOn)).toEqual(withManifest);
   await configure("TASK_TOOL_PRELOAD_ENABLED", "false");
   const off = await connect(task.id);
   const baseline = (await off.listTools()).tools;
@@ -92,15 +104,16 @@ test("wire response is default-on, per-task, additive, and fixed for one MCP ses
   await configure("TASK_TOOL_PRELOAD_ENABLED", "true");
   const [on, unmatched, unowned, missing] = await Promise.all([
     connect(task.id),
-    connect(other.id),
+    connect(untyped.id),
     connect(foreign.id),
     connect(),
   ]);
-  expect(await pins(on)).toEqual(["get-tasks", "script-run"]);
+  expect(await pins(on)).toEqual(withManifest);
   expect(on.getInstructions()).toContain("call it directly");
-  expect(await pins(unmatched)).toEqual([]);
-  expect(await pins(unowned)).toEqual([]);
-  expect(await pins(missing)).toEqual([]);
+  expect(await pins(unmatched)).toEqual(core);
+  expect(unmatched.getInstructions()).toBeUndefined();
+  expect(await pins(unowned)).toEqual(core);
+  expect(await pins(missing)).toEqual(core);
   expect(await pins(off)).toEqual([]);
   expect((await on.listTools()).tools.map((tool) => tool.name)).toEqual(
     baseline.map((tool) => tool.name),
@@ -112,11 +125,11 @@ test("wire response is default-on, per-task, additive, and fixed for one MCP ses
   process.env.TASK_TOOL_PRELOAD_ENABLED = "true";
   await configure("TASK_TOOL_PRELOAD_ENABLED", "false");
   expect(await pins(await connect(task.id))).toEqual([]);
-  expect(await pins(on)).toEqual(["get-tasks", "script-run"]);
+  expect(await pins(on)).toEqual(withManifest);
 
   await configure("TASK_TOOL_PRELOAD_ENABLED", "true");
   await configure("TASK_TOOL_MANIFESTS", "invalid deployment JSON");
-  expect(await pins(await connect(task.id))).toEqual([]);
+  expect(await pins(await connect(task.id))).toEqual(core);
 }, 30_000);
 
 test("a manifest cannot expand the scripts-only capability surface", async () => {
@@ -125,6 +138,6 @@ test("a manifest cannot expand the scripts-only capability surface", async () =>
   await configure("TASK_TOOL_MANIFESTS", '{"taskTypes":{"script":["script-run","get-tasks"]}}');
   await configure("SCRIPTS_ONLY_MCP", "true");
   const client = await connect(task.id);
-  expect(await pins(client)).toEqual(["script-run"]);
+  expect(await pins(client)).toEqual(["script-query-types", "script-run", "script-search"]);
   expect((await client.listTools()).tools.some((tool) => tool.name === "get-tasks")).toBe(false);
 });

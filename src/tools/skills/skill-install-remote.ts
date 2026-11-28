@@ -3,6 +3,7 @@ import * as z from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createSkill, getAgentById } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
+import { fetchRemoteSkillFile } from "@/github/skill-file";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -13,7 +14,7 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
       title: "Install Remote Skill",
       annotations: { destructiveHint: false },
       description:
-        "Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via GitHub raw content API.",
+        "Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md with the server's GitHub token when one is configured (private repos), else unauthenticated.",
       inputSchema: z.object({
         sourceRepo: z.string().describe('GitHub repo (e.g. "vercel-labs/skills")'),
         sourcePath: z.string().optional().describe('Path within repo (e.g. "skills/nextjs")'),
@@ -65,15 +66,14 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
         let sourceHash: string | null = null;
 
         if (!args.isComplex) {
-          // Fetch SKILL.md content
-          const response = await fetch(rawUrl);
-          if (!response.ok) {
-            return toolErr(`Failed to fetch: HTTP ${response.status}`, {
-              details: `Failed to fetch SKILL.md from ${rawUrl}: ${response.status}`,
+          const fetched = await fetchRemoteSkillFile(args.sourceRepo, branch, args.sourcePath);
+          if (!fetched.ok) {
+            return toolErr(`Failed to fetch SKILL.md: ${fetched.error}`, {
+              details: `Failed to fetch SKILL.md from ${rawUrl}: ${fetched.error}`,
               data: { yourAgentId: requestInfo.agentId },
             });
           }
-          content = await response.text();
+          content = fetched.content;
           sourceHash = new Bun.CryptoHasher("sha256").update(content).digest("hex");
         }
 

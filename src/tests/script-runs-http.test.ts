@@ -20,6 +20,7 @@ import {
 } from "../be/db";
 import * as modelValidation from "../be/model-validation";
 import { configSecretName, registerStoredSecret } from "../be/secret-registry";
+import { resolveBySessionToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -185,14 +186,16 @@ describe("/api/script-runs HTTP", () => {
     expect(listBody.runs[0]?.output).toBeUndefined();
   });
 
-  test("background runs call back through MCP_BASE_URL, not the public base URL", async () => {
+  test("background runs call back through MCP_BASE_URL on a run-bound agent token", async () => {
     process.env.SCRIPT_RUN_SUPERVISOR_DISABLE = "false";
     process.env.MCP_BASE_URL = "http://swarm-internal.example.test:3013";
     process.env.PUBLIC_MCP_BASE_URL = "https://swarm-public.example.test";
     const spawnedWith: string[] = [];
+    const spawnedKeys: string[] = [];
     setScriptRunExecutor({
-      async start({ baseUrl }) {
+      async start({ baseUrl, apiKey }) {
         spawnedWith.push(baseUrl);
+        spawnedKeys.push(apiKey);
         return {
           pid: null,
           tmpdir: "",
@@ -219,6 +222,11 @@ describe("/api/script-runs HTTP", () => {
         await Bun.sleep(20);
       }
       expect(spawnedWith).toEqual(["http://swarm-internal.example.test:3013"]);
+      // The launch bearer is the swarm API key; the run holds its own agent token instead.
+      expect(spawnedKeys[0]).not.toBe(API_KEY);
+      expect((await resolveBySessionToken(spawnedKeys[0]!, { touch: false }))?.agentId).toBe(
+        agentId,
+      );
     } finally {
       setScriptRunExecutor(localProcessScriptExecutor);
       delete process.env.MCP_BASE_URL;

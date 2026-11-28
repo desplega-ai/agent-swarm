@@ -37,7 +37,7 @@ import type {
 } from "./types";
 
 // npm's `latest` is older and lacks the JSON/stdin contract used here.
-export const DSH_PACKAGE = "@deepseek-ai/dsh@0.2.3-alpha.2";
+export const DSH_PACKAGE = "@deepseek-ai/dsh@0.2.3-alpha.3";
 
 /** Held stderr past this is flushed as is, so a line with no newline cannot grow without bound. */
 const STDERR_HOLD_MAX = 64 * 1024;
