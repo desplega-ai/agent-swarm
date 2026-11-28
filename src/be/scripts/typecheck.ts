@@ -562,6 +562,8 @@ export interface SwarmSdk {
   // --- prompt templates ---
   prompt_list(args?: { eventType?: string; scope?: "global" | "agent" | "repo"; scopeId?: string; isDefault?: boolean }): Promise<unknown>;
   prompt_get(args: { id: string }): Promise<unknown>;
+  // --- integrations ---
+  integration_status(args?: Record<string, never>): Promise<unknown>;
   // --- tracker ---
   tracker_status(args?: Record<string, unknown>): Promise<unknown>;
   tracker_syncStatus(args?: Record<string, unknown>): Promise<unknown>;

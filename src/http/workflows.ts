@@ -192,6 +192,7 @@ const createWorkflowRoute = route({
     requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
+    enabled: z.boolean().optional(),
   }),
   responses: {
     201: { description: "Workflow created", schema: WorkflowSaveResponseSchema },
@@ -799,6 +800,7 @@ export async function handleWorkflows(
       requires: parsed.body.requires,
       dir: parsed.body.dir,
       vcsRepo: parsed.body.vcsRepo,
+      enabled: parsed.body.enabled,
       createdByAgentId: myAgentId ?? undefined,
       createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
     };

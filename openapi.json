@@ -47086,6 +47086,12 @@
                                 "more",
                                 "people"
                               ]
+                            },
+                            "workflowSuggest": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
                             }
                           },
                           "required": [
@@ -77205,6 +77211,9 @@
                   "vcsRepo": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "enabled": {
+                    "type": "boolean"
                   }
                 },
                 "required": [

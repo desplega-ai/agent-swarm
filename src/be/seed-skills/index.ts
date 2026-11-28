@@ -292,6 +292,12 @@ import workflowStructuredOutputConfig from "../../../templates/skills/workflow-s
 import workflowStructuredOutputContent from "../../../templates/skills/workflow-structured-output/content.md" with {
   type: "text",
 };
+import workflowSuggestionConfig from "../../../templates/skills/workflow-suggestion/config.json" with {
+  type: "text",
+};
+import workflowSuggestionContent from "../../../templates/skills/workflow-suggestion/content.md" with {
+  type: "text",
+};
 import wtsExpertConfig from "../../../templates/skills/wts-expert/config.json" with {
   type: "text",
 };
@@ -408,6 +414,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: verifyingConfig, body: verifyingContent },
   { config: workOnTaskConfig, body: workOnTaskContent },
   { config: workflowIterateConfig, body: workflowIterateContent },
+  { config: workflowSuggestionConfig, body: workflowSuggestionContent },
   { config: workflowStructuredOutputConfig, body: workflowStructuredOutputContent },
   { config: wtsExpertConfig, body: wtsExpertContent },
 ];

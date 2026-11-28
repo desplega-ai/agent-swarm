@@ -68,6 +68,7 @@ import taskFailureAuditSrc from "./catalog/task-failure-audit.ts" with { type: "
 import textDiffSrc from "./catalog/text-diff.ts" with { type: "text" };
 import toolUsageSrc from "./catalog/tool-usage.ts" with { type: "text" };
 import waitForTaskSrc from "./catalog/wait-for-task.ts" with { type: "text" };
+import workflowSuggestScanSrc from "./catalog/workflow-suggest-scan.ts" with { type: "text" };
 
 export type SeedScript = {
   name: string;
@@ -416,6 +417,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
       "Dreaming verify: checks synthesis claims against real writes, flags unclaimed writes and silent refusals, checks survival of earlier changes, writes the run ledger.",
     intent: "Verify that what dreaming said it changed is what actually changed.",
     source: asText(dreamingVerifySrc),
+  },
+  {
+    name: "workflow-suggest-scan",
+    description:
+      "Lead, on a person's ask: their similar earlier asks (word Jaccard, one per day), the workflow-suggest ledger, install workflows ranked by fit with run health, maturity and connected integrations. Read-only.",
+    intent:
+      "Decide whether to offer a workflow inside the reply to a person who keeps asking for the same kind of work.",
+    source: asText(workflowSuggestScanSrc),
   },
 ];
 

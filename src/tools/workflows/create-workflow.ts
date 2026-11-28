@@ -12,6 +12,7 @@ import {
 } from "@/tools/utils";
 import {
   AssetKeySchema,
+  AutomationIntegrationIdSchema,
   CooldownConfigSchema,
   InputValueSchema,
   TriggerConfigSchema,
@@ -115,6 +116,18 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
               "Supported keywords: type, required, properties, enum, const, items. " +
               "Other JSON-Schema keywords are silently ignored.",
           ),
+        requires: z
+          .array(AutomationIntegrationIdSchema)
+          .optional()
+          .describe(
+            "Integrations the workflow needs (slack, github, linear, jira, gsc, agentmail, agentfs). Preflight marks it needs_setup when one is not connected.",
+          ),
+        enabled: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default true. false saves a draft that refuses every trigger until someone enables it.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -134,6 +147,8 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         dir,
         vcsRepo,
         triggerSchema,
+        requires,
+        enabled,
       },
       requestInfo,
     ) => {
@@ -178,6 +193,8 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
             dir,
             vcsRepo,
             triggerSchema,
+            requires,
+            enabled,
             createdByAgentId: requestInfo.agentId,
             createdBy,
           },

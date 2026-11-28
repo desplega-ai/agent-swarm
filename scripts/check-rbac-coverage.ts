@@ -105,6 +105,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
     "read-only, like the ungated GET /api/agents/{id}/profile-check",
   "src/tools/model-profiles/list-model-profiles.ts":
     "read-only, like the ungated GET /api/model-profiles",
+  "src/tools/integration-status.ts":
+    "read-only: the same integration setup states as the API-key GET /status, plus slugs of the script connections scoped to the caller",
   "src/tools/get-metrics.ts": PIN_REASON,
   "src/tools/get-swarm.ts": PIN_REASON,
   "src/tools/join-swarm.ts": PIN_REASON,

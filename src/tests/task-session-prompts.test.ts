@@ -4,6 +4,7 @@ import {
   buildRequesterProfilePrompt,
   buildTaskSessionPrompts,
   buildUseCasePrompt,
+  buildWorkflowSuggestPrompt,
   type TaskSessionContext,
 } from "../commands/runner";
 import { type BasePromptArgs, getTaskContextPrompt } from "../prompts/base-prompt";
@@ -185,6 +186,19 @@ describe("buildTaskSessionPrompts", () => {
 
   test("no nudge renders nothing", async () => {
     expect(await buildChecklistNudgePrompt(undefined)).toBe("");
+  });
+
+  test("a person's ask carries the workflow-suggestion pointer once, in the task prompt only", async () => {
+    const lead = agentArgs("claude", { role: "lead" });
+    const withFlag = await build(lead, { ...sessionA, workflowSuggest: true }, "/work-on-task aaa");
+    const withoutFlag = await build(lead, sessionA, "/work-on-task aaa");
+
+    expect(withFlag.systemPrompt).toBe(withoutFlag.systemPrompt);
+    expect(withFlag.systemPrompt).not.toContain("## Workflow suggestion");
+    expect(withFlag.prompt.split("## Workflow suggestion").length - 1).toBe(1);
+    expect(withFlag.prompt).toContain("load the `workflow-suggestion` skill");
+    expect(withoutFlag.prompt).not.toContain("## Workflow suggestion");
+    expect(await buildWorkflowSuggestPrompt(undefined)).toBe("");
   });
 
   test("a lead task in a use-case group carries the key once, in the task prompt only", async () => {

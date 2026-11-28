@@ -190,6 +190,17 @@ export const platformbTrackers: Scenario = {
       // Not linear or jira: those names would put these rows on a provider the server may sync.
       const provider = `e2e-tracker-${ctx.nonce}`;
 
+      const integrationStatus = expectToolOk(
+        await callTool(connection, "integration-status"),
+        "integration-status",
+      );
+      const integrations = asRecord(asRecord(integrationStatus.data).integrations);
+      expect(
+        ["slack", "github", "linear", "jira", "gsc", "agentmail", "agentfs"].every((id) =>
+          ["unverified", "configured", "verified"].includes(String(integrations[id])),
+        ) && Array.isArray(asRecord(integrationStatus.data).connections),
+        `integration-status returns every integration state, got ${JSON.stringify(integrations)}`,
+      );
       let outcome = expectToolOk(await callTool(connection, "tracker-status"), "tracker-status");
       const trackers = asRecords(outcome.data, "trackers");
       expect(

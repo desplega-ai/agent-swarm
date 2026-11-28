@@ -174,6 +174,18 @@ export const platformChecklist: Scenario = {
         triggers.get(secondTaskId)?.checklistNudge === undefined,
         "The member's only editable item is never nudged twice",
       );
+      expect(
+        triggers.get(firstTaskId)?.workflowSuggest === true,
+        "A person's ask to the lead carries the workflow-suggestion pointer",
+      );
+      const apiTaskId = await createAssignedTask(ctx, lead.agentId, "API checklist request", {
+        requestedByUserId: userId,
+      });
+      await lead.waitForTask(apiTaskId);
+      expect(
+        triggers.get(apiTaskId)?.workflowSuggest === undefined,
+        "An API-sourced task carries no workflow-suggestion pointer",
+      );
     } finally {
       await lead.stop();
       await retireAgent(ctx, lead.agentId);

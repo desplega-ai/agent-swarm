@@ -20131,6 +20131,8 @@ export interface paths {
                                         comms?: components["schemas"]["UserCommsPrefs"];
                                     };
                                 };
+                                /** @enum {boolean} */
+                                workflowSuggest?: true;
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */
                                 type: "unread_mentions";
@@ -31851,6 +31853,7 @@ export interface paths {
                         requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                         dir?: string;
                         vcsRepo?: string;
+                        enabled?: boolean;
                     };
                 };
             };
