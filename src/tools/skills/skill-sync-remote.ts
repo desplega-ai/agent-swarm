@@ -3,6 +3,7 @@ import * as z from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getSkillById, listSkills, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
+import { fetchRemoteSkillFile } from "@/github/skill-file";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 function contentHash(content: string): string {
@@ -59,16 +60,17 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
           if (!skill.sourceRepo) continue;
 
           try {
-            const filePath = skill.sourcePath ? `${skill.sourcePath}/SKILL.md` : "SKILL.md";
-            const rawUrl = `https://raw.githubusercontent.com/${skill.sourceRepo}/${skill.sourceBranch}/${filePath}`;
-
-            const response = await fetch(rawUrl);
-            if (!response.ok) {
-              errors.push(`${skill.name}: HTTP ${response.status}`);
+            const fetched = await fetchRemoteSkillFile(
+              skill.sourceRepo,
+              skill.sourceBranch,
+              skill.sourcePath,
+            );
+            if (!fetched.ok) {
+              errors.push(`${skill.name}: ${fetched.error}`);
               continue;
             }
 
-            const newContent = await response.text();
+            const newContent = fetched.content;
             const newHash = contentHash(newContent);
             const now = new Date().toISOString();
 
