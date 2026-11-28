@@ -493,12 +493,6 @@ async function userDurableScriptAllowlist(): Promise<Set<string>> {
   );
 }
 
-function bearerToken(req: IncomingMessage): string | undefined {
-  const raw = req.headers.authorization;
-  const header = Array.isArray(raw) ? raw[0] : raw;
-  return header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -697,8 +691,8 @@ export async function handleScriptRuns(
     }
 
     if (!existing && parsed.body.background) {
-      // A user token cannot act as the run's agent: spawn on the server key, as a reconcile respawn does.
-      startScriptRunProcess(run, getScriptApiBaseUrl(), user ? undefined : bearerToken(req)).catch(
+      // The run gets its own agent-bound token; a run caller's provenance carries over.
+      startScriptRunProcess(run, getScriptApiBaseUrl(), getCurrentRunProvenance() ?? {}).catch(
         async (err) => {
           await updateScriptRun(run.id, {
             status: "failed",

@@ -19,6 +19,7 @@ import {
   initDb,
   listScriptRunJournalSteps,
 } from "../be/db";
+import { resolveBySessionToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
@@ -75,7 +76,10 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "POST" && req.url?.endsWith("/heartbeat")) heartbeatCount += 1;
   if (await handleCore(req, res, agentId, API_KEY)) return;
   if (req.method === "POST" && req.url === "/api/mcp-bridge") {
-    if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+    // The broker presents the run's own agent token, never the swarm API key.
+    const bearer = req.headers.authorization?.replace(/^Bearer /, "") ?? "";
+    const principal = await resolveBySessionToken(bearer, { touch: false });
+    if (!principal || principal.agentId !== agentId) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "unauthorized" }));
       return;

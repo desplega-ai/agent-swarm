@@ -48,11 +48,12 @@ export type ScriptApiCredential = {
 export async function acquireScriptApiCredential(
   agentId: string,
   provenance: ScriptRunProvenance = {},
+  ttlMs = SCRIPT_RUN_TOKEN_TTL_MS,
 ): Promise<ScriptApiCredential> {
   if (!(await getAgentById(agentId))) {
     return { apiKey: undefined, release: async () => {} };
   }
-  const token = await mintScriptRunToken(agentId, SCRIPT_RUN_TOKEN_TTL_MS, provenance);
+  const token = await mintScriptRunToken(agentId, ttlMs, provenance);
   let released = false;
   return {
     apiKey: token.plaintext,
