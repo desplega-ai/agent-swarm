@@ -37939,7 +37939,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A scoped user may cancel only the runs it launched */
+            /** @description A scoped user may cancel only the runs it launched, and an agent only its own runs */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -37987,7 +37987,16 @@ export interface operations {
                     };
                 };
             };
-            /** @description Journal step not found */
+            /** @description Script run belongs to another agent */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Script run or journal step not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -38034,6 +38043,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Script run belongs to another agent */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Script run not found */
             404: {
                 headers: {
@@ -38062,6 +38080,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Script run belongs to another agent */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Script run not found */
             404: {
@@ -38106,6 +38133,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Script run belongs to another agent */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Script run not found */
             404: {
