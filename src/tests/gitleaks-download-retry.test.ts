@@ -22,6 +22,8 @@ const RESPONSES = {
   ok: `HTTP/1.1 200 OK\r\nContent-Length: ${BODY.length}\r\nConnection: close\r\n\r\n${BODY}`,
 };
 
+const NOT_FOUND = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
   for (const fn of cleanups.splice(0)) await fn();
@@ -29,17 +31,18 @@ afterEach(async () => {
 
 async function downloadThrough(steps: Step[]) {
   let connections = 0;
-  const server = Bun.listen<Step>({
+  const server = Bun.listen({
     hostname: "127.0.0.1",
     port: 0,
     socket: {
-      open(socket) {
+      // Under `bun test --parallel` another file can poll this port (it got the
+      // same OS-assigned port from getFreePort()), so only a request for the
+      // tarball takes a scripted step.
+      data(socket, chunk) {
+        if (!chunk.toString().startsWith("GET /v")) return void socket.end(NOT_FOUND);
         const step = steps[Math.min(connections++, steps.length - 1)];
         if (step === "drop") socket.end();
-        else socket.data = step;
-      },
-      data(socket) {
-        socket.end(RESPONSES[socket.data as "504" | "ok"]);
+        else socket.end(RESPONSES[step]);
       },
     },
   });
