@@ -1,3 +1,4 @@
+import { NATIVE_TOOL_MAP, type NativeToolSet } from "../../../src/prompts/harness-native-tools.ts";
 import { soloVariantId } from "../src/baseline.ts";
 import { parseToolUses, type ToolUse, toolUseMatches } from "../src/judge/session-log-parse.ts";
 import type { SessionLogRow } from "../src/swarm/client.ts";
@@ -115,6 +116,122 @@ export function rawApiToolCount(tools: ToolUse[]): number {
     const input = safeStringify(u.input);
     return toolUseMatches(u.toolName, [/^bash$/i, "command_execution"]) && /\/api\//i.test(input);
   }).length;
+}
+
+// ---- native multi-agent tool counters (harness tool mappings) ----
+//
+// Exact name equality only: `toolUseMatches` is a case-insensitive substring test,
+// so "Task" would also match `send-task`.
+
+type NativeProvider = keyof typeof NATIVE_TOOL_MAP;
+
+function nativeNames(
+  provider: string | undefined,
+  pick: (set: NativeToolSet) => (string | undefined)[],
+): Set<string> {
+  const sets =
+    provider === undefined
+      ? Object.values(NATIVE_TOOL_MAP)
+      : provider in NATIVE_TOOL_MAP
+        ? [NATIVE_TOOL_MAP[provider as NativeProvider]]
+        : [];
+  return new Set(sets.flatMap(pick).filter((name): name is string => typeof name === "string"));
+}
+
+/**
+ * Native subagent spawns: Claude `Agent` (logged as `Task` by older builds),
+ * Codex `spawn_agent`. `provider` undefined counts every harness's names; they
+ * never collide.
+ */
+export function countNativeSpawns(tools: ToolUse[], provider?: string): number {
+  const names = nativeNames(provider, (s) => [s.spawn, ...(s.spawnAliases ?? [])]);
+  return tools.filter((u) => names.has(u.toolName)).length;
+}
+
+/**
+ * Native agent messaging and waiting: Claude `SendMessage`, Codex `send_message`,
+ * `followup_task`, `wait_agent` (`wait` in app-server collab items, see
+ * session-log-parse.ts) and `send_input` (the v1 handler).
+ */
+export function countNativeComms(tools: ToolUse[], provider?: string): number {
+  const names = nativeNames(provider, (s) => [s.message, s.followup, s.wait]);
+  if (provider === undefined || provider === "codex") {
+    names.add("wait");
+    names.add("send_input");
+  }
+  return tools.filter((u) => names.has(u.toolName)).length;
+}
+
+/**
+ * A swarm tool's bare slug: `mcp__agent-swarm__send-task` (Claude),
+ * `mcp__agent_swarm__send_task` (Codex code mode) and `send-task` (Codex MCP
+ * item) all read `send-task`.
+ */
+export function swarmToolSlug(toolName: string): string {
+  return toolName.replace(/^mcp__.+?__/, "").replace(/_/g, "-");
+}
+
+/** Tool arguments: Codex MCP calls nest them under `arguments`; other harnesses pass them flat. */
+export function toolArgs(input: unknown): Record<string, unknown> {
+  const flat =
+    typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
+  const nested = flat.arguments;
+  return typeof nested === "object" && nested !== null ? (nested as Record<string, unknown>) : flat;
+}
+
+/** Swarm dispatches: `send-task` calls plus `script-run` of the `delegate` script. */
+export function countSwarmDispatch(tools: ToolUse[]): number {
+  return tools.filter((u) => {
+    const slug = swarmToolSlug(u.toolName);
+    if (slug === "send-task") return true;
+    return slug === "script-run" && toolArgs(u.input).name === "delegate";
+  }).length;
+}
+
+/** Bash / exec calls that POST to the tasks API (the raw-curl task-creation route). */
+export function rawTaskCreateCount(tools: ToolUse[]): number {
+  return tools.filter((u) => {
+    if (!toolUseMatches(u.toolName, [/^bash$/i, "command_execution"])) return false;
+    const input = safeStringify(u.input);
+    // The collection endpoint (`/api/tasks`, not `/api/tasks/<id>`) with a body or POST.
+    return /\/api\/tasks(?![\w/-])/i.test(input) && /\bPOST\b|\s-d\s|--data/i.test(input);
+  }).length;
+}
+
+/** Every tool call an agent made, across all the tasks it ran (seed task, follow-ups, wake-ups). */
+export async function agentToolUses(
+  ctx: JudgeContext,
+  agentId: string | undefined,
+): Promise<ToolUse[]> {
+  if (!agentId) return [];
+  const own = ctx.tasks.filter((t) => t.agentId === agentId);
+  return (await Promise.all(own.map((t) => taskToolUses(ctx, t)))).flat();
+}
+
+/** The outputs of every task an agent ran, joined in task order. */
+export function agentOutput(ctx: JudgeContext, agentId: string | undefined): string {
+  if (!agentId) return "";
+  return ctx.tasks
+    .filter((t) => t.agentId === agentId)
+    .map((t) => safeStringify(t.result ?? t.output ?? ""))
+    .filter((text) => text.length > 0)
+    .join("\n");
+}
+
+/**
+ * Tasks a non-lead roster member created for someone else: every task-creation
+ * route leaves one. A task an agent assigns to itself (a `defer-task` wake-up)
+ * and a system follow-up are continuations, not dispatch.
+ */
+export function memberCreatedTasks(ctx: Pick<JudgeContext, "tasks" | "workers">): SwarmTask[] {
+  const memberIds = new Set(ctx.workers.filter((w) => !w.isLead).map((w) => w.agentId));
+  return ctx.tasks.filter(
+    (t) =>
+      typeof t.creatorAgentId === "string" &&
+      memberIds.has(t.creatorAgentId) &&
+      t.agentId !== t.creatorAgentId &&
+      (t.taskType ?? null) !== "follow-up",
+  );
 }
 
 export function parseJson(value: unknown): unknown {

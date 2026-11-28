@@ -49,6 +49,10 @@ const SYSTEM_TEMPLATES = [
   "system.agent.tool_discovery.fx",
   "system.agent.tool_discovery.opencode",
   "system.agent.tool_discovery.direct",
+  "system.agent.tool_mapping.claude.lead",
+  "system.agent.tool_mapping.claude.worker",
+  "system.agent.tool_mapping.codex.lead",
+  "system.agent.tool_mapping.codex.worker",
   "system.agent.tools_skills",
   "system.agent.worker",
   "system.agent.worker.remote",
@@ -126,11 +130,11 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 40 system and session templates in total", () => {
+  test("registers 44 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 34 system blocks + 5 session composites.
-    expect(sessionSystem.length).toBe(40);
+    // 39 system blocks + 5 session composites.
+    expect(sessionSystem.length).toBe(44);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {

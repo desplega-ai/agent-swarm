@@ -233,6 +233,8 @@ const COLUMN_MIGRATIONS = [
   "ALTER TABLE eval_runs ADD COLUMN efforts_json TEXT",
   // Opt-in api extension plan installed in each attempt's sandbox API (JSON); NULL = none.
   "ALTER TABLE eval_runs ADD COLUMN api_extension_json TEXT",
+  // Extra env merged into every worker (`run --worker-env`, e.g. a prompt flag A/B arm); NULL = none.
+  "ALTER TABLE eval_runs ADD COLUMN worker_env_json TEXT",
   // Effort the attempt's worker was launched with, and the one its harness
   // reported applying (agent latestModel). NULL = harness default / none reported.
   "ALTER TABLE attempts ADD COLUMN reasoning_effort TEXT",

@@ -541,8 +541,8 @@
       "scenarios": ["knowledge-objects", "knowledge-objects-reindex-scope"]
     },
     "prompt-template-override": {
-      "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default",
-      "scenarios": ["knowledge-prompt-templates"]
+      "description": "agent-scope override resolves, renders, versions, checks out, resets to the code default; the native tool-mapping system templates render within budget",
+      "scenarios": ["knowledge-prompt-templates", "prompt-tool-mapping"]
     },
     "request-body-json": {
       "description": "A request body that is not valid JSON gets 400 with the shared error envelope on the route factory's routes, the JSON-RPC parse error on MCP, and 400 on a signed Linear webhook.",

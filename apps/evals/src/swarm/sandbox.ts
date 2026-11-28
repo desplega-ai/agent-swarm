@@ -284,6 +284,8 @@ export function apiRuntimeEnv(
  *      registering as the entrypoint's `worker-<hash>` fallback), and
  *      SYSTEM_PROMPT (spec.systemPrompt, unchanged);
  *   5. spec.env ?? {} (validated non-reserved at registry load).
+ *   5b. runEnv ?? {} (`run --worker-env`, validated non-reserved at the CLI):
+ *       last, so an A/B arm toggle is uniform across every scenario.
  *   6. DESPLEGA_TELEMETRY_ENV="test" (eval traffic must never enter the
  *      production telemetry cohort).
  */
@@ -299,6 +301,8 @@ export function workerRuntimeEnv(opts: {
   index?: number;
   /** Member identity + extra env (v7 §9); default {}. */
   spec?: WorkerSpec;
+  /** The run's `--worker-env` pairs; default {}. */
+  runEnv?: Record<string, string>;
 }): Record<string, string> {
   const { config } = opts;
   const role = opts.role ?? "worker";
@@ -349,6 +353,7 @@ export function workerRuntimeEnv(opts: {
     AGENT_NAME: identity.agentName,
     ...(spec.systemPrompt ? { SYSTEM_PROMPT: spec.systemPrompt } : {}),
     ...(spec.env ?? {}),
+    ...(opts.runEnv ?? {}),
     DESPLEGA_TELEMETRY_ENV: "test",
   };
 }
@@ -407,6 +412,8 @@ export async function bootStack(opts: {
   preBootSql?: { fixture: string; text: string };
   /** Opt-in: install this extension bundle into the API once it is healthy, before workers boot. */
   apiExtension?: ApiExtensionPlan;
+  /** The run's `--worker-env` pairs, merged into every worker's env. */
+  workerEnv?: Record<string, string>;
   /** Sandbox TTL. Default 1800s. */
   timeoutSec?: number;
   /** Per-service readiness wait. Default 120s API / 180s worker. */
@@ -612,6 +619,7 @@ export async function bootStack(opts: {
         role: member.role,
         index: member.index,
         spec: member.spec,
+        ...(opts.workerEnv ? { runEnv: opts.workerEnv } : {}),
       });
       allWorkerEnvs.push(workerEnv);
       let auth: CodexSubscriptionAuth | null = null;

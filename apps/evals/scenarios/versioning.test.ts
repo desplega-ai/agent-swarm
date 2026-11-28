@@ -6,7 +6,12 @@ import { hashScenario, normalizeSourceTokens } from "../src/scenario-hash.ts";
 import type { Scenario } from "../src/types.ts";
 import { scenarios } from "./index.ts";
 import { SCENARIO_HASHES } from "./scenario-hashes.ts";
-import { SUITE_SCENARIO_VERSIONS, SUITE_VERSION, suiteVersionFor } from "./suite.ts";
+import {
+  EXPERIMENT_SCENARIO_IDS,
+  SUITE_SCENARIO_VERSIONS,
+  SUITE_VERSION,
+  suiteVersionFor,
+} from "./suite.ts";
 
 describe("scenario versioning", () => {
   test("every registered scenario has a positive integer version", () => {
@@ -18,9 +23,24 @@ describe("scenario versioning", () => {
     }
   });
 
-  test("the suite manifest lists exactly the registered scenarios at their current versions", () => {
-    const registered = Object.fromEntries(scenarios.map((s) => [s.id, s.version]));
+  test("the suite manifest lists exactly the registered non-experiment scenarios at their current versions", () => {
+    const registered = Object.fromEntries(
+      scenarios
+        .filter((s) => !EXPERIMENT_SCENARIO_IDS.includes(s.id))
+        .map((s) => [s.id, s.version]),
+    );
     expect(SUITE_SCENARIO_VERSIONS).toEqual(registered);
+  });
+
+  test("every experiment scenario is registered and records no suite version", () => {
+    const registered = new Set(scenarios.map((s) => s.id));
+    for (const id of EXPERIMENT_SCENARIO_IDS) {
+      expect({ id, registered: registered.has(id), suite: suiteVersionFor(id, 1) }).toEqual({
+        id,
+        registered: true,
+        suite: null,
+      });
+    }
   });
 
   test("suiteVersionFor names the suite only for a manifest scenario at its manifest version", () => {

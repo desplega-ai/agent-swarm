@@ -11,7 +11,12 @@ import { SCENARIO_CARDS, scenarioCard } from "../scenarios/cards.ts";
 import { scenarios } from "../scenarios/index.ts";
 import { SCENARIO_HASHES } from "../scenarios/scenario-hashes.ts";
 import { canarySuiteScenarioIds, isHeldOut, SUITE_SCENARIO_VERSIONS } from "../scenarios/suite.ts";
-import { serializeConfig, serializeScenario, validateScenario } from "./registry.ts";
+import {
+  parseWorkerEnvFlags,
+  serializeConfig,
+  serializeScenario,
+  validateScenario,
+} from "./registry.ts";
 import {
   type CheckResult,
   type DeterministicCheck,
@@ -783,5 +788,21 @@ describe("scenario cards (Phase 6): every registered scenario says what it tests
     // A scenario outside the manifest (or at another version) has no suite.
     expect(serializeScenario(scenario({ id: "sql-audit", version: 99 })).suite).toBeNull();
     expect(serializeScenario(scenario({ id: "not-registered" })).card).toBeNull();
+  });
+});
+
+describe("parseWorkerEnvFlags (run --worker-env)", () => {
+  test("parses repeatable KEY=VALUE pairs; the value may contain '='", () => {
+    expect(parseWorkerEnvFlags(["HARNESS_TOOL_MAPPINGS_ENABLED=true", "X_Y=a=b"])).toEqual({
+      HARNESS_TOOL_MAPPINGS_ENABLED: "true",
+      X_Y: "a=b",
+    });
+    expect(parseWorkerEnvFlags([])).toEqual({});
+  });
+
+  test("refuses a missing '=', a malformed key and a boot-path key", () => {
+    expect(() => parseWorkerEnvFlags(["NOVALUE"])).toThrow("expects KEY=VALUE");
+    expect(() => parseWorkerEnvFlags(["lower=1"])).toThrow("must match");
+    expect(() => parseWorkerEnvFlags(["MODEL_OVERRIDE=x"])).toThrow("reserved by the boot path");
   });
 });

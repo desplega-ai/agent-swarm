@@ -621,6 +621,21 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 
 **pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models })` (`models` follows `PI_CODEMODE_MODELS`, default off, only with codemode on; the usage of a script's `models.*` calls reaches `getSessionStats()` cost, proven in `src/tests/providers/pi-cost.test.ts`), wrapped by `createBoundedCodemodeExtension` (120 s per-script deadline, 32 nested calls, 4 concurrent), and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
 
+## Native multi-agent tool mappings
+
+`HARNESS_TOOL_MAPPINGS_ENABLED=true` (default `false`) appends a "Native tools in this swarm" section to `claude` and `codex` prompts, so the model's trained reflex for its own multi-agent tools lands on the swarm tool. Templates: `system.agent.tool_mapping.{claude,codex}.{lead,worker}`. Names: `src/prompts/harness-native-tools.ts`.
+
+| Native (claude / codex) | Lead | Worker |
+| --- | --- | --- |
+| `Agent` / `spawn_agent` | `send-task` (native only for a quick read-only lookup) | local subagents, unchanged |
+| `ListAgents` / `list_agents` | `get-swarm` | local, unchanged |
+| `SendMessage` / `send_message`, `interrupt_agent` | `steer-task` (`cancel-task` for a stop) | local; `steer-task` for a swarm task it created |
+| `TaskStop` | `cancel-task` | local |
+| `followup_task` | `send-task` with `parentTaskId` | local |
+| `wait_agent` | `defer-task` with `wakeOn`, or the `wait-for-task` script | same for a swarm task |
+
+Other harnesses, `claude-managed` and scripts-only sessions get no section. On a claude or codex bump, `bun run check:harness-native-tools` (Merge Gate runs it) fails when a mapped name is gone: it reads the SDK `BUILTIN_TOOL_NAMES` minus the `Dockerfile.worker` deny list, and the `collaboration` namespace of `codex debug prompt-input`. Fix the names in `harness-native-tools.ts`; the templates read them from there.
+
 ## Native tool interception
 
 Every harness reports its own built-in tool calls (bash, read, write, edit) to `POST /api/tool-hooks`, so an extension with `toolSources: ["native"]` can observe, block and rewrite them. The shared client is `src/hooks/native-tool-hooks.ts`; each harness only maps its event to a `NativeCall` and applies the decision. Server side: `src/http/tool-hooks.ts` and [runbooks/extensions.md § Native tool calls](./extensions.md#native-tool-calls).

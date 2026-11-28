@@ -219,6 +219,34 @@ describe("parseToolUses — Codex raw_log ThreadEvents", () => {
     });
   });
 
+  it("names app-server collab calls by their model-facing snake_case tool", () => {
+    const collab = (id: string, tool: string) =>
+      row(
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id,
+            type: "unknown",
+            originalType: "collabAgentToolCall",
+            value: { type: "collabAgentToolCall", id, tool, status: "completed", prompt: "p" },
+          },
+        }),
+        { cli: "codex" },
+      );
+    const uses = parseToolUses([
+      collab("c1", "spawnAgent"),
+      collab("c2", "wait"),
+      row(
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "u1", type: "unknown", originalType: "somethingElse", value: {} },
+        }),
+        { cli: "codex" },
+      ),
+    ]);
+    expect(uses.map((u) => u.toolName)).toEqual(["spawn_agent", "wait"]);
+  });
+
   it("ignores non-tool codex items (agent_message, reasoning)", () => {
     const uses = parseToolUses([
       row(

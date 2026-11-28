@@ -73,6 +73,7 @@ export const BASELINE_ENV_KEYS = [
   "DASHBOARD_URL",
   "SCRIPTS_ONLY_MCP",
   "UI_SPEC_ENABLED",
+  "HARNESS_TOOL_MAPPINGS_ENABLED",
 ] as const;
 
 export const baselineKey = (deployment: string, name: string): string => `${deployment} / ${name}`;

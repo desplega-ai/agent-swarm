@@ -56,6 +56,26 @@ export const WORKER_SPEC_RESERVED_ENV = new Set([
 ]);
 const TEMPLATE_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const ENV_KEY_RE = /^[A-Z][A-Z0-9_]*$/;
+
+/**
+ * `run --worker-env KEY=VALUE` pairs to env merged into every worker. Same key
+ * rules as WorkerSpec.env: the boot path's reserved keys are refused.
+ */
+export function parseWorkerEnvFlags(flags: string[]): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const flag of flags) {
+    const eq = flag.indexOf("=");
+    if (eq <= 0) throw new Error(`--worker-env expects KEY=VALUE, got "${flag}"`);
+    const key = flag.slice(0, eq);
+    if (!ENV_KEY_RE.test(key))
+      throw new Error(`--worker-env key "${key}" must match ${ENV_KEY_RE}`);
+    if (WORKER_SPEC_RESERVED_ENV.has(key)) {
+      throw new Error(`--worker-env key "${key}" is reserved by the boot path`);
+    }
+    env[key] = flag.slice(eq + 1);
+  }
+  return env;
+}
 const MAX_SEED_MEMORIES = 16;
 /** Bare filename, no path separators — prevents traversal out of evals/scenarios/fixtures/. */
 const SQL_DUMP_NAME_RE = /^[A-Za-z0-9._-]+\.sql$/;

@@ -44,6 +44,9 @@ const EXPECTED_IDS = [
   "human-in-loop-solo",
   "real-diff-agent-fs",
   "docs-suggestion",
+  "tool-mapping-lead-reflex",
+  "tool-mapping-worker-local",
+  "tool-mapping-worker-comms",
 ];
 
 describe("scenario registry", () => {

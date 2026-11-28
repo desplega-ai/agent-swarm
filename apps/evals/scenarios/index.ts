@@ -9,6 +9,9 @@ import { implementReview, implementReviewSolo } from "./implement-review.ts";
 import { realDiffAgentFs } from "./real-diff-agent-fs.ts";
 import { scriptAuthoring } from "./script-authoring.ts";
 import { sqlAudit } from "./sql-audit.ts";
+import { toolMappingLeadReflex } from "./tool-mapping-lead-reflex.ts";
+import { toolMappingWorkerComms } from "./tool-mapping-worker-comms.ts";
+import { toolMappingWorkerLocal } from "./tool-mapping-worker-local.ts";
 import { toolRouting } from "./tool-routing.ts";
 import { workerRecovery, workerRecoverySolo } from "./worker-recovery.ts";
 import { workflowAuthoring } from "./workflow-authoring.ts";
@@ -41,6 +44,10 @@ export const scenarios: Scenario[] = [
   humanInLoopSolo,
   realDiffAgentFs,
   docsSuggestion,
+  // Experiments (EXPERIMENT_SCENARIO_IDS in suite.ts): runnable by id, outside the suite.
+  toolMappingLeadReflex,
+  toolMappingWorkerLocal,
+  toolMappingWorkerComms,
 ];
 
 // Cheap smoke default for `--scenarios` when none are passed. sql-audit is the
