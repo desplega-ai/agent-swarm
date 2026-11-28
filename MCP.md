@@ -1785,7 +1785,7 @@ Remove a skill from an agent.
 
 **Install Remote Skill**
 
-Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via GitHub raw content API.
+Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md with the server's GitHub token when one is configured (private repos), else unauthenticated.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

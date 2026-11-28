@@ -26,6 +26,7 @@ import {
   syncSkillsToFilesystem,
 } from "../be/skill-sync";
 import { getSkillUsageDetail, getSkillUsageSummary, SKILL_USAGE_WINDOWS } from "../be/skill-usage";
+import { fetchRemoteSkillFile } from "../github/skill-file";
 import {
   AgentSkillSchema,
   SkillFileSchema,
@@ -638,12 +639,16 @@ export async function handleSkills(
 
       let content = "";
       if (!parsed.body.isComplex) {
-        const response = await fetch(rawUrl);
-        if (!response.ok) {
-          jsonError(res, `Failed to fetch SKILL.md: HTTP ${response.status}`, 400);
+        const fetched = await fetchRemoteSkillFile(
+          parsed.body.sourceRepo,
+          branch,
+          parsed.body.sourcePath,
+        );
+        if (!fetched.ok) {
+          jsonError(res, `Failed to fetch SKILL.md: ${fetched.error}`, 400);
           return true;
         }
-        content = await response.text();
+        content = fetched.content;
       }
 
       let name: string;
@@ -700,14 +705,16 @@ export async function handleSkills(
     for (const skill of remoteSkills) {
       if (skill.isComplex || !skill.sourceRepo) continue;
       try {
-        const fp = skill.sourcePath ? `${skill.sourcePath}/SKILL.md` : "SKILL.md";
-        const url = `https://raw.githubusercontent.com/${skill.sourceRepo}/${skill.sourceBranch}/${fp}`;
-        const resp = await fetch(url);
-        if (!resp.ok) {
-          errors.push(`${skill.name}: HTTP ${resp.status}`);
+        const fetched = await fetchRemoteSkillFile(
+          skill.sourceRepo,
+          skill.sourceBranch,
+          skill.sourcePath,
+        );
+        if (!fetched.ok) {
+          errors.push(`${skill.name}: ${fetched.error}`);
           continue;
         }
-        const newContent = await resp.text();
+        const newContent = fetched.content;
         const newHash = new Bun.CryptoHasher("sha256").update(newContent).digest("hex");
         const now = new Date().toISOString();
 
