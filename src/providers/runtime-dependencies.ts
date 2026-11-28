@@ -97,7 +97,7 @@ export async function validateProviderDependencies(
     case "dsh":
       requireExecutable(
         env.DSH_BINARY || "dsh",
-        "Use worker-full, install @deepseek-ai/dsh@0.2.3-alpha.2, or set DSH_BINARY to a trusted executable.",
+        "Use worker-full, install @deepseek-ai/dsh@0.2.3-alpha.3, or set DSH_BINARY to a trusted executable.",
       );
       return;
     case "amp":
