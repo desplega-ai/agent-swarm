@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.16.1] - 2026-11-28
+
+### Added
+- Apps: export an app as a bundle (`GET /api/apps/{id}/export`) and import it on another swarm (`POST /api/apps/import`) (#3748); an app chat with no agent-fs key shows the connect steps (#3746).
+- CLI: `bun run ui:dev --api local` runs a throwaway loopback API with the app or page copied in, so dev clicks never write to prod (#3759).
+
+### Changed
+- Postgres: Postgres 18 is the default in Compose, CI, the worker image and the guides (#3743); CI also tests Postgres 16 (#3757).
+- Performance: app sync reconcile batches row patches into one upsert per chunk (#3737); Postgres task readability checks run per page row (#3760); an unchanged agent ping skips the re-read and the `agent_log` row (#3739).
+- Worker image: amp, copilot 1.0.117 and qwen 0.28.7 (#3756, #3766).
+- Specs and skills: TLA+ heartbeat and workflow specs synced with main (#3754); heartbeat-runbook skill seed patch (#3752).
+
+### Fixed
+- Profile sync: an agent editing a stale identity file keeps the DB edits (#3731); test workers keep their profile mirrors under `SWARM_WORKSPACE_DIR` (#3751).
+- Tasks: agent-fs attachments verify only with the agent's own agent-scoped `AGENT_FS_API_KEY` (#3745).
+- Security: Codex refresh-lock routes accept only pool slot keys (#3758); the `ext:<name>` identity binds only to extension-role agents (#3744); the chat channel routing KV namespace is reserved (#3755).
+- OTel: request-armed timers run outside the request's trace (#3742).
+- Tests: the drain test restarts its API when another test takes its port (#3768); the `/pages/:id` UI smoke no longer waits on networkidle (#3764).
+
 ## [2.16.0] - 2026-11-27
 
 ### Added
