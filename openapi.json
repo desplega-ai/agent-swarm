@@ -57324,7 +57324,7 @@
             "description": "Script run cancelled, or already terminal"
           },
           "403": {
-            "description": "A scoped user may cancel only the runs it launched",
+            "description": "A scoped user may cancel only the runs it launched, and an agent only its own runs",
             "content": {
               "application/json": {
                 "schema": {
@@ -57413,8 +57413,18 @@
               }
             }
           },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Journal step not found",
+            "description": "Script run or journal step not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -57512,6 +57522,16 @@
               }
             }
           },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Script run not found",
             "content": {
@@ -57551,6 +57571,16 @@
         "responses": {
           "204": {
             "description": "Heartbeat recorded"
+          },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Script run not found",
@@ -57647,6 +57677,16 @@
         "responses": {
           "204": {
             "description": "Status updated"
+          },
+          "403": {
+            "description": "Script run belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "Script run not found",

@@ -47,6 +47,7 @@ import {
   type AgentTask,
   AgentTaskStatusSchema,
   RoutingReasonSchema,
+  type ScriptRun,
   ScriptRunJournalEntrySchema,
   ScriptRunListItemSchema,
   ScriptRunSchema,
@@ -243,7 +244,10 @@ const deleteScriptRunRoute = route({
   params: idParamsSchema,
   responses: {
     204: { description: "Script run cancelled, or already terminal" },
-    403: { description: "A scoped user may cancel only the runs it launched" },
+    403: {
+      description:
+        "A scoped user may cancel only the runs it launched, and an agent only its own runs",
+    },
     404: { description: "Script run not found" },
   },
   // Agents and the operator key pass; a user role needs the verb, and a scoped user cancels only its own runs.
@@ -260,7 +264,8 @@ const getInternalStepRoute = route({
   params: stepParamsSchema,
   responses: {
     200: { description: "Journal step found", schema: journalStepReplaySchema },
-    404: { description: "Journal step not found" },
+    403: { description: "Script run belongs to another agent" },
+    404: { description: "Script run or journal step not found" },
   },
 });
 
@@ -277,6 +282,7 @@ const postInternalStepRoute = route({
   body: journalStepBodySchema,
   responses: {
     201: { description: "Journal step written", schema: z.object({ ok: z.literal(true) }) },
+    403: { description: "Script run belongs to another agent" },
     404: { description: "Script run not found" },
   },
   rbac: {
@@ -295,6 +301,7 @@ const heartbeatRoute = route({
   params: runIdParamsSchema,
   responses: {
     204: { description: "Heartbeat recorded" },
+    403: { description: "Script run belongs to another agent" },
     404: { description: "Script run not found" },
   },
   rbac: {
@@ -314,6 +321,7 @@ const statusRoute = route({
   body: statusBodySchema,
   responses: {
     204: { description: "Status updated" },
+    403: { description: "Script run belongs to another agent" },
     404: { description: "Script run not found" },
   },
   rbac: {
@@ -438,6 +446,27 @@ async function requireAgent(res: ServerResponse, agentId: string | undefined) {
     return null;
   }
   return agent;
+}
+
+/**
+ * The run behind a per-run harness route, or null after a 404 or 403. Only the
+ * run's own harness drives these routes, and it always sends the run's agent id.
+ */
+async function harnessRun(
+  res: ServerResponse,
+  runId: string,
+  agentId: string | undefined,
+): Promise<ScriptRun | null> {
+  const run = await getScriptRun(runId);
+  if (!run) {
+    jsonError(res, "Script run not found", 404);
+    return null;
+  }
+  if (agentId !== run.agentId) {
+    jsonError(res, "Script run belongs to another agent", 403);
+    return null;
+  }
+  return run;
 }
 
 function scriptRunUrl(id: string): string {
@@ -746,6 +775,11 @@ export async function handleScriptRuns(
         return true;
       }
     }
+    // An agent cancels only its own runs. The operator key without X-Agent-ID still cancels any.
+    if (!canceller && agentId !== undefined && agentId !== run.agentId) {
+      jsonError(res, "Script run belongs to another agent", 403);
+      return true;
+    }
     if (TERMINAL_SCRIPT_RUN_STATUSES.some((status) => status === run.status)) {
       res.writeHead(204);
       res.end();
@@ -768,6 +802,7 @@ export async function handleScriptRuns(
   if (getInternalStepRoute.match(req.method, pathSegments)) {
     const parsed = await getInternalStepRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!(await harnessRun(res, parsed.params.runId, agentId))) return true;
     const step = await getScriptRunJournalStep(parsed.params.runId, parsed.params.stepKey);
     if (!step) {
       jsonError(res, "Script run journal step not found", 404);
@@ -789,11 +824,8 @@ export async function handleScriptRuns(
   if (postInternalStepRoute.match(req.method, pathSegments)) {
     const parsed = await postInternalStepRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = await getScriptRun(parsed.params.runId);
-    if (!run) {
-      jsonError(res, "Script run not found", 404);
-      return true;
-    }
+    const run = await harnessRun(res, parsed.params.runId, agentId);
+    if (!run) return true;
     // The journal write and the cap re-read must be atomic: concurrent
     // ctx.step.agentTask journal posts for the same run would otherwise all
     // land before any of them counts, and every one of them would see (and be
@@ -822,10 +854,7 @@ export async function handleScriptRuns(
   if (heartbeatRoute.match(req.method, pathSegments)) {
     const parsed = await heartbeatRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!(await getScriptRun(parsed.params.runId))) {
-      jsonError(res, "Script run not found", 404);
-      return true;
-    }
+    if (!(await harnessRun(res, parsed.params.runId, agentId))) return true;
     await updateScriptRun(parsed.params.runId, { lastHeartbeatAt: new Date().toISOString() });
     res.writeHead(204);
     res.end();
@@ -835,11 +864,8 @@ export async function handleScriptRuns(
   if (statusRoute.match(req.method, pathSegments)) {
     const parsed = await statusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = await getScriptRun(parsed.params.runId);
-    if (!run) {
-      jsonError(res, "Script run not found", 404);
-      return true;
-    }
+    const run = await harnessRun(res, parsed.params.runId, agentId);
+    if (!run) return true;
     if (run.status !== "running") {
       res.writeHead(204);
       res.end();
