@@ -10,7 +10,7 @@ import { closeDb, getSwarmConfigs, initDb, upsertSwarmConfig } from "../be/db";
 import { wasDbCreatedThisBoot } from "../be/db/runtime";
 import { DB_RETENTION_TABLES } from "../be/db-retention";
 import { NEW_INSTALL_CONFIG_DEFAULTS, seedDbRetentionDefaults } from "../be/db-retention-defaults";
-import { PortInUseError, startOnFreePort, waitForServer } from "./test-net";
+import { PORT_IN_USE_LOG, PortInUseError, startOnFreePort, waitForServer } from "./test-net";
 
 const RETENTION_KEYS: string[] = DB_RETENTION_TABLES.map((table) => table.envKey);
 const KEYS = [...RETENTION_KEYS, ...NEW_INSTALL_CONFIG_DEFAULTS.map((entry) => entry.key)];
@@ -129,7 +129,8 @@ describe("retention defaults across real boots", () => {
     return startOnFreePort(async (port) => {
       const api = await launchApi(port, dbPath, env);
       const res = await fetch(`${api.base}/api/config?scope=global`, { headers });
-      if (res.status === 200) return api;
+      const body = res.status === 200 ? await res.json().catch(() => null) : null;
+      if (Array.isArray(body?.configs) && api.proc.exitCode === null) return api;
       api.proc.kill("SIGKILL");
       await api.proc.exited;
       if (isNewDb)
@@ -168,11 +169,17 @@ describe("retention defaults across real boots", () => {
       const decoder = new TextDecoder();
       for await (const chunk of proc.stdout) stdout.text += decoder.decode(chunk, { stream: true });
     })();
-    void new Response(proc.stderr).text();
+    const stderr = new Response(proc.stderr).text();
     const api: Api = { proc, base: `http://127.0.0.1:${port}`, stdout };
     booted.push(api);
+    // A child that lost its port exits while a foreign server answers /health.
+    const died = proc.exited.then(async (code) => {
+      const log = `${stdout.text}\n${await stderr}`;
+      if (PORT_IN_USE_LOG.test(log)) throw new PortInUseError(`port ${port} in use`);
+      throw new Error(`src/http.ts exited ${code} before /health answered:\n${log.slice(-2000)}`);
+    });
     // A cold first boot (migrations, seeds, transpile cache) can pass the 60 s default.
-    await waitForServer(`${api.base}/health`, 120_000);
+    await Promise.race([waitForServer(`${api.base}/health`, 120_000), died]);
     return api;
   }
 
