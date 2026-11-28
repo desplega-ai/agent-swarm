@@ -33,6 +33,12 @@ export const mcpSurface: Scenario = {
     try {
       const tools = await connection.listTools();
       expect(tools.length > 0, "MCP tools/list returned no tools");
+      for (const name of ["get-task-details", "store-progress"]) {
+        expect(
+          tools.find((tool) => tool.name === name)?._meta?.["anthropic/alwaysLoad"] === true,
+          `Expected ${name} to preload without a task manifest`,
+        );
+      }
       expect(
         tools.every((tool) => tool.inputSchema),
         "An MCP tool has no inputSchema",

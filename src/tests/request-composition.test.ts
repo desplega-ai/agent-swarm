@@ -53,6 +53,7 @@ const savedEnv = {
   SWARM_ENABLED_TOOLS: process.env.SWARM_ENABLED_TOOLS,
   SCRIPTS_ONLY_MCP: process.env.SCRIPTS_ONLY_MCP,
   TASK_TOOL_MANIFESTS: process.env.TASK_TOOL_MANIFESTS,
+  TASK_TOOL_PRELOAD_ENABLED: process.env.TASK_TOOL_PRELOAD_ENABLED,
 };
 
 beforeAll(async () => {
@@ -158,7 +159,7 @@ describe("POST/GET /api/tasks/{id}/request-composition", () => {
     expect(m1!.parts.some((part) => part.kind === "tool_schemas")).toBe(false);
   });
 
-  test("deferral shrinks the tool estimate: all > core > preloaded", async () => {
+  test("Claude and pi include the same core schemas by default", async () => {
     const sizes: Record<string, number> = {};
     for (const toolLoading of ["all", "core", "preloaded"] as const) {
       await post({ sessionId: `sess-${toolLoading}`, provider: "x", toolLoading, parts: [] });
@@ -168,7 +169,7 @@ describe("POST/GET /api/tasks/{id}/request-composition", () => {
       if (part) sizes[manifest.sessionId] = part.estTokens;
     }
     expect(sizes["sess-all"]!).toBeGreaterThan(sizes["sess-core"]!);
-    expect(sizes["sess-core"]!).toBeGreaterThan(sizes["sess-preloaded"]!);
+    expect(sizes["sess-core"]).toBe(sizes["sess-preloaded"]);
     expect(sizes["sess-preloaded"]!).toBeGreaterThan(0);
   });
 
@@ -273,6 +274,7 @@ describe("tool schema measurement", () => {
   test("full surface is far larger than the core set", async () => {
     resetToolSchemaMemo();
     const listed = await listSessionToolsMemo({
+      preloadCoreTools: false,
       preloadedTools: [],
       excludedTools: [],
       enabledTools: undefined,

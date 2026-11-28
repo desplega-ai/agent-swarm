@@ -242,6 +242,7 @@ export async function handleMcp(
 }
 
 export type McpSessionOptions = {
+  preloadCoreTools: boolean;
   preloadedTools: string[];
   excludedTools: string[];
   enabledTools: string | undefined;
@@ -282,11 +283,12 @@ export async function resolveMcpSessionOptions(
       } catch {
         // An invalid deployment value must not prevent tool discovery.
         // Avoid logging its contents, which may contain misfiled secrets.
-        console.warn("[MCP] Invalid TASK_TOOL_MANIFESTS; using ordinary tool discovery");
+        console.warn("[MCP] Invalid TASK_TOOL_MANIFESTS; preloading core tools only");
       }
     }
   }
   return {
+    preloadCoreTools: preloadEnabled,
     preloadedTools,
     excludedTools,
     // Agent row, then global row, then deployment env. A blank agent row
