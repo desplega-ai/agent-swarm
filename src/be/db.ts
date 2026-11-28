@@ -264,7 +264,7 @@ import {
 import { decodeKvRow, encodeKvValue, type KvRow } from "./db/kv";
 import { clearAgentModelProfileOnOverrideChange } from "./db/model-profiles";
 import { pageFilter } from "./db/page-search";
-import { parsePageThemeTokens } from "./db/page-theme-tokens";
+import { parsePageKit, parsePageThemeTokens } from "./db/page-theme-tokens";
 import {
   newPromptTemplateRows,
   type PromptTemplateUpsert,
@@ -6584,6 +6584,7 @@ function rowToPage(row: PageRow): Page {
     theme: row.theme ?? null,
     themeTokens: parsePageThemeTokens(row.theme_tokens),
     designVersion: typeof row.design_version === "number" ? row.design_version : 1,
+    kit: parsePageKit(row.kit ?? null),
     viewCount: typeof row.view_count === "number" ? row.view_count : 0,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
@@ -6605,6 +6606,8 @@ export async function createPage(data: {
   themeTokens?: Page["themeTokens"];
   /** Defaults to 2 (the swarm design system). Rows inserted outside this function default to 1. */
   designVersion?: number;
+  /** The page kit spec, already validated; `body` holds its rendered HTML. */
+  kit?: Page["kit"];
 }): Promise<Page> {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
@@ -6624,6 +6627,7 @@ export async function createPage(data: {
     theme: data.theme ?? null,
     theme_tokens: data.themeTokens ? JSON.stringify(data.themeTokens) : null,
     design_version: data.designVersion ?? 2,
+    kit: data.kit ? JSON.stringify(data.kit) : null,
   });
   if (!row) throw new Error("Failed to create page");
   return rowToPage(row);
@@ -6762,6 +6766,8 @@ export async function updatePage(
     /** undefined keeps the stored value, null clears it. */
     themeTokens?: Page["themeTokens"];
     designVersion?: number;
+    /** undefined keeps the stored spec unless `body` is set; null clears it. */
+    kit?: Page["kit"];
   },
 ): Promise<Page | null> {
   const update: PageColumnUpdate = {
@@ -6787,6 +6793,14 @@ export async function updatePage(
           ? JSON.stringify(data.themeTokens)
           : null,
     design_version: data.designVersion,
+    // A kit page renders from its spec, so a body written without a spec must
+    // drop the spec, or the next read would serve the old kit instead.
+    kit:
+      data.kit !== undefined || data.body !== undefined
+        ? data.kit
+          ? JSON.stringify(data.kit)
+          : null
+        : undefined,
   };
   if (Object.values(update).every((value) => value === undefined)) return getPage(id);
   const row = await getStorage().repos.pages.updatePage(id, update, new Date().toISOString());

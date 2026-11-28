@@ -1,0 +1,260 @@
+{
+  "template": "dashboard",
+  "slots": {
+    "header": {
+      "type": "Header",
+      "props": {
+        "eyebrow": "Release health · Kettlewell Transit app",
+        "title": "Version 4.12 rollout",
+        "meta": [
+          {
+            "label": "As of",
+            "value": "14 May 2026, 16:00"
+          },
+          {
+            "label": "Release manager",
+            "value": "Aiko Tanaka"
+          }
+        ]
+      }
+    },
+    "notice": {
+      "type": "Callout",
+      "props": {
+        "tone": "warning",
+        "content": "**Android rollout is paused at 25%.** Crash-free sessions on Android 12 are at 98.9%, below the 99.5% gate. iOS continues."
+      }
+    },
+    "metrics": {
+      "type": "Metrics",
+      "props": {
+        "items": [
+          {
+            "label": "Adoption",
+            "value": "31%",
+            "delta": "−19 pts",
+            "tone": "warning",
+            "compare": "to the 50% target for 18 May"
+          },
+          {
+            "label": "Crash-free sessions",
+            "value": "99.6%",
+            "delta": "−0.1 pts",
+            "tone": "warning",
+            "compare": "vs 99.7% on 4.11"
+          },
+          {
+            "label": "Cold start, median",
+            "value": "1.8",
+            "unit": "s",
+            "delta": "−0.4 s",
+            "tone": "success",
+            "compare": "vs 2.2 s on 4.11"
+          },
+          {
+            "label": "Store rating",
+            "value": "4.6",
+            "delta": "0.0",
+            "tone": "neutral",
+            "compare": "same as 4.11"
+          }
+        ]
+      }
+    },
+    "sections": [
+      {
+        "type": "Section",
+        "props": {
+          "title": "By platform"
+        },
+        "children": [
+          {
+            "type": "Table",
+            "props": {
+              "caption": "Rollout by platform",
+              "headers": [
+                "Platform",
+                "Rollout",
+                "Sessions, 7 days",
+                "Crash-free",
+                "Gate 99.5%",
+                "Status"
+              ],
+              "align": [
+                "left",
+                "right",
+                "right",
+                "right",
+                "left",
+                "left"
+              ],
+              "rows": [
+                [
+                  "iOS 17 and 18",
+                  "50%",
+                  "412k",
+                  "99.8%",
+                  "Pass",
+                  {
+                    "badge": "Rolling out",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "iOS 16",
+                  "50%",
+                  "61k",
+                  "99.6%",
+                  "Pass",
+                  {
+                    "badge": "Rolling out",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "Android 14 and 15",
+                  "25%",
+                  "298k",
+                  "99.6%",
+                  "Pass",
+                  {
+                    "badge": "Paused",
+                    "tone": "paused"
+                  }
+                ],
+                [
+                  "Android 13",
+                  "25%",
+                  "104k",
+                  "99.5%",
+                  "Pass",
+                  {
+                    "badge": "Paused",
+                    "tone": "paused"
+                  }
+                ],
+                [
+                  "Android 12",
+                  "25%",
+                  "47k",
+                  {
+                    "text": "98.9%",
+                    "tone": "error"
+                  },
+                  {
+                    "text": "Fail",
+                    "tone": "error"
+                  },
+                  {
+                    "badge": "Blocking",
+                    "tone": "error"
+                  }
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "layout": "aside"
+        },
+        "children": [
+          {
+            "type": "Chart",
+            "props": {
+              "title": "Crashes per 10,000 sessions, Android 12",
+              "chart": {
+                "type": "bar",
+                "categories": [
+                  "8 May",
+                  "9 May",
+                  "10 May",
+                  "11 May",
+                  "12 May",
+                  "13 May",
+                  "14 May"
+                ],
+                "series": [
+                  {
+                    "name": "Crashes per 10,000 sessions",
+                    "values": [
+                      9,
+                      11,
+                      10,
+                      96,
+                      112,
+                      108,
+                      110
+                    ]
+                  }
+                ],
+                "reference": {
+                  "value": 50,
+                  "label": "Gate: 50"
+                }
+              },
+              "note": "4.12 reached Android 12 devices on 11 May."
+            }
+          },
+          {
+            "type": "Fields",
+            "props": {
+              "title": "Top crash"
+            },
+            "children": [
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Signature",
+                  "value": "`MapTileCache.evict`"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Share",
+                  "value": "83% of Android 12 crashes"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "First seen",
+                  "value": "11 May, build 2291"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Owner",
+                  "value": "Maps team"
+                }
+              },
+              {
+                "type": "Field",
+                "props": {
+                  "label": "Fix",
+                  "value": "4.12.1 in review, MOB-1904"
+                }
+              }
+            ]
+          },
+          {
+            "type": "Text",
+            "props": {
+              "content": "### What happens next\n\n- 4.12.1 goes to 5% of Android 12 devices on 15 May.\n- The rollout resumes when crash-free sessions hold above 99.5% for 24 hours.\n- Without a fix by 18 May, Android 12 stays on 4.11."
+            }
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "type": "Text",
+      "props": {
+        "content": "Source: crash reporting and the two store consoles. Refreshes every hour."
+      }
+    }
+  }
+}

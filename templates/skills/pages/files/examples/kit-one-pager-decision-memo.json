@@ -1,0 +1,157 @@
+{
+  "template": "one-pager",
+  "slots": {
+    "header": {
+      "type": "Header",
+      "props": {
+        "eyebrow": "Decision memo · Data platform",
+        "title": "Move the nightly export from 23:00 to 02:00",
+        "lede": "The export now overlaps with evening clinics in two time zones. Moving it three hours later removes the overlap and costs nothing."
+      }
+    },
+    "facts": {
+      "type": "Fields",
+      "children": [
+        {
+          "type": "Field",
+          "props": {
+            "label": "Decision by",
+            "value": "20 March 2026"
+          }
+        },
+        {
+          "type": "Field",
+          "props": {
+            "label": "Decides",
+            "value": "Leila Haddad"
+          }
+        },
+        {
+          "type": "Field",
+          "props": {
+            "label": "Cost",
+            "value": "None"
+          }
+        },
+        {
+          "type": "Field",
+          "props": {
+            "label": "Reversible",
+            "value": "Yes, one setting"
+          }
+        }
+      ]
+    },
+    "sections": [
+      {
+        "type": "Section",
+        "props": {
+          "title": "Context"
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "The export copies the day's appointments to the reporting warehouse. It locks the appointments table for about 25 minutes.\n\nSince the Calgary and Vancouver clinics opened, evening appointments there run until 00:30 our time. Front-desk staff see a frozen booking screen during the lock. We logged 37 complaints in February, up from 4 in November."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "title": "Options"
+        },
+        "children": [
+          {
+            "type": "Table",
+            "props": {
+              "caption": "Three options compared",
+              "headers": [
+                "Option",
+                "Effect on clinics",
+                "Effect on reports",
+                "Effort"
+              ],
+              "rows": [
+                [
+                  "Keep 23:00",
+                  "The lock overlaps evening clinics 5 nights a week.",
+                  "None",
+                  "None"
+                ],
+                [
+                  "**Move to 02:00**",
+                  "No overlap. Every clinic is closed.",
+                  "Morning reports are ready at 03:10 instead of 00:10.",
+                  "One setting"
+                ],
+                [
+                  "Replace with a streaming copy",
+                  "No lock at all.",
+                  "Reports update through the day.",
+                  "About 6 weeks"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "title": "Recommendation"
+        },
+        "children": [
+          {
+            "type": "Callout",
+            "props": {
+              "tone": "neutral",
+              "content": "**Move to 02:00 now.** Look at streaming again when the warehouse migration finishes in Q4."
+            }
+          },
+          {
+            "type": "Text",
+            "props": {
+              "content": "Nobody reads the morning reports before 06:00. We checked 90 days of access logs: the earliest open was 06:14."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "title": "Risk"
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "The database backup starts at 03:00. The export ends by 02:25 on a normal night. On the longest night on record it ended 40 minutes after it started, which still leaves 20 minutes."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Section",
+        "props": {
+          "title": "What we need"
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "A yes or no from Leila by 20 March. With a yes, the change goes out on Monday 23 March and we watch the first three nights."
+            }
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "type": "Text",
+      "props": {
+        "content": "Prepared by Marek Novak, data platform. The complaint log and the access-log query are attached to ticket DATA-881."
+      }
+    }
+  }
+}

@@ -101,6 +101,8 @@ export type PageRow = {
   theme: string | null;
   theme_tokens: string | null;
   design_version: number;
+  /** Page kit spec JSON, or NULL for a free-HTML, JSON or SVG page. */
+  kit: string | null;
 };
 
 export type NewPageRow = Omit<PageRow, "createdAt" | "updatedAt" | "view_count">;
@@ -121,6 +123,7 @@ export type PageColumnUpdate = Partial<
     | "theme"
     | "theme_tokens"
     | "design_version"
+    | "kit"
   >
 >;
 
@@ -560,10 +563,10 @@ export abstract class BasePagesRepository implements PagesRepository {
   insertPage(r: NewPageRow): Promise<PageRow | null> {
     return this.db.get<PageRow>(sql`
       INSERT INTO pages (id, "key", "agentId", slug, title, description, "contentType", "authMode",
-        "passwordHash", body, "needsCredentials", theme, theme_tokens, design_version)
+        "passwordHash", body, "needsCredentials", theme, theme_tokens, design_version, kit)
       VALUES (${r.id}, ${r.key}, ${r.agentId}, ${r.slug}, ${r.title}, ${r.description},
         ${r.contentType}, ${r.authMode}, ${r.passwordHash}, ${r.body}, ${r.needsCredentials},
-        ${r.theme}, ${r.theme_tokens}, ${r.design_version})
+        ${r.theme}, ${r.theme_tokens}, ${r.design_version}, ${r.kit})
       RETURNING *`);
   }
 
@@ -624,6 +627,7 @@ export abstract class BasePagesRepository implements PagesRepository {
     if (u.theme !== undefined) sets.push(sql`theme = ${u.theme}`);
     if (u.theme_tokens !== undefined) sets.push(sql`theme_tokens = ${u.theme_tokens}`);
     if (u.design_version !== undefined) sets.push(sql`design_version = ${u.design_version}`);
+    if (u.kit !== undefined) sets.push(sql`kit = ${u.kit}`);
     sets.push(sql`"updatedAt" = ${updatedAt}`);
     return this.db.get<PageRow>(
       sql`UPDATE pages SET ${sqlJoin(sets, sql`, `)} WHERE id = ${id} RETURNING *`,

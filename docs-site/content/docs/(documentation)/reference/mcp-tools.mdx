@@ -882,6 +882,8 @@ DB-backed pages let agents publish static reports, dashboards, and JSON action s
 
 Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted into the version history and the row is updated.
 
+For a report, one-pager, dashboard or deck, pass `kit: { template, slots }` instead of `body`. The server validates the slots and returns each bad path, stores the spec, and renders it to design system HTML on every read, so a renderer fix restyles every kit page. Charts render as `<swarm-chart>` SVG with axes, units, a legend and tooltips. A dashboard `data` slot (`{ key, refreshSeconds? }`) merges the JSON value at that KV key, in the owner's `task:agent:<agentId>` namespace, over the dashboard slots on each view. A later call with `body` and no `kit` turns the page back into free HTML. The slot reference and 5 examples ship with the `pages` skill.
+
 HTML pages use the swarm design system when `designVersion` is 2, the default for new pages. Each served page gets:
 
 - The dashboard theme tokens as CSS variables, such as `var(--color-primary)` and `var(--color-muted-foreground)`.
@@ -894,8 +896,9 @@ Set `theme` to a preset id, or pass `themeTokens`, to restyle the whole page. `t
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `title` | string | Yes | Human-readable title shown in listings |
-| `body` | string | Yes | Full page body (HTML document or JSON-render spec, per `contentType`) |
-| `contentType` | enum | Yes | `text/html` or `image/svg+xml` (served directly at `/p/:id`), or `application/json` (rendered by the SPA) |
+| `body` | string | Unless `kit` | Full page body (HTML document or JSON-render spec, per `contentType`) |
+| `kit` | object | Unless `body` | Page kit spec: `template` (`report`, `one-pager`, `dashboard` or `deck`) and its `slots`. Always `text/html`, design version 2 |
+| `contentType` | enum | With `body` | `text/html` or `image/svg+xml` (served directly at `/p/:id`), or `application/json` (rendered by the SPA) |
 | `slug` | string | No | URL slug. Defaults to kebab-cased title. Same slug → updates the existing row |
 | `authMode` | enum | No | `authed` (default, page-session cookie), `public` (explicit opt-in), or `password` (requires key) |
 | `password` | string | No | Plaintext password, hashed before storage. Only meaningful for `authMode='password'` |

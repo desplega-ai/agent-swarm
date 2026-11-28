@@ -38,6 +38,7 @@ export async function snapshotPage(
     theme: page.theme,
     themeTokens: page.themeTokens,
     designVersion: page.designVersion,
+    kit: page.kit ?? null,
   };
 
   return createPageVersion({

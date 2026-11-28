@@ -65,8 +65,12 @@ describe("seeded skills with bundled files", () => {
     const pages = skills.find((skill) => skill.name === "pages");
     expect(pages?.files.map((file) => file.path).sort()).toEqual([
       "examples/annotated-pr.html",
+      "examples/kit-dashboard-release-health.json",
+      "examples/kit-deck-quarterly-review.json",
+      "examples/kit-one-pager-decision-memo.json",
+      "examples/kit-one-pager-trial-result.json",
+      "examples/kit-report-incident-review.json",
       "examples/multiplayer-board.html",
-      "examples/report-page.html",
     ]);
 
     // Simple skills stay simple.
@@ -109,8 +113,12 @@ describe("seeded skills with bundled files", () => {
     const files = await getSkillFiles(pages.id);
     expect(files.map((file) => file.path).sort()).toEqual([
       "examples/annotated-pr.html",
+      "examples/kit-dashboard-release-health.json",
+      "examples/kit-deck-quarterly-review.json",
+      "examples/kit-one-pager-decision-memo.json",
+      "examples/kit-one-pager-trial-result.json",
+      "examples/kit-report-incident-review.json",
       "examples/multiplayer-board.html",
-      "examples/report-page.html",
     ]);
     expect(files.every((file) => file.content.length > 0)).toBe(true);
   });
@@ -133,7 +141,7 @@ describe("seeded skills with bundled files", () => {
     const pages = await getSkillByName("pages", "swarm");
     if (!pages) throw new Error("pages skill missing");
     const original = (await getSkillFiles(pages.id)).find(
-      (file) => file.path === "examples/report-page.html",
+      (file) => file.path === "examples/annotated-pr.html",
     );
     if (!original) throw new Error("bundled example missing");
 
@@ -216,7 +224,7 @@ describe("seeded skills with bundled files", () => {
     const upgraded = await getSkillByName("pages", "swarm");
     expect(upgraded?.isComplex).toBe(true);
     expect(upgraded?.content).not.toBe(legacyContent);
-    expect((await getSkillFiles(upgraded?.id ?? "")).length).toBe(3);
+    expect((await getSkillFiles(upgraded?.id ?? "")).length).toBe(7);
 
     // And it settles: the next run is a clean no-op.
     const second = await runSeeder(skillsSeeder, { quiet: true });
@@ -291,7 +299,7 @@ describe("seeded skills with bundled files", () => {
       "skills",
       "pages",
       "examples",
-      "report-page.html",
+      "annotated-pr.html",
     );
     expect(existsSync(examplePath)).toBe(true);
 

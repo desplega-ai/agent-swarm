@@ -23,7 +23,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getPage, incrementPageViewCount } from "../be/db";
+import { getKv, getPage, incrementPageViewCount } from "../be/db";
 import { getActiveDesignSystem } from "../be/design-system";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../pages/browser-sdk";
 import { COLOR_LITERAL_THRESHOLD, countColorLiterals } from "../pages/color-literals";
@@ -32,6 +32,8 @@ import {
   feedbackOverlayScripts,
   isPageFeedbackRequested,
 } from "../pages/feedback-overlay";
+import { renderKitDocument } from "../pages/kit/render";
+import { DashboardDataSchema, PageKitSchema } from "../pages/kit/schema";
 import {
   buildPageHeadV2,
   PAGE_HEAD_V1,
@@ -124,6 +126,7 @@ const publicPageJsonRoute = route({
  */
 async function pageHead(
   page: Page,
+  body: string,
   queryParams: URLSearchParams,
   wantsPrint: boolean,
 ): Promise<string> {
@@ -138,12 +141,121 @@ async function pageHead(
   const mode = designSystem?.mode ?? "viewer";
   const wantsDark =
     mode === "dark" || (mode === "viewer" && queryParams.get(PAGE_MODE_PARAM) === "dark");
-  const dark = !wantsPrint && wantsDark && countColorLiterals(page.body) < COLOR_LITERAL_THRESHOLD;
+  const dark = !wantsPrint && wantsDark && countColorLiterals(body) < COLOR_LITERAL_THRESHOLD;
   return buildPageHeadV2({
     theme,
     mode: dark ? "dark" : "light",
     fontsHref: designSystem?.fontsHref,
   });
+}
+
+/**
+ * The last kit render of each page, so repeat views of a public kit page skip
+ * the parse and render. `version` is the page's `updatedAt` (every edit bumps
+ * it) and `dataVersion` the data slot's KV `updatedAt`, so an edit or a data
+ * write renders again on the next view. In-process: a restart after a
+ * renderer change clears it. `html: null` caches a spec that no longer
+ * validates. An LRU (Map insertion order) capped by entries and HTML chars.
+ */
+type KitRender = {
+  version: string;
+  dataKey: string | null;
+  dataVersion: string;
+  html: string | null;
+};
+const KIT_RENDER_CACHE_MAX_ENTRIES = 500;
+const KIT_RENDER_CACHE_MAX_CHARS = 32 * 1024 * 1024;
+const kitRenders = new Map<string, KitRender>();
+let kitRenderChars = 0;
+
+function freshKitRender(page: Page, dataVersion: string): KitRender | undefined {
+  const render = kitRenders.get(page.id);
+  if (render?.version !== page.updatedAt || render.dataVersion !== dataVersion) return undefined;
+  kitRenders.delete(page.id);
+  kitRenders.set(page.id, render);
+  return render;
+}
+
+function storeKitRender(pageId: string, render: KitRender): void {
+  const old = kitRenders.get(pageId);
+  if (old) {
+    kitRenders.delete(pageId);
+    kitRenderChars -= old.html?.length ?? 0;
+  }
+  kitRenders.set(pageId, render);
+  kitRenderChars += render.html?.length ?? 0;
+  for (const [id, entry] of kitRenders) {
+    if (
+      kitRenders.size <= KIT_RENDER_CACHE_MAX_ENTRIES &&
+      kitRenderChars <= KIT_RENDER_CACHE_MAX_CHARS
+    )
+      break;
+    kitRenders.delete(id);
+    kitRenderChars -= entry.html?.length ?? 0;
+  }
+}
+
+/** A dashboard data slot's KV value, read from the page owner's own namespace. */
+async function readDashboardData(
+  agentId: string,
+  key: string,
+): Promise<{ version: string; value?: unknown }> {
+  try {
+    const entry = await getKv(`task:agent:${agentId}`, key);
+    return entry ? { version: String(entry.updatedAt), value: entry.value } : { version: "none" };
+  } catch {
+    // A KV read failure serves the spec as written.
+    return { version: "error" };
+  }
+}
+
+/**
+ * The HTML a page serves. A kit page renders from its stored spec (cached per
+ * version above), so a kit renderer fix restyles it; a dashboard with a `data`
+ * slot merges the KV value at that key, read from the page owner's own
+ * namespace (`task:agent:<agentId>`), over its slots. A spec or data value
+ * that no longer validates falls back: the spec to the stored body, the data
+ * to the spec. `kitCache` reports whether a kit page skipped the render.
+ */
+async function pageHtmlBody(page: Page): Promise<{ body: string; kitCache?: "hit" | "miss" }> {
+  if (!page.kit) return { body: page.body };
+  let data: { version: string; value?: unknown } | undefined;
+  const cached = kitRenders.get(page.id);
+  if (cached?.version === page.updatedAt) {
+    if (cached.dataKey) data = await readDashboardData(page.agentId, cached.dataKey);
+    const hit = freshKitRender(page, data?.version ?? "");
+    if (hit) return { body: hit.html ?? page.body, kitCache: "hit" };
+  }
+  const parsed = PageKitSchema.safeParse(page.kit);
+  if (!parsed.success) {
+    storeKitRender(page.id, {
+      version: page.updatedAt,
+      dataKey: null,
+      dataVersion: "",
+      html: null,
+    });
+    return { body: page.body, kitCache: "miss" };
+  }
+  const kit = parsed.data;
+  const dataKey = kit.template === "dashboard" && kit.slots.data ? kit.slots.data.key : null;
+  if (dataKey && !data) {
+    data = await readDashboardData(page.agentId, dataKey);
+    // A concurrent view may have rendered the same versions during the read.
+    const hit = freshKitRender(page, data.version);
+    if (hit) return { body: hit.html ?? page.body, kitCache: "hit" };
+  }
+  const dashboardData = data && DashboardDataSchema.safeParse(data.value);
+  const html = renderKitDocument(kit, {
+    title: page.title,
+    dashboardData: dashboardData?.success ? dashboardData.data : undefined,
+  });
+  storeKitRender(page.id, {
+    version: page.updatedAt,
+    dataKey,
+    dataVersion: data?.version ?? "",
+    html,
+  });
+  return { body: html, kitCache: "miss" };
 }
 
 /** A doctype at the start of a body (`\s` also matches a BOM). */
@@ -715,10 +827,11 @@ export async function handlePagesPublic(
   // `?__swarm-feedback` is on (the overlay hides itself in print).
   // The feedback key guard goes first in <head> so it runs before page scripts.
   const feedback = isPageFeedbackRequested(queryParams);
+  const { body, kitCache } = await pageHtmlBody(page);
   const html =
-    injectBrowserSdk(page.body, {
+    injectBrowserSdk(body, {
       // The viewer meta goes after the head defaults, which start with <base target>.
-      head: `${await pageHead(page, queryParams, wantsPrint)}<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">`,
+      head: `${await pageHead(page, body, queryParams, wantsPrint)}<meta name="swarm-viewer" content="${pageViewer(cookiePayload)}">`,
       headFirst: feedback ? feedbackKeyGuardScript() : "",
       standardsMode: page.designVersion !== 1,
     }) +
@@ -732,6 +845,7 @@ export async function handlePagesPublic(
     "X-Content-Type-Options": "nosniff",
   };
   if (inlineSetCookie.length > 0) headers["Set-Cookie"] = inlineSetCookie;
+  if (kitCache) headers["X-Swarm-Kit-Render"] = kitCache;
   res.writeHead(200, headers);
   res.end(html);
   await bumpViewCount(page.id);

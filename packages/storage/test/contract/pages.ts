@@ -236,6 +236,7 @@ export function pagesContract(engine: ContractEngine): void {
       theme: null,
       theme_tokens: null,
       design_version: 2,
+      kit: null,
       ...extra,
     });
 

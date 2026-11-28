@@ -1,0 +1,294 @@
+{
+  "template": "deck",
+  "slots": {
+    "slides": [
+      {
+        "type": "Slide",
+        "props": {
+          "layout": "title",
+          "eyebrow": "Quarterly review · Halden Coffee Roasters",
+          "title": "Wholesale, Q3 2026",
+          "lede": "Revenue, accounts, what went wrong and one decision.",
+          "meta": [
+            {
+              "label": "Presented by",
+              "value": "Signe Aaberg"
+            },
+            {
+              "label": "Date",
+              "value": "8 October 2026"
+            }
+          ]
+        }
+      },
+      {
+        "type": "Slide",
+        "props": {
+          "layout": "statement",
+          "eyebrow": "The quarter in one line",
+          "title": "Revenue grew 14% while we served 9 fewer accounts."
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "We closed 27 small accounts that cost more to deliver than they earned, and signed 18 new ones. The 118 accounts we serve now order more per delivery."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Slide",
+        "props": {
+          "layout": "content",
+          "eyebrow": "Revenue",
+          "title": "Every month beat the same month last year"
+        },
+        "children": [
+          {
+            "type": "Chart",
+            "props": {
+              "title": "Wholesale revenue by month",
+              "chart": {
+                "type": "bar",
+                "unit": "€k",
+                "categories": [
+                  "July",
+                  "August",
+                  "September"
+                ],
+                "series": [
+                  {
+                    "name": "Q3 2025",
+                    "role": "baseline",
+                    "values": [
+                      182,
+                      176,
+                      201
+                    ]
+                  },
+                  {
+                    "name": "Q3 2026",
+                    "values": [
+                      204,
+                      209,
+                      224
+                    ]
+                  }
+                ]
+              },
+              "note": "Quarter total: €637k, up from €559k."
+            }
+          }
+        ]
+      },
+      {
+        "type": "Slide",
+        "props": {
+          "layout": "content",
+          "eyebrow": "Accounts",
+          "title": "Four accounts added more than the closures removed"
+        },
+        "children": [
+          {
+            "type": "Table",
+            "props": {
+              "caption": "Revenue change by account",
+              "headers": [
+                "Account",
+                "Q3 2025",
+                "Q3 2026",
+                "Change"
+              ],
+              "align": [
+                "left",
+                "right",
+                "right",
+                "right"
+              ],
+              "rows": [
+                [
+                  "Hotel Lindgaard",
+                  "€41k",
+                  "€63k",
+                  {
+                    "text": "+€22k",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "Café Nordlys, 6 sites",
+                  "€58k",
+                  "€74k",
+                  {
+                    "text": "+€16k",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "Torvet Food Hall",
+                  "€22k",
+                  "€35k",
+                  {
+                    "text": "+€13k",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "Bakeri Solveig",
+                  "€30k",
+                  "€38k",
+                  {
+                    "text": "+€8k",
+                    "tone": "success"
+                  }
+                ],
+                [
+                  "27 accounts we closed",
+                  "€34k",
+                  "€0",
+                  {
+                    "text": "−€34k",
+                    "tone": "error"
+                  }
+                ],
+                [
+                  "All other accounts",
+                  "€374k",
+                  "€427k",
+                  {
+                    "text": "+€53k",
+                    "tone": "success"
+                  }
+                ]
+              ],
+              "footer": [
+                "Total",
+                "€559k",
+                "€637k",
+                "+€78k"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "Slide",
+        "props": {
+          "layout": "split",
+          "eyebrow": "Operations",
+          "title": "Three things did not go to plan"
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "- Decaf was out of stock for 3 weeks in August. We lost about €9k in orders.\n- The new invoicing system sent 61 duplicate invoices.\n- Two delivery vans were off the road for 11 days."
+            }
+          },
+          {
+            "type": "Table",
+            "props": {
+              "caption": "Operations measures against target",
+              "headers": [
+                "Measure",
+                "Q2",
+                "Q3",
+                "Target"
+              ],
+              "align": [
+                "left",
+                "right",
+                "right",
+                "right"
+              ],
+              "rows": [
+                [
+                  "On-time deliveries",
+                  "96%",
+                  {
+                    "text": "91%",
+                    "tone": "error"
+                  },
+                  "95%"
+                ],
+                [
+                  "Invoice disputes",
+                  "14",
+                  {
+                    "text": "61",
+                    "tone": "error"
+                  },
+                  "under 20"
+                ],
+                [
+                  "Weeks with a stock-out",
+                  "0",
+                  {
+                    "text": "3",
+                    "tone": "error"
+                  },
+                  "0"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "Slide",
+        "props": {
+          "layout": "content",
+          "eyebrow": "Q4",
+          "title": "Three commitments for next quarter"
+        },
+        "children": [
+          {
+            "type": "Table",
+            "props": {
+              "caption": "Q4 commitments",
+              "headers": [
+                "Commitment",
+                "Owner",
+                "By"
+              ],
+              "rows": [
+                [
+                  "Hold 4 weeks of decaf stock at all times",
+                  "Jonas Friis",
+                  "1 November"
+                ],
+                [
+                  "Fix duplicate invoices and credit the affected accounts",
+                  "Mette Holm",
+                  "24 October"
+                ],
+                [
+                  "Sign 6 new accounts that order over €2k a month",
+                  "Signe Aaberg",
+                  "31 December"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "Slide",
+        "props": {
+          "layout": "statement",
+          "eyebrow": "Decision needed today",
+          "title": "Approve a third delivery van: €38k, paid back in 14 months."
+        },
+        "children": [
+          {
+            "type": "Text",
+            "props": {
+              "content": "It removes the 11-day gap we had in Q3 and lets us open the Aarhus route in January."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
