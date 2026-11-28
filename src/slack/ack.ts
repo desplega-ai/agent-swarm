@@ -1,3 +1,4 @@
+import { webApi } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import { getLogsByTaskIdChronological, getSlackTasksInThread, getTaskById } from "../be/db";
 import { terminalReactionEvent } from "../integrations/reaction-events";
@@ -25,6 +26,26 @@ type SlackReactionClient = Pick<WebClient, "reactions">;
  */
 const ACCEPTANCE_EVENTS: readonly SlackReactionEvent[] = ["accepted", "buffered", "now", "steered"];
 
+const reactionClients = new WeakMap<WebClient, SlackReactionClient>();
+
+/**
+ * The client reactions go through. On a 429 a Web API client pauses its queue
+ * for every method, so a rate-limited reaction on the shared Bolt client holds
+ * back replies and cards. This sibling has its own queue. Anything that is not
+ * a real `WebClient` (a test double) is used as it is.
+ */
+function reactionClient(client: SlackReactionClient): SlackReactionClient {
+  if (!(client instanceof webApi.WebClient)) return client;
+  let sibling = reactionClients.get(client);
+  if (!sibling) {
+    sibling = new webApi.WebClient(client.token ?? process.env.SLACK_BOT_TOKEN, {
+      slackApiUrl: client.slackApiUrl,
+    });
+    reactionClients.set(client, sibling);
+  }
+  return sibling;
+}
+
 function slackErrorCode(error: unknown): string | undefined {
   if (!error || typeof error !== "object") return undefined;
   const data = "data" in error ? error.data : undefined;
@@ -45,8 +66,9 @@ async function addReaction(
   event: SlackReactionEvent | undefined,
 ): Promise<void> {
   if (!name) return;
+  const reactions = reactionClient(client).reactions;
   try {
-    await client.reactions.add({ channel, name, timestamp });
+    await reactions.add({ channel, name, timestamp });
   } catch (error) {
     if (slackErrorCode(error) === "already_reacted") return;
     if (slackErrorCode(error) === "invalid_name") {
@@ -63,7 +85,7 @@ async function addReaction(
       // built-in reaction rather than leaving the message with none at all).
       const fallback = event ? SLACK_REACTION_DEFAULTS[event] : SLACK_REACTION_DEFAULTS.completed;
       try {
-        await client.reactions.add({ channel, name: fallback, timestamp });
+        await reactions.add({ channel, name: fallback, timestamp });
       } catch (fallbackError) {
         console.log(
           scrubSecrets(
@@ -121,6 +143,7 @@ export async function finalizeSlackMessageReaction(
       (name): name is string => name !== null,
     ),
   );
+  const reactions = reactionClient(client).reactions;
   // Each removal targets a different name and absorbs its own error, so the
   // (at most ACCEPTANCE_EVENTS.length) calls run together. The outcome
   // reaction still waits for all of them: an outcome name that matches an
@@ -128,7 +151,7 @@ export async function finalizeSlackMessageReaction(
   await Promise.all(
     Array.from(names, async (name) => {
       try {
-        await client.reactions.remove({ channel, name, timestamp });
+        await reactions.remove({ channel, name, timestamp });
       } catch (error) {
         const code = slackErrorCode(error);
         if (code === "no_reaction" || code === "message_not_found" || code === "invalid_name")
