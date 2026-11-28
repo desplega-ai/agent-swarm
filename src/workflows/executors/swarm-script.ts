@@ -148,6 +148,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       },
       // Rows the script creates through its token point back at this step.
       { sourceStepId: meta.stepId },
+      "workflow_node",
     );
     if (output.exitCode === 0 && !output.error && !output.runtimeError) {
       await touchScratchScriptLastUsed(resolved.script.id);

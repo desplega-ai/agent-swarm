@@ -829,6 +829,10 @@
       "description": "Telemetry enable and ui-event relay to the sink, validation and size cap",
       "scenarios": ["platform-telemetry"]
     },
+    "telemetry-activity-rollup": {
+      "description": "The org.activity rollup counts script runs, HITL requests and workflow steps by kind, flushes at shutdown with no content, and counts nothing with telemetry off",
+      "scenarios": ["platform-telemetry-activity"]
+    },
     "tracker-disabled-contract": {
       "description": "Linear and Jira routes answer the unconfigured contract; tracker tools keep sync and agent mappings without a provider",
       "scenarios": ["platformb-trackers"]

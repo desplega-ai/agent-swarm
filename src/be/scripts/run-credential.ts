@@ -1,4 +1,6 @@
+import { getDeploymentScriptExecutorName } from "../../scripts-runtime/executors/registry";
 import { type RunScriptInput, type RunScriptOutput, runScript } from "../../scripts-runtime/loader";
+import { recordScriptRun, type ScriptRunTrigger } from "../../telemetry-activity";
 import type { ScriptRunProvenance } from "../../utils/request-auth-context";
 import { getAgentById } from "../db";
 import { getStorage } from "../storage";
@@ -65,6 +67,29 @@ export async function acquireScriptApiCredential(
   };
 }
 
+/** Run `run` and count it in the hourly `org.activity` rollup, thrown errors as failed. */
+async function countedRun(
+  trigger: ScriptRunTrigger,
+  executor: string | null | undefined,
+  run: () => Promise<RunScriptOutput>,
+): Promise<RunScriptOutput> {
+  const startedAt = Date.now();
+  let status: "completed" | "failed" | "timeout" = "failed";
+  try {
+    const output = await run();
+    if (output.exitCode === 0 && !output.error && !output.runtimeError) status = "completed";
+    else if (output.error === "timeout") status = "timeout";
+    return output;
+  } finally {
+    recordScriptRun({
+      trigger,
+      executor: executor ?? getDeploymentScriptExecutorName(),
+      status,
+      durationMs: Date.now() - startedAt,
+    });
+  }
+}
+
 /** `ctx.db.dialect` of a run: the active storage engine's `db_query` dialect. */
 function scriptDbDialect(): RunScriptInput["dbDialect"] {
   return getStorage().capabilities.dbQueryDialect;
@@ -81,10 +106,13 @@ function scriptDbDialect(): RunScriptInput["dbDialect"] {
 export async function runScriptWithRunCredential(
   input: Omit<RunScriptInput, "apiKey" | "dbDialect">,
   provenance: ScriptRunProvenance = {},
+  trigger: ScriptRunTrigger = "other",
 ): Promise<RunScriptOutput> {
   const credential = await acquireScriptApiCredential(input.agentId, provenance);
   try {
-    return await runScript({ ...input, apiKey: credential.apiKey, dbDialect: scriptDbDialect() });
+    return await countedRun(trigger, input.executor, () =>
+      runScript({ ...input, apiKey: credential.apiKey, dbDialect: scriptDbDialect() }),
+    );
   } finally {
     await credential.release();
   }
@@ -113,19 +141,21 @@ export async function runScriptAsUserWithRunCredential(
 ): Promise<RunScriptOutput> {
   const token = await mintUserScriptRunToken(userId, userScriptRunTokenTtlMs());
   try {
-    return await runScript({
-      ...input,
-      apiKey: token.plaintext,
-      dbDialect: scriptDbDialect(),
-      // Empty: the SDK then sends no X-Agent-ID, which the api refuses on a user token.
-      agentId: "",
-      // Explicit empties: omitted, the loader falls back to deployment-wide bindings.
-      egressSecrets: [],
-      failedBindings: [],
-      userConfig: {},
-      apiConnections: [],
-      mcpConnections: [],
-    });
+    return await countedRun("inline", input.executor, () =>
+      runScript({
+        ...input,
+        apiKey: token.plaintext,
+        dbDialect: scriptDbDialect(),
+        // Empty: the SDK then sends no X-Agent-ID, which the api refuses on a user token.
+        agentId: "",
+        // Explicit empties: omitted, the loader falls back to deployment-wide bindings.
+        egressSecrets: [],
+        failedBindings: [],
+        userConfig: {},
+        apiConnections: [],
+        mcpConnections: [],
+      }),
+    );
   } finally {
     await revokeUserScriptRunToken(token.tokenId);
   }

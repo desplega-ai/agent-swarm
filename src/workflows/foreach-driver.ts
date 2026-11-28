@@ -12,6 +12,7 @@ import {
 } from "../be/db";
 import { getRunLineageBlock, getWorkflowRunStatus } from "../be/db/workflow-runs";
 import { getStorage } from "../be/storage";
+import { recordWorkflowStep } from "../telemetry-activity";
 import type {
   Workflow,
   WorkflowDefinition,
@@ -190,6 +191,10 @@ async function driveForeachOwed(
         if (liveness === "run-ended") return notJoined();
         if (liveness === "child-ended") continue;
         started.add(child.id);
+        // A queued child counts as a workflow step only here, when its claimed
+        // attempt row reaches an executor: never while pending, requeued or
+        // cancelled. Each retry attempt is its own row and counts once.
+        recordWorkflowStep(child.nodeType);
         const outcome = await startChild({
           def,
           child,
