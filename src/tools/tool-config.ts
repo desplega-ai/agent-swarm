@@ -1,15 +1,8 @@
 /**
- * Tool classification for context optimization.
- *
- * CORE_TOOLS: Always in Claude Code's context (no Tool Search needed).
- * These cover session startup and recurring fleet-wide operations, selected
- * by distinct-task prevalence and tool-description cost.
- *
- * All other registered tools rely on Claude Code's Tool Search feature
- * (auto-activates when total tool tokens exceed ~10K).
+ * Core tools cover session startup and recurring fleet-wide operations.
+ * Pi exposes registered core tools directly. Claude Code preloads them
+ * when TASK_TOOL_PRELOAD_ENABLED is on.
  */
-
-/** Tools that must always be available in context (not deferred by Tool Search) */
 export const CORE_TOOLS = new Set([
   // Session bootstrap
   "join-swarm", // first tool called on startup

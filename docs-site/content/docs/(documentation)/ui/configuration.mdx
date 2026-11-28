@@ -366,10 +366,10 @@ The API server resolves the model when a worker claims the task and records `res
 
 ## Task tool preloading
 
-`TASK_TOOL_PRELOAD_ENABLED` defaults to `true`. With it enabled, each new agent MCP session reads
-`TASK_TOOL_MANIFESTS`, selects tools using the authenticated agent's current task, and marks their
-MCP metadata with `anthropic/alwaysLoad: true`. Claude Code supports this annotation; no reduction
-in tool searches is claimed for other harnesses. Existing sessions retain their original selection.
+`TASK_TOOL_PRELOAD_ENABLED` defaults to `true`. Each new agent MCP session marks its available core
+tools with `anthropic/alwaysLoad: true`. Claude Code can call tools such as `get-task-details` and
+`store-progress` directly, even on a task without a type. A matching `TASK_TOOL_MANIFESTS` entry
+preloads additional tools for the authenticated agent's task. Existing sessions keep their selection.
 
 Both settings can be stored in global or agent-scoped configuration. Agent-scoped values override
 global values; resolved configuration takes precedence over environment defaults. The dashboard
@@ -378,18 +378,18 @@ edits global values. For a small pilot, use agent-scoped configuration instead.
 ```json
 {
   "taskTypes": {
-    "review": ["get-tasks", "script-run", "get-repos"]
+    "review": ["get-workflow"]
   },
   "schedules": {
-    "12345678-1234-4234-8234-123456789abc": ["script-run", "kv-get"]
+    "12345678-1234-4234-8234-123456789abc": ["list-workflow-runs"]
   }
 }
 ```
 
 Keys match exactly. A schedule entry replaces the task-type selection, including an empty array
 to opt out. Each entry accepts at most 16 registered swarm tool names. Unsupported shapes or
-unknown names are rejected on config writes. Invalid environment values fall back to ordinary
-discovery with a server warning. Missing task context, an unowned task, or no match adds no tools.
+unknown names are rejected on config writes. An invalid manifest produces a server warning.
+An invalid manifest, missing task context, an unowned task, or no match leaves the core selection in place.
 Slack tools preload only when the task has Slack context. Capability filters, scripts-only mode,
 and tool-call permissions still apply; preloading never grants access or removes searchable tools.
 
