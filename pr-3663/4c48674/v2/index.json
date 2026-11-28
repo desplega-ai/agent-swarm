@@ -1,0 +1,2147 @@
+{
+  "profile": "v2",
+  "channel": "channel.png",
+  "scenarios": [
+    {
+      "name": "slack-mention",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "mention",
+          "channel": "C0GENERAL0",
+          "ts": "1795581975.271000",
+          "frames": [
+            {
+              "file": "frames/slack-mention/mention/01-message.add.png",
+              "index": 5,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-mention/mention/02-reaction.add.png",
+              "index": 6,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-mention/mention/03-message.add.png",
+              "index": 7,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-mention/mention/04-message.add.png",
+              "index": 8,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-mention/mention/05-message.update.png",
+              "index": 9,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-mention/mention/06-reaction.remove.png",
+              "index": 10,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-mention/mention/07-message.update.png",
+              "index": 11,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-mention/mention/08-reaction.add.png",
+              "index": 12,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-mention/mention/steps.gif",
+          "finalThread": "frames/slack-mention/mention/final-thread.png",
+          "finalDesktop": "frames/slack-mention/mention/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-follow-up",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "follow-up",
+          "channel": "C0GENERAL0",
+          "ts": "1795581976.894000",
+          "frames": [
+            {
+              "file": "frames/slack-follow-up/follow-up/01-message.add.png",
+              "index": 13,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/02-reaction.add.png",
+              "index": 14,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/03-message.add.png",
+              "index": 15,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/04-message.add.png",
+              "index": 16,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/05-message.update.png",
+              "index": 17,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/06-reaction.remove.png",
+              "index": 18,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/07-message.update.png",
+              "index": 19,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/08-reaction.add.png",
+              "index": 20,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/09-message.add.png",
+              "index": 21,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/10-reaction.add.png",
+              "index": 22,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/11-message.add.png",
+              "index": 23,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/12-message.update.png",
+              "index": 24,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/13-reaction.remove.png",
+              "index": 25,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/14-message.update.png",
+              "index": 26,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-follow-up/follow-up/15-reaction.add.png",
+              "index": 27,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-follow-up/follow-up/steps.gif",
+          "finalThread": "frames/slack-follow-up/follow-up/final-thread.png",
+          "finalDesktop": "frames/slack-follow-up/follow-up/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-failed-task",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "failed",
+          "channel": "C0GENERAL0",
+          "ts": "1795581978.936000",
+          "frames": [
+            {
+              "file": "frames/slack-failed-task/failed/01-message.add.png",
+              "index": 28,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-failed-task/failed/02-reaction.add.png",
+              "index": 29,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-failed-task/failed/03-message.add.png",
+              "index": 30,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-failed-task/failed/04-message.add.png",
+              "index": 31,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-failed-task/failed/05-message.update.png",
+              "index": 32,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-failed-task/failed/06-reaction.remove.png",
+              "index": 33,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-failed-task/failed/07-message.update.png",
+              "index": 34,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-failed-task/failed/08-reaction.add.png",
+              "index": 35,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-failed-task/failed/steps.gif",
+          "finalThread": "frames/slack-failed-task/failed/final-thread.png",
+          "finalDesktop": "frames/slack-failed-task/failed/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-assistant-file-share",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "image-only",
+          "channel": "DAQ9BKGCF",
+          "ts": "1795581979.955000",
+          "frames": [
+            {
+              "file": "frames/slack-assistant-file-share/image-only/01-message.add.png",
+              "index": 37,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/02-message.add.png",
+              "index": 39,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/03-reaction.add.png",
+              "index": 42,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/04-message.add.png",
+              "index": 43,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/05-message.add.png",
+              "index": 44,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/06-message.update.png",
+              "index": 48,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/07-reaction.remove.png",
+              "index": 50,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/08-message.update.png",
+              "index": 51,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-only/09-reaction.add.png",
+              "index": 52,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-assistant-file-share/image-only/steps.gif",
+          "finalThread": "frames/slack-assistant-file-share/image-only/final-thread.png",
+          "finalDesktop": "frames/slack-assistant-file-share/image-only/final-desktop.png"
+        },
+        {
+          "label": "image-with-caption",
+          "channel": "DAQ9BKGCF",
+          "ts": "1795581980.513001",
+          "frames": [
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/01-message.add.png",
+              "index": 45,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/02-message.add.png",
+              "index": 47,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/03-reaction.add.png",
+              "index": 54,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/04-message.add.png",
+              "index": 55,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/05-message.add.png",
+              "index": 56,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/06-message.update.png",
+              "index": 57,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/07-reaction.remove.png",
+              "index": 58,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/08-message.update.png",
+              "index": 59,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-assistant-file-share/image-with-caption/09-reaction.add.png",
+              "index": 60,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-assistant-file-share/image-with-caption/steps.gif",
+          "finalThread": "frames/slack-assistant-file-share/image-with-caption/final-thread.png",
+          "finalDesktop": "frames/slack-assistant-file-share/image-with-caption/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-thread-one-card",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "thread-footer-on",
+          "channel": "C0GENERAL0",
+          "ts": "1795581984.192000",
+          "frames": [
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/01-message.add.png",
+              "index": 61,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/02-reaction.add.png",
+              "index": 62,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/03-message.add.png",
+              "index": 63,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/04-message.update.png",
+              "index": 64,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/05-reaction.remove.png",
+              "index": 65,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/06-message.add.png",
+              "index": 66,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/07-reaction.add.png",
+              "index": 67,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/08-message.add.png",
+              "index": 68,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/09-message.add.png",
+              "index": 69,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/10-message.update.png",
+              "index": 70,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-on/11-message.update.png",
+              "index": 71,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-thread-one-card/thread-footer-on/steps.gif",
+          "finalThread": "frames/slack-thread-one-card/thread-footer-on/final-thread.png",
+          "finalDesktop": "frames/slack-thread-one-card/thread-footer-on/final-desktop.png"
+        },
+        {
+          "label": "thread-footer-off",
+          "channel": "C0GENERAL0",
+          "ts": "1795581987.140000",
+          "frames": [
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/01-message.add.png",
+              "index": 72,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/02-reaction.add.png",
+              "index": 73,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/03-message.add.png",
+              "index": 74,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/04-message.update.png",
+              "index": 75,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/05-reaction.remove.png",
+              "index": 76,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/06-message.add.png",
+              "index": 77,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/07-reaction.add.png",
+              "index": 78,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/08-message.add.png",
+              "index": 79,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/09-message.add.png",
+              "index": 80,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/10-message.update.png",
+              "index": 81,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-thread-one-card/thread-footer-off/11-message.update.png",
+              "index": 82,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-thread-one-card/thread-footer-off/steps.gif",
+          "finalThread": "frames/slack-thread-one-card/thread-footer-off/final-thread.png",
+          "finalDesktop": "frames/slack-thread-one-card/thread-footer-off/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-task-output-ui-spec",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "ui-spec",
+          "channel": "C0GENERAL0",
+          "ts": "1795581990.652000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/01-message.add.png",
+              "index": 83,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/02-reaction.add.png",
+              "index": 84,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/03-message.add.png",
+              "index": 85,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/04-message.add.png",
+              "index": 86,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/05-message.update.png",
+              "index": 87,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/06-reaction.remove.png",
+              "index": 88,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/07-message.update.png",
+              "index": 89,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec/08-reaction.add.png",
+              "index": 90,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-ui-spec/ui-spec/steps.gif",
+          "finalThread": "frames/slack-task-output-ui-spec/ui-spec/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-ui-spec/ui-spec/final-desktop.png"
+        },
+        {
+          "label": "ui-spec-unsafe",
+          "channel": "C0GENERAL0",
+          "ts": "1795581991.693000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/01-message.add.png",
+              "index": 91,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/02-reaction.add.png",
+              "index": 92,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/03-message.add.png",
+              "index": 93,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/04-message.add.png",
+              "index": 94,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/05-message.update.png",
+              "index": 95,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/06-reaction.remove.png",
+              "index": 96,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/07-message.update.png",
+              "index": 97,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-ui-spec/ui-spec-unsafe/08-reaction.add.png",
+              "index": 98,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-ui-spec/ui-spec-unsafe/steps.gif",
+          "finalThread": "frames/slack-task-output-ui-spec/ui-spec-unsafe/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-ui-spec/ui-spec-unsafe/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-reply-card",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "card",
+          "channel": "C0GENERAL0",
+          "ts": "1795581992.752000",
+          "frames": [
+            {
+              "file": "frames/slack-reply-card/card/01-message.add.png",
+              "index": 99,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-card/card/02-reaction.add.png",
+              "index": 100,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-reply-card/card/03-message.add.png",
+              "index": 101,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-card/card/04-message.add.png",
+              "index": 102,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-card/card/05-reaction.remove.png",
+              "index": 103,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-reply-card/card/06-reaction.add.png",
+              "index": 104,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-reply-card/card/07-message.update.png",
+              "index": 120,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-reply-card/card/steps.gif",
+          "finalThread": "frames/slack-reply-card/card/final-thread.png",
+          "finalDesktop": "frames/slack-reply-card/card/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-reply-footer-toggle",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "footer-off",
+          "channel": "C0GENERAL0",
+          "ts": "1795581995.290000",
+          "frames": [
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/01-message.add.png",
+              "index": 112,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/02-reaction.add.png",
+              "index": 113,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/03-message.add.png",
+              "index": 114,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/04-message.add.png",
+              "index": 115,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/05-message.update.png",
+              "index": 116,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/06-reaction.remove.png",
+              "index": 117,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/07-message.update.png",
+              "index": 118,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-off/08-reaction.add.png",
+              "index": 119,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-reply-footer-toggle/footer-off/steps.gif",
+          "finalThread": "frames/slack-reply-footer-toggle/footer-off/final-thread.png",
+          "finalDesktop": "frames/slack-reply-footer-toggle/footer-off/final-desktop.png"
+        },
+        {
+          "label": "footer-on",
+          "channel": "C0GENERAL0",
+          "ts": "1795581997.358000",
+          "frames": [
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/01-message.add.png",
+              "index": 121,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/02-reaction.add.png",
+              "index": 122,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/03-message.add.png",
+              "index": 123,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/04-message.add.png",
+              "index": 124,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/05-message.update.png",
+              "index": 125,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/06-reaction.remove.png",
+              "index": 126,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/07-message.update.png",
+              "index": 127,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-reply-footer-toggle/footer-on/08-reaction.add.png",
+              "index": 128,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-reply-footer-toggle/footer-on/steps.gif",
+          "finalThread": "frames/slack-reply-footer-toggle/footer-on/final-thread.png",
+          "finalDesktop": "frames/slack-reply-footer-toggle/footer-on/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-quiet-lead-threads",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "quiet-off",
+          "channel": "C0GENERAL0",
+          "ts": "1795581998.427000",
+          "frames": [
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/01-message.add.png",
+              "index": 130,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/02-reaction.add.png",
+              "index": 131,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/03-message.add.png",
+              "index": 132,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/04-message.add.png",
+              "index": 133,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/05-message.update.png",
+              "index": 134,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/06-message.update.png",
+              "index": 135,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/07-message.add.png",
+              "index": 136,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/08-message.update.png",
+              "index": 137,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/09-message.update.png",
+              "index": 138,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/10-message.add.png",
+              "index": 139,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/11-message.delete.png",
+              "index": 140,
+              "kind": "message.delete"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/12-reaction.remove.png",
+              "index": 141,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/13-reaction.add.png",
+              "index": 142,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-off/14-message.update.png",
+              "index": 146,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-quiet-lead-threads/quiet-off/steps.gif",
+          "finalThread": "frames/slack-quiet-lead-threads/quiet-off/final-thread.png",
+          "finalDesktop": "frames/slack-quiet-lead-threads/quiet-off/final-desktop.png"
+        },
+        {
+          "label": "quiet-on",
+          "channel": "C0GENERAL0",
+          "ts": "1795582001.142000",
+          "frames": [
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-on/01-message.add.png",
+              "index": 143,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-on/02-reaction.add.png",
+              "index": 144,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-on/03-message.add.png",
+              "index": 145,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-on/04-message.add.png",
+              "index": 147,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-on/05-reaction.remove.png",
+              "index": 148,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-on/06-reaction.add.png",
+              "index": 149,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-quiet-lead-threads/quiet-on/07-message.update.png",
+              "index": 150,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-quiet-lead-threads/quiet-on/steps.gif",
+          "finalThread": "frames/slack-quiet-lead-threads/quiet-on/final-thread.png",
+          "finalDesktop": "frames/slack-quiet-lead-threads/quiet-on/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-defer-eta-v2",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "defer-eta-v2",
+          "channel": "C0GENERAL0",
+          "ts": "1795582014.385001",
+          "frames": [
+            {
+              "file": "frames/slack-defer-eta-v2/defer-eta-v2/01-message.add.png",
+              "index": 153,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-eta-v2/defer-eta-v2/02-reaction.add.png",
+              "index": 154,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-defer-eta-v2/defer-eta-v2/03-message.add.png",
+              "index": 155,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-eta-v2/defer-eta-v2/04-message.add.png",
+              "index": 156,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-eta-v2/defer-eta-v2/05-message.update.png",
+              "index": 157,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-eta-v2/defer-eta-v2/06-message.update.png",
+              "index": 158,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-defer-eta-v2/defer-eta-v2/steps.gif",
+          "finalThread": "frames/slack-defer-eta-v2/defer-eta-v2/final-thread.png",
+          "finalDesktop": "frames/slack-defer-eta-v2/defer-eta-v2/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-task-output-citations",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "valid",
+          "channel": "C0GENERAL0",
+          "ts": "1795582018.634000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-citations/valid/01-message.add.png",
+              "index": 159,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/valid/02-reaction.add.png",
+              "index": 160,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/valid/03-message.add.png",
+              "index": 161,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/valid/04-message.add.png",
+              "index": 162,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/valid/05-message.update.png",
+              "index": 163,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/valid/06-reaction.remove.png",
+              "index": 164,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-citations/valid/07-message.update.png",
+              "index": 165,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/valid/08-reaction.add.png",
+              "index": 166,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-citations/valid/steps.gif",
+          "finalThread": "frames/slack-task-output-citations/valid/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-citations/valid/final-desktop.png"
+        },
+        {
+          "label": "invalid",
+          "channel": "C0GENERAL0",
+          "ts": "1795582020.392000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-citations/invalid/01-message.add.png",
+              "index": 167,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/invalid/02-reaction.add.png",
+              "index": 168,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/invalid/03-message.add.png",
+              "index": 169,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/invalid/04-message.add.png",
+              "index": 170,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/invalid/05-message.update.png",
+              "index": 171,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/invalid/06-reaction.remove.png",
+              "index": 172,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-citations/invalid/07-message.update.png",
+              "index": 173,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/invalid/08-reaction.add.png",
+              "index": 174,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-citations/invalid/steps.gif",
+          "finalThread": "frames/slack-task-output-citations/invalid/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-citations/invalid/final-desktop.png"
+        },
+        {
+          "label": "oversized",
+          "channel": "C0GENERAL0",
+          "ts": "1795582021.390000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-citations/oversized/01-message.add.png",
+              "index": 175,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/oversized/02-reaction.add.png",
+              "index": 176,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/oversized/03-message.add.png",
+              "index": 177,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/oversized/04-message.add.png",
+              "index": 178,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/oversized/05-message.update.png",
+              "index": 179,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/oversized/06-reaction.remove.png",
+              "index": 180,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-citations/oversized/07-message.update.png",
+              "index": 181,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/oversized/08-reaction.add.png",
+              "index": 182,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-citations/oversized/steps.gif",
+          "finalThread": "frames/slack-task-output-citations/oversized/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-citations/oversized/final-desktop.png"
+        },
+        {
+          "label": "github-url",
+          "channel": "C0GENERAL0",
+          "ts": "1795582022.390000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-citations/github-url/01-message.add.png",
+              "index": 183,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/github-url/02-reaction.add.png",
+              "index": 184,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/github-url/03-message.add.png",
+              "index": 185,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/github-url/04-message.add.png",
+              "index": 186,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/github-url/05-message.update.png",
+              "index": 187,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/github-url/06-reaction.remove.png",
+              "index": 188,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-citations/github-url/07-message.update.png",
+              "index": 189,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/github-url/08-reaction.add.png",
+              "index": 190,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-citations/github-url/steps.gif",
+          "finalThread": "frames/slack-task-output-citations/github-url/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-citations/github-url/final-desktop.png"
+        },
+        {
+          "label": "general",
+          "channel": "C0GENERAL0",
+          "ts": "1795582023.390000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-citations/general/01-message.add.png",
+              "index": 191,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/general/02-reaction.add.png",
+              "index": 192,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/general/03-message.add.png",
+              "index": 193,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/general/04-message.add.png",
+              "index": 194,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/general/05-message.update.png",
+              "index": 195,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/general/06-reaction.remove.png",
+              "index": 196,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-citations/general/07-message.update.png",
+              "index": 197,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/general/08-reaction.add.png",
+              "index": 198,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-citations/general/steps.gif",
+          "finalThread": "frames/slack-task-output-citations/general/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-citations/general/final-desktop.png"
+        },
+        {
+          "label": "refused",
+          "channel": "C0GENERAL0",
+          "ts": "1795582024.390000",
+          "frames": [
+            {
+              "file": "frames/slack-task-output-citations/refused/01-message.add.png",
+              "index": 199,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/refused/02-reaction.add.png",
+              "index": 200,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/refused/03-message.add.png",
+              "index": 201,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/refused/04-message.add.png",
+              "index": 202,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-task-output-citations/refused/05-message.update.png",
+              "index": 203,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/refused/06-reaction.remove.png",
+              "index": 204,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-task-output-citations/refused/07-message.update.png",
+              "index": 205,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-task-output-citations/refused/08-reaction.add.png",
+              "index": 206,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-task-output-citations/refused/steps.gif",
+          "finalThread": "frames/slack-task-output-citations/refused/final-thread.png",
+          "finalDesktop": "frames/slack-task-output-citations/refused/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-task-tree-toggle",
+      "status": "pass",
+      "error": null,
+      "threads": []
+    },
+    {
+      "name": "slack-stop-button",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "stop-button-off",
+          "channel": "C0GENERAL0",
+          "ts": "1795582029.300000",
+          "frames": [
+            {
+              "file": "frames/slack-stop-button/stop-button-off/01-message.add.png",
+              "index": 216,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/02-reaction.add.png",
+              "index": 217,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/03-message.add.png",
+              "index": 218,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/04-message.update.png",
+              "index": 224,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/05-message.update.png",
+              "index": 225,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/06-message.update.png",
+              "index": 226,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/07-message.add.png",
+              "index": 227,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/08-message.update.png",
+              "index": 228,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/09-reaction.remove.png",
+              "index": 229,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/10-message.update.png",
+              "index": 230,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-off/11-reaction.add.png",
+              "index": 231,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-stop-button/stop-button-off/steps.gif",
+          "finalThread": "frames/slack-stop-button/stop-button-off/final-thread.png",
+          "finalDesktop": "frames/slack-stop-button/stop-button-off/final-desktop.png"
+        },
+        {
+          "label": "stop-button-on",
+          "channel": "C0GENERAL0",
+          "ts": "1795582039.889000",
+          "frames": [
+            {
+              "file": "frames/slack-stop-button/stop-button-on/01-message.add.png",
+              "index": 232,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/02-reaction.add.png",
+              "index": 233,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/03-message.add.png",
+              "index": 234,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/04-message.update.png",
+              "index": 235,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/05-message.update.png",
+              "index": 236,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/06-message.update.png",
+              "index": 237,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/07-message.add.png",
+              "index": 238,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/08-message.update.png",
+              "index": 239,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/09-reaction.remove.png",
+              "index": 240,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/10-message.update.png",
+              "index": 241,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-stop-button/stop-button-on/11-reaction.add.png",
+              "index": 242,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-stop-button/stop-button-on/steps.gif",
+          "finalThread": "frames/slack-stop-button/stop-button-on/final-thread.png",
+          "finalDesktop": "frames/slack-stop-button/stop-button-on/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-defer-wake-v2",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "defer-wake-v2",
+          "channel": "C0GENERAL0",
+          "ts": "1795582050.165000",
+          "frames": [
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/01-message.add.png",
+              "index": 243,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/02-reaction.add.png",
+              "index": 244,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/03-message.add.png",
+              "index": 245,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/04-message.add.png",
+              "index": 246,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/05-message.update.png",
+              "index": 247,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/06-message.update.png",
+              "index": 248,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/07-message.update.png",
+              "index": 249,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/08-reaction.remove.png",
+              "index": 250,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/09-reaction.add.png",
+              "index": 251,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/10-message.update.png",
+              "index": 252,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/11-message.update.png",
+              "index": 253,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/12-message.add.png",
+              "index": 254,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/13-message.update.png",
+              "index": 255,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/14-message.update.png",
+              "index": 256,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/15-message.update.png",
+              "index": 257,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/16-message.update.png",
+              "index": 258,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-v2/defer-wake-v2/17-message.update.png",
+              "index": 259,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-defer-wake-v2/defer-wake-v2/steps.gif",
+          "finalThread": "frames/slack-defer-wake-v2/defer-wake-v2/final-thread.png",
+          "finalDesktop": "frames/slack-defer-wake-v2/defer-wake-v2/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-defer-wake-reply-v2",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "defer-wake-reply-v2",
+          "channel": "C0GENERAL0",
+          "ts": "1795582083.496000",
+          "frames": [
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/01-message.add.png",
+              "index": 260,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/02-reaction.add.png",
+              "index": 261,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/03-message.add.png",
+              "index": 262,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/04-message.add.png",
+              "index": 263,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/05-message.update.png",
+              "index": 264,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/06-message.update.png",
+              "index": 265,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/07-message.add.png",
+              "index": 266,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/08-message.delete.png",
+              "index": 267,
+              "kind": "message.delete"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/09-reaction.remove.png",
+              "index": 268,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/10-reaction.add.png",
+              "index": 269,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/11-message.update.png",
+              "index": 270,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/steps.gif",
+          "finalThread": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/final-thread.png",
+          "finalDesktop": "frames/slack-defer-wake-reply-v2/defer-wake-reply-v2/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-redefer",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "redefer",
+          "channel": "C0GENERAL0",
+          "ts": "1795582098.101000",
+          "frames": [
+            {
+              "file": "frames/slack-redefer/redefer/01-message.add.png",
+              "index": 271,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/02-reaction.add.png",
+              "index": 272,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/03-message.add.png",
+              "index": 273,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/04-message.add.png",
+              "index": 274,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/05-message.update.png",
+              "index": 275,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/06-message.update.png",
+              "index": 276,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/07-message.update.png",
+              "index": 277,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/08-message.update.png",
+              "index": 278,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/09-message.update.png",
+              "index": 279,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/10-message.update.png",
+              "index": 280,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-redefer/redefer/11-message.update.png",
+              "index": 286,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-redefer/redefer/steps.gif",
+          "finalThread": "frames/slack-redefer/redefer/final-thread.png",
+          "finalDesktop": "frames/slack-redefer/redefer/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-skipped-task-v2",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "skipped-v2-default",
+          "channel": "C0GENERAL0",
+          "ts": "1795582108.640000",
+          "frames": [
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-default/01-message.add.png",
+              "index": 281,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-default/02-reaction.add.png",
+              "index": 282,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-default/03-message.add.png",
+              "index": 283,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-default/04-reaction.remove.png",
+              "index": 284,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-default/05-reaction.add.png",
+              "index": 285,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-default/06-message.update.png",
+              "index": 287,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-skipped-task-v2/skipped-v2-default/steps.gif",
+          "finalThread": "frames/slack-skipped-task-v2/skipped-v2-default/final-thread.png",
+          "finalDesktop": "frames/slack-skipped-task-v2/skipped-v2-default/final-desktop.png"
+        },
+        {
+          "label": "skipped-v2-override",
+          "channel": "C0GENERAL0",
+          "ts": "1795582123.034000",
+          "frames": [
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-override/01-message.add.png",
+              "index": 288,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-override/02-reaction.add.png",
+              "index": 289,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-override/03-message.add.png",
+              "index": 290,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-override/04-reaction.remove.png",
+              "index": 291,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-override/05-reaction.add.png",
+              "index": 292,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-skipped-task-v2/skipped-v2-override/06-message.update.png",
+              "index": 293,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-skipped-task-v2/skipped-v2-override/steps.gif",
+          "finalThread": "frames/slack-skipped-task-v2/skipped-v2-override/final-thread.png",
+          "finalDesktop": "frames/slack-skipped-task-v2/skipped-v2-override/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-cancelled-task",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "cancelled-ask",
+          "channel": "C0GENERAL0",
+          "ts": "1795582127.531000",
+          "frames": [
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/01-message.add.png",
+              "index": 294,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/02-reaction.add.png",
+              "index": 295,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/03-message.add.png",
+              "index": 296,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/04-message.add.png",
+              "index": 297,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/05-message.update.png",
+              "index": 298,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/06-reaction.remove.png",
+              "index": 299,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/07-message.update.png",
+              "index": 300,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-ask/08-reaction.add.png",
+              "index": 301,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-cancelled-task/cancelled-ask/steps.gif",
+          "finalThread": "frames/slack-cancelled-task/cancelled-ask/final-thread.png",
+          "finalDesktop": "frames/slack-cancelled-task/cancelled-ask/final-desktop.png"
+        },
+        {
+          "label": "cancelled-delegated",
+          "channel": "C0GENERAL0",
+          "ts": "1795582128.096000",
+          "frames": [
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/01-message.add.png",
+              "index": 302,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/02-reaction.add.png",
+              "index": 303,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/03-message.add.png",
+              "index": 304,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/04-message.add.png",
+              "index": 305,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/05-message.update.png",
+              "index": 306,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/06-reaction.remove.png",
+              "index": 307,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/07-message.update.png",
+              "index": 308,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-delegated/08-reaction.add.png",
+              "index": 309,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-cancelled-task/cancelled-delegated/steps.gif",
+          "finalThread": "frames/slack-cancelled-task/cancelled-delegated/final-thread.png",
+          "finalDesktop": "frames/slack-cancelled-task/cancelled-delegated/final-desktop.png"
+        },
+        {
+          "label": "cancelled-then-done",
+          "channel": "C0GENERAL0",
+          "ts": "1795582128.633000",
+          "frames": [
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/01-message.add.png",
+              "index": 310,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/02-reaction.add.png",
+              "index": 311,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/03-message.add.png",
+              "index": 312,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/04-message.add.png",
+              "index": 313,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/05-message.update.png",
+              "index": 314,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/06-reaction.remove.png",
+              "index": 315,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/07-message.update.png",
+              "index": 316,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-cancelled-task/cancelled-then-done/08-reaction.add.png",
+              "index": 317,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-cancelled-task/cancelled-then-done/steps.gif",
+          "finalThread": "frames/slack-cancelled-task/cancelled-then-done/final-thread.png",
+          "finalDesktop": "frames/slack-cancelled-task/cancelled-then-done/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-delegation-child-result",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "delegation-child-result",
+          "channel": "C0GENERAL0",
+          "ts": "1795582130.676000",
+          "frames": [
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/01-message.add.png",
+              "index": 318,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/02-reaction.add.png",
+              "index": 319,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/03-message.add.png",
+              "index": 320,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/04-message.add.png",
+              "index": 321,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/05-message.update.png",
+              "index": 322,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/06-message.add.png",
+              "index": 323,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/07-message.update.png",
+              "index": 324,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/08-message.update.png",
+              "index": 325,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/09-message.add.png",
+              "index": 326,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/10-message.update.png",
+              "index": 327,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/11-reaction.remove.png",
+              "index": 328,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-delegation-child-result/delegation-child-result/12-reaction.add.png",
+              "index": 329,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-delegation-child-result/delegation-child-result/steps.gif",
+          "finalThread": "frames/slack-delegation-child-result/delegation-child-result/final-thread.png",
+          "finalDesktop": "frames/slack-delegation-child-result/delegation-child-result/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-delegation-failed-child",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "delegation-failed-child",
+          "channel": "C0GENERAL0",
+          "ts": "1795582133.943000",
+          "frames": [
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/01-message.add.png",
+              "index": 330,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/02-reaction.add.png",
+              "index": 331,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/03-message.add.png",
+              "index": 332,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/04-message.add.png",
+              "index": 333,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/05-message.update.png",
+              "index": 334,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/06-message.add.png",
+              "index": 335,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/07-message.update.png",
+              "index": 336,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/08-message.update.png",
+              "index": 337,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/09-message.add.png",
+              "index": 338,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/10-message.update.png",
+              "index": 339,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/11-reaction.remove.png",
+              "index": 340,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-delegation-failed-child/delegation-failed-child/12-reaction.add.png",
+              "index": 341,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-delegation-failed-child/delegation-failed-child/steps.gif",
+          "finalThread": "frames/slack-delegation-failed-child/delegation-failed-child/final-thread.png",
+          "finalDesktop": "frames/slack-delegation-failed-child/delegation-failed-child/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-delegation-late-child",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "delegation-late-child",
+          "channel": "C0GENERAL0",
+          "ts": "1795582136.706000",
+          "frames": [
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/01-message.add.png",
+              "index": 342,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/02-reaction.add.png",
+              "index": 343,
+              "kind": "reaction.add"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/03-message.add.png",
+              "index": 344,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/04-message.update.png",
+              "index": 345,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/05-message.update.png",
+              "index": 346,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/06-message.add.png",
+              "index": 347,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/07-message.update.png",
+              "index": 348,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/08-message.add.png",
+              "index": 349,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/09-message.update.png",
+              "index": 350,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/10-message.update.png",
+              "index": 351,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/11-message.add.png",
+              "index": 352,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/12-message.update.png",
+              "index": 353,
+              "kind": "message.update"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/13-reaction.remove.png",
+              "index": 354,
+              "kind": "reaction.remove"
+            },
+            {
+              "file": "frames/slack-delegation-late-child/delegation-late-child/14-reaction.add.png",
+              "index": 355,
+              "kind": "reaction.add"
+            }
+          ],
+          "gif": "frames/slack-delegation-late-child/delegation-late-child/steps.gif",
+          "finalThread": "frames/slack-delegation-late-child/delegation-late-child/final-thread.png",
+          "finalDesktop": "frames/slack-delegation-late-child/delegation-late-child/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-approval-buttons",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "approve",
+          "channel": "C0APRDF092E21",
+          "ts": "1795582147.519000",
+          "frames": [
+            {
+              "file": "frames/slack-approval-buttons/approve/01-message.add.png",
+              "index": 363,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-approval-buttons/approve/02-message.update.png",
+              "index": 366,
+              "kind": "message.update"
+            }
+          ],
+          "gif": "frames/slack-approval-buttons/approve/steps.gif",
+          "finalThread": "frames/slack-approval-buttons/approve/final-thread.png",
+          "finalDesktop": "frames/slack-approval-buttons/approve/final-desktop.png"
+        }
+      ]
+    },
+    {
+      "name": "slack-chat-sdk-mention",
+      "status": "pass",
+      "error": null,
+      "threads": [
+        {
+          "label": "chat-sdk-mention",
+          "channel": "C0GENERAL0",
+          "ts": "1795582148.591000",
+          "journal": "slack-http-journal-slack-chat-sdk-mention-1.jsonl",
+          "frames": [
+            {
+              "file": "frames/slack-chat-sdk-mention/chat-sdk-mention/01-message.add.png",
+              "index": 5,
+              "kind": "message.add"
+            },
+            {
+              "file": "frames/slack-chat-sdk-mention/chat-sdk-mention/02-message.add.png",
+              "index": 7,
+              "kind": "message.add"
+            }
+          ],
+          "gif": "frames/slack-chat-sdk-mention/chat-sdk-mention/steps.gif",
+          "finalThread": "frames/slack-chat-sdk-mention/chat-sdk-mention/final-thread.png",
+          "finalDesktop": "frames/slack-chat-sdk-mention/chat-sdk-mention/final-desktop.png"
+        }
+      ]
+    }
+  ]
+}
