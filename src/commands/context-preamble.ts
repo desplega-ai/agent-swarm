@@ -486,6 +486,35 @@ async function fetchSessionLogsForResume(
   }
 }
 
+/** An intent row: a side-effecting call that started and never reported back (`tool-intents.ts`). */
+interface ToolIntentForPreamble {
+  toolCallId: string;
+  toolName: string;
+  argsSummary?: string;
+  createdAt: string;
+}
+
+async function fetchToolIntentsForResume(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+): Promise<ToolIntentForPreamble[]> {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  try {
+    const response = await fetch(`${apiUrl}/api/tasks/${taskId}/tool-intents`, { headers });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { intents?: ToolIntentForPreamble[] };
+    return Array.isArray(data.intents)
+      ? data.intents.filter(
+          (intent) => typeof intent.toolCallId === "string" && typeof intent.toolName === "string",
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 async function fetchSteeringMessagesForResume(
   apiUrl: string,
   apiKey: string,
@@ -771,8 +800,16 @@ const MAX_INTERRUPTED_CALLS = 3;
  * the newest `MAX_INTERRUPTED_CALLS` as `<tool> <arg summary>` joined by
  * `; `, or null when nothing is open. A call without an id cannot be paired
  * and is never flagged. The caller scrubs the result.
+ *
+ * `intents` are the session's open intent rows. Each was written before its
+ * call ran, so it names a call whose `tool_use` line a hard kill dropped before
+ * the 5 s log flush. One whose id the logs already pair is skipped either way:
+ * answered there, or already listed from its log line.
  */
-function findInterruptedToolCall(logs: SessionLogForPreamble[]): string | null {
+function findInterruptedToolCall(
+  logs: SessionLogForPreamble[],
+  intents: ToolIntentForPreamble[] = [],
+): string | null {
   const open = new Map<string, Extract<ToolLogEvent, { kind: "use" }>>();
   const answered = new Set<string>();
   const lateInput = new Map<string, ToolInput>();
@@ -797,6 +834,12 @@ function findInterruptedToolCall(logs: SessionLogForPreamble[]): string | null {
     const raw = primary ?? (Object.keys(input).length > 0 ? JSON.stringify(input) : "");
     const args = raw.replace(/\s+/g, " ").trim().slice(0, 200);
     calls.push(args ? `${use.name} ${args}` : use.name);
+  }
+  for (const intent of intents) {
+    if (answered.has(intent.toolCallId) || open.has(intent.toolCallId)) continue;
+    const args = (intent.argsSummary ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+    const call = args ? `${intent.toolName} ${args}` : intent.toolName;
+    if (!calls.includes(call)) calls.push(call);
   }
   return calls.length > 0 ? calls.slice(-MAX_INTERRUPTED_CALLS).join("; ") : null;
 }
@@ -870,8 +913,9 @@ export async function buildResumeContextPreamble(
   // still surfaces tool-call history from earlier attempts. Merge, sort by
   // createdAt ASC, then keep the most recent N.
   const steeringEnabled = isSteeringEnabled();
-  const [logsBatches, steeringBatches] = await Promise.all([
+  const [logsBatches, intentBatches, steeringBatches] = await Promise.all([
     Promise.all(chain.map((c) => fetchSessionLogsForResume(apiUrl, apiKey, c.id))),
+    Promise.all(chain.map((c) => fetchToolIntentsForResume(apiUrl, apiKey, c.id))),
     steeringEnabled
       ? Promise.all(chain.map((c) => fetchSteeringMessagesForResume(apiUrl, apiKey, c.id)))
       : Promise.resolve([]),
@@ -890,12 +934,17 @@ export async function buildResumeContextPreamble(
   // An unanswered side-effecting call may have landed before the cut-off
   // (git push, PR comment, message send). Flag it so the agent checks first.
   // Only the newest attempt's session was cut; an earlier attempt's open call
-  // was already the previous resume's to check.
-  const interruptedSession = logsBatches.find((batch) => batch.length > 0) ?? [];
+  // was already the previous resume's to check. A session killed before its
+  // first log flush has intent rows and no logs, so either one marks it.
+  const interruptedIndex = chain.findIndex(
+    (_, i) => (logsBatches[i]?.length ?? 0) > 0 || (intentBatches[i]?.length ?? 0) > 0,
+  );
+  const interruptedSession = logsBatches[interruptedIndex] ?? [];
   const interrupted = findInterruptedToolCall(
     [...interruptedSession]
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .slice(-CONTEXT_PREAMBLE_RESUME_SESSION_LOG_LIMIT),
+    intentBatches[interruptedIndex] ?? [],
   );
   const interruptedLine = interrupted
     ? scrubSecrets(

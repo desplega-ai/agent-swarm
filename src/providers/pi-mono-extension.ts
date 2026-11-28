@@ -27,6 +27,7 @@ import {
   runNativePost,
   runNativePre,
 } from "../hooks/native-tool-hooks";
+import { clearToolIntent, recordToolIntent } from "../hooks/tool-intents";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { renderGoalReminder } from "../prompts/goal-reminder";
 import { isSessionSummarySkipped } from "../utils/env-flag";
@@ -727,6 +728,14 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         nativeStartedAt.set(event.toolCallId, Date.now());
       }
 
+      // Every guard has let the call through: record a side-effecting call's intent before it runs.
+      await recordToolIntent(nativeHookTarget(config), {
+        toolName: event.toolName,
+        toolInput: event.input,
+        toolCallId: event.toolCallId,
+        cwd: process.cwd(),
+      });
+
       return undefined;
     });
 
@@ -765,6 +774,13 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
           });
         }
       }
+
+      void clearToolIntent(nativeHookTarget(config), {
+        toolName: event.toolName,
+        toolInput: event.input,
+        toolCallId: event.toolCallId,
+        cwd: process.cwd(),
+      });
 
       // Observe-only report to extensions with toolSources "native".
       if (PI_NATIVE_TOOLS.has(event.toolName)) {

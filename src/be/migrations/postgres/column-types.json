@@ -2741,6 +2741,13 @@
         "evidence": "DEFAULT strftime iso; upsert sets updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') at src/be/task-ui-spec.ts:93"
       }
     },
+    "tool_call_intents": {
+      "createdAt": {
+        "class": "timestamptz",
+        "format": "iso-ms-z",
+        "evidence": "packages/storage/src/repositories/sessions.ts insertToolCallIntent binds nowIso; only writer"
+      }
+    },
     "tracker_agent_mapping": {
       "createdAt": {
         "class": "text",

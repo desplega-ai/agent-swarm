@@ -80,3 +80,4 @@ automation_savings_links # system-written savings rollup links between jobs, no 
 import_items             # importer ownership map, system-written at boot (294)
 import_pending_assignments # importer-written assignments awaiting agent registration (294)
 agent_history            # append-only delete/restore history; actor_ref names the actor, triggers forbid updates (334)
+tool_call_intents        # worker-hook intent rows, deleted when the call completes; agentId names the writer (343)

@@ -3657,6 +3657,25 @@
       "exempt": "identifier"
     }
   },
+  "tool_call_intents": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "toolCallId": {
+      "exempt": "identifier"
+    },
+    "toolName": "scrubbed",
+    "argsSummary": "scrubbed",
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
   "tracker_agent_mapping": {
     "id": {
       "exempt": "identifier"

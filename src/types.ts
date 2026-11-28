@@ -2181,6 +2181,21 @@ export const SessionLogSchema = z
 
 export type SessionLog = z.infer<typeof SessionLogSchema>;
 
+/** A side-effecting tool call that started and has not reported back (see migration 343). */
+export const ToolCallIntentSchema = z
+  .object({
+    id: z.string(),
+    taskId: z.string(),
+    agentId: z.string().optional(),
+    toolCallId: z.string(),
+    toolName: z.string(),
+    argsSummary: z.string().optional(),
+    createdAt: z.string(),
+  })
+  .openapi("ToolCallIntent");
+
+export type ToolCallIntent = z.infer<typeof ToolCallIntentSchema>;
+
 // Session Cost Types (aggregated cost data per session)
 // Migration 063 widened the set to include 'unpriced' for cases where the API
 // recompute path couldn't find pricing rows for the (provider, model, token_class).

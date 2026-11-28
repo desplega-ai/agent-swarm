@@ -16,6 +16,11 @@ import {
   refreshActiveSessionOnActivity,
   SessionCostConflictError,
 } from "../be/db";
+import {
+  clearToolCallIntent,
+  listToolCallIntents,
+  recordToolCallIntent,
+} from "../be/db/tool-call-intents";
 import { isScriptRunToken } from "../be/users";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
@@ -26,6 +31,7 @@ import {
   SessionCostModelBreakdownSchema,
   SessionCostSchema,
   SessionLogSchema,
+  ToolCallIntentSchema,
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -181,6 +187,63 @@ const getSessionLogsByTask = route({
   },
 });
 
+const TOOL_INTENT_UNGATED =
+  "Worker hook write: the session posture gates users; the handler admits only the task's own agent or the operator key.";
+
+const recordToolIntentRoute = route({
+  method: "post",
+  path: "/api/tasks/{taskId}/tool-intents",
+  pattern: ["api", "tasks", null, "tool-intents"],
+  session: { taskParam: "taskId" },
+  rbac: { ungated: TOOL_INTENT_UNGATED },
+  summary: "Record a side-effecting tool call before it runs",
+  tags: ["Session Data"],
+  params: z.object({ taskId: z.string() }),
+  body: z.object({
+    toolCallId: z.string().min(1).max(200),
+    toolName: z.string().min(1).max(200),
+    argsSummary: z.string().max(4000).optional(),
+  }),
+  responses: {
+    201: { description: "Intent recorded", schema: z.object({ intent: ToolCallIntentSchema }) },
+    403: { description: "The task belongs to another agent" },
+    404: { description: "Task not found" },
+  },
+});
+
+const clearToolIntentRoute = route({
+  method: "delete",
+  path: "/api/tasks/{taskId}/tool-intents/{toolCallId}",
+  pattern: ["api", "tasks", null, "tool-intents", null],
+  session: { taskParam: "taskId" },
+  rbac: { ungated: TOOL_INTENT_UNGATED },
+  summary: "Clear the intent of a tool call that finished",
+  tags: ["Session Data"],
+  params: z.object({ taskId: z.string(), toolCallId: z.string() }),
+  responses: {
+    200: { description: "Intent cleared", schema: z.object({ deleted: z.boolean() }) },
+    403: { description: "The task belongs to another agent" },
+    404: { description: "Task not found" },
+  },
+});
+
+const listToolIntentsRoute = route({
+  method: "get",
+  path: "/api/tasks/{taskId}/tool-intents",
+  pattern: ["api", "tasks", null, "tool-intents"],
+  session: { taskParam: "taskId" },
+  summary: "List side-effecting tool calls that started and never finished",
+  tags: ["Session Data"],
+  params: z.object({ taskId: z.string() }),
+  responses: {
+    200: {
+      description: "Open tool call intents, oldest first",
+      schema: z.object({ intents: z.array(ToolCallIntentSchema) }),
+    },
+    404: { description: "Task not found" },
+  },
+});
+
 const createSessionCostRoute = route({
   method: "post",
   path: "/api/session-costs",
@@ -329,6 +392,30 @@ const listSessionCosts = route({
   },
 });
 
+/** The task a tool-intent write names, when the caller is its agent or the operator; else answers. */
+async function ownTaskForToolIntent(
+  req: IncomingMessage,
+  res: ServerResponse,
+  taskId: string,
+  myAgentId: string | undefined,
+) {
+  const task = await getTaskById(taskId);
+  if (!task) {
+    jsonError(res, "Task not found", 404);
+    return null;
+  }
+  const auth = getRequestAuth(req);
+  const callerAgentId = auth?.kind === "agent" ? auth.agentId : myAgentId;
+  const admitted =
+    (auth?.kind === "agent" || auth?.kind === "operator") &&
+    (callerAgentId === undefined ? auth.kind === "operator" : callerAgentId === task.agentId);
+  if (!admitted) {
+    jsonError(res, "Only the task's own agent records its tool calls.", 403);
+    return null;
+  }
+  return task;
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleSessionData(
@@ -385,6 +472,48 @@ export async function handleSessionData(
     }
     const logs = await getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);
     getSessionLogsByTask.respond(res, 200, { logs });
+    return true;
+  }
+
+  if (recordToolIntentRoute.match(req.method, pathSegments)) {
+    const parsed = await recordToolIntentRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = await ownTaskForToolIntent(req, res, parsed.params.taskId, myAgentId);
+    if (!task) return true;
+    const intent = await recordToolCallIntent({
+      taskId: task.id,
+      agentId: task.agentId ?? null,
+      toolCallId: parsed.body.toolCallId,
+      toolName: parsed.body.toolName,
+      argsSummary: parsed.body.argsSummary,
+    });
+    recordToolIntentRoute.respond(res, 201, { intent });
+    return true;
+  }
+
+  if (clearToolIntentRoute.match(req.method, pathSegments)) {
+    const parsed = await clearToolIntentRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = await ownTaskForToolIntent(req, res, parsed.params.taskId, myAgentId);
+    if (!task) return true;
+    const deleted = await clearToolCallIntent(task.id, parsed.params.toolCallId);
+    clearToolIntentRoute.respond(res, 200, { deleted });
+    return true;
+  }
+
+  if (listToolIntentsRoute.match(req.method, pathSegments)) {
+    const parsed = await listToolIntentsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = await getTaskById(parsed.params.taskId);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (!(await canReadSession(req, myAgentId, task.id))) {
+      jsonError(res, SESSION_READ_DENIED, 403);
+      return true;
+    }
+    listToolIntentsRoute.respond(res, 200, { intents: await listToolCallIntents(task.id) });
     return true;
   }
 

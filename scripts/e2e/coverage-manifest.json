@@ -825,6 +825,10 @@
       "description": "Telemetry enable and ui-event relay to the sink, validation and size cap",
       "scenarios": ["platform-telemetry"]
     },
+    "tool-call-intents": {
+      "description": "The real hook and codex-hook commands write an intent row before a side-effecting call and clear it after; read-only calls write nothing, a dead API never blocks, only the task's agent may write",
+      "scenarios": ["tool-call-intents"]
+    },
     "tracker-disabled-contract": {
       "description": "Linear and Jira routes answer the unconfigured contract; tracker tools keep sync and agent mappings without a provider",
       "scenarios": ["platformb-trackers"]

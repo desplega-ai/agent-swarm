@@ -55,6 +55,7 @@ import {
 } from "./native-tool-hooks";
 import { guardGhPrBody } from "./pr-body-guard";
 import { guardGhPrRoom } from "./pr-room-guard";
+import { clearToolIntent, recordToolIntent } from "./tool-intents";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
@@ -1083,6 +1084,14 @@ export async function handleHook(): Promise<void> {
     return { apiUrl, headers: mcpConfig.headers, taskId: (await readTaskFile())?.taskId };
   };
 
+  /** Where tool-call intents go: every tool name, swarm MCP tools included. */
+  const intentTargetOf = async (): Promise<NativeHookTarget | undefined> => {
+    const apiUrl = getBaseUrl();
+    if (!mcpConfig || !apiUrl) return undefined;
+    const taskId = process.env.AGENT_SWARM_TASK_ID || (await readTaskFile())?.taskId;
+    return taskId ? { apiUrl, headers: mcpConfig.headers, taskId } : undefined;
+  };
+
   const isToolEvent = msg.hook_event_name === "PreToolUse" || msg.hook_event_name === "PostToolUse";
 
   // Ping the server to indicate activity, then get current agent info.
@@ -1333,6 +1342,17 @@ export async function handleHook(): Promise<void> {
         }
       }
 
+      // Every guard has let the call through: record its intent before it runs.
+      const intentTarget = await intentTargetOf();
+      if (intentTarget && msg.tool_name) {
+        await recordToolIntent(intentTarget, {
+          toolName: msg.tool_name,
+          toolInput: rewrittenInput ?? msg.tool_input,
+          toolCallId: msg.tool_use_id,
+          cwd: msg.cwd ?? process.cwd(),
+        });
+      }
+
       if (rewrittenInput !== undefined) {
         console.log(
           JSON.stringify({
@@ -1361,6 +1381,15 @@ export async function handleHook(): Promise<void> {
         await runNativePost(postTarget, postCall, {
           result: msg.tool_response,
           durationMs: 0,
+        });
+      }
+      const clearTarget = await intentTargetOf();
+      if (clearTarget && msg.tool_name) {
+        await clearToolIntent(clearTarget, {
+          toolName: msg.tool_name,
+          toolInput: msg.tool_input,
+          toolCallId: msg.tool_use_id,
+          cwd: msg.cwd ?? process.cwd(),
         });
       }
       // Active session heartbeat (workers only, fire-and-forget)

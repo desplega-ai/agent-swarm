@@ -27,6 +27,9 @@
  * (`native-tool-hooks.ts`), so an extension with `toolSources: ["native"]`
  * can observe, block (exit 2) or rewrite a Bash command or an apply_patch patch (`updatedInput`).
  *
+ * A side-effecting call (`tool-intents.ts`: swarm writers, `gh pr create`) that passes every
+ * guard gets an awaited intent row first; PostToolUse clears it.
+ *
  * One-shot guarantee: a message is included in hook output only after its
  * `/delivered` POST succeeded, so a message is injected at most once. A
  * failed POST leaves the row `pending` for the next lifecycle event; rows a
@@ -48,6 +51,7 @@ import {
 } from "./native-tool-hooks";
 import { guardGhPrBody, type PrBodyGuardDeps } from "./pr-body-guard";
 import { guardGhPrRoom, type PrRoomGuardDeps } from "./pr-room-guard";
+import { clearToolIntent, recordToolIntent, type ToolIntentCall } from "./tool-intents";
 
 const FETCH_TIMEOUT_MS = 5_000;
 
@@ -275,6 +279,19 @@ export async function codexNativePre(
   return { action: "continue" };
 }
 
+function intentCallOf(msg: CodexHookMessage, toolInput: unknown): ToolIntentCall {
+  return {
+    toolName: msg.tool_name ?? "",
+    toolInput,
+    toolCallId: msg.tool_use_id,
+    cwd: msg.cwd ?? process.cwd(),
+  };
+}
+
+function updatedInputOf(output: Record<string, unknown>): unknown {
+  return (output.hookSpecificOutput as { updatedInput?: unknown } | undefined)?.updatedInput;
+}
+
 /** stdin/stdout entry point used by the `codex-hook` CLI command. */
 export async function handleCodexHook(): Promise<void> {
   let msg: CodexHookMessage;
@@ -296,9 +313,17 @@ export async function handleCodexHook(): Promise<void> {
     process.exitCode = 2;
     return;
   }
+  const intentTarget = nativeTargetOf(config);
+  if (intentTarget && msg.tool_name && msg.hook_event_name === "PreToolUse") {
+    const updated = native.action === "modify" ? updatedInputOf(native.output) : undefined;
+    await recordToolIntent(intentTarget, intentCallOf(msg, updated ?? msg.tool_input));
+  }
   if (native.action === "modify") {
     console.log(JSON.stringify(native.output));
     return;
+  }
+  if (intentTarget && msg.tool_name && msg.hook_event_name === "PostToolUse") {
+    await clearToolIntent(intentTarget, intentCallOf(msg, msg.tool_input));
   }
   const postCall = msg.hook_event_name === "PostToolUse" ? nativeCallOf(msg) : undefined;
   const postTarget = nativeTargetOf(config);

@@ -18,6 +18,7 @@ import {
   runNativePost,
   runNativePre,
 } from "../hooks/native-tool-hooks";
+import { clearToolIntent, recordToolIntent } from "../hooks/tool-intents";
 import { renderGoalReminder } from "../prompts/goal-reminder";
 import {
   apiHeaders,
@@ -102,6 +103,12 @@ export function createOpencodeSwarmPlugin(
     rawArgs: event.input,
     toolCallId: event.id,
   });
+  const intentCall = (event: { tool: string; id: string; input: unknown }) => ({
+    toolName: event.tool,
+    toolInput: event.input,
+    toolCallId: event.id,
+    cwd: process.cwd(),
+  });
   return {
     id: "agent-swarm",
     async setup(ctx) {
@@ -147,9 +154,13 @@ export function createOpencodeSwarmPlugin(
           }
           nativeStartedAt.set(event.id, Date.now());
         }
+
+        // Every guard has let the call through: record a side-effecting call's intent first.
+        await recordToolIntent(nativeHookTarget(config), intentCall(event));
       });
 
       await ctx.tool.hook("execute.after", (event) => {
+        void clearToolIntent(nativeHookTarget(config), intentCall(event));
         if (isOpencodeBuiltinTool(event.tool, mcpServers)) {
           const startedAt = nativeStartedAt.get(event.id);
           nativeStartedAt.delete(event.id);
